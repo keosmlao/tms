@@ -411,6 +411,87 @@ async function getBillCompleteList(session, fromDate, toDate) {
   );
 }
 
+// ============ Cancelled bills (status=2) ============
+async function getBillsCancelledList(session, fromDate, toDate) {
+  const scope = getBranchScope(session);
+  await ensureJobListIndexes();
+  const from = coerceDateToFixedYear(fromDate ?? getFixedTodayDate());
+  const to = coerceDateToFixedYear(toDate ?? getFixedTodayDate());
+  return query(
+    `SELECT
+      to_char(d.doc_date,'DD-MM-YYYY') as doc_date,
+      d.doc_no, d.bill_no,
+      to_char(d.bill_date,'DD-MM-YYYY') as bill_date,
+      to_char(d.date_logistic,'DD-MM-YYYY') as date_logistic,
+      to_char(d.sent_end,'DD-MM-YYYY HH24:MI') as cancelled_at,
+      d.cust_code,
+      COALESCE(NULLIF(TRIM(cu.name_1), ''), d.cust_code, '-') as cust_name,
+      COALESCE(d.telephone, '') as telephone,
+      COALESCE(NULLIF(TRIM(car.name_1), ''), a.car, '-') as car,
+      COALESCE(NULLIF(TRIM(drv.name_1), ''), a.driver, '-') as driver,
+      COALESCE(d.remark, '') as remark
+    FROM public.odg_tms_detail d
+    INNER JOIN odg_tms a ON a.doc_no = d.doc_no
+    LEFT JOIN ar_customer cu ON cu.code = d.cust_code
+    LEFT JOIN public.odg_tms_car car ON car.code = a.car
+    LEFT JOIN public.odg_tms_driver drv ON drv.code = a.driver
+    WHERE COALESCE(d.status, 0) = 2
+      AND d.doc_date BETWEEN $1 AND $2
+      AND ${getFixedYearSqlFilter("d.doc_date")}
+      ${branchFilterJob(scope, "a")}
+    ORDER BY d.sent_end DESC NULLS LAST, d.doc_no DESC`,
+    [from, to]
+  );
+}
+
+// ============ Partial-delivered bills (status=1 but delivered < selected) ============
+async function getBillsPartialList(session, fromDate, toDate) {
+  const scope = getBranchScope(session);
+  await ensureJobListIndexes();
+  const from = coerceDateToFixedYear(fromDate ?? getFixedTodayDate());
+  const to = coerceDateToFixedYear(toDate ?? getFixedTodayDate());
+  return query(
+    `WITH partial_bills AS (
+      SELECT i.bill_no, i.doc_no,
+        SUM(COALESCE(i.selected_qty, 0))::numeric AS selected_total,
+        SUM(COALESCE(i.delivered_qty, 0))::numeric AS delivered_total
+      FROM public.odg_tms_detail_item i
+      INNER JOIN public.odg_tms_detail d
+        ON d.bill_no = i.bill_no AND d.doc_no = i.doc_no
+      WHERE COALESCE(d.status, 0) = 1
+        AND d.doc_date BETWEEN $1 AND $2
+        AND ${getFixedYearSqlFilter("d.doc_date")}
+      GROUP BY i.bill_no, i.doc_no
+      HAVING SUM(COALESCE(i.delivered_qty, 0)) < SUM(COALESCE(i.selected_qty, 0))
+    )
+    SELECT
+      to_char(d.doc_date,'DD-MM-YYYY') as doc_date,
+      d.doc_no, d.bill_no,
+      to_char(d.bill_date,'DD-MM-YYYY') as bill_date,
+      to_char(d.date_logistic,'DD-MM-YYYY') as date_logistic,
+      to_char(d.sent_end,'DD-MM-YYYY HH24:MI') as completed_at,
+      d.cust_code,
+      COALESCE(NULLIF(TRIM(cu.name_1), ''), d.cust_code, '-') as cust_name,
+      COALESCE(d.telephone, '') as telephone,
+      COALESCE(NULLIF(TRIM(car.name_1), ''), a.car, '-') as car,
+      COALESCE(NULLIF(TRIM(drv.name_1), ''), a.driver, '-') as driver,
+      COALESCE(d.remark, '') as remark,
+      pb.selected_total::float as selected_total,
+      pb.delivered_total::float as delivered_total,
+      (pb.selected_total - pb.delivered_total)::float as remaining_total
+    FROM partial_bills pb
+    INNER JOIN public.odg_tms_detail d
+      ON d.bill_no = pb.bill_no AND d.doc_no = pb.doc_no
+    INNER JOIN odg_tms a ON a.doc_no = d.doc_no
+    LEFT JOIN ar_customer cu ON cu.code = d.cust_code
+    LEFT JOIN public.odg_tms_car car ON car.code = a.car
+    LEFT JOIN public.odg_tms_driver drv ON drv.code = a.driver
+    WHERE 1=1 ${branchFilterJob(scope, "a")}
+    ORDER BY d.sent_end DESC NULLS LAST, d.doc_no DESC`,
+    [from, to]
+  );
+}
+
 module.exports = {
   getAvailableBillsWithProducts,
   getAvailableBills,
@@ -422,4 +503,6 @@ module.exports = {
   getBillsWaitingSentDetails,
   getBillsInProgress,
   getBillCompleteList,
+  getBillsCancelledList,
+  getBillsPartialList,
 };

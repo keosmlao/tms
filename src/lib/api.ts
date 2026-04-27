@@ -17,6 +17,7 @@ export const Actions = {
   getApproveList: approve.getApproveList,
   approveJob: approve.approveJob,
   getApproveReport: approve.getApproveReport,
+  getApprovedList: approve.getApprovedList,
 
   // Jobs
   getJobs: jobs.getJobs,
@@ -29,6 +30,10 @@ export const Actions = {
   addBillToDraft: jobs.addBillToDraft,
   removeBillFromDraft: jobs.removeBillFromDraft,
   searchBills: jobs.searchBills,
+  getJobsClosedByDriver: jobs.getJobsClosedByDriver,
+  getJobsClosed: jobs.getJobsClosed,
+  getJobsWaitingReceive: jobs.getJobsWaitingReceive,
+  getJobsWaitingPickup: jobs.getJobsWaitingPickup,
 
   // Bills
   getAvailableBills: bills.getAvailableBills,
@@ -41,6 +46,8 @@ export const Actions = {
   getBillsWaitingSentDetails: bills.getBillsWaitingSentDetails,
   getBillsInProgress: bills.getBillsInProgress,
   getBillCompleteList: bills.getBillCompleteList,
+  getBillsCancelledList: bills.getBillsCancelledList,
+  getBillsPartialList: bills.getBillsPartialList,
 
   // Reports
   getReportDaily: reports.getReportDaily,

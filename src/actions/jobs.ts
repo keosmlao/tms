@@ -12,6 +12,10 @@ import {
   addBillToDraft as svcAddBillToDraft,
   removeBillFromDraft as svcRemoveBillFromDraft,
   searchBills as svcSearchBills,
+  getJobsClosedByDriver as svcGetJobsClosedByDriver,
+  getJobsClosed as svcGetJobsClosed,
+  getJobsWaitingReceive as svcGetJobsWaitingReceive,
+  getJobsWaitingPickup as svcGetJobsWaitingPickup,
 } from "@/queries/jobs.js";
 
 export async function getJobs() {
@@ -63,4 +67,24 @@ export async function removeBillFromDraft(billNo: string) {
 export async function searchBills(q: string) {
   const s = await requireSession();
   return svcSearchBills(s, q);
+}
+
+export async function getJobsClosedByDriver(fromDate?: string, toDate?: string) {
+  const s = await requireSession();
+  return svcGetJobsClosedByDriver(s, fromDate, toDate);
+}
+
+export async function getJobsClosed(fromDate?: string, toDate?: string) {
+  const s = await requireSession();
+  return svcGetJobsClosed(s, fromDate, toDate);
+}
+
+export async function getJobsWaitingReceive(fromDate?: string, toDate?: string) {
+  const s = await requireSession();
+  return svcGetJobsWaitingReceive(s, fromDate, toDate);
+}
+
+export async function getJobsWaitingPickup(fromDate?: string, toDate?: string) {
+  const s = await requireSession();
+  return svcGetJobsWaitingPickup(s, fromDate, toDate);
 }

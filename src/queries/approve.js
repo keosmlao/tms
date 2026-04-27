@@ -46,4 +46,39 @@ async function getApproveReport(session, fromDate, toDate) {
   return query(`SELECT to_char(doc_date,'DD-MM-YYYY') as doc_date, doc_no, to_char(date_logistic,'DD-MM-YYYY') as date_logistic, b.name_1 as car, driver||'-'||c.name_1 as driver, item_bill, approve_user||'-'||e.name_1 as approve_user, user_created||'-'||d.name_1 as user_created, case when approve_status=0 then 'ລໍຖ້າອະນຸມັດ' else case when job_status=0 then 'ລໍຖ້າຈັດສົ່ງ' when job_status=1 then 'ຮັບຖ້ຽວ / ເບີກເຄື່ອງ' when job_status=2 then 'ກຳລັງຈັດສົ່ງ' when job_status=3 then 'ຄົນຂັບປິດງານ' else 'admin ປິດຖ້ຽວ' end end as job_status FROM odg_tms a LEFT JOIN public.odg_tms_car b ON b.code=a.car LEFT JOIN public.odg_tms_driver c ON c.code=a.driver LEFT JOIN erp_user d ON d.code=a.user_created LEFT JOIN erp_user e ON e.code=a.approve_user WHERE doc_date BETWEEN $1 AND $2 ${branchFilterJob(scope, "a")} ORDER BY doc_date`, [fromDate, toDate]);
 }
 
-module.exports = { getApproveList, approveJob, getApproveReport };
+// Approved jobs (approve_status=1) — for the "ອະນຸມັດແລ້ວ" page
+async function getApprovedList(session, fromDate, toDate) {
+  const scope = getBranchScope(session);
+  await ensureForwardBranchColumn();
+  return query(
+    `SELECT
+      to_char(a.doc_date,'DD-MM-YYYY') as doc_date,
+      a.doc_no,
+      to_char(a.date_logistic,'DD-MM-YYYY') as date_logistic,
+      to_char(a.create_date_time_now,'DD-MM-YYYY HH24:MI') as created_at,
+      COALESCE(NULLIF(TRIM(b.name_1), ''), a.car, '-') as car,
+      COALESCE(NULLIF(TRIM(c.name_1), ''), a.driver, '-') as driver,
+      COALESCE(NULLIF(TRIM(uc.name_1), ''), a.user_created, '-') as user_created,
+      COALESCE(NULLIF(TRIM(ap.name_1), ''), a.approve_user, '-') as approve_user,
+      a.item_bill,
+      COALESCE(a.job_status, 0) as job_status,
+      case when a.job_status=0 then 'ລໍຖ້າຈັດສົ່ງ'
+           when a.job_status=1 then 'ຮັບຖ້ຽວ'
+           when a.job_status=2 then 'ກຳລັງຈັດສົ່ງ'
+           when a.job_status=3 then 'ຄົນຂັບປິດງານ'
+           else 'admin ປິດຖ້ຽວ' end as job_status_text
+    FROM odg_tms a
+    LEFT JOIN public.odg_tms_car b ON b.code = a.car
+    LEFT JOIN public.odg_tms_driver c ON c.code = a.driver
+    LEFT JOIN erp_user uc ON uc.code = a.user_created
+    LEFT JOIN erp_user ap ON ap.code = a.approve_user
+    WHERE COALESCE(a.approve_status, 0) = 1
+      AND a.doc_date BETWEEN $1 AND $2
+      AND ${getFixedYearSqlFilter("a.doc_date")}
+      ${branchFilterJob(scope, "a")}
+    ORDER BY a.doc_date DESC, a.doc_no DESC`,
+    [fromDate, toDate]
+  );
+}
+
+module.exports = { getApproveList, approveJob, getApproveReport, getApprovedList };

@@ -5,6 +5,7 @@ import {
   getApproveList as svcGetApproveList,
   approveJob as svcApproveJob,
   getApproveReport as svcGetApproveReport,
+  getApprovedList as svcGetApprovedList,
 } from "@/queries/approve.js";
 
 export async function getApproveList() {
@@ -20,4 +21,9 @@ export async function approveJob(docNo: string) {
 export async function getApproveReport(fromDate: string, toDate: string) {
   const s = await requireSession();
   return svcGetApproveReport(s, fromDate, toDate);
+}
+
+export async function getApprovedList(fromDate: string, toDate: string) {
+  const s = await requireSession();
+  return svcGetApprovedList(s, fromDate, toDate);
 }

@@ -394,6 +394,159 @@ async function searchBills(session, q) {
   return query(`SELECT doc_no, doc_date, to_char(doc_date,'DD-MM-YYYY') as doc_date_display, cust_code, b.telephone, (SELECT count(item_code) FROM ic_trans_detail WHERE doc_no=a.doc_no) as count_item FROM ic_trans_shipment a LEFT JOIN ar_customer b ON b.code=a.cust_code WHERE trans_flag=44 AND check_status=0 AND doc_no NOT IN (SELECT bill_no FROM odg_tms_listbill_draft) ${branchFilterShipment(scope, "a")} AND ${getFixedYearSqlFilter("a.doc_date")} AND (doc_no LIKE $1 OR cust_code LIKE $1) LIMIT 10`, [`%${q}%`]);
 }
 
+// ============ Jobs by status ============
+
+async function getJobsByStatus(session, fromDate, toDate, jobStatus) {
+  const { getBranchScope, branchFilterJob } = require("./helpers");
+  const scope = getBranchScope(session);
+  const from = coerceDateToFixedYear(fromDate ?? getFixedTodayDate());
+  const to = coerceDateToFixedYear(toDate ?? getFixedTodayDate());
+  return query(
+    `WITH bill_summary AS (
+      SELECT d.doc_no,
+        COUNT(*)::int AS total_bills,
+        COUNT(*) FILTER (WHERE d.recipt_job IS NULL AND COALESCE(d.status, 0) NOT IN (1, 2))::int AS pending_pickup_count,
+        COUNT(*) FILTER (WHERE d.recipt_job IS NOT NULL)::int AS picked_count
+      FROM public.odg_tms_detail d
+      WHERE ${getFixedYearSqlFilter("d.doc_date")}
+      GROUP BY d.doc_no
+    )
+    SELECT
+      to_char(a.doc_date,'DD-MM-YYYY') as doc_date,
+      a.doc_no,
+      to_char(a.date_logistic,'DD-MM-YYYY') as date_logistic,
+      to_char(a.create_date_time_now,'DD-MM-YYYY HH24:MI') as created_at,
+      to_char(a.job_close,'DD-MM-YYYY HH24:MI') as driver_closed_at,
+      to_char(a.admin_close_at,'DD-MM-YYYY HH24:MI') as admin_closed_at,
+      COALESCE(NULLIF(TRIM(b.name_1), ''), a.car, '-') as car,
+      COALESCE(NULLIF(TRIM(c.name_1), ''), a.driver, '-') as driver,
+      COALESCE(NULLIF(TRIM(uc.name_1), ''), a.user_created, '-') as user_created,
+      COALESCE(NULLIF(TRIM(ap.name_1), ''), a.approve_user, '-') as approve_user,
+      COALESCE(NULLIF(TRIM(adc.name_1), ''), a.admin_close_user, '-') as admin_close_user,
+      a.item_bill,
+      COALESCE(bs.pending_pickup_count, 0) as pending_pickup_count,
+      COALESCE(bs.picked_count, 0) as picked_count,
+      COALESCE(a.miles_start, '') as miles_start,
+      COALESCE(a.miles_end, '') as miles_end,
+      COALESCE(a.job_status, 0) as job_status
+    FROM odg_tms a
+    LEFT JOIN public.odg_tms_car b ON b.code = a.car
+    LEFT JOIN public.odg_tms_driver c ON c.code = a.driver
+    LEFT JOIN erp_user uc ON uc.code = a.user_created
+    LEFT JOIN erp_user ap ON ap.code = a.approve_user
+    LEFT JOIN erp_user adc ON adc.code = a.admin_close_user
+    LEFT JOIN bill_summary bs ON bs.doc_no = a.doc_no
+    WHERE COALESCE(a.approve_status, 0) = 1
+      AND COALESCE(a.job_status, 0) = $3
+      AND a.doc_date BETWEEN $1 AND $2
+      AND ${getFixedYearSqlFilter("a.doc_date")}
+      ${branchFilterJob(scope, "a")}
+    ORDER BY a.doc_date DESC, a.doc_no DESC`,
+    [from, to, jobStatus]
+  );
+}
+
+async function getJobsClosedByDriver(session, fromDate, toDate) {
+  return getJobsByStatus(session, fromDate, toDate, 3);
+}
+
+async function getJobsClosed(session, fromDate, toDate) {
+  return getJobsByStatus(session, fromDate, toDate, 4);
+}
+
+// Approved jobs that the driver hasn't received yet (job_status=0).
+async function getJobsWaitingReceive(session, fromDate, toDate) {
+  const { getBranchScope, branchFilterJob } = require("./helpers");
+  const scope = getBranchScope(session);
+  const from = coerceDateToFixedYear(fromDate ?? getFixedTodayDate());
+  const to = coerceDateToFixedYear(toDate ?? getFixedTodayDate());
+  return query(
+    `WITH bill_summary AS (
+      SELECT d.doc_no,
+        COUNT(*)::int AS total_bills,
+        COUNT(*) FILTER (WHERE d.recipt_job IS NULL AND COALESCE(d.status, 0) NOT IN (1, 2))::int AS pending_receive_count,
+        COUNT(*) FILTER (WHERE d.recipt_job IS NOT NULL)::int AS received_count
+      FROM public.odg_tms_detail d
+      WHERE ${getFixedYearSqlFilter("d.doc_date")}
+      GROUP BY d.doc_no
+    )
+    SELECT
+      to_char(a.doc_date,'DD-MM-YYYY') as doc_date,
+      a.doc_no,
+      to_char(a.date_logistic,'DD-MM-YYYY') as date_logistic,
+      to_char(a.create_date_time_now,'DD-MM-YYYY HH24:MI') as created_at,
+      COALESCE(NULLIF(TRIM(b.name_1), ''), a.car, '-') as car,
+      COALESCE(NULLIF(TRIM(c.name_1), ''), a.driver, '-') as driver,
+      COALESCE(NULLIF(TRIM(uc.name_1), ''), a.user_created, '-') as user_created,
+      COALESCE(NULLIF(TRIM(ap.name_1), ''), a.approve_user, '-') as approve_user,
+      a.item_bill,
+      COALESCE(bs.pending_receive_count, 0) as pending_receive_count,
+      COALESCE(bs.received_count, 0) as received_count,
+      COALESCE(a.job_status, 0) as job_status
+    FROM odg_tms a
+    LEFT JOIN public.odg_tms_car b ON b.code = a.car
+    LEFT JOIN public.odg_tms_driver c ON c.code = a.driver
+    LEFT JOIN erp_user uc ON uc.code = a.user_created
+    LEFT JOIN erp_user ap ON ap.code = a.approve_user
+    LEFT JOIN bill_summary bs ON bs.doc_no = a.doc_no
+    WHERE COALESCE(a.approve_status, 0) = 1
+      AND COALESCE(a.job_status, 0) = 0
+      AND a.doc_date BETWEEN $1 AND $2
+      AND ${getFixedYearSqlFilter("a.doc_date")}
+      ${branchFilterJob(scope, "a")}
+    ORDER BY a.doc_date DESC, a.doc_no DESC`,
+    [from, to]
+  );
+}
+
+// Jobs the driver has received (job_status=1). The driver still needs to
+// pick up the bills before they can start dispatching. We surface the count
+// of unpicked bills so the UI can show progress.
+async function getJobsWaitingPickup(session, fromDate, toDate) {
+  const { getBranchScope, branchFilterJob } = require("./helpers");
+  const scope = getBranchScope(session);
+  const from = coerceDateToFixedYear(fromDate ?? getFixedTodayDate());
+  const to = coerceDateToFixedYear(toDate ?? getFixedTodayDate());
+  return query(
+    `WITH bill_summary AS (
+      SELECT d.doc_no,
+        COUNT(*)::int AS total_bills,
+        COUNT(*) FILTER (WHERE d.recipt_job IS NULL AND COALESCE(d.status, 0) NOT IN (1, 2))::int AS pending_pickup_count,
+        COUNT(*) FILTER (WHERE d.recipt_job IS NOT NULL)::int AS picked_count
+      FROM public.odg_tms_detail d
+      WHERE ${getFixedYearSqlFilter("d.doc_date")}
+      GROUP BY d.doc_no
+    )
+    SELECT
+      to_char(a.doc_date,'DD-MM-YYYY') as doc_date,
+      a.doc_no,
+      to_char(a.date_logistic,'DD-MM-YYYY') as date_logistic,
+      to_char(a.create_date_time_now,'DD-MM-YYYY HH24:MI') as created_at,
+      COALESCE(NULLIF(TRIM(b.name_1), ''), a.car, '-') as car,
+      COALESCE(NULLIF(TRIM(c.name_1), ''), a.driver, '-') as driver,
+      COALESCE(NULLIF(TRIM(uc.name_1), ''), a.user_created, '-') as user_created,
+      COALESCE(NULLIF(TRIM(ap.name_1), ''), a.approve_user, '-') as approve_user,
+      a.item_bill,
+      COALESCE(bs.pending_pickup_count, 0) as pending_pickup_count,
+      COALESCE(bs.picked_count, 0) as picked_count,
+      COALESCE(a.job_status, 0) as job_status
+    FROM odg_tms a
+    LEFT JOIN public.odg_tms_car b ON b.code = a.car
+    LEFT JOIN public.odg_tms_driver c ON c.code = a.driver
+    LEFT JOIN erp_user uc ON uc.code = a.user_created
+    LEFT JOIN erp_user ap ON ap.code = a.approve_user
+    LEFT JOIN bill_summary bs ON bs.doc_no = a.doc_no
+    WHERE COALESCE(a.approve_status, 0) = 1
+      AND COALESCE(a.job_status, 0) = 1
+      AND a.doc_date BETWEEN $1 AND $2
+      AND ${getFixedYearSqlFilter("a.doc_date")}
+      AND COALESCE(bs.pending_pickup_count, 0) > 0
+      ${branchFilterJob(scope, "a")}
+    ORDER BY a.doc_date DESC, a.doc_no DESC`,
+    [from, to]
+  );
+}
+
 module.exports = {
   getJobs,
   createJob,
@@ -405,4 +558,8 @@ module.exports = {
   addBillToDraft,
   removeBillFromDraft,
   searchBills,
+  getJobsClosedByDriver,
+  getJobsClosed,
+  getJobsWaitingReceive,
+  getJobsWaitingPickup,
 };

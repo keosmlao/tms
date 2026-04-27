@@ -60,7 +60,10 @@ const navSections: NavSection[] = [
     title: "ອະນຸມັດ",
     icon: <FaClipboardCheck size={16} />,
     key: "approve",
-    items: [{ label: "ອະນຸມັດ", href: "/approve", icon: <FaClipboardCheck size={13} /> }],
+    items: [
+      { label: "ລໍອະນຸມັດ", href: "/approve", icon: <FaClipboardCheck size={13} /> },
+      { label: "ອະນຸມັດແລ້ວ", href: "/approve/approved", icon: <FaCheckCircle size={13} /> },
+    ],
   },
   {
     title: "ຂົນສົ່ງ",
@@ -68,10 +71,15 @@ const navSections: NavSection[] = [
     key: "route",
     items: [
       { label: "ລໍຖ້າຈັດຖ້ຽວ", href: "/bills-pending", icon: <FaBox size={13} /> },
-      { label: "ຈັດຖ້ຽວ/ລໍອະນຸມັດ", href: "/jobs", icon: <FaClipboardCheck size={13} /> },
+      { label: "ໃບງານ/ລໍຖ້າອະນຸມັດ", href: "/jobs", icon: <FaClipboardCheck size={13} /> },
+      { label: "ລໍຖ້າຮັບຖ້ຽວ", href: "/jobs/waiting-receive", icon: <FaClock size={13} /> },
+      { label: "ລໍຖ້າເບີກເຄື່ອງ", href: "/jobs/waiting-pickup", icon: <FaBox size={13} /> },
       { label: "ລໍຖ້າຈັດສົ່ງ", href: "/bills-waitingsent", icon: <FaClock size={13} /> },
       { label: "ກຳລັງຈັດສົ່ງ", href: "/bills-inprogress", icon: <FaTruck size={13} /> },
       { label: "ຈັດສົ່ງສຳເລັດ", href: "/bill-complete", icon: <FaCheckCircle size={13} /> },
+      { label: "ບິນສົ່ງບໍ່ຄົບ", href: "/bills-partial", icon: <FaBox size={13} /> },
+      { label: "ຄົນຂັບປິດງານ", href: "/jobs/closed-by-driver", icon: <FaClipboardCheck size={13} /> },
+      { label: "ປິດສຳເລັດແລ້ວ", href: "/jobs/closed", icon: <FaCheckCircle size={13} /> },
     ],
   },
   {

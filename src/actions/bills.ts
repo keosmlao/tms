@@ -12,6 +12,8 @@ import {
   getBillsWaitingSentDetails as svcGetBillsWaitingSentDetails,
   getBillsInProgress as svcGetBillsInProgress,
   getBillCompleteList as svcGetBillCompleteList,
+  getBillsCancelledList as svcGetBillsCancelledList,
+  getBillsPartialList as svcGetBillsPartialList,
 } from "@/queries/bills.js";
 
 export async function getAvailableBills() {
@@ -66,4 +68,14 @@ export async function getBillsInProgress() {
 export async function getBillCompleteList(fromDate?: string, toDate?: string) {
   const s = await requireSession();
   return svcGetBillCompleteList(s, fromDate, toDate);
+}
+
+export async function getBillsCancelledList(fromDate?: string, toDate?: string) {
+  const s = await requireSession();
+  return svcGetBillsCancelledList(s, fromDate, toDate);
+}
+
+export async function getBillsPartialList(fromDate?: string, toDate?: string) {
+  const s = await requireSession();
+  return svcGetBillsPartialList(s, fromDate, toDate);
 }
