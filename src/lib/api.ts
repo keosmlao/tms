@@ -3,6 +3,7 @@ import * as approve from "@/actions/approve";
 import * as billShipment from "@/actions/bill-shipment";
 import * as bills from "@/actions/bills";
 import * as dashboard from "@/actions/dashboard";
+import * as fuel from "@/actions/fuel";
 import * as gps from "@/actions/gps";
 import * as jobs from "@/actions/jobs";
 import * as masterData from "@/actions/master-data";
@@ -106,6 +107,13 @@ export const Actions = {
   // Bill shipment
   getBillShipmentData: billShipment.getBillShipmentData,
   saveBillShipment: billShipment.saveBillShipment,
+
+  // Fuel
+  getFuelLogs: fuel.getFuelLogs,
+  getFuelSummary: fuel.getFuelSummary,
+  getFuelImage: fuel.getFuelImage,
+  deleteFuelLog: fuel.deleteFuelLog,
+  saveFuelRefill: fuel.saveFuelRefill,
 };
 
 export const Auth = {

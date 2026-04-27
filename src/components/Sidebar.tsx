@@ -29,6 +29,7 @@ import {
   FaMapMarkerAlt,
   FaFileInvoice,
   FaBroadcastTower,
+  FaGasPump,
 } from "react-icons/fa";
 
 interface NavItem {
@@ -93,6 +94,14 @@ const navSections: NavSection[] = [
       { label: "ຕາມບິນ", href: "/reports/by-bill", icon: <FaFileInvoice size={13} /> },
       { label: "ນຳໃຊ້ລົດ/ເດືອນ", href: "/reports/monthly-car", icon: <FaChartLine size={13} /> },
       { label: "ຄົນຂັບ/ເດືອນ", href: "/reports/monthly-driver", icon: <FaChartLine size={13} /> },
+    ],
+  },
+  {
+    title: "ນ້ຳມັນ",
+    icon: <FaGasPump size={16} />,
+    key: "fuel",
+    items: [
+      { label: "ບັນທຶກເຕີມນ້ຳມັນ", href: "/fuel", icon: <FaGasPump size={13} /> },
     ],
   },
   {

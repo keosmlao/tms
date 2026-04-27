@@ -14,6 +14,7 @@ const {
   getFixedYearSqlFilter,
 } = require("../lib/fixed-year");
 const { saveToken: saveFcmToken, deleteToken: deleteFcmToken } = require("./push");
+const { saveFuelRefill, getFuelLogs, getFuelSummary } = require("./fuel");
 
 function asText(value) {
   return typeof value === "string" ? value.trim() : "";
@@ -589,6 +590,29 @@ async function mobileJobAction(body) {
         return { success: true };
       }
 
+      case "fuel_refill": {
+        const result = await saveFuelRefill(
+          {
+            fuel_date: asNullableText(body.fuel_date),
+            user_code: asNullableText(body.user_code),
+            driver_name: asNullableText(body.driver_name),
+            car: asNullableText(body.car),
+            doc_no: docNo || null,
+            liters: body.liters,
+            amount: body.amount,
+            odometer: body.odometer,
+            station: asNullableText(body.station),
+            note: asNullableText(body.note),
+            image_data: asNullableText(body.image_data ?? body.photo),
+            lat,
+            lng,
+          },
+          client
+        );
+        await client.query("COMMIT");
+        return result;
+      }
+
       default:
         throw new Error("Invalid action");
     }
@@ -692,6 +716,22 @@ async function mobileBills({ docNo, billNo, type }) {
   return [];
 }
 
+async function mobileFuelLogs({ userCode, fromDate, toDate, limit } = {}) {
+  const code = asText(userCode);
+  if (!code) {
+    const err = new Error("user_code is required");
+    err.status = 400;
+    throw err;
+  }
+  const rows = await getFuelLogs({ userCode: code, fromDate, toDate });
+  const summary = await getFuelSummary({ userCode: code, fromDate, toDate });
+  const max = Number(limit ?? 100);
+  return {
+    rows: max > 0 ? rows.slice(0, max) : rows,
+    summary,
+  };
+}
+
 async function fcmTokenSave({ user_code, token, platform }) {
   const userCode = asText(user_code);
   const t = asText(token);
@@ -721,6 +761,7 @@ module.exports = {
   mobileJobsList,
   mobileJobAction,
   mobileBills,
+  mobileFuelLogs,
   fcmTokenSave,
   fcmTokenDelete,
 };
