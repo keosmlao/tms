@@ -162,41 +162,52 @@ const ensureTmsDetailItemTable = once(async () => {
 
 async function getRemainingBillProducts(billNo) {
   await ensureTmsDetailItemTable();
+  // Items become "available for re-dispatch" once the prior delivery attempt
+  // is finished (status=1 done, status=2 cancelled). Active attempts
+  // (status NULL/0/3) lock their selected_qty so the same items can't get
+  // dispatched twice in parallel.
   const rows = await query(
-    `WITH dispatch_state AS (
-      SELECT
-        EXISTS(SELECT 1 FROM public.odg_tms_detail_item WHERE bill_no = $1) AS has_detail_item,
-        EXISTS(SELECT 1 FROM public.odg_tms_detail WHERE bill_no = $1) AS has_detail
+    `WITH active_locked AS (
+      SELECT item.item_code,
+             COALESCE(SUM(item.selected_qty), 0)::numeric AS locked_qty
+      FROM public.odg_tms_detail_item item
+      INNER JOIN public.odg_tms_detail det
+        ON det.bill_no = item.bill_no AND det.doc_no = item.doc_no
+      WHERE item.bill_no = $1
+        AND COALESCE(det.status, 0) NOT IN (1, 2)
+      GROUP BY item.item_code
     ),
-    assigned AS (
-      SELECT item_code, COALESCE(SUM(selected_qty), 0)::numeric AS selected_qty
-      FROM public.odg_tms_detail_item
-      WHERE bill_no = $1
-      GROUP BY item_code
+    delivered AS (
+      SELECT item.item_code,
+             COALESCE(SUM(item.delivered_qty), 0)::numeric AS delivered_qty
+      FROM public.odg_tms_detail_item item
+      INNER JOIN public.odg_tms_detail det
+        ON det.bill_no = item.bill_no AND det.doc_no = item.doc_no
+      WHERE item.bill_no = $1
+        AND COALESCE(det.status, 0) IN (1, 2)
+      GROUP BY item.item_code
     )
     SELECT
       d.item_code,
       d.item_name,
-      CASE
-        WHEN state.has_detail_item THEN GREATEST(
-          COALESCE(d.qty, 0)::numeric - COALESCE(assigned.selected_qty, 0)::numeric, 0
-        )::numeric
-        WHEN state.has_detail THEN 0::numeric
-        ELSE COALESCE(d.qty, 0)::numeric
-      END AS qty,
+      GREATEST(
+        COALESCE(d.qty, 0)::numeric
+        - COALESCE(al.locked_qty, 0)
+        - COALESCE(dl.delivered_qty, 0),
+        0
+      )::numeric AS qty,
       d.unit_code
     FROM ic_trans_detail d
-    CROSS JOIN dispatch_state state
-    LEFT JOIN assigned ON assigned.item_code = d.item_code
+    LEFT JOIN active_locked al ON al.item_code = d.item_code
+    LEFT JOIN delivered dl ON dl.item_code = d.item_code
     WHERE d.doc_no = $1
       AND d.item_code NOT LIKE '97%'
-      AND CASE
-        WHEN state.has_detail_item THEN GREATEST(
-          COALESCE(d.qty, 0)::numeric - COALESCE(assigned.selected_qty, 0)::numeric, 0
-        )::numeric
-        WHEN state.has_detail THEN 0::numeric
-        ELSE COALESCE(d.qty, 0)::numeric
-      END > 0
+      AND GREATEST(
+        COALESCE(d.qty, 0)::numeric
+        - COALESCE(al.locked_qty, 0)
+        - COALESCE(dl.delivered_qty, 0),
+        0
+      ) > 0
     ORDER BY d.item_code`,
     [billNo]
   );
@@ -213,82 +224,68 @@ async function getRemainingSummaryMap(billNos) {
   await ensureTmsDetailItemTable();
   if (billNos.length === 0) return new Map();
 
-  const [detailRows, detailItemRows, totalRows, partialRows] = await Promise.all([
-    query(
-      `SELECT bill_no FROM public.odg_tms_detail WHERE bill_no = ANY($1::varchar[]) GROUP BY bill_no`,
-      [billNos]
+  // Active attempts lock the items (selected_qty), finished attempts only
+  // consume what was actually delivered (delivered_qty). The remainder is
+  // available again for re-dispatch — covers cancelled bills and partials.
+  const rows = await query(
+    `WITH active_locked AS (
+      SELECT item.bill_no, item.item_code,
+             COALESCE(SUM(item.selected_qty), 0)::numeric AS locked_qty
+      FROM public.odg_tms_detail_item item
+      INNER JOIN public.odg_tms_detail det
+        ON det.bill_no = item.bill_no AND det.doc_no = item.doc_no
+      WHERE item.bill_no = ANY($1::varchar[])
+        AND COALESCE(det.status, 0) NOT IN (1, 2)
+      GROUP BY item.bill_no, item.item_code
     ),
-    query(
-      `SELECT bill_no FROM public.odg_tms_detail_item WHERE bill_no = ANY($1::varchar[]) GROUP BY bill_no`,
-      [billNos]
-    ),
-    query(
-      `SELECT doc_no as bill_no, COUNT(*)::int AS remaining_count,
-        COALESCE(SUM(COALESCE(qty, 0)::numeric), 0)::numeric AS remaining_qty_total
-       FROM ic_trans_detail
-       WHERE doc_no = ANY($1::varchar[]) AND item_code NOT LIKE '97%'
-       GROUP BY doc_no`,
-      [billNos]
-    ),
-    query(
-      `WITH item_bills AS (
-          SELECT DISTINCT bill_no FROM public.odg_tms_detail_item WHERE bill_no = ANY($1::varchar[])
-        ),
-        assigned AS (
-          SELECT bill_no, item_code, COALESCE(SUM(selected_qty), 0)::numeric AS selected_qty
-          FROM public.odg_tms_detail_item
-          WHERE bill_no = ANY($1::varchar[])
-          GROUP BY bill_no, item_code
-        )
-       SELECT d.doc_no AS bill_no,
-         COUNT(*) FILTER (
-           WHERE GREATEST(COALESCE(d.qty, 0)::numeric - COALESCE(a.selected_qty, 0)::numeric, 0) > 0
-         )::int AS remaining_count,
-         COALESCE(
-           SUM(GREATEST(COALESCE(d.qty, 0)::numeric - COALESCE(a.selected_qty, 0)::numeric, 0)), 0
-         )::numeric AS remaining_qty_total
-       FROM ic_trans_detail d
-       JOIN item_bills ib ON ib.bill_no = d.doc_no
-       LEFT JOIN assigned a ON a.bill_no = d.doc_no AND a.item_code = d.item_code
-       WHERE d.item_code NOT LIKE '97%'
-       GROUP BY d.doc_no`,
-      [billNos]
-    ),
-  ]);
-
-  const detailBills = new Set(detailRows.map((row) => row.bill_no));
-  const detailItemBills = new Set(detailItemRows.map((row) => row.bill_no));
-  const totalByBill = new Map(
-    totalRows.map((row) => [
-      row.bill_no,
-      {
-        remaining_count: Number(row.remaining_count ?? 0),
-        remaining_qty_total: Number(row.remaining_qty_total ?? 0),
-      },
-    ])
-  );
-  const partialByBill = new Map(
-    partialRows.map((row) => [
-      row.bill_no,
-      {
-        remaining_count: Number(row.remaining_count ?? 0),
-        remaining_qty_total: Number(row.remaining_qty_total ?? 0),
-      },
-    ])
+    delivered AS (
+      SELECT item.bill_no, item.item_code,
+             COALESCE(SUM(item.delivered_qty), 0)::numeric AS delivered_qty
+      FROM public.odg_tms_detail_item item
+      INNER JOIN public.odg_tms_detail det
+        ON det.bill_no = item.bill_no AND det.doc_no = item.doc_no
+      WHERE item.bill_no = ANY($1::varchar[])
+        AND COALESCE(det.status, 0) IN (1, 2)
+      GROUP BY item.bill_no, item.item_code
+    )
+    SELECT
+      d.doc_no AS bill_no,
+      COUNT(*) FILTER (
+        WHERE GREATEST(
+          COALESCE(d.qty, 0)::numeric
+          - COALESCE(al.locked_qty, 0)
+          - COALESCE(dl.delivered_qty, 0),
+          0
+        ) > 0
+      )::int AS remaining_count,
+      COALESCE(
+        SUM(GREATEST(
+          COALESCE(d.qty, 0)::numeric
+          - COALESCE(al.locked_qty, 0)
+          - COALESCE(dl.delivered_qty, 0),
+          0
+        )), 0
+      )::numeric AS remaining_qty_total
+    FROM ic_trans_detail d
+    LEFT JOIN active_locked al
+      ON al.bill_no = d.doc_no AND al.item_code = d.item_code
+    LEFT JOIN delivered dl
+      ON dl.bill_no = d.doc_no AND dl.item_code = d.item_code
+    WHERE d.doc_no = ANY($1::varchar[])
+      AND d.item_code NOT LIKE '97%'
+    GROUP BY d.doc_no`,
+    [billNos]
   );
 
   const result = new Map();
   for (const billNo of billNos) {
-    const fallbackTotals = totalByBill.get(billNo) ?? {
-      remaining_count: 0,
-      remaining_qty_total: 0,
-    };
-    const summary = detailItemBills.has(billNo)
-      ? partialByBill.get(billNo) ?? { remaining_count: 0, remaining_qty_total: 0 }
-      : detailBills.has(billNo)
-      ? { remaining_count: 0, remaining_qty_total: 0 }
-      : fallbackTotals;
-    result.set(billNo, summary);
+    result.set(billNo, { remaining_count: 0, remaining_qty_total: 0 });
+  }
+  for (const row of rows) {
+    result.set(row.bill_no, {
+      remaining_count: Number(row.remaining_count ?? 0),
+      remaining_qty_total: Number(row.remaining_qty_total ?? 0),
+    });
   }
   return result;
 }

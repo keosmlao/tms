@@ -295,17 +295,44 @@ async function mobileJobAction(body) {
         // Backfill the customer's location if it's missing. Only updates when
         // the existing latitude/longitude is NULL/empty/zero so we don't
         // overwrite a known-good location with a delivery checkin point.
+        // Accepts any zero variant ("0", "0.0", "0.000000", "-0.0", whitespace).
         if (currentBill.cust_code && lat && lng) {
-          await client.query(
+          const updated = await client.query(
             `UPDATE public.ar_customer_detail
              SET latitude = $2, longitude = $3
              WHERE ar_code = $1
                AND (
-                 latitude IS NULL OR TRIM(latitude::text) IN ('', '0', '0.0')
-                 OR longitude IS NULL OR TRIM(longitude::text) IN ('', '0', '0.0')
-               )`,
+                 latitude IS NULL
+                 OR longitude IS NULL
+                 OR TRIM(latitude::text) = ''
+                 OR TRIM(longitude::text) = ''
+                 OR TRIM(latitude::text) ~ '^-?0+\\.?0*$'
+                 OR TRIM(longitude::text) ~ '^-?0+\\.?0*$'
+               )
+             RETURNING ar_code`,
             [currentBill.cust_code, lat, lng]
           );
+          // If no row matched (e.g. customer not in ar_customer_detail), insert.
+          if ((updated.rowCount ?? 0) === 0) {
+            await client.query(
+              `INSERT INTO public.ar_customer_detail (ar_code, latitude, longitude)
+               VALUES ($1, $2, $3)
+               ON CONFLICT (ar_code) DO UPDATE
+                 SET latitude = EXCLUDED.latitude,
+                     longitude = EXCLUDED.longitude
+                 WHERE
+                   public.ar_customer_detail.latitude IS NULL
+                   OR public.ar_customer_detail.longitude IS NULL
+                   OR TRIM(public.ar_customer_detail.latitude::text) = ''
+                   OR TRIM(public.ar_customer_detail.longitude::text) = ''
+                   OR TRIM(public.ar_customer_detail.latitude::text) ~ '^-?0+\\.?0*$'
+                   OR TRIM(public.ar_customer_detail.longitude::text) ~ '^-?0+\\.?0*$'`,
+              [currentBill.cust_code, lat, lng]
+            ).catch((err) => {
+              // ar_customer_detail might not have ar_code as primary key; skip on conflict.
+              console.warn('[checkin] ar_customer_detail insert skipped:', err?.message);
+            });
+          }
         }
 
         await client.query("COMMIT");
@@ -472,6 +499,7 @@ async function mobileJobAction(body) {
 
       case "cancel_bill": {
         if (!billNo) throw new Error("bill_no is required");
+        if (!comment) throw new Error("ກະລຸນາໃສ່ໝາຍເຫດການຍົກເລີກ");
         const billRow = await client.query(
           `SELECT d.doc_no, t.approve_status, t.job_status, d.recipt_job
            FROM public.odg_tms_detail d
