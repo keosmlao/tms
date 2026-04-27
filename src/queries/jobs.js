@@ -190,12 +190,39 @@ async function createJob(session, data) {
     }
   }
   await queryOne("DELETE FROM public.odg_tms_listbill_draft WHERE user_create=$1", [session.usercode]);
+
+  // Notify driver about the new dispatch
+  if (data.driver) {
+    const carRow = data.car
+      ? await queryOne(
+          "SELECT name_1 FROM public.odg_tms_car WHERE code = $1",
+          [data.car]
+        )
+      : null;
+    const carName = carRow?.name_1 ?? data.car ?? "";
+    const logisticDate = data.date_log
+      ? new Date(coerceDateToFixedYear(data.date_log)).toLocaleDateString("lo-LA")
+      : "";
+    const billCount = normalizedBills.length;
+    const lines = [
+      `📋 ຖ້ຽວ ${data.doc_no}`,
+      logisticDate ? `📅 ສົ່ງວັນທີ ${logisticDate}` : null,
+      carName ? `🚚 ລົດ ${carName}` : null,
+      `📦 ${billCount} ບິນ`,
+    ].filter(Boolean);
+    void pushToDriver(
+      data.driver,
+      "🚚 ມີຖ້ຽວໃໝ່ໃຫ້ທ່ານ",
+      lines.join("\n"),
+      { type: "job_created", doc_no: data.doc_no }
+    );
+  }
 }
 
 async function deleteJob(docNo) {
   await ensureTmsWorkerTable();
   await ensureTmsDetailItemTable();
-  // Grab the driver before we delete so we can notify them.
+  // Grab the driver before delete so we can notify
   const job = await queryOne(
     `SELECT driver FROM odg_tms WHERE doc_no=$1 AND ${getFixedYearSqlFilter("doc_date")}`,
     [docNo]
@@ -208,8 +235,8 @@ async function deleteJob(docNo) {
   if (job?.driver) {
     void pushToDriver(
       job.driver,
-      "ຖ້ຽວຖືກຍົກເລີກ",
-      `ຖ້ຽວ ${docNo} ຖືກລຶບໂດຍ admin`,
+      "❌ ຖ້ຽວຖືກຍົກເລີກ",
+      `📋 ຖ້ຽວ ${docNo}\n⚠️ admin ໄດ້ລຶບຖ້ຽວນີ້ແລ້ວ`,
       { type: "job_deleted", doc_no: docNo }
     );
   }
@@ -234,8 +261,8 @@ async function closeJob(session, docNo) {
   if (currentJob.driver) {
     void pushToDriver(
       currentJob.driver,
-      "ຖ້ຽວຖືກປິດແລ້ວ",
-      `admin ປິດຖ້ຽວ ${docNo}`,
+      "✅ ຖ້ຽວຖືກປິດແລ້ວ",
+      `📋 ຖ້ຽວ ${docNo}\n🏁 admin ປິດຖ້ຽວສຳເລັດ`,
       { type: "job_closed", doc_no: docNo }
     );
   }

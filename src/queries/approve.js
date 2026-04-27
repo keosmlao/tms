@@ -26,10 +26,15 @@ async function approveJob(session, docNo) {
     const logisticDate = job.date_logistic
       ? new Date(job.date_logistic).toLocaleDateString("lo-LA")
       : "";
+    const lines = [
+      `📋 ຖ້ຽວ ${docNo}`,
+      logisticDate ? `📅 ສົ່ງວັນທີ ${logisticDate}` : null,
+      `✨ ພ້ອມຮັບຖ້ຽວແລ້ວ`,
+    ].filter(Boolean);
     void pushToDriver(
       job.driver,
-      "ມີຖ້ຽວໃໝ່ຖືກອະນຸມັດ",
-      `ຖ້ຽວ ${docNo}${logisticDate ? ` · ວັນຈັດສົ່ງ ${logisticDate}` : ""}`,
+      "✅ ຖ້ຽວຖືກອະນຸມັດແລ້ວ",
+      lines.join("\n"),
       { type: "job_approved", doc_no: docNo }
     );
   }

@@ -99,6 +99,10 @@ async function pushToDriver(driverCode, title, body, data = {}) {
     const tokens = await getTokensFor(driverCode);
     if (tokens.length === 0) return;
 
+    const tag = data.doc_no
+      ? `job_${data.doc_no}_${data.type ?? "default"}`
+      : undefined;
+
     const message = {
       notification: { title, body },
       data: Object.fromEntries(
@@ -110,6 +114,20 @@ async function pushToDriver(driverCode, title, body, data = {}) {
         priority: "high",
         notification: {
           channelId: "odgtms_jobs",
+          color: "#0d9488",
+          defaultSound: true,
+          defaultVibrateTimings: true,
+          tag,
+          notificationCount: 1,
+        },
+      },
+      apns: {
+        payload: {
+          aps: {
+            alert: { title, body },
+            sound: "default",
+            "thread-id": data.doc_no ? `job_${data.doc_no}` : undefined,
+          },
         },
       },
       tokens,
