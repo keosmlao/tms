@@ -598,8 +598,7 @@ async function searchBillsForJob(q, excludeDocNo) {
             b.telephone
      FROM ic_trans a
      LEFT JOIN ar_customer b ON b.code = a.cust_code
-     WHERE a.trans_flag = '44'
-       AND ${getFixedYearSqlFilter("a.doc_date")}
+     WHERE ${getFixedYearSqlFilter("a.doc_date")}
        AND (a.doc_no ILIKE $1 OR a.cust_code ILIKE $1 OR COALESCE(b.name_1, '') ILIKE $1)
        AND a.doc_no NOT IN (
          SELECT s.doc_no FROM ic_trans_shipment s
