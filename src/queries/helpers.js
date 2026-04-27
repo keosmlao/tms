@@ -166,8 +166,20 @@ async function getRemainingBillProducts(billNo) {
   // is finished (status=1 done, status=2 cancelled). Active attempts
   // (status NULL/0/3) lock their selected_qty so the same items can't get
   // dispatched twice in parallel.
+  // ic_trans_detail can have multiple rows per item_code, so we aggregate
+  // first to avoid duplicate rows in the result.
   const rows = await query(
-    `WITH active_locked AS (
+    `WITH bill_items AS (
+      SELECT
+        d.item_code,
+        MAX(d.item_name) AS item_name,
+        SUM(COALESCE(d.qty, 0))::numeric AS total_qty,
+        MAX(d.unit_code) AS unit_code
+      FROM ic_trans_detail d
+      WHERE d.doc_no = $1 AND d.item_code NOT LIKE '97%'
+      GROUP BY d.item_code
+    ),
+    active_locked AS (
       SELECT item.item_code,
              COALESCE(SUM(item.selected_qty), 0)::numeric AS locked_qty
       FROM public.odg_tms_detail_item item
@@ -188,27 +200,25 @@ async function getRemainingBillProducts(billNo) {
       GROUP BY item.item_code
     )
     SELECT
-      d.item_code,
-      d.item_name,
+      bi.item_code,
+      bi.item_name,
       GREATEST(
-        COALESCE(d.qty, 0)::numeric
+        bi.total_qty
         - COALESCE(al.locked_qty, 0)
         - COALESCE(dl.delivered_qty, 0),
         0
       )::numeric AS qty,
-      d.unit_code
-    FROM ic_trans_detail d
-    LEFT JOIN active_locked al ON al.item_code = d.item_code
-    LEFT JOIN delivered dl ON dl.item_code = d.item_code
-    WHERE d.doc_no = $1
-      AND d.item_code NOT LIKE '97%'
-      AND GREATEST(
-        COALESCE(d.qty, 0)::numeric
-        - COALESCE(al.locked_qty, 0)
-        - COALESCE(dl.delivered_qty, 0),
-        0
-      ) > 0
-    ORDER BY d.item_code`,
+      bi.unit_code
+    FROM bill_items bi
+    LEFT JOIN active_locked al ON al.item_code = bi.item_code
+    LEFT JOIN delivered dl ON dl.item_code = bi.item_code
+    WHERE GREATEST(
+      bi.total_qty
+      - COALESCE(al.locked_qty, 0)
+      - COALESCE(dl.delivered_qty, 0),
+      0
+    ) > 0
+    ORDER BY bi.item_code`,
     [billNo]
   );
 
@@ -227,8 +237,19 @@ async function getRemainingSummaryMap(billNos) {
   // Active attempts lock the items (selected_qty), finished attempts only
   // consume what was actually delivered (delivered_qty). The remainder is
   // available again for re-dispatch — covers cancelled bills and partials.
+  // ic_trans_detail can have multiple rows per item_code, so we aggregate
+  // first.
   const rows = await query(
-    `WITH active_locked AS (
+    `WITH bill_items AS (
+      SELECT
+        d.doc_no AS bill_no,
+        d.item_code,
+        SUM(COALESCE(d.qty, 0))::numeric AS total_qty
+      FROM ic_trans_detail d
+      WHERE d.doc_no = ANY($1::varchar[]) AND d.item_code NOT LIKE '97%'
+      GROUP BY d.doc_no, d.item_code
+    ),
+    active_locked AS (
       SELECT item.bill_no, item.item_code,
              COALESCE(SUM(item.selected_qty), 0)::numeric AS locked_qty
       FROM public.odg_tms_detail_item item
@@ -249,10 +270,10 @@ async function getRemainingSummaryMap(billNos) {
       GROUP BY item.bill_no, item.item_code
     )
     SELECT
-      d.doc_no AS bill_no,
+      bi.bill_no,
       COUNT(*) FILTER (
         WHERE GREATEST(
-          COALESCE(d.qty, 0)::numeric
+          bi.total_qty
           - COALESCE(al.locked_qty, 0)
           - COALESCE(dl.delivered_qty, 0),
           0
@@ -260,20 +281,18 @@ async function getRemainingSummaryMap(billNos) {
       )::int AS remaining_count,
       COALESCE(
         SUM(GREATEST(
-          COALESCE(d.qty, 0)::numeric
+          bi.total_qty
           - COALESCE(al.locked_qty, 0)
           - COALESCE(dl.delivered_qty, 0),
           0
         )), 0
       )::numeric AS remaining_qty_total
-    FROM ic_trans_detail d
+    FROM bill_items bi
     LEFT JOIN active_locked al
-      ON al.bill_no = d.doc_no AND al.item_code = d.item_code
+      ON al.bill_no = bi.bill_no AND al.item_code = bi.item_code
     LEFT JOIN delivered dl
-      ON dl.bill_no = d.doc_no AND dl.item_code = d.item_code
-    WHERE d.doc_no = ANY($1::varchar[])
-      AND d.item_code NOT LIKE '97%'
-    GROUP BY d.doc_no`,
+      ON dl.bill_no = bi.bill_no AND dl.item_code = bi.item_code
+    GROUP BY bi.bill_no`,
     [billNos]
   );
 
