@@ -263,7 +263,7 @@ async function mobileJobAction(body) {
         await ensureBillDeliveryItems(billNo, client);
 
         const billRow = await client.query(
-          `SELECT d.doc_no, t.approve_status, t.job_status, d.recipt_job
+          `SELECT d.doc_no, d.cust_code, t.approve_status, t.job_status, d.recipt_job
            FROM public.odg_tms_detail d
            INNER JOIN odg_tms t ON t.doc_no = d.doc_no
            WHERE d.bill_no = $1 AND ${getFixedYearSqlFilter("d.doc_date")}
@@ -291,6 +291,22 @@ async function mobileJobAction(body) {
            WHERE doc_no = $1 AND ${getFixedYearSqlFilter("doc_date")}`,
           [currentDocNo]
         );
+
+        // Backfill the customer's location if it's missing. Only updates when
+        // the existing latitude/longitude is NULL/empty/zero so we don't
+        // overwrite a known-good location with a delivery checkin point.
+        if (currentBill.cust_code && lat && lng) {
+          await client.query(
+            `UPDATE public.ar_customer_detail
+             SET latitude = $2, longitude = $3
+             WHERE ar_code = $1
+               AND (
+                 latitude IS NULL OR TRIM(latitude::text) IN ('', '0', '0.0')
+                 OR longitude IS NULL OR TRIM(longitude::text) IN ('', '0', '0.0')
+               )`,
+            [currentBill.cust_code, lat, lng]
+          );
+        }
 
         await client.query("COMMIT");
         return { success: true, doc_no: currentDocNo };
@@ -570,7 +586,9 @@ async function mobileBills({ docNo, billNo, type }) {
         a.bill_no, to_char(a.bill_date,'DD-MM-YYYY') as bill_date,
         a.cust_code, b.name_1 as cust_name, b.telephone,
         to_char(a.date_logistic,'DD-MM-YYYY') as date_logistic,
-        a.lat, a.lng, a.lat_end, a.lng_end,
+        COALESCE(NULLIF(TRIM(a.lat::text), ''), NULLIF(TRIM(acd.latitude::text), '')) as lat,
+        COALESCE(NULLIF(TRIM(a.lng::text), ''), NULLIF(TRIM(acd.longitude::text), '')) as lng,
+        a.lat_end, a.lng_end,
         COALESCE(a.count_item, '0') as count_item,
         COALESCE(a.status, 0) as status,
         COALESCE(to_char(a.recipt_job,'DD-MM-YYYY HH24:MI'), '-') as recipt_job,
@@ -581,6 +599,7 @@ async function mobileBills({ docNo, billNo, type }) {
         COALESCE(a.remark, '') as remark
       FROM public.odg_tms_detail a
       LEFT JOIN ar_customer b ON b.code = a.cust_code
+      LEFT JOIN ar_customer_detail acd ON acd.ar_code = a.cust_code
       WHERE a.doc_no = $1 AND ${getFixedYearSqlFilter("a.doc_date")}
       ORDER BY a.bill_no`,
       [docNo]
