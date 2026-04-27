@@ -1,4 +1,3 @@
-// @ts-expect-error JS module
 import { query } from "@/lib/db.js";
 
 export async function GET() {
