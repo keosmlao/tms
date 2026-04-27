@@ -1,26 +1,212 @@
 @import "tailwindcss";
 
+@custom-variant dark (&:where(.dark, .dark *));
+
 :root {
-  --background: #ffffff;
-  --foreground: #171717;
+  --background: #f6f8f7;
+  --foreground: #13212c;
+  --font-lao-sans: "Noto Sans Lao", system-ui, sans-serif;
+  --font-geist-mono: "Geist Mono", ui-monospace, monospace;
+
+  --glass-bg: rgba(255, 255, 255, 0.82);
+  --glass-bg-heavy: rgba(255, 255, 255, 0.94);
+  --glass-border: rgba(19, 33, 44, 0.10);
+  --glass-border-subtle: rgba(19, 33, 44, 0.12);
+  --glass-shadow: 0 18px 50px rgba(15, 25, 33, 0.08);
+  --glass-shadow-lg: 0 24px 70px rgba(15, 25, 33, 0.10);
+  --glass-glow-primary: rgba(14, 124, 107, 0.14);
+  --glass-glow-success: rgba(16, 185, 129, 0.15);
+  --glass-glow-warning: rgba(245, 158, 11, 0.15);
+  --glass-glow-danger: rgba(239, 68, 68, 0.15);
+  --mesh-gradient: linear-gradient(180deg, #f6f8f7 0%, #eef4f1 54%, #f8f5ef 100%);
 }
 
 @theme inline {
   --color-background: var(--background);
   --color-foreground: var(--foreground);
-  --font-sans: var(--font-geist-sans);
+  --font-sans: var(--font-lao-sans);
   --font-mono: var(--font-geist-mono);
 }
 
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
-  }
+.dark {
+  --background: #081017;
+  --foreground: #e2e8f0;
+
+  --glass-bg: rgba(13, 24, 34, 0.78);
+  --glass-bg-heavy: rgba(13, 24, 34, 0.94);
+  --glass-border: rgba(231, 239, 244, 0.10);
+  --glass-border-subtle: rgba(231, 239, 244, 0.12);
+  --glass-shadow: 0 18px 52px rgba(2, 6, 10, 0.36);
+  --glass-shadow-lg: 0 28px 80px rgba(2, 6, 10, 0.48);
+  --glass-glow-primary: rgba(45, 212, 191, 0.18);
+  --glass-glow-success: rgba(16, 185, 129, 0.20);
+  --glass-glow-warning: rgba(245, 158, 11, 0.20);
+  --glass-glow-danger: rgba(239, 68, 68, 0.20);
+  --mesh-gradient: linear-gradient(180deg, #081017 0%, #0b171f 58%, #0e1515 100%);
 }
 
 body {
-  background: var(--background);
+  background: var(--mesh-gradient);
+  background-attachment: fixed;
   color: var(--foreground);
-  font-family: Arial, Helvetica, sans-serif;
+  font-family: var(--font-sans), system-ui, sans-serif;
+}
+
+/* ─── Glassmorphism Utilities ─── */
+
+.glass {
+  background: var(--glass-bg);
+  backdrop-filter: blur(16px) saturate(1.35);
+  -webkit-backdrop-filter: blur(16px) saturate(1.35);
+  border: 1px solid var(--glass-border);
+  box-shadow: var(--glass-shadow);
+}
+
+.glass-heavy {
+  background: var(--glass-bg-heavy);
+  backdrop-filter: blur(18px) saturate(1.35);
+  -webkit-backdrop-filter: blur(18px) saturate(1.35);
+  border: 1px solid var(--glass-border);
+  box-shadow: var(--glass-shadow);
+}
+
+.glass-subtle {
+  background: var(--glass-bg);
+  backdrop-filter: blur(12px) saturate(1.4);
+  -webkit-backdrop-filter: blur(12px) saturate(1.4);
+  border: 1px solid var(--glass-border-subtle);
+}
+
+.glow-primary {
+  box-shadow: var(--glass-shadow), 0 0 0 1px var(--glass-glow-primary), inset 0 1px 0 rgba(255, 255, 255, 0.1);
+}
+
+.glow-success {
+  box-shadow: var(--glass-shadow), 0 0 20px var(--glass-glow-success);
+}
+
+.glow-warning {
+  box-shadow: var(--glass-shadow), 0 0 20px var(--glass-glow-warning);
+}
+
+.glow-danger {
+  box-shadow: var(--glass-shadow), 0 0 20px var(--glass-glow-danger);
+}
+
+.glass-input {
+  background: var(--glass-bg);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  border: 1px solid var(--glass-border-subtle);
+  transition: all 0.2s ease;
+}
+
+.glass-input:focus {
+  border-color: rgba(14, 124, 107, 0.55);
+  box-shadow: 0 0 0 3px rgba(14, 124, 107, 0.12), 0 0 16px rgba(14, 124, 107, 0.08);
+  outline: none;
+}
+
+/* ─── Gradient Mesh Background ─── */
+
+.gradient-mesh-bg {
+  background: var(--mesh-gradient);
+  background-attachment: fixed;
+}
+
+.gradient-mesh-bg::before {
+  content: "";
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  background:
+    linear-gradient(rgba(19, 33, 44, 0.035) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(19, 33, 44, 0.03) 1px, transparent 1px);
+  background-size: 72px 72px;
+  mask-image: linear-gradient(180deg, black, transparent 86%);
+  z-index: 0;
+}
+
+/* ─── Animations ─── */
+
+@keyframes fadeIn {
+  from { opacity: 0; transform: translateY(-8px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+@keyframes fadeInUp {
+  from { opacity: 0; transform: translateY(12px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+@keyframes slideInRight {
+  from { opacity: 0; transform: translateX(-12px); }
+  to { opacity: 1; transform: translateX(0); }
+}
+
+@keyframes glowPulse {
+  0%, 100% { box-shadow: 0 0 16px var(--glass-glow-primary); }
+  50% { box-shadow: 0 0 24px var(--glass-glow-primary); }
+}
+
+@keyframes shimmer {
+  0% { background-position: -200% 0; }
+  100% { background-position: 200% 0; }
+}
+
+@keyframes float {
+  0%, 100% { transform: translateY(0); }
+  50% { transform: translateY(-8px); }
+}
+
+.animate-fadeIn {
+  animation: fadeIn 0.2s ease-out;
+}
+
+.animate-fadeInUp {
+  animation: fadeInUp 0.3s ease-out;
+}
+
+.animate-slideInRight {
+  animation: slideInRight 0.25s ease-out;
+}
+
+.animate-glowPulse {
+  animation: glowPulse 2s ease-in-out infinite;
+}
+
+.animate-float {
+  animation: float 6s ease-in-out infinite;
+}
+
+/* ─── Scrollbar ─── */
+
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+  background: rgba(14, 124, 107, 0.24);
+  border-radius: 3px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: rgba(14, 124, 107, 0.40);
+}
+
+/* ─── Print ─── */
+
+@media print {
+  .glass, .glass-heavy, .glass-subtle {
+    background: white !important;
+    backdrop-filter: none !important;
+    -webkit-backdrop-filter: none !important;
+    box-shadow: none !important;
+    border: 1px solid #e5e7eb !important;
+  }
 }
