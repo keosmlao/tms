@@ -33,7 +33,5 @@ export async function logout() {
 }
 
 export async function me() {
-  const session = await getSession();
-  if (!session) throw new Error("Unauthorized");
-  return session;
+  return await getSession();
 }
