@@ -17,6 +17,7 @@ import {
 } from "react-icons/fa";
 import { FIXED_YEAR_END, FIXED_YEAR_START } from "@/lib/fixed-year";
 import { Actions } from "@/lib/api";
+import { StatusPageHeader, StatusStatGrid } from "@/components/status-page-shell";
 // Ported from server actions: getBillProducts, getBillsPending, updateBillTransport
 
 interface TimeUse {
@@ -205,40 +206,22 @@ export default function BillsPendingClient() {
   const inputCls = "w-full px-3 py-2 glass-input rounded-lg text-xs text-slate-700 dark:text-slate-200 transition-all";
 
   return (
-    <div className="space-y-4">
-      {/* ── Header ── */}
-      <div className="flex items-center justify-between">
-        <div className="flex items-center gap-3">
-          <div className="w-10 h-10 rounded-lg flex items-center justify-center bg-teal-500/10">
-            <FaFileInvoice className="text-lg text-teal-600 dark:text-teal-400" />
-          </div>
-          <div>
-            <h1 className="text-lg font-bold text-slate-800 dark:text-white">ລາຍການລໍຖ້າຈັດສົ່ງ</h1>
-            <p className="text-[11px] text-slate-500 dark:text-slate-400">ບິນທີ່ລໍຖ້າການຈັດສົ່ງ</p>
-          </div>
-        </div>
-        <div className="flex items-center gap-3">
-          <div className="text-right">
-            <p className="text-xl font-bold text-teal-600 dark:text-teal-400">{filtered.length}</p>
-            <p className="text-[10px] text-slate-500 dark:text-slate-400">ບິນທັງໝົດ</p>
-          </div>
-          <div className="w-px h-8 bg-slate-200/50 dark:bg-white/10" />
-          <div className="text-right">
-            <p className="text-xl font-bold text-amber-600 dark:text-amber-400">{fmtQty(totalQty)}</p>
-            <p className="text-[10px] text-slate-500 dark:text-slate-400">ຈຳນວນເຫຼືອ</p>
-          </div>
-          <div className="w-px h-8 bg-slate-200/50 dark:bg-white/10" />
-          <div className="text-right">
-            <p className="text-xl font-bold text-sky-600 dark:text-sky-400">{totalItems}</p>
-            <p className="text-[10px] text-slate-500 dark:text-slate-400">ລາຍການເຫຼືອ</p>
-          </div>
-          <div className="w-px h-8 bg-slate-200/50 dark:bg-white/10" />
-          <div className="text-right">
-            <p className="text-xl font-bold text-orange-600 dark:text-orange-400">{partialDeliveryCount}</p>
-            <p className="text-[10px] text-slate-500 dark:text-slate-400">ທະຍອຍສົ່ງ</p>
-          </div>
-        </div>
-      </div>
+    <div className="space-y-5">
+      <StatusPageHeader
+        title="ລາຍການລໍຖ້າຈັດສົ່ງ"
+        subtitle="ບິນທີ່ລໍຖ້າການຈັດສົ່ງ"
+        icon={<FaFileInvoice />}
+        tone="teal"
+      />
+
+      <StatusStatGrid
+        stats={[
+          { label: "ບິນທັງໝົດ", value: filtered.length, icon: <FaFileInvoice />, tone: "teal" },
+          { label: "ຈຳນວນເຫຼືອ", value: fmtQty(totalQty), icon: <FaBoxOpen />, tone: "amber" },
+          { label: "ລາຍການເຫຼືອ", value: totalItems, icon: <FaBox />, tone: "sky" },
+          { label: "ທະຍອຍສົ່ງ", value: partialDeliveryCount, icon: <FaExchangeAlt />, tone: "orange" },
+        ]}
+      />
 
       {/* ── Filters ── */}
       <div className="glass rounded-lg p-4">

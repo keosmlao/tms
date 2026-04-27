@@ -3,6 +3,13 @@
 import { useEffect, useMemo, useState, type ReactNode } from "react";
 import { FaCalendar, FaSearch, FaSpinner } from "react-icons/fa";
 import { getFixedTodayDate } from "@/lib/fixed-year";
+import {
+  StatusControlPanel,
+  StatusPageHeader,
+  StatusStatGrid,
+  StatusTableShell,
+  type StatusTone,
+} from "@/components/status-page-shell";
 
 export interface Column<T> {
   key: keyof T | string;
@@ -18,7 +25,7 @@ export interface StatCard {
   value: number | string;
   icon: ReactNode;
   /** Tailwind text+bg color tokens, e.g. "amber" for amber-600 + amber-500/10 */
-  tone?: "slate" | "amber" | "sky" | "emerald" | "rose" | "teal" | "orange";
+  tone?: StatusTone;
 }
 
 interface StatusListPageProps<T> {
@@ -27,7 +34,7 @@ interface StatusListPageProps<T> {
   subtitle: string;
   icon: ReactNode;
   /** Tone for icon container, e.g. "emerald" → bg-emerald-500/10 + text-emerald-600 */
-  tone?: "slate" | "amber" | "sky" | "emerald" | "rose" | "teal" | "orange";
+  tone?: StatusTone;
 
   /** Async loader receiving (fromDate, toDate). */
   fetchData: (fromDate: string, toDate: string) => Promise<T[]>;
@@ -49,25 +56,6 @@ interface StatusListPageProps<T> {
   initialFromDate?: string;
   initialToDate?: string;
 }
-
-const TONES: Record<
-  NonNullable<StatusListPageProps<unknown>["tone"]>,
-  { bg: string; text: string }
-> = {
-  slate: { bg: "bg-slate-500/10", text: "text-slate-600 dark:text-slate-400" },
-  amber: { bg: "bg-amber-500/10", text: "text-amber-600 dark:text-amber-400" },
-  sky: { bg: "bg-sky-500/10", text: "text-sky-600 dark:text-sky-400" },
-  emerald: {
-    bg: "bg-emerald-500/10",
-    text: "text-emerald-600 dark:text-emerald-400",
-  },
-  rose: { bg: "bg-rose-500/10", text: "text-rose-600 dark:text-rose-400" },
-  teal: { bg: "bg-teal-500/10", text: "text-teal-600 dark:text-teal-400" },
-  orange: {
-    bg: "bg-orange-500/10",
-    text: "text-orange-600 dark:text-orange-400",
-  },
-};
 
 export default function StatusListPage<T>({
   title,
@@ -115,53 +103,17 @@ export default function StatusListPage<T>({
     );
   }, [items, search, searchKeys]);
 
-  const headerTone = TONES[tone];
   const computedStats = stats ? stats(items) : null;
 
   return (
     <div className="space-y-5">
-      {/* Header */}
-      <div className="flex items-center gap-3">
-        <div
-          className={`w-10 h-10 rounded-lg ${headerTone.bg} flex items-center justify-center ${headerTone.text} text-lg`}
-        >
-          {icon}
-        </div>
-        <div>
-          <h1 className="text-lg font-bold text-slate-800 dark:text-white">
-            {title}
-          </h1>
-          <p className="text-xs text-slate-500 dark:text-slate-400">{subtitle}</p>
-        </div>
-      </div>
+      <StatusPageHeader title={title} subtitle={subtitle} icon={icon} tone={tone} />
 
-      {/* Stats */}
-      {computedStats && computedStats.length > 0 && (
-        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-4">
-          {computedStats.map((s, i) => {
-            const t = TONES[s.tone ?? "slate"];
-            return (
-              <div key={i} className="glass rounded-lg p-4">
-                <div className="flex items-center justify-between">
-                  <div>
-                    <p className="text-[11px] font-medium text-slate-500 dark:text-slate-400">
-                      {s.label}
-                    </p>
-                    <p className={`mt-1 text-2xl font-bold ${t.text}`}>{s.value}</p>
-                  </div>
-                  <div className={`w-10 h-10 rounded-lg ${t.bg} flex items-center justify-center ${t.text}`}>
-                    {s.icon}
-                  </div>
-                </div>
-              </div>
-            );
-          })}
-        </div>
-      )}
+      {computedStats && <StatusStatGrid stats={computedStats} />}
 
       {/* Date filter */}
-      {!hideDateFilter && (
-        <div className="glass rounded-lg p-4">
+      {(!hideDateFilter || (searchKeys && searchKeys.length > 0)) && (
+        <StatusControlPanel>
           <form
             onSubmit={(e) => {
               e.preventDefault();
@@ -169,70 +121,61 @@ export default function StatusListPage<T>({
             }}
             className="flex flex-wrap items-end gap-3"
           >
-            <div className="flex-1 min-w-[140px]">
-              <label className="block text-xs font-medium text-slate-600 dark:text-slate-300 mb-1.5">
-                <FaCalendar className="inline mr-1.5 text-slate-400" size={11} /> ຈາກວັນທີ
-              </label>
-              <input
-                type="date"
-                value={fromDate}
-                onChange={(e) => setFromDate(e.target.value)}
-                className="w-full glass-input rounded-lg px-3 py-2 text-xs text-slate-700 dark:text-slate-200"
-              />
-            </div>
-            <div className="flex-1 min-w-[140px]">
-              <label className="block text-xs font-medium text-slate-600 dark:text-slate-300 mb-1.5">
-                ເຖິງວັນທີ
-              </label>
-              <input
-                type="date"
-                value={toDate}
-                onChange={(e) => setToDate(e.target.value)}
-                className="w-full glass-input rounded-lg px-3 py-2 text-xs text-slate-700 dark:text-slate-200"
-              />
-            </div>
-            <button
-              type="submit"
-              className="px-5 py-2 rounded-lg bg-teal-700 hover:bg-teal-800 text-white text-xs font-semibold transition-colors disabled:opacity-50"
-              disabled={loading}
-            >
-              {loading ? "ກຳລັງໂຫຼດ..." : "ຄົ້ນຫາ"}
-            </button>
+            {!hideDateFilter && (
+              <>
+                <div className="flex-1 min-w-[140px]">
+                  <label className="block text-xs font-medium text-slate-600 dark:text-slate-300 mb-1.5">
+                    <FaCalendar className="inline mr-1.5 text-slate-400" size={11} /> ຈາກວັນທີ
+                  </label>
+                  <input
+                    type="date"
+                    value={fromDate}
+                    onChange={(e) => setFromDate(e.target.value)}
+                    className="w-full glass-input rounded-lg px-3 py-2 text-xs text-slate-700 dark:text-slate-200"
+                  />
+                </div>
+                <div className="flex-1 min-w-[140px]">
+                  <label className="block text-xs font-medium text-slate-600 dark:text-slate-300 mb-1.5">
+                    ເຖິງວັນທີ
+                  </label>
+                  <input
+                    type="date"
+                    value={toDate}
+                    onChange={(e) => setToDate(e.target.value)}
+                    className="w-full glass-input rounded-lg px-3 py-2 text-xs text-slate-700 dark:text-slate-200"
+                  />
+                </div>
+              </>
+            )}
+            {searchKeys && searchKeys.length > 0 && (
+              <div className="flex-[1.4] min-w-[220px]">
+                <label className="block text-xs font-medium text-slate-600 dark:text-slate-300 mb-1.5">
+                  <FaSearch className="inline mr-1.5 text-slate-400" size={11} /> ຄົ້ນຫາ
+                </label>
+                <input
+                  type="text"
+                  value={search}
+                  onChange={(e) => setSearch(e.target.value)}
+                  placeholder="ຄົ້ນຫາ..."
+                  className="w-full px-3 py-2 glass-input rounded-lg text-xs text-slate-700 dark:text-slate-200 transition-all"
+                />
+              </div>
+            )}
+            {!hideDateFilter && (
+              <button
+                type="submit"
+                className="px-5 py-2 rounded-lg bg-teal-700 hover:bg-teal-800 text-white text-xs font-semibold transition-colors disabled:opacity-50"
+                disabled={loading}
+              >
+                {loading ? "ກຳລັງໂຫຼດ..." : "ຄົ້ນຫາ"}
+              </button>
+            )}
           </form>
-        </div>
-      )}
-
-      {/* Search */}
-      {searchKeys && searchKeys.length > 0 && (
-        <div className="glass rounded-lg p-4">
-          <div className="max-w-md">
-            <label className="block text-xs font-medium text-slate-600 dark:text-slate-300 mb-1.5">
-              <FaSearch className="inline mr-1.5 text-slate-400" size={11} /> ຄົ້ນຫາ
-            </label>
-            <input
-              type="text"
-              value={search}
-              onChange={(e) => setSearch(e.target.value)}
-              placeholder="ຄົ້ນຫາ..."
-              className="w-full px-3 py-2 glass-input rounded-lg text-xs text-slate-700 dark:text-slate-200 transition-all"
-            />
-          </div>
-        </div>
+        </StatusControlPanel>
       )}
 
       {/* Table */}
-      <div className="glass rounded-lg overflow-hidden">
-        <div className="px-4 py-3 border-b border-slate-200/30 dark:border-white/5 flex items-center justify-between">
-          <p className="text-xs text-slate-500">
-            ພົບ{" "}
-            <span className="font-semibold text-slate-700 dark:text-slate-200">
-              {filtered.length}
-            </span>{" "}
-            ລາຍການ
-          </p>
-          <p className="text-[11px] text-slate-400">ສະເພາະຂໍ້ມູນປີ 2026</p>
-        </div>
-
+      <StatusTableShell count={filtered.length}>
         {loading ? (
           <div className="flex items-center justify-center py-20 text-slate-400">
             <FaSpinner className="animate-spin mr-2" /> ກຳລັງໂຫຼດ...
@@ -255,7 +198,7 @@ export default function StatusListPage<T>({
                   {columns.map((col) => (
                     <th
                       key={String(col.key)}
-                      className={`px-4 py-3 text-left font-semibold text-slate-600 ${col.headerClassName ?? ""}`}
+                      className={`px-4 py-3 text-left font-semibold text-slate-600 dark:text-slate-300 ${col.headerClassName ?? ""}`}
                       style={col.width ? { width: col.width } : undefined}
                     >
                       {col.label}
@@ -293,7 +236,7 @@ export default function StatusListPage<T>({
             </table>
           </div>
         )}
-      </div>
+      </StatusTableShell>
     </div>
   );
 }

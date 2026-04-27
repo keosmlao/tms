@@ -15,6 +15,13 @@ import {
   FaUser,
 } from "react-icons/fa";
 import { Actions } from "@/lib/api";
+import {
+  StatusControlPanel,
+  StatusPageHeader,
+  StatusStatGrid,
+  StatusTableShell,
+} from "@/components/status-page-shell";
+import { Pagination, toNumber } from "@/components/status-page-helpers";
 
 interface Product {
   item_code: string;
@@ -44,10 +51,6 @@ interface ApprovalItem {
   user_created: string;
 }
 
-function toNumber(value: number | string | null | undefined) {
-  return Number(value ?? 0);
-}
-
 export default function ApprovePage() {
   const router = useRouter();
   const [items, setItems] = useState<ApprovalItem[]>([]);
@@ -68,7 +71,7 @@ export default function ApprovePage() {
       .then((data) => setItems((data ?? []) as ApprovalItem[]))
       .catch((e: any) => {
         console.error(e);
-        setLoadError(e?.response?.data?.error ?? e?.message ?? "Unknown error");
+        setLoadError(e?.message ?? "Unknown error");
       })
       .finally(() => setLoading(false));
   };
@@ -142,39 +145,23 @@ export default function ApprovePage() {
 
   return (
     <div className="space-y-5">
-      {/* Header */}
-      <div className="flex items-center gap-3">
-        <div className="w-10 h-10 rounded-lg bg-emerald-500/10 flex items-center justify-center">
-          <FaClipboardCheck className="text-emerald-600 text-lg" />
-        </div>
-        <div>
-          <h1 className="text-lg font-bold text-slate-800 dark:text-white">ອະນຸມັດຖ້ຽວ</h1>
-          <p className="text-xs text-slate-500 dark:text-slate-400">ກວດ ແລະ ອະນຸມັດຖ້ຽວກ່ອນເຂົ້າຂັ້ນຕອນຈັດສົ່ງ</p>
-        </div>
-      </div>
+      <StatusPageHeader
+        title="ລໍອະນຸມັດ"
+        subtitle="ກວດ ແລະ ອະນຸມັດຖ້ຽວກ່ອນເຂົ້າຂັ້ນຕອນຈັດສົ່ງ"
+        icon={<FaClipboardCheck />}
+        tone="emerald"
+      />
 
-      {/* Summary cards */}
-      <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
-        <div className="glass rounded-lg p-4">
-          <p className="text-[11px] font-medium text-slate-500 dark:text-slate-400">ຖ້ຽວລໍຖ້າອະນຸມັດ</p>
-          <p className="mt-1 text-2xl font-bold text-emerald-700 dark:text-emerald-400">{summary.jobs}</p>
-        </div>
-        <div className="glass rounded-lg p-4">
-          <p className="text-[11px] font-medium text-slate-500 dark:text-slate-400">ລວມບິນ</p>
-          <p className="mt-1 text-2xl font-bold text-teal-700 dark:text-teal-400">{summary.bills}</p>
-        </div>
-        <div className="glass rounded-lg p-4">
-          <p className="text-[11px] font-medium text-slate-500 dark:text-slate-400">ລົດ</p>
-          <p className="mt-1 text-2xl font-bold text-sky-700 dark:text-sky-400">{summary.cars.size}</p>
-        </div>
-        <div className="glass rounded-lg p-4">
-          <p className="text-[11px] font-medium text-slate-500 dark:text-slate-400">ຄົນຂັບ</p>
-          <p className="mt-1 text-2xl font-bold text-sky-700 dark:text-sky-400">{summary.drivers.size}</p>
-        </div>
-      </div>
+      <StatusStatGrid
+        stats={[
+          { label: "ຖ້ຽວລໍຖ້າອະນຸມັດ", value: summary.jobs, icon: <FaClipboardCheck />, tone: "emerald" },
+          { label: "ລວມບິນ", value: summary.bills, icon: <FaBoxOpen />, tone: "teal" },
+          { label: "ລົດ", value: summary.cars.size, icon: <FaTruck />, tone: "sky" },
+          { label: "ຄົນຂັບ", value: summary.drivers.size, icon: <FaUser />, tone: "sky" },
+        ]}
+      />
 
-      {/* Search */}
-      <div className="glass rounded-lg p-4">
+      <StatusControlPanel>
         <div className="max-w-md">
           <label className="block text-xs font-medium text-slate-600 dark:text-slate-300 mb-1.5">
             <FaSearch className="inline mr-1.5 text-slate-400" size={11} />
@@ -191,23 +178,15 @@ export default function ApprovePage() {
             className="w-full px-3 py-2 glass-input rounded-lg text-xs"
           />
         </div>
-      </div>
+      </StatusControlPanel>
 
-      {/* Table */}
-      <div className="glass rounded-lg overflow-hidden">
-        <div className="px-4 py-3 border-b border-slate-200/30 dark:border-white/5 flex items-center justify-between">
-          <p className="text-xs text-slate-500 dark:text-slate-400">
-            ພົບ <span className="font-semibold text-slate-700 dark:text-slate-200">{filteredItems.length}</span> ລາຍການ
-          </p>
-          <p className="text-[11px] text-slate-400">ລໍຖ້າອະນຸມັດ</p>
-        </div>
-
+      <StatusTableShell count={filteredItems.length} note="ລໍຖ້າອະນຸມັດ">
         {loading ? (
           <div className="py-14 text-center">
             <div className="w-14 h-14 mx-auto rounded-lg bg-slate-500/10 flex items-center justify-center mb-3 animate-pulse">
-              <FaBoxOpen className="text-slate-400 text-xl" />
+              <FaBoxOpen className="text-slate-400 dark:text-slate-500 text-xl" />
             </div>
-            <p className="text-sm text-slate-500">ກຳລັງໂຫຼດ...</p>
+            <p className="text-sm text-slate-500 dark:text-slate-400">ກຳລັງໂຫຼດ...</p>
           </div>
         ) : loadError ? (
           <div className="py-14 text-center">
@@ -221,7 +200,7 @@ export default function ApprovePage() {
             <div className="w-14 h-14 mx-auto rounded-lg bg-emerald-500/10 flex items-center justify-center mb-3">
               <FaCheckCircle className="text-emerald-400 text-xl" />
             </div>
-            <p className="text-sm text-slate-500">
+            <p className="text-sm text-slate-500 dark:text-slate-400">
               {searchText.trim() ? "ບໍ່ພົບຂໍ້ມູນຕາມຄໍາຄົ້ນຫາ" : "ບໍ່ມີຖ້ຽວລໍຖ້າອະນຸມັດ"}
             </p>
           </div>
@@ -393,38 +372,17 @@ export default function ApprovePage() {
                 </tbody>
               </table>
             </div>
-
-            {totalPages > 1 && (
-              <div className="flex items-center justify-between px-4 py-3 border-t border-slate-200/30 dark:border-white/5">
-                <p className="text-[11px] text-slate-500">
-                  ສະແດງ {(currentPage - 1) * perPage + 1}-{Math.min(currentPage * perPage, filteredItems.length)} ຈາກ {filteredItems.length}
-                </p>
-                <div className="flex items-center gap-2">
-                  <button
-                    onClick={() => setCurrentPage((value) => Math.max(1, value - 1))}
-                    disabled={currentPage === 1}
-                    className="px-3 py-1.5 text-xs font-medium rounded-lg glass text-slate-600 dark:text-slate-300 hover:bg-white/30 dark:hover:bg-white/5 disabled:opacity-40 disabled:cursor-not-allowed"
-                  >
-                    ກ່ອນ
-                  </button>
-                  <span className="text-[11px] text-slate-500">
-                    {currentPage} / {totalPages}
-                  </span>
-                  <button
-                    onClick={() => setCurrentPage((value) => Math.min(totalPages, value + 1))}
-                    disabled={currentPage === totalPages}
-                    className="px-3 py-1.5 text-xs font-medium rounded-lg glass text-slate-600 dark:text-slate-300 hover:bg-white/30 dark:hover:bg-white/5 disabled:opacity-40 disabled:cursor-not-allowed"
-                  >
-                    ຕໍ່ໄປ
-                  </button>
-                </div>
-              </div>
-            )}
+            <Pagination
+              currentPage={currentPage}
+              totalPages={totalPages}
+              total={filteredItems.length}
+              perPage={perPage}
+              onChange={setCurrentPage}
+            />
           </>
         )}
-      </div>
+      </StatusTableShell>
 
-      {/* After-approve footer quick nav */}
       <button
         type="button"
         onClick={() => router.push("/approve/report")}

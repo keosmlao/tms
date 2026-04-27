@@ -18,6 +18,7 @@ import {
   FaTruck,
 } from "react-icons/fa";
 import { Actions } from "@/lib/api";
+import { StatusPageHeader, StatusStatGrid } from "@/components/status-page-shell";
 
 function ImageThumb({ src, label }: { src: string; label: string }) {
   const [open, setOpen] = useState(false);
@@ -330,85 +331,21 @@ export default function BillsWaitingSentClient({
 
   return (
     <div className="space-y-5">
-      <div className="flex items-center gap-3">
-        <div className="w-10 h-10 rounded-lg bg-emerald-500/10 flex items-center justify-center">
-          <FaTruck className="text-emerald-600 dark:text-emerald-400 text-lg" />
-        </div>
-        <div>
-          <h1 className="text-lg font-bold text-slate-800 dark:text-white">
-            ລາຍການລໍຖ້າຈັດສົ່ງ
-          </h1>
-          <p className="text-xs text-slate-500 dark:text-slate-400">
-            ດຶງສະເພາະຖ້ຽວທີ່ອະນຸມັດແລ້ວ ແຕ່ຍັງບໍ່ທັນສົ່ງສໍາເລັດ
-          </p>
-        </div>
-      </div>
+      <StatusPageHeader
+        title="ລາຍການລໍຖ້າຈັດສົ່ງ"
+        subtitle="ດຶງສະເພາະຖ້ຽວທີ່ອະນຸມັດແລ້ວ ແຕ່ຍັງບໍ່ທັນສົ່ງສໍາເລັດ"
+        icon={<FaTruck />}
+        tone="emerald"
+      />
 
-      <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-4">
-        <div className="glass rounded-lg p-4">
-          <div className="flex items-center justify-between">
-            <div>
-              <p className="text-[11px] font-medium text-slate-500 dark:text-slate-400">
-                ຖ້ຽວທີ່ຍັງຄ້າງ
-              </p>
-              <p className="mt-1 text-2xl font-bold text-slate-800 dark:text-white">
-                {summary.jobs}
-              </p>
-            </div>
-            <div className="w-10 h-10 rounded-lg bg-slate-500/10 flex items-center justify-center">
-              <FaClipboardCheck className="text-slate-600 dark:text-slate-400" />
-            </div>
-          </div>
-        </div>
-
-        <div className="glass rounded-lg p-4">
-          <div className="flex items-center justify-between">
-            <div>
-              <p className="text-[11px] font-medium text-slate-500 dark:text-slate-400">
-                ບິນທີ່ລໍຖ້າສົ່ງ
-              </p>
-              <p className="mt-1 text-2xl font-bold text-amber-600 dark:text-amber-400">
-                {summary.waiting}
-              </p>
-            </div>
-            <div className="w-10 h-10 rounded-lg bg-amber-500/10 flex items-center justify-center">
-              <FaClock className="text-amber-600 dark:text-amber-400" />
-            </div>
-          </div>
-        </div>
-
-        <div className="glass rounded-lg p-4">
-          <div className="flex items-center justify-between">
-            <div>
-              <p className="text-[11px] font-medium text-slate-500 dark:text-slate-400">
-                ບິນກຳລັງຈັດສົ່ງ
-              </p>
-              <p className="mt-1 text-2xl font-bold text-sky-600 dark:text-sky-400">
-                {summary.inprogress}
-              </p>
-            </div>
-            <div className="w-10 h-10 rounded-lg bg-sky-500/10 flex items-center justify-center">
-              <FaRoute className="text-sky-600 dark:text-sky-400" />
-            </div>
-          </div>
-        </div>
-
-        <div className="glass rounded-lg p-4">
-          <div className="flex items-center justify-between">
-            <div>
-              <p className="text-[11px] font-medium text-slate-500 dark:text-slate-400">
-                ສົ່ງແລ້ວໃນຖ້ຽວຄ້າງ
-              </p>
-              <p className="mt-1 text-2xl font-bold text-emerald-600 dark:text-emerald-400">
-                {summary.completed}
-              </p>
-            </div>
-            <div className="w-10 h-10 rounded-lg bg-emerald-500/10 flex items-center justify-center">
-              <FaCheckCircle className="text-emerald-600 dark:text-emerald-400" />
-            </div>
-          </div>
-        </div>
-      </div>
+      <StatusStatGrid
+        stats={[
+          { label: "ຖ້ຽວທີ່ຍັງຄ້າງ", value: summary.jobs, icon: <FaClipboardCheck />, tone: "slate" },
+          { label: "ບິນທີ່ລໍຖ້າສົ່ງ", value: summary.waiting, icon: <FaClock />, tone: "amber" },
+          { label: "ບິນກຳລັງຈັດສົ່ງ", value: summary.inprogress, icon: <FaRoute />, tone: "sky" },
+          { label: "ສົ່ງແລ້ວໃນຖ້ຽວຄ້າງ", value: summary.completed, icon: <FaCheckCircle />, tone: "emerald" },
+        ]}
+      />
 
       {transportOptions.length > 0 && (
         <div className="glass rounded-lg p-3">

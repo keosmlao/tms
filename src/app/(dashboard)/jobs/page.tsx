@@ -23,6 +23,12 @@ import {
   FaUsers,
 } from "react-icons/fa";
 import { Actions } from "@/lib/api";
+import {
+  StatusControlPanel,
+  StatusPageHeader,
+  StatusStatGrid,
+  StatusTableShell,
+} from "@/components/status-page-shell";
 // Ported from server actions: approveJob, closeJob, deleteJob, getJobBillsWithProducts, getJobs
 
 // ==================== Types ====================
@@ -510,153 +516,136 @@ export default function JobsClient({ initialJobs = [] as Job[] }: { initialJobs?
 
   return (
     <div className="space-y-5">
-      {/* ========== HERO ========== */}
-      <div className="relative overflow-hidden rounded-lg bg-[#0b1b18] p-5 sm:p-6 shadow-xl">
-        <div
-          className="absolute inset-0 opacity-20"
-          style={{
-            backgroundImage:
-              "radial-gradient(circle at 10% 10%, #a78bfa 0%, transparent 35%), radial-gradient(circle at 90% 80%, #60a5fa 0%, transparent 35%)",
-          }}
-        />
-
-        <div className="relative flex flex-wrap items-start justify-between gap-4">
-          <div className="flex items-start gap-3">
-            <div className="w-11 h-11 rounded-lg bg-white/10 backdrop-blur flex items-center justify-center ring-1 ring-white/20">
-              <FaTruck className="text-sky-300" size={18} />
-            </div>
-            <div>
-              <div className="flex items-center gap-2">
-                <span className="relative flex h-1.5 w-1.5">
-                  <span className="absolute inline-flex h-full w-full rounded-full bg-sky-400 opacity-75 animate-ping" />
-                  <span className="relative inline-flex h-1.5 w-1.5 rounded-full bg-sky-400" />
-                </span>
-                <p className="text-[10px] font-semibold uppercase tracking-[0.22em] text-sky-300">
-                  Dispatch Queue
-                </p>
-              </div>
-              <h1 className="text-xl sm:text-2xl font-bold text-white leading-tight">
-                ຈັດການຖ້ຽວຂົນສົ່ງ
-              </h1>
-              <p className="text-[11px] text-slate-300 mt-0.5">
-                ຈັດການ ຈັດຖ້ຽວ ອະນຸມັດ ແລະ ຕິດຕາມສະຖານະ
-              </p>
-            </div>
-          </div>
-
+      <StatusPageHeader
+        title="ໃບງານ / ລໍຖ້າອະນຸມັດ"
+        subtitle="ຈັດການ ຈັດຖ້ຽວ ອະນຸມັດ ແລະ ຕິດຕາມສະຖານະ"
+        icon={<FaTruck />}
+        tone="sky"
+        aside={
           <div className="flex flex-wrap items-center gap-2">
-            <StatBadge label="ທັງໝົດ" value={stats.total} color="sky" />
-            <StatBadge label="ລໍອະນຸມັດ" value={stats.pending} color="amber" />
-            <StatBadge label="ດຳເນີນງານ" value={stats.inProgress} color="sky" />
-            <StatBadge label="ສຳເລັດ" value={stats.done} color="emerald" />
             <button
               type="button"
               onClick={refreshJobs}
               disabled={isRefreshing}
-              className="inline-flex items-center gap-1.5 rounded-lg bg-white/10 hover:bg-white/15 backdrop-blur border border-white/15 px-3 py-2 text-[11px] font-semibold text-white transition-all disabled:opacity-60"
+              className="inline-flex items-center gap-1.5 rounded-lg glass px-3 py-2 text-[11px] font-semibold text-slate-700 dark:text-slate-200 transition-all disabled:opacity-60"
             >
               <FaSyncAlt className={isRefreshing ? "animate-spin" : ""} size={11} />
               ຣີເຟຣຊ
             </button>
             <Link
-               href="/jobs/add"
-              className="inline-flex items-center gap-1.5 rounded-lg bg-white px-3 py-2 text-[11px] font-semibold text-slate-900 hover:bg-slate-100 transition-all"
+              href="/jobs/add"
+              className="inline-flex items-center gap-1.5 rounded-lg bg-teal-700 px-3 py-2 text-[11px] font-semibold text-white hover:bg-teal-800 transition-all"
             >
               <FaPlus size={11} /> ເພີ່ມຖ້ຽວ
             </Link>
           </div>
-        </div>
-      </div>
+        }
+      />
 
-      {/* ========== SEARCH + FILTER ========== */}
-      <div className="flex flex-wrap items-center gap-3">
-        <div className="relative flex-1 min-w-[220px]">
-          <FaSearch className="absolute left-3.5 top-1/2 -translate-y-1/2 text-slate-300" size={12} />
-          <input
-            type="text"
-            value={searchText}
-            onChange={(event) => setSearchText(event.target.value)}
-            placeholder="ຄົ້ນຫາເລກຖ້ຽວ, ລົດ, ຄົນຂັບ..."
-            className="w-full pl-9 pr-9 py-2.5 glass-input rounded-lg text-sm text-slate-800 dark:text-slate-200 placeholder-slate-400 transition-all"
-          />
-          {searchText && (
-            <button
-              type="button"
-              onClick={() => setSearchText("")}
-              className="absolute right-2 top-1/2 -translate-y-1/2 rounded p-1 text-slate-400 hover:text-slate-600"
-              aria-label="Clear"
-            >
-              <FaTimes size={10} />
-            </button>
-          )}
-        </div>
+      <StatusStatGrid
+        stats={[
+          { label: "ທັງໝົດ", value: stats.total, icon: <FaClipboardList />, tone: "sky" },
+          { label: "ລໍອະນຸມັດ", value: stats.pending, icon: <FaClock />, tone: "amber" },
+          { label: "ດຳເນີນງານ", value: stats.inProgress, icon: <FaTruck />, tone: "sky" },
+          { label: "ສຳເລັດ", value: stats.done, icon: <FaCheckCircle />, tone: "emerald" },
+        ]}
+      />
 
-        <div className="inline-flex items-center gap-1 rounded-lg glass p-1">
-          {([
-            { key: "all" as const, label: "ທັງໝົດ", count: stats.total },
-            { key: "pending_approve" as const, label: "ລໍອະນຸມັດ", count: stats.pending },
-            { key: "in_progress" as const, label: "ດຳເນີນງານ", count: stats.inProgress },
-            { key: "done" as const, label: "ສຳເລັດ", count: stats.done },
-          ]).map((opt) => (
-            <button
-              key={opt.key}
-              type="button"
-              onClick={() => setFilter(opt.key)}
-              className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-[11px] font-semibold transition-all ${
-                filter === opt.key ? "glass-heavy glow-primary text-teal-600 dark:text-teal-400" : "text-slate-500 dark:text-slate-400 hover:text-slate-800 dark:hover:text-white"
-              }`}
-            >
-              {opt.label}
-              <span
-                className={`rounded-full px-1.5 py-0.5 text-[9px] font-bold tabular-nums ${
-                  filter === opt.key ? "bg-teal-500/20 text-teal-600 dark:text-teal-400" : "bg-slate-500/10 text-slate-500 dark:text-slate-400"
+      <StatusControlPanel>
+        <div className="flex flex-wrap items-center gap-3">
+          <div className="relative flex-1 min-w-[220px]">
+            <FaSearch className="absolute left-3.5 top-1/2 -translate-y-1/2 text-slate-400" size={12} />
+            <input
+              type="text"
+              value={searchText}
+              onChange={(event) => setSearchText(event.target.value)}
+              placeholder="ຄົ້ນຫາເລກຖ້ຽວ, ລົດ, ຄົນຂັບ..."
+              className="w-full pl-9 pr-9 py-2 glass-input rounded-lg text-xs text-slate-700 dark:text-slate-200 placeholder-slate-400 transition-all"
+            />
+            {searchText && (
+              <button
+                type="button"
+                onClick={() => setSearchText("")}
+                className="absolute right-2 top-1/2 -translate-y-1/2 rounded p-1 text-slate-400 hover:text-slate-600"
+                aria-label="Clear"
+              >
+                <FaTimes size={10} />
+              </button>
+            )}
+          </div>
+
+          <div className="inline-flex items-center gap-1 rounded-lg bg-white/30 dark:bg-white/5 p-1">
+            {([
+              { key: "all" as const, label: "ທັງໝົດ", count: stats.total },
+              { key: "pending_approve" as const, label: "ລໍອະນຸມັດ", count: stats.pending },
+              { key: "in_progress" as const, label: "ດຳເນີນງານ", count: stats.inProgress },
+              { key: "done" as const, label: "ສຳເລັດ", count: stats.done },
+            ]).map((opt) => (
+              <button
+                key={opt.key}
+                type="button"
+                onClick={() => setFilter(opt.key)}
+                className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-[11px] font-semibold transition-all ${
+                  filter === opt.key
+                    ? "bg-teal-700 text-white"
+                    : "text-slate-500 dark:text-slate-400 hover:text-slate-800 dark:hover:text-white"
                 }`}
               >
-                {opt.count}
-              </span>
-            </button>
-          ))}
-        </div>
-      </div>
-
-      {/* ========== TABLE ========== */}
-      {jobs.length === 0 ? (
-        <div className="flex flex-col items-center justify-center py-20 rounded-lg glass">
-          <div className="w-16 h-16 rounded-lg bg-slate-500/10 flex items-center justify-center mb-3">
-            <FaClipboardList className="text-slate-400 dark:text-slate-500 text-3xl" />
+                {opt.label}
+                <span
+                  className={`rounded-full px-1.5 py-0.5 text-[9px] font-bold tabular-nums ${
+                    filter === opt.key
+                      ? "bg-white/20 text-white"
+                      : "bg-slate-500/10 text-slate-500 dark:text-slate-400"
+                  }`}
+                >
+                  {opt.count}
+                </span>
+              </button>
+            ))}
           </div>
-          <p className="text-sm font-semibold text-slate-700 dark:text-slate-200">ຍັງບໍ່ມີຖ້ຽວ</p>
-          <p className="text-xs text-slate-400 dark:text-slate-500 mt-1">ເພີ່ມຖ້ຽວໃໝ່ເພື່ອເລີ່ມ</p>
-          <Link
-             href="/jobs/add"
-            className="mt-4 inline-flex items-center gap-1.5 rounded-lg bg-slate-900 px-3.5 py-2 text-xs font-semibold text-white hover:bg-slate-800"
-          >
-            <FaPlus size={11} /> ເພີ່ມຖ້ຽວ
-          </Link>
         </div>
-      ) : filteredJobs.length === 0 ? (
-        <div className="flex flex-col items-center justify-center py-16 rounded-lg glass">
-          <FaSearch className="text-slate-400 dark:text-slate-500 text-2xl mb-2" />
-          <p className="text-sm text-slate-500 dark:text-slate-400">ບໍ່ພົບຜົນທີ່ກົງກັບການຄົ້ນຫາ</p>
-        </div>
-      ) : (
-        <div className="overflow-hidden rounded-lg glass">
+      </StatusControlPanel>
+
+      <StatusTableShell count={filteredJobs.length}>
+        {jobs.length === 0 ? (
+          <div className="py-14 text-center">
+            <div className="w-14 h-14 mx-auto rounded-lg bg-slate-500/10 flex items-center justify-center mb-3">
+              <FaClipboardList className="text-slate-400 dark:text-slate-500 text-xl" />
+            </div>
+            <p className="text-sm font-semibold text-slate-700 dark:text-slate-200">ຍັງບໍ່ມີຖ້ຽວ</p>
+            <p className="text-xs text-slate-400 dark:text-slate-500 mt-1">ເພີ່ມຖ້ຽວໃໝ່ເພື່ອເລີ່ມ</p>
+            <Link
+              href="/jobs/add"
+              className="mt-4 inline-flex items-center gap-1.5 rounded-lg bg-teal-700 px-3.5 py-2 text-xs font-semibold text-white hover:bg-teal-800"
+            >
+              <FaPlus size={11} /> ເພີ່ມຖ້ຽວ
+            </Link>
+          </div>
+        ) : filteredJobs.length === 0 ? (
+          <div className="py-14 text-center">
+            <div className="w-14 h-14 mx-auto rounded-lg bg-slate-500/10 flex items-center justify-center mb-3">
+              <FaSearch className="text-slate-400 dark:text-slate-500 text-xl" />
+            </div>
+            <p className="text-sm text-slate-500 dark:text-slate-400">ບໍ່ພົບຜົນທີ່ກົງກັບການຄົ້ນຫາ</p>
+          </div>
+        ) : (
           <div className="overflow-x-auto">
-            <table className="w-full text-sm">
+            <table className="w-full text-xs">
               <thead>
-                <tr className="bg-white/30 dark:bg-white/5 border-b border-slate-200/30 dark:border-white/5 text-[10px] font-semibold uppercase tracking-wider text-slate-500 dark:text-slate-400">
-                  <th className="px-3 py-2.5 w-8" aria-label="Expand" />
-                  <th className="px-3 py-2.5 text-left">ເລກທີ / ວັນທີ</th>
-                  <th className="px-3 py-2.5 text-left">ວັນຈັດສົ່ງ</th>
-                  <th className="px-3 py-2.5 text-left">ລົດ</th>
-                  <th className="px-3 py-2.5 text-left">ຄົນຂັບ</th>
-                  <th className="px-3 py-2.5 text-left">ກຳມະກອນ</th>
-                  <th className="px-3 py-2.5 text-center">ບິນ</th>
-                  <th className="px-3 py-2.5 text-left">ສະຖານະ</th>
-                  <th className="px-3 py-2.5 text-right">ຈັດການ</th>
+                <tr className="bg-white/30 dark:bg-white/5 border-b border-slate-200/30 dark:border-white/5 font-semibold text-slate-600 dark:text-slate-300">
+                  <th className="px-4 py-3 w-8" aria-label="Expand" />
+                  <th className="px-4 py-3 text-left">ເລກທີ / ວັນທີ</th>
+                  <th className="px-4 py-3 text-left">ວັນຈັດສົ່ງ</th>
+                  <th className="px-4 py-3 text-left">ລົດ</th>
+                  <th className="px-4 py-3 text-left">ຄົນຂັບ</th>
+                  <th className="px-4 py-3 text-left">ກຳມະກອນ</th>
+                  <th className="px-4 py-3 text-center">ບິນ</th>
+                  <th className="px-4 py-3 text-left">ສະຖານະ</th>
+                  <th className="px-4 py-3 text-right">ຈັດການ</th>
                 </tr>
               </thead>
-              <tbody className="divide-y divide-slate-200/30 dark:divide-white/5">
+              <tbody>
                 {filteredJobs.map((job) => (
                   <JobRow
                     key={job.doc_no}
@@ -676,8 +665,8 @@ export default function JobsClient({ initialJobs = [] as Job[] }: { initialJobs?
               </tbody>
             </table>
           </div>
-        </div>
-      )}
+        )}
+      </StatusTableShell>
     </div>
   );
 }

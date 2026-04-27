@@ -406,7 +406,9 @@ async function getJobsByStatus(session, fromDate, toDate, jobStatus) {
       SELECT d.doc_no,
         COUNT(*)::int AS total_bills,
         COUNT(*) FILTER (WHERE d.recipt_job IS NULL AND COALESCE(d.status, 0) NOT IN (1, 2))::int AS pending_pickup_count,
-        COUNT(*) FILTER (WHERE d.recipt_job IS NOT NULL)::int AS picked_count
+        COUNT(*) FILTER (WHERE d.recipt_job IS NOT NULL)::int AS picked_count,
+        COUNT(*) FILTER (WHERE COALESCE(d.status, 0) = 1)::int AS completed_count,
+        COUNT(*) FILTER (WHERE COALESCE(d.status, 0) = 2)::int AS cancelled_count
       FROM public.odg_tms_detail d
       WHERE ${getFixedYearSqlFilter("d.doc_date")}
       GROUP BY d.doc_no
@@ -426,6 +428,11 @@ async function getJobsByStatus(session, fromDate, toDate, jobStatus) {
       a.item_bill,
       COALESCE(bs.pending_pickup_count, 0) as pending_pickup_count,
       COALESCE(bs.picked_count, 0) as picked_count,
+      COALESCE(bs.completed_count, 0) as completed_count,
+      COALESCE(bs.cancelled_count, 0) as cancelled_count,
+      -- Aliases used by the waiting-receive page
+      COALESCE(bs.picked_count, 0) as received_count,
+      COALESCE(bs.pending_pickup_count, 0) as pending_receive_count,
       COALESCE(a.miles_start, '') as miles_start,
       COALESCE(a.miles_end, '') as miles_end,
       COALESCE(a.job_status, 0) as job_status
@@ -512,7 +519,9 @@ async function getJobsWaitingPickup(session, fromDate, toDate) {
       SELECT d.doc_no,
         COUNT(*)::int AS total_bills,
         COUNT(*) FILTER (WHERE d.recipt_job IS NULL AND COALESCE(d.status, 0) NOT IN (1, 2))::int AS pending_pickup_count,
-        COUNT(*) FILTER (WHERE d.recipt_job IS NOT NULL)::int AS picked_count
+        COUNT(*) FILTER (WHERE d.recipt_job IS NOT NULL)::int AS picked_count,
+        COUNT(*) FILTER (WHERE COALESCE(d.status, 0) = 1)::int AS completed_count,
+        COUNT(*) FILTER (WHERE COALESCE(d.status, 0) = 2)::int AS cancelled_count
       FROM public.odg_tms_detail d
       WHERE ${getFixedYearSqlFilter("d.doc_date")}
       GROUP BY d.doc_no

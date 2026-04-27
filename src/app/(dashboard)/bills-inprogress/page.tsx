@@ -18,6 +18,7 @@ import {
   FaTruckMoving,
 } from "react-icons/fa";
 import { Actions } from "@/lib/api";
+import { StatusPageHeader, StatusStatGrid } from "@/components/status-page-shell";
 // Ported from server actions: getBillsWaitingSentDetails, deleteJob, getJobBillsWithProducts
 
 function ImageThumb({ src, label }: { src: string; label: string }) {
@@ -382,42 +383,23 @@ export default function BillsInProgressClient({
 
   return (
     <div className="space-y-5">
-      <div className="flex items-center gap-3">
-        <div className="w-10 h-10 rounded-lg bg-sky-500/10 flex items-center justify-center">
-          <FaTruckMoving className="text-sky-600 dark:text-sky-400 text-lg" />
-        </div>
-        <div>
-          <h1 className="text-lg font-bold text-slate-800 dark:text-white">
-            ກຳລັງຈັດສົ່ງ
-          </h1>
-          <p className="text-xs text-slate-500 dark:text-slate-400">
-            ຖ້ຽວທີ່ເລີ່ມຈັດສົ່ງແລ້ວ ແລະຍັງມີບິນທີ່ກຳລັງ active
-          </p>
-        </div>
-      </div>
+      <StatusPageHeader
+        title="ກຳລັງຈັດສົ່ງ"
+        subtitle="ຖ້ຽວທີ່ເລີ່ມຈັດສົ່ງແລ້ວ ແລະຍັງມີບິນທີ່ກຳລັງ active"
+        icon={<FaTruckMoving />}
+        tone="sky"
+      />
 
-      <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-5">
-        <div className="glass rounded-lg p-4">
-          <p className="text-[11px] font-medium text-slate-500 dark:text-slate-400">ຖ້ຽວ active</p>
-          <p className="mt-1 text-2xl font-bold text-slate-800 dark:text-white">{summary.jobs}</p>
-        </div>
-        <div className="glass rounded-lg p-4">
-          <p className="text-[11px] font-medium text-slate-500 dark:text-slate-400">ບິນກຳລັງສົ່ງ</p>
-          <p className="mt-1 text-2xl font-bold text-sky-600 dark:text-sky-400">{summary.inprogress}</p>
-        </div>
-        <div className="glass rounded-lg p-4">
-          <p className="text-[11px] font-medium text-slate-500 dark:text-slate-400">ບິນລໍຖ້າຕໍ່</p>
-          <p className="mt-1 text-2xl font-bold text-amber-600 dark:text-amber-400">{summary.waiting}</p>
-        </div>
-        <div className="glass rounded-lg p-4">
-          <p className="text-[11px] font-medium text-slate-500 dark:text-slate-400">ບິນສົ່ງແລ້ວ</p>
-          <p className="mt-1 text-2xl font-bold text-emerald-600 dark:text-emerald-400">{summary.completed}</p>
-        </div>
-        <div className="glass rounded-lg p-4">
-          <p className="text-[11px] font-medium text-slate-500 dark:text-slate-400">ບິນຍົກເລີກ</p>
-          <p className="mt-1 text-2xl font-bold text-rose-600 dark:text-rose-400">{summary.cancelled}</p>
-        </div>
-      </div>
+      <StatusStatGrid
+        columns={5}
+        stats={[
+          { label: "ຖ້ຽວ active", value: summary.jobs, icon: <FaTruckMoving />, tone: "slate" },
+          { label: "ບິນກຳລັງສົ່ງ", value: summary.inprogress, icon: <FaRoute />, tone: "sky" },
+          { label: "ບິນລໍຖ້າຕໍ່", value: summary.waiting, icon: <FaClock />, tone: "amber" },
+          { label: "ບິນສົ່ງແລ້ວ", value: summary.completed, icon: <FaCheckCircle />, tone: "emerald" },
+          { label: "ບິນຍົກເລີກ", value: summary.cancelled, icon: <FaTimesCircle />, tone: "rose" },
+        ]}
+      />
 
       {transportOptions.length > 0 && (
         <div className="glass rounded-lg p-3">

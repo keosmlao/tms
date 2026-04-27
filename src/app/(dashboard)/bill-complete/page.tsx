@@ -15,6 +15,7 @@ import {
 } from "react-icons/fa";
 import { Actions } from "@/lib/api";
 import { getFixedTodayDate, FIXED_YEAR_START, FIXED_YEAR_END } from "@/lib/fixed-year";
+import { StatusPageHeader, StatusStatGrid } from "@/components/status-page-shell";
 // Ported from server actions: getBillsWaitingSentDetails, deleteJob
 
 function ImageThumb({ src, label }: { src: string; label: string }) {
@@ -339,42 +340,23 @@ export default function BillCompleteClient({
 
   return (
     <div className="space-y-5">
-      <div className="flex items-center gap-3">
-        <div className="w-10 h-10 rounded-lg bg-emerald-500/10 flex items-center justify-center">
-          <FaFlagCheckered className="text-emerald-600 dark:text-emerald-400 text-lg" />
-        </div>
-        <div>
-          <h1 className="text-lg font-bold text-slate-800 dark:text-white">
-            ຈັດສົ່ງສຳເລັດ
-          </h1>
-          <p className="text-xs text-slate-500 dark:text-slate-400">
-            ຖ້ຽວທີ່ບໍ່ມີບິນຄ້າງແລ້ວ ແລະລໍປິດງານ ຫຼື ປິດແລ້ວ
-          </p>
-        </div>
-      </div>
+      <StatusPageHeader
+        title="ຈັດສົ່ງສຳເລັດ"
+        subtitle="ຖ້ຽວທີ່ບໍ່ມີບິນຄ້າງແລ້ວ ແລະລໍປິດງານ ຫຼື ປິດແລ້ວ"
+        icon={<FaFlagCheckered />}
+        tone="emerald"
+      />
 
-      <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-5">
-        <div className="glass rounded-lg p-4">
-          <p className="text-[11px] font-medium text-slate-500 dark:text-slate-400">ຖ້ຽວທີ່ຈົບແລ້ວ</p>
-          <p className="mt-1 text-2xl font-bold text-slate-800 dark:text-white">{summary.jobs}</p>
-        </div>
-        <div className="glass rounded-lg p-4">
-          <p className="text-[11px] font-medium text-slate-500 dark:text-slate-400">ບິນສົ່ງສຳເລັດ</p>
-          <p className="mt-1 text-2xl font-bold text-emerald-600 dark:text-emerald-400">{summary.completed}</p>
-        </div>
-        <div className="glass rounded-lg p-4">
-          <p className="text-[11px] font-medium text-slate-500 dark:text-slate-400">ບິນຍົກເລີກ</p>
-          <p className="mt-1 text-2xl font-bold text-rose-600 dark:text-rose-400">{summary.cancelled}</p>
-        </div>
-        <div className="glass rounded-lg p-4">
-          <p className="text-[11px] font-medium text-slate-500 dark:text-slate-400">ລໍ admin ປິດ</p>
-          <p className="mt-1 text-2xl font-bold text-amber-600 dark:text-amber-400">{summary.waitingAdmin}</p>
-        </div>
-        <div className="glass rounded-lg p-4">
-          <p className="text-[11px] font-medium text-slate-500 dark:text-slate-400">admin ປິດແລ້ວ</p>
-          <p className="mt-1 text-2xl font-bold text-slate-600 dark:text-slate-300">{summary.adminClosed}</p>
-        </div>
-      </div>
+      <StatusStatGrid
+        columns={5}
+        stats={[
+          { label: "ຖ້ຽວທີ່ຈົບແລ້ວ", value: summary.jobs, icon: <FaFlagCheckered />, tone: "slate" },
+          { label: "ບິນສົ່ງສຳເລັດ", value: summary.completed, icon: <FaCheckCircle />, tone: "emerald" },
+          { label: "ບິນຍົກເລີກ", value: summary.cancelled, icon: <FaTimesCircle />, tone: "rose" },
+          { label: "ລໍ admin ປິດ", value: summary.waitingAdmin, icon: <FaBoxOpen />, tone: "amber" },
+          { label: "admin ປິດແລ້ວ", value: summary.adminClosed, icon: <FaUserCheck />, tone: "slate" },
+        ]}
+      />
 
       <div className="glass rounded-lg p-4">
         <form

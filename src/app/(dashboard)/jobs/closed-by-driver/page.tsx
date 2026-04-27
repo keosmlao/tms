@@ -13,10 +13,15 @@ import {
   FaRoute,
   FaSearch,
   FaSpinner,
-  FaTruck,
 } from "react-icons/fa";
 import { Actions } from "@/lib/api";
 import { getFixedTodayDate } from "@/lib/fixed-year";
+import {
+  StatusControlPanel,
+  StatusPageHeader,
+  StatusStatGrid,
+  StatusTableShell,
+} from "@/components/status-page-shell";
 
 interface JobRow {
   doc_date: string;
@@ -106,13 +111,16 @@ export default function JobsClosedByDriverPage() {
   const [billsWithProducts, setBillsWithProducts] = useState<Record<string, BillWithProducts[]>>({});
   const [loadingDoc, setLoadingDoc] = useState<string | null>(null);
   const [actingDoc, setActingDoc] = useState<string | null>(null);
+  const [loading, setLoading] = useState(true);
   const [currentPage, setCurrentPage] = useState(1);
   const perPage = 20;
 
   const load = () => {
+    setLoading(true);
     void Actions.getJobsClosedByDriver(fromDate, toDate)
       .then((data) => setJobs(data as JobRow[]))
-      .catch((e) => console.error(e));
+      .catch((e) => console.error(e))
+      .finally(() => setLoading(false));
   };
 
   useEffect(() => {
@@ -184,19 +192,43 @@ export default function JobsClosedByDriverPage() {
 
   return (
     <div className="space-y-5">
-      {/* Header */}
-      <div className="flex items-center gap-3">
-        <div className="w-10 h-10 rounded-lg bg-sky-500/10 flex items-center justify-center">
-          <FaClipboardCheck className="text-sky-600 dark:text-sky-400 text-lg" />
-        </div>
-        <div>
-          <h1 className="text-lg font-bold text-slate-800 dark:text-white">ຄົນຂັບປິດງານ</h1>
-          <p className="text-xs text-slate-500 dark:text-slate-400">ຖ້ຽວທີ່ຄົນຂັບປິດແລ້ວ ລໍ admin ປິດທ້າຍ</p>
-        </div>
-      </div>
+      <StatusPageHeader
+        title="ຄົນຂັບປິດງານ"
+        subtitle="ຖ້ຽວທີ່ຄົນຂັບປິດແລ້ວ ລໍ admin ປິດທ້າຍ"
+        icon={<FaClipboardCheck />}
+        tone="sky"
+      />
 
-      {/* Date filter */}
-      <div className="glass rounded-lg p-4">
+      <StatusStatGrid
+        stats={[
+          {
+            label: "ຖ້ຽວຄ້າງລໍ admin ປິດ",
+            value: summary.jobs,
+            icon: <FaClipboardCheck />,
+            tone: "sky",
+          },
+          {
+            label: "ບິນທັງໝົດ",
+            value: summary.bills,
+            icon: <FaRoute />,
+            tone: "slate",
+          },
+          {
+            label: "ບິນລໍເບີກ",
+            value: summary.pending,
+            icon: <FaClock />,
+            tone: "amber",
+          },
+          {
+            label: "ບິນເບີກແລ້ວ",
+            value: summary.picked,
+            icon: <FaCheckCircle />,
+            tone: "emerald",
+          },
+        ]}
+      />
+
+      <StatusControlPanel>
         <form
           onSubmit={(e) => {
             e.preventDefault();
@@ -224,89 +256,35 @@ export default function JobsClosedByDriverPage() {
               className="w-full glass-input rounded-lg px-3 py-2 text-xs text-slate-700 dark:text-slate-200"
             />
           </div>
+          <div className="flex-[1.4] min-w-[220px]">
+            <label className="block text-xs font-medium text-slate-600 dark:text-slate-300 mb-1.5">
+              <FaSearch className="inline mr-1.5 text-slate-400" size={11} /> ຄົ້ນຫາ
+            </label>
+            <input
+              type="text"
+              value={searchText}
+              onChange={(e) => { setSearchText(e.target.value); setCurrentPage(1); }}
+              placeholder="ຄົ້ນຫາເລກຖ້ຽວ, ລົດ, ຄົນຂັບ..."
+              className="w-full px-3 py-2 glass-input rounded-lg text-xs text-slate-700 dark:text-slate-200 transition-all"
+            />
+          </div>
           <button
             type="submit"
-            className="px-5 py-2 rounded-lg bg-teal-700 hover:bg-teal-800 text-white text-xs font-semibold transition-colors"
+            className="px-5 py-2 rounded-lg bg-teal-700 hover:bg-teal-800 text-white text-xs font-semibold transition-colors disabled:opacity-50"
+            disabled={loading}
           >
-            ຄົ້ນຫາ
+            {loading ? "ກຳລັງໂຫຼດ..." : "ຄົ້ນຫາ"}
           </button>
         </form>
-      </div>
-
-      {/* Stats */}
-      <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-4">
-        <div className="glass rounded-lg p-4">
-          <div className="flex items-center justify-between">
-            <div>
-              <p className="text-[11px] font-medium text-slate-500 dark:text-slate-400">ຖ້ຽວຄ້າງລໍ admin ປິດ</p>
-              <p className="mt-1 text-2xl font-bold text-slate-800 dark:text-white">{summary.jobs}</p>
-            </div>
-            <div className="w-10 h-10 rounded-lg bg-sky-500/10 flex items-center justify-center">
-              <FaClipboardCheck className="text-sky-600 dark:text-sky-400" />
-            </div>
-          </div>
-        </div>
-        <div className="glass rounded-lg p-4">
-          <div className="flex items-center justify-between">
-            <div>
-              <p className="text-[11px] font-medium text-slate-500 dark:text-slate-400">ບິນທັງໝົດ</p>
-              <p className="mt-1 text-2xl font-bold text-slate-800 dark:text-white">{summary.bills}</p>
-            </div>
-            <div className="w-10 h-10 rounded-lg bg-slate-500/10 flex items-center justify-center">
-              <FaRoute className="text-slate-600 dark:text-slate-400" />
-            </div>
-          </div>
-        </div>
-        <div className="glass rounded-lg p-4">
-          <div className="flex items-center justify-between">
-            <div>
-              <p className="text-[11px] font-medium text-slate-500 dark:text-slate-400">ບິນລໍເບີກ</p>
-              <p className="mt-1 text-2xl font-bold text-amber-600 dark:text-amber-400">{summary.pending}</p>
-            </div>
-            <div className="w-10 h-10 rounded-lg bg-amber-500/10 flex items-center justify-center">
-              <FaClock className="text-amber-600 dark:text-amber-400" />
-            </div>
-          </div>
-        </div>
-        <div className="glass rounded-lg p-4">
-          <div className="flex items-center justify-between">
-            <div>
-              <p className="text-[11px] font-medium text-slate-500 dark:text-slate-400">ບິນເບີກແລ້ວ</p>
-              <p className="mt-1 text-2xl font-bold text-emerald-600 dark:text-emerald-400">{summary.picked}</p>
-            </div>
-            <div className="w-10 h-10 rounded-lg bg-emerald-500/10 flex items-center justify-center">
-              <FaCheckCircle className="text-emerald-600 dark:text-emerald-400" />
-            </div>
-          </div>
-        </div>
-      </div>
-
-      {/* Search */}
-      <div className="glass rounded-lg p-4">
-        <div className="max-w-md">
-          <label className="block text-xs font-medium text-slate-600 dark:text-slate-300 mb-1.5">
-            <FaSearch className="inline mr-1.5 text-slate-400" size={11} /> ຄົ້ນຫາ
-          </label>
-          <input
-            type="text"
-            value={searchText}
-            onChange={(e) => { setSearchText(e.target.value); setCurrentPage(1); }}
-            placeholder="ຄົ້ນຫາເລກຖ້ຽວ, ລົດ, ຄົນຂັບ..."
-            className="w-full px-3 py-2 glass-input rounded-lg text-xs text-slate-700 dark:text-slate-200 transition-all"
-          />
-        </div>
-      </div>
+      </StatusControlPanel>
 
       {/* Table */}
-      <div className="glass rounded-lg overflow-hidden">
-        <div className="px-4 py-3 border-b border-slate-200/30 dark:border-white/5 flex items-center justify-between">
-          <p className="text-xs text-slate-500">
-            ພົບ <span className="font-semibold text-slate-700 dark:text-slate-200">{filteredJobs.length}</span> ລາຍການ
-          </p>
-          <p className="text-[11px] text-slate-400">ສະເພາະຂໍ້ມູນປີ 2026</p>
-        </div>
-
-        {filteredJobs.length === 0 ? (
+      <StatusTableShell count={filteredJobs.length}>
+        {loading ? (
+          <div className="flex items-center justify-center py-20 text-slate-400">
+            <FaSpinner className="animate-spin mr-2" /> ກຳລັງໂຫຼດ...
+          </div>
+        ) : filteredJobs.length === 0 ? (
           <div className="py-14 text-center">
             <div className="w-14 h-14 mx-auto rounded-lg bg-slate-500/10 flex items-center justify-center mb-3">
               <FaClipboardCheck className="text-slate-400 dark:text-slate-500 text-xl" />
@@ -508,7 +486,7 @@ export default function JobsClosedByDriverPage() {
             )}
           </>
         )}
-      </div>
+      </StatusTableShell>
     </div>
   );
 }
