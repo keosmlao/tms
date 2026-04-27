@@ -136,11 +136,11 @@ async function mobileJobsList(driverId, date) {
     LEFT JOIN bill_summary bs ON bs.doc_no = a.doc_no`;
 
   if (date) {
-    sql += ` WHERE a.driver=$1 AND COALESCE(a.approve_status, 0)=1 AND a.job_status != 4 AND a.doc_date=$2 AND ${getFixedYearSqlFilter("a.doc_date")} ORDER BY a.doc_no`;
+    sql += ` WHERE a.driver=$1 AND a.job_status != 4 AND a.doc_date=$2 AND ${getFixedYearSqlFilter("a.doc_date")} ORDER BY a.doc_no`;
     return await query(sql, [driverId, fixedDate]);
   }
 
-  sql += ` WHERE a.driver=$1 AND COALESCE(a.approve_status, 0)=1 AND a.job_status != 4 AND ${getFixedYearSqlFilter("a.doc_date")} ORDER BY a.doc_no`;
+  sql += ` WHERE a.driver=$1 AND a.job_status != 4 AND ${getFixedYearSqlFilter("a.doc_date")} ORDER BY a.doc_no`;
   return await query(sql, [driverId]);
 }
 
