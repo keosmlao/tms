@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState, type ReactNode } from "react";
+import { Suspense, useEffect, useRef, useState, type ReactNode } from "react";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import {
@@ -262,7 +262,7 @@ function MetricCard({
 }
 
 // ==================== Page ====================
-export default function GpsUsageTrackPage() {
+function GpsUsageTrackInner() {
   const searchParams = useSearchParams();
   const router = useRouter();
   const imei = searchParams.get("imei") ?? "";
@@ -1171,5 +1171,13 @@ export default function GpsUsageTrackPage() {
         </div>
       </div>
     </>
+  );
+}
+
+export default function GpsUsageTrackPage() {
+  return (
+    <Suspense fallback={null}>
+      <GpsUsageTrackInner />
+    </Suspense>
   );
 }

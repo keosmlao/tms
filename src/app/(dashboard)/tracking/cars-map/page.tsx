@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useSearchParams } from "next/navigation";
 import L from "leaflet";
 import "leaflet/dist/leaflet.css";
@@ -762,7 +762,7 @@ function VehicleRow({
 
 // ==================== Main Page ====================
 
-export default function CarsMapPage() {
+function CarsMapInner() {
   const searchParams = useSearchParams();
   const focusParam = searchParams.get("focus")?.trim() ?? "";
 
@@ -1186,5 +1186,13 @@ export default function CarsMapPage() {
         </div>
       </div>
     </>
+  );
+}
+
+export default function CarsMapPage() {
+  return (
+    <Suspense fallback={null}>
+      <CarsMapInner />
+    </Suspense>
   );
 }

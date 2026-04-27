@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { Suspense, useEffect, useState } from "react";
 import { useSearchParams } from "next/navigation";
 import {
   FaSearch,
@@ -414,7 +414,7 @@ function NotFoundState() {
 }
 
 // ==================== Main Page ====================
-export default function TrackingPage() {
+function TrackingPageInner() {
   const searchParams = useSearchParams();
   const initialSearch = searchParams.get("search") || "";
   const { searchText, setSearchText, result, loading, searched, search } = useTracking(initialSearch);
@@ -496,5 +496,13 @@ export default function TrackingPage() {
       {!loading && !result && !searched && <EmptyState />}
       {!loading && !result && searched && <NotFoundState />}
     </div>
+  );
+}
+
+export default function TrackingPage() {
+  return (
+    <Suspense fallback={null}>
+      <TrackingPageInner />
+    </Suspense>
   );
 }

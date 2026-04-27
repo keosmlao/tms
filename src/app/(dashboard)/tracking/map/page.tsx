@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { Suspense, useCallback, useEffect, useState } from "react";
 import { useSearchParams } from "next/navigation";
 import {
   FaCompass,
@@ -46,7 +46,7 @@ function formatUpdatedAt(value: string) {
   return value;
 }
 
-export default function TrackingMapPage() {
+function TrackingMapInner() {
   const searchParams = useSearchParams();
   const imei = (searchParams.get("imei") ?? "").trim();
 
@@ -272,5 +272,13 @@ function InfoRow({
         </p>
       </div>
     </div>
+  );
+}
+
+export default function TrackingMapPage() {
+  return (
+    <Suspense fallback={null}>
+      <TrackingMapInner />
+    </Suspense>
   );
 }

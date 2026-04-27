@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { Suspense, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import {
   FaTruck,
@@ -17,7 +17,15 @@ import {
 import { Auth } from "@/lib/api";
 import { useSession } from "@/providers/session-provider";
 
-export default function Login() {
+export default function LoginPage() {
+  return (
+    <Suspense fallback={null}>
+      <Login />
+    </Suspense>
+  );
+}
+
+function Login() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const { refresh } = useSession();
