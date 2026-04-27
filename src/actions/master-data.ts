@@ -82,12 +82,12 @@ export async function deleteDriver(code: string) {
   return svcDeleteDriver(code);
 }
 export async function getDispatchDrivers() {
-  await requireSession();
-  return svcGetDispatchDrivers();
+  const s = await requireSession();
+  return svcGetDispatchDrivers(s);
 }
 export async function getDispatchWorkers() {
-  await requireSession();
-  return svcGetDispatchWorkers();
+  const s = await requireSession();
+  return svcGetDispatchWorkers(s);
 }
 export async function getDispatchWorkersWithBranch() {
   await requireSession();

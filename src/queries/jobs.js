@@ -293,7 +293,7 @@ async function getJobAddPageData(session) {
       [fixedMonth]
     ),
     query("SELECT code, name_1 FROM public.odg_tms_car ORDER BY name_1 ASC, code ASC"),
-    getTransportDepartmentEmployees(),
+    getTransportDepartmentEmployees(session),
     getAvailableBills(session),
   ]);
 

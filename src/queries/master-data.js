@@ -175,20 +175,40 @@ async function getDispatchDriverByCode(code) {
   );
 }
 
-async function getTransportDepartmentEmployees() {
+async function getTransportDepartmentEmployees(session) {
+  await ensureWorkerBranchTable();
+  const branch = session?.logistic_code?.trim() ?? "";
+  const scoped = !!branch && branch !== "02-0004";
+
+  if (!scoped) {
+    return query(
+      `SELECT e.employee_code AS code,
+        COALESCE(NULLIF(TRIM(e.fullname_lo), ''), NULLIF(TRIM(e.nickname), ''), e.employee_code) AS name_1
+      FROM public.odg_employee e
+      LEFT JOIN public.odg_department d ON d.department_code = e.department_code
+      WHERE e.employment_status = 'ACTIVE'
+        AND d.department_name_lo ILIKE '%ຂົນສົ່ງ%'
+      ORDER BY name_1 ASC, e.employee_code ASC`
+    );
+  }
+
+  // Branch admin: only show employees assigned to this branch
   return query(
     `SELECT e.employee_code AS code,
       COALESCE(NULLIF(TRIM(e.fullname_lo), ''), NULLIF(TRIM(e.nickname), ''), e.employee_code) AS name_1
     FROM public.odg_employee e
     LEFT JOIN public.odg_department d ON d.department_code = e.department_code
+    INNER JOIN public.odg_tms_worker_branch wb ON wb.worker_code = e.employee_code
     WHERE e.employment_status = 'ACTIVE'
       AND d.department_name_lo ILIKE '%ຂົນສົ່ງ%'
-    ORDER BY name_1 ASC, e.employee_code ASC`
+      AND wb.transport_code = $1
+    ORDER BY name_1 ASC, e.employee_code ASC`,
+    [branch]
   );
 }
 
-async function getDispatchDrivers() { return getTransportDepartmentEmployees(); }
-async function getDispatchWorkers() { return getTransportDepartmentEmployees(); }
+async function getDispatchDrivers(session) { return getTransportDepartmentEmployees(session); }
+async function getDispatchWorkers(session) { return getTransportDepartmentEmployees(session); }
 
 async function ensureWorkerBranchTable() {
   await query(`
