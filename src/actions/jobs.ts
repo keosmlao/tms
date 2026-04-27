@@ -12,6 +12,8 @@ import {
   addBillToDraft as svcAddBillToDraft,
   removeBillFromDraft as svcRemoveBillFromDraft,
   searchBills as svcSearchBills,
+  searchBillsForJob as svcSearchBillsForJob,
+  addBillsToJob as svcAddBillsToJob,
   getJobsClosedByDriver as svcGetJobsClosedByDriver,
   getJobsClosed as svcGetJobsClosed,
   getJobsWaitingReceive as svcGetJobsWaitingReceive,
@@ -67,6 +69,31 @@ export async function removeBillFromDraft(billNo: string) {
 export async function searchBills(q: string) {
   const s = await requireSession();
   return svcSearchBills(s, q);
+}
+
+export interface AddBillsToJobItem {
+  item_code: string;
+  item_name?: string;
+  qty?: number;
+  selectedQty: number;
+  unit_code?: string;
+}
+export interface AddBillsToJobEntry {
+  bill_no: string;
+  items?: AddBillsToJobItem[];
+}
+
+export async function addBillsToJob(
+  docNo: string,
+  bills: AddBillsToJobEntry[] | string[]
+) {
+  await requireSession();
+  return svcAddBillsToJob(docNo, bills);
+}
+
+export async function searchBillsForJob(query: string, excludeDocNo?: string) {
+  await requireSession();
+  return svcSearchBillsForJob(query, excludeDocNo);
 }
 
 export async function getJobsClosedByDriver(fromDate?: string, toDate?: string) {

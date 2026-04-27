@@ -121,18 +121,30 @@ export default function Sidebar() {
   const { isDarkMode, toggleTheme } = useTheme();
   const [isCollapsed, setIsCollapsed] = useState(false);
   const [mobileOpen, setMobileOpen] = useState(false);
-  const [openSections, setOpenSections] = useState<Record<string, boolean>>({
-    tracking: true,
-    approve: true,
-    route: true,
-    report: false,
-    manage: false,
-  });
+  // Accordion: at most one section open at a time. Defaults to the section
+  // that owns the current route so users land on a useful expanded state.
+  const sectionForPath = (path: string): string | null => {
+    const match = navSections.find((s) =>
+      s.items.some((it) => path.startsWith(it.href))
+    );
+    return match?.key ?? null;
+  };
+
+  const [openSection, setOpenSection] = useState<string | null>(
+    () => sectionForPath(pathname) ?? "route"
+  );
 
   useEffect(() => {
     const saved = localStorage.getItem("sidebar_collapsed");
     if (saved !== null) setIsCollapsed(saved === "true");
   }, []);
+
+  // When the route changes, snap open to the matching section so deep links
+  // (e.g. via Cmd-click) reveal the right group on first render.
+  useEffect(() => {
+    const k = sectionForPath(pathname);
+    if (k) setOpenSection(k);
+  }, [pathname]);
 
   const toggleCollapse = () => {
     const newState = !isCollapsed;
@@ -142,7 +154,7 @@ export default function Sidebar() {
 
   const toggleSection = (key: string) => {
     if (isCollapsed) return;
-    setOpenSections((prev) => ({ ...prev, [key]: !prev[key] }));
+    setOpenSection((prev) => (prev === key ? null : key));
   };
 
   const isActive = (href: string) => pathname === href;
@@ -229,7 +241,7 @@ export default function Sidebar() {
         {/* Nav sections */}
         <nav className="flex-1 px-3 pb-4 overflow-y-auto">
           {navSections.map((section) => {
-            const isOpen = openSections[section.key];
+            const isOpen = openSection === section.key;
             const sectionActive = isSectionActive(section);
 
             if (isCollapsed) {

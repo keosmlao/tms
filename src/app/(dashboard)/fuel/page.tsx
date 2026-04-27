@@ -6,6 +6,7 @@ import {
   FaGasPump,
   FaImage,
   FaMoneyBillWave,
+  FaPlus,
   FaSearch,
   FaSpinner,
   FaTimes,
@@ -22,6 +23,7 @@ import {
   StatusTableShell,
 } from "@/components/status-page-shell";
 import { Pagination, toNumber } from "@/components/status-page-helpers";
+import { FuelEntryDialog } from "@/components/fuel-entry-dialog";
 
 interface FuelLog {
   id: number;
@@ -63,6 +65,7 @@ export default function FuelPage() {
     loading: boolean;
   } | null>(null);
   const [deletingId, setDeletingId] = useState<number | null>(null);
+  const [addOpen, setAddOpen] = useState(false);
   const perPage = 20;
 
   const load = () => {
@@ -202,6 +205,13 @@ export default function FuelPage() {
           >
             {loading ? "ກຳລັງໂຫຼດ..." : "ຄົ້ນຫາ"}
           </button>
+          <button
+            type="button"
+            onClick={() => setAddOpen(true)}
+            className="px-5 py-2 rounded-lg bg-orange-600 hover:bg-orange-700 text-white text-xs font-semibold transition-colors inline-flex items-center gap-2"
+          >
+            <FaPlus size={10} /> ບັນທຶກໃໝ່
+          </button>
         </form>
       </StatusControlPanel>
 
@@ -328,6 +338,12 @@ export default function FuelPage() {
           </>
         )}
       </StatusTableShell>
+
+      <FuelEntryDialog
+        open={addOpen}
+        onClose={() => setAddOpen(false)}
+        onSaved={load}
+      />
 
       {photoOpen && (
         <div

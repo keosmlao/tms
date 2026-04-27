@@ -8,10 +8,12 @@ import {
   FaChevronDown,
   FaChevronRight,
   FaClock,
+  FaPlus,
   FaRoute,
   FaSearch,
   FaSpinner,
 } from "react-icons/fa";
+import { AddBillsToJobDialog } from "@/components/add-bills-to-job-dialog";
 import { Actions } from "@/lib/api";
 import { getFixedTodayDate } from "@/lib/fixed-year";
 import {
@@ -53,6 +55,7 @@ export default function JobsWaitingReceivePage() {
   const [expandedDoc, setExpandedDoc] = useState<string | null>(null);
   const [billsByDoc, setBillsByDoc] = useState<Record<string, JobBill[]>>({});
   const [loadingDoc, setLoadingDoc] = useState<string | null>(null);
+  const [addBillsDocNo, setAddBillsDocNo] = useState<string | null>(null);
   const perPage = 20;
 
   const load = () => {
@@ -259,15 +262,25 @@ export default function JobsWaitingReceivePage() {
                             <StatusBadge tone="amber" label="ລໍຖ້າຮັບຖ້ຽວ" />
                           </td>
                           <td className="px-4 py-3 text-center">
-                            {job.car && (
-                              <Link
-                                href={`/tracking/cars-map?focus=${encodeURIComponent(job.car)}`}
+                            <div className="inline-flex items-center gap-1">
+                              <button
+                                type="button"
+                                onClick={() => setAddBillsDocNo(job.doc_no)}
                                 className="inline-flex items-center justify-center w-7 h-7 rounded-lg text-emerald-600 hover:bg-emerald-50 hover:text-emerald-700 dark:text-emerald-400 dark:hover:bg-emerald-500/10 transition-colors"
-                                title={`ຕິດຕາມລົດ ${job.car}`}
+                                title="ເພີ່ມບິນເຂົ້າຖ້ຽວ"
                               >
-                                <FaBroadcastTower size={12} />
-                              </Link>
-                            )}
+                                <FaPlus size={11} />
+                              </button>
+                              {job.car && (
+                                <Link
+                                  href={`/tracking/cars-map?focus=${encodeURIComponent(job.car)}`}
+                                  className="inline-flex items-center justify-center w-7 h-7 rounded-lg text-emerald-600 hover:bg-emerald-50 hover:text-emerald-700 dark:text-emerald-400 dark:hover:bg-emerald-500/10 transition-colors"
+                                  title={`ຕິດຕາມລົດ ${job.car}`}
+                                >
+                                  <FaBroadcastTower size={12} />
+                                </Link>
+                              )}
+                            </div>
                           </td>
                         </tr>
                         {isExpanded && (
@@ -300,6 +313,13 @@ export default function JobsWaitingReceivePage() {
           </>
         )}
       </StatusTableShell>
+
+      <AddBillsToJobDialog
+        open={addBillsDocNo !== null}
+        docNo={addBillsDocNo}
+        onClose={() => setAddBillsDocNo(null)}
+        onSaved={load}
+      />
     </div>
   );
 }

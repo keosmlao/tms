@@ -286,6 +286,8 @@ export default function AddJobClient({
   const [modalSelected, setModalSelected] = useState<Record<string, Record<string, number>>>({});
   const [qtyDrafts, setQtyDrafts] = useState<Record<string, string>>({});
   const [searchText, setSearchText] = useState("");
+  const [searchingIcTrans, setSearchingIcTrans] = useState(false);
+  const icTransDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [billProductsByNo, setBillProductsByNo] = useState<Record<string, Product[]>>({});
   const [loadingBillNo, setLoadingBillNo] = useState<string | null>(null);
 
@@ -313,6 +315,45 @@ export default function AddJobClient({
       }
     } catch {}
   }, [addedByBill]);
+
+  // Debounced server search across ic_trans master so the modal can surface
+  // bills not yet in ic_trans_shipment. Results are merged into availableBills
+  // (deduped by doc_no) so the rest of the picker flow handles them uniformly.
+  useEffect(() => {
+    if (!showModal) return;
+    const q = deferredSearchText.trim();
+    if (q.length < 2) {
+      setSearchingIcTrans(false);
+      if (icTransDebounceRef.current) {
+        clearTimeout(icTransDebounceRef.current);
+        icTransDebounceRef.current = null;
+      }
+      return;
+    }
+    if (icTransDebounceRef.current) clearTimeout(icTransDebounceRef.current);
+    setSearchingIcTrans(true);
+    icTransDebounceRef.current = setTimeout(() => {
+      Actions.searchBillsForJob(q)
+        .then((data) => {
+          const list = (data ?? []) as AvailableBill[];
+          if (list.length === 0) return;
+          setAvailableBills((prev) => {
+            const seen = new Set(prev.map((b) => b.doc_no));
+            const additions = list.filter((b) => !seen.has(b.doc_no));
+            if (additions.length === 0) return prev;
+            return [...prev, ...additions];
+          });
+        })
+        .catch((err) => console.error("ic_trans search failed", err))
+        .finally(() => setSearchingIcTrans(false));
+    }, 300);
+    return () => {
+      if (icTransDebounceRef.current) {
+        clearTimeout(icTransDebounceRef.current);
+        icTransDebounceRef.current = null;
+      }
+    };
+  }, [deferredSearchText, showModal]);
 
   // Auto-fill driver/workers when car changes
   useEffect(() => {
@@ -1042,9 +1083,12 @@ export default function AddJobClient({
                   type="text"
                   value={searchText}
                   onChange={(event) => setSearchText(event.target.value)}
-                  placeholder="ຄົ້ນຫາຕາມເລກບິນ, ລູກຄ້າ..."
-                  className="h-9 w-full rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 pl-9 pr-3 text-xs outline-none focus:border-teal-500 focus:ring-2 focus:ring-teal-500/20 transition-all"
+                  placeholder="ຄົ້ນຫາຈາກ ic_trans (ເລກບິນ, ລະຫັດ/ຊື່ລູກຄ້າ)..."
+                  className="h-9 w-full rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 pl-9 pr-9 text-xs outline-none focus:border-teal-500 focus:ring-2 focus:ring-teal-500/20 transition-all"
                 />
+                {searchingIcTrans && (
+                  <FaSpinner className="absolute right-3 top-1/2 -translate-y-1/2 text-xs text-gray-400 animate-spin" />
+                )}
               </div>
             </div>
 

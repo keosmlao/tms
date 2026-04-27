@@ -13,6 +13,7 @@ const {
   ensurePendingJobListIndex,
   ensureTmsDetailItemTable,
   getRemainingBillProducts,
+  getRemainingSummaryMap,
 } = require("./helpers");
 const { pushToDriver } = require("./push");
 
@@ -219,6 +220,181 @@ async function createJob(session, data) {
   }
 }
 
+async function addBillsToJob(docNo, bills) {
+  if (!docNo) throw new Error("doc_no is required");
+
+  // Accept either a list of bill_no strings (legacy) or the full
+  // create-job shape: [{ bill_no, items: [{item_code, item_name, qty, selectedQty, unit_code}] }].
+  const normalizedInput = (Array.isArray(bills) ? bills : [])
+    .map((entry) => {
+      if (!entry) return null;
+      if (typeof entry === "string") {
+        return { bill_no: entry.trim(), items: null };
+      }
+      const billNo = String(entry.bill_no ?? "").trim();
+      if (!billNo) return null;
+      return { bill_no: billNo, items: Array.isArray(entry.items) ? entry.items : null };
+    })
+    .filter(Boolean);
+  if (normalizedInput.length === 0) {
+    throw new Error("ກະລຸນາເລືອກບິນຢ່າງໜ້ອຍ 1 ບິນ");
+  }
+
+  await ensureTmsWorkerTable();
+  await ensureTmsDetailItemTable();
+  await ensureForwardBranchColumn();
+
+  const job = await queryOne(
+    `SELECT doc_no, to_char(doc_date,'YYYY-MM-DD') as doc_date,
+            to_char(date_logistic,'YYYY-MM-DD') as date_logistic,
+            car, driver,
+            COALESCE(approve_status, 0) as approve_status,
+            COALESCE(job_status, 0) as job_status
+     FROM odg_tms
+     WHERE doc_no=$1 AND ${getFixedYearSqlFilter("doc_date")}`,
+    [docNo]
+  );
+  if (!job) throw new Error("ບໍ່ພົບຖ້ຽວ");
+  if (Number(job.approve_status) !== 1) {
+    throw new Error("ຖ້ຽວນີ້ຍັງບໍ່ຖືກອະນຸມັດ");
+  }
+  if (Number(job.job_status) >= 2) {
+    throw new Error("ຖ້ຽວນີ້ເລີ່ມຈັດສົ່ງແລ້ວ ບໍ່ສາມາດເພີ່ມບິນໄດ້");
+  }
+
+  // De-dupe against bills already on this job so the same bill can't be
+  // attached twice.
+  const existing = await query(
+    `SELECT bill_no FROM public.odg_tms_detail
+     WHERE doc_no=$1 AND ${getFixedYearSqlFilter("doc_date")}`,
+    [docNo]
+  );
+  const existingSet = new Set(existing.map((r) => String(r.bill_no)));
+  const billsToAdd = normalizedInput.filter((b) => !existingSet.has(b.bill_no));
+  if (billsToAdd.length === 0) {
+    throw new Error("ບິນທີ່ເລືອກມີຢູ່ໃນຖ້ຽວແລ້ວ");
+  }
+
+  let added = 0;
+  for (const entry of billsToAdd) {
+    const billNo = entry.bill_no;
+    const meta = await queryOne(
+      `SELECT to_char(a.doc_date,'YYYY-MM-DD') as bill_date, a.cust_code, b.telephone
+       FROM ic_trans_shipment a
+       LEFT JOIN ar_customer b ON b.code=a.cust_code
+       WHERE a.doc_no=$1 AND ${getFixedYearSqlFilter("a.doc_date")}`,
+      [billNo]
+    );
+    if (!meta) continue;
+
+    // Match createJob's normalization: validate the caller's selected items
+    // against the remaining quantities, falling back to "all remaining" when
+    // the caller didn't pick specific items.
+    const remainingProducts = await getRemainingBillProducts(billNo);
+    const remainingByItem = new Map(remainingProducts.map((it) => [it.item_code, it]));
+
+    const itemsToSave =
+      entry.items && entry.items.length > 0
+        ? entry.items.map((item) => {
+            const remainingItem = remainingByItem.get(item.item_code);
+            const selectedQty = Number(item.selectedQty ?? item.qty ?? 0);
+            if (!remainingItem) {
+              throw new Error(`ບິນ ${billNo} ລາຍການ ${item.item_code} ຖືກຈັດຄົບແລ້ວ`);
+            }
+            if (!Number.isFinite(selectedQty) || selectedQty <= 0) {
+              throw new Error(`ຈໍານວນຈັດສົ່ງຂອງ ${item.item_code} ບໍ່ຖືກຕ້ອງ`);
+            }
+            if (selectedQty > Number(remainingItem.qty)) {
+              throw new Error(
+                `ບິນ ${billNo} ລາຍການ ${item.item_code} ເຫຼືອຈັດໄດ້ພຽງ ${remainingItem.qty}`
+              );
+            }
+            return {
+              item_code: item.item_code,
+              item_name: item.item_name || remainingItem.item_name,
+              qty: Number(remainingItem.qty),
+              selectedQty,
+              unit_code: item.unit_code || remainingItem.unit_code,
+            };
+          })
+        : remainingProducts.map((it) => ({
+            item_code: it.item_code,
+            item_name: it.item_name,
+            qty: Number(it.qty),
+            selectedQty: Number(it.qty),
+            unit_code: it.unit_code,
+          }));
+
+    if (itemsToSave.length === 0) {
+      throw new Error(`ບິນ ${billNo} ບໍ່ມີລາຍການຄົງເຫຼືອໃຫ້ຈັດຖ້ຽວ`);
+    }
+
+    await queryOne(
+      `INSERT INTO public.odg_tms_detail
+        (doc_no, doc_date, car, bill_no, bill_date, cust_code,
+         create_date_time_now, date_logistic, count_item, telephone)
+       VALUES ($1,$2,$3,$4,$5,$6,LOCALTIMESTAMP(0),$7,$8,$9)`,
+      [
+        docNo,
+        job.doc_date,
+        job.car,
+        billNo,
+        coerceDateToFixedYear(meta.bill_date),
+        meta.cust_code,
+        job.date_logistic,
+        itemsToSave.length,
+        meta.telephone,
+      ]
+    );
+
+    for (const item of itemsToSave) {
+      await queryOne(
+        `INSERT INTO public.odg_tms_detail_item
+          (doc_no, bill_no, item_code, item_name, qty, selected_qty, unit_code)
+         VALUES ($1,$2,$3,$4,$5,$6,$7)`,
+        [
+          docNo,
+          billNo,
+          item.item_code,
+          item.item_name,
+          item.qty,
+          item.selectedQty,
+          item.unit_code,
+        ]
+      );
+    }
+
+    await queryOne(
+      `UPDATE ic_trans_shipment SET check_status=1
+       WHERE doc_no=$1 AND ${getFixedYearSqlFilter("doc_date")}`,
+      [billNo]
+    );
+    added += 1;
+  }
+
+  // Refresh the bill count cached on the job header so list pages show it.
+  await queryOne(
+    `UPDATE public.odg_tms
+     SET item_bill = (
+       SELECT COUNT(*) FROM public.odg_tms_detail
+       WHERE doc_no=$1 AND ${getFixedYearSqlFilter("doc_date")}
+     )
+     WHERE doc_no=$1 AND ${getFixedYearSqlFilter("doc_date")}`,
+    [docNo]
+  );
+
+  if (added > 0 && job.driver) {
+    void pushToDriver(
+      job.driver,
+      "📦 ມີບິນເພີ່ມໃນຖ້ຽວ",
+      `📋 ຖ້ຽວ ${docNo}\n➕ ເພີ່ມ ${added} ບິນ`,
+      { type: "bills_added", doc_no: docNo }
+    );
+  }
+
+  return { success: true, added };
+}
+
 async function deleteJob(docNo) {
   await ensureTmsWorkerTable();
   await ensureTmsDetailItemTable();
@@ -394,6 +570,58 @@ async function searchBills(session, q) {
   return query(`SELECT doc_no, doc_date, to_char(doc_date,'DD-MM-YYYY') as doc_date_display, cust_code, b.telephone, (SELECT count(item_code) FROM ic_trans_detail WHERE doc_no=a.doc_no) as count_item FROM ic_trans_shipment a LEFT JOIN ar_customer b ON b.code=a.cust_code WHERE trans_flag=44 AND check_status=0 AND doc_no NOT IN (SELECT bill_no FROM odg_tms_listbill_draft) ${branchFilterShipment(scope, "a")} AND ${getFixedYearSqlFilter("a.doc_date")} AND (doc_no LIKE $1 OR cust_code LIKE $1) LIMIT 10`, [`%${q}%`]);
 }
 
+// Free-text search across ic_trans master so admins can attach bills that
+// aren't surfaced by the default available-bills list — e.g. bills from
+// another branch or ones not yet registered in ic_trans_shipment.
+async function searchBillsForJob(q, excludeDocNo) {
+  const text = String(q ?? "").trim();
+  if (text.length < 2) return [];
+
+  const params = [`%${text}%`];
+  let excludeClause = "";
+  if (excludeDocNo) {
+    params.push(excludeDocNo);
+    excludeClause = `AND a.doc_no NOT IN (
+      SELECT bill_no FROM public.odg_tms_detail
+      WHERE doc_no=$${params.length} AND ${getFixedYearSqlFilter("doc_date")}
+    )`;
+  }
+
+  // Exclude any bill already routed via ic_trans_shipment so the master-search
+  // surface only adds genuinely new bills (the shipment-linked ones already
+  // appear in the default available-bills list).
+  const rows = await query(
+    `SELECT a.doc_no,
+            to_char(a.doc_date,'DD-MM-YYYY') as doc_date,
+            a.cust_code,
+            b.name_1 as cust_name,
+            b.telephone
+     FROM ic_trans a
+     LEFT JOIN ar_customer b ON b.code = a.cust_code
+     WHERE a.trans_flag = '44'
+       AND ${getFixedYearSqlFilter("a.doc_date")}
+       AND (a.doc_no ILIKE $1 OR a.cust_code ILIKE $1 OR COALESCE(b.name_1, '') ILIKE $1)
+       AND a.doc_no NOT IN (
+         SELECT s.doc_no FROM ic_trans_shipment s
+         WHERE ${getFixedYearSqlFilter("s.doc_date")}
+       )
+       ${excludeClause}
+     ORDER BY a.doc_date DESC
+     LIMIT 30`,
+    params
+  );
+  if (rows.length === 0) return [];
+
+  // Only surface bills that still have remaining items to dispatch.
+  const summaries = await getRemainingSummaryMap(rows.map((r) => r.doc_no));
+  return rows
+    .map((r) => ({
+      ...r,
+      count_item: summaries.get(r.doc_no)?.remaining_count ?? 0,
+    }))
+    .filter((r) => r.count_item > 0);
+}
+
 // ============ Jobs by status ============
 
 async function getJobsByStatus(session, fromDate, toDate, jobStatus) {
@@ -567,6 +795,8 @@ module.exports = {
   addBillToDraft,
   removeBillFromDraft,
   searchBills,
+  searchBillsForJob,
+  addBillsToJob,
   getJobsClosedByDriver,
   getJobsClosed,
   getJobsWaitingReceive,

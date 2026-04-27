@@ -31,6 +31,8 @@ export const Actions = {
   addBillToDraft: jobs.addBillToDraft,
   removeBillFromDraft: jobs.removeBillFromDraft,
   searchBills: jobs.searchBills,
+  addBillsToJob: jobs.addBillsToJob,
+  searchBillsForJob: jobs.searchBillsForJob,
   getJobsClosedByDriver: jobs.getJobsClosedByDriver,
   getJobsClosed: jobs.getJobsClosed,
   getJobsWaitingReceive: jobs.getJobsWaitingReceive,
