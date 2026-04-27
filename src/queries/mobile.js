@@ -202,6 +202,8 @@ async function mobileJobAction(body) {
            FROM public.odg_tms_detail d
            INNER JOIN odg_tms t ON t.doc_no = d.doc_no
            WHERE d.bill_no = $1 AND ${getFixedYearSqlFilter("d.doc_date")}
+           ORDER BY (CASE WHEN COALESCE(d.status, 0) NOT IN (1, 2) THEN 0 ELSE 1 END),
+                    d.create_date_time_now DESC NULLS LAST
            LIMIT 1`,
           [billNo]
         );
@@ -209,7 +211,18 @@ async function mobileJobAction(body) {
         const currentDocNo = currentJob?.doc_no;
         if (!currentDocNo) throw new Error("Bill was not found");
         if (Number(currentJob.approve_status ?? 0) !== 1) throw new Error("ຖ້ຽວນີ້ຍັງບໍ່ຖືກອະນຸມັດ");
-        if (Number(currentJob.job_status ?? 0) !== 1) throw new Error("ສາມາດເບີກເຄື່ອງໄດ້ຫຼັງຈາກຮັບຖ້ຽວແລ້ວເທົ່ານັ້ນ");
+        // Auto-receive if the driver hasn't tapped "ຮັບຖ້ຽວ" yet — saves a step
+        // since picking up implies the trip is in hand.
+        if (Number(currentJob.job_status ?? 0) === 0) {
+          await client.query(
+            `UPDATE odg_tms
+             SET job_status = 1
+             WHERE doc_no = $1 AND COALESCE(approve_status, 0) = 1 AND ${getFixedYearSqlFilter("doc_date")}`,
+            [currentDocNo]
+          );
+        } else if (Number(currentJob.job_status ?? 0) > 2) {
+          throw new Error("ຖ້ຽວນີ້ປິດແລ້ວ ບໍ່ສາມາດເບີກເຄື່ອງ");
+        }
 
         await ensureBillDeliveryItems(billNo, client);
 
@@ -267,6 +280,8 @@ async function mobileJobAction(body) {
            FROM public.odg_tms_detail d
            INNER JOIN odg_tms t ON t.doc_no = d.doc_no
            WHERE d.bill_no = $1 AND ${getFixedYearSqlFilter("d.doc_date")}
+           ORDER BY (CASE WHEN COALESCE(d.status, 0) NOT IN (1, 2) THEN 0 ELSE 1 END),
+                    d.create_date_time_now DESC NULLS LAST
            LIMIT 1`,
           [billNo]
         );
@@ -348,6 +363,8 @@ async function mobileJobAction(body) {
            FROM public.odg_tms_detail d
            INNER JOIN odg_tms t ON t.doc_no = d.doc_no
            WHERE d.bill_no = $1 AND ${getFixedYearSqlFilter("d.doc_date")}
+           ORDER BY (CASE WHEN COALESCE(d.status, 0) NOT IN (1, 2) THEN 0 ELSE 1 END),
+                    d.create_date_time_now DESC NULLS LAST
            LIMIT 1`,
           [billNo]
         );
@@ -505,6 +522,8 @@ async function mobileJobAction(body) {
            FROM public.odg_tms_detail d
            INNER JOIN odg_tms t ON t.doc_no = d.doc_no
            WHERE d.bill_no = $1 AND ${getFixedYearSqlFilter("d.doc_date")}
+           ORDER BY (CASE WHEN COALESCE(d.status, 0) NOT IN (1, 2) THEN 0 ELSE 1 END),
+                    d.create_date_time_now DESC NULLS LAST
            LIMIT 1`,
           [billNo]
         );
