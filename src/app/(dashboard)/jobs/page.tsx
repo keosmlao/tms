@@ -43,12 +43,16 @@ export interface Job {
   worker_count: number;
   workers: string;
   item_bill: number;
+  bill_nos: string;
   user_created: string;
   approve_status: number;
   status: string;
   job_status: number;
   forward_transport_code?: string;
   forward_transport_name?: string;
+  delivery_round_code?: string;
+  delivery_round_name?: string;
+  delivery_round_time_label?: string;
 }
 
 interface Product {
@@ -217,10 +221,21 @@ function JobRow({
           </div>
         </td>
         <td className="px-3 py-3">
-          <span className="inline-flex items-center gap-1.5 rounded-lg bg-sky-500/10 px-2 py-1 text-[11px] font-semibold text-sky-600 dark:text-sky-400">
-            <FaTruck size={9} />
-            {job.date_logistic || "-"}
-          </span>
+          <div className="flex flex-col gap-1">
+            <span className="inline-flex w-fit items-center gap-1.5 rounded-lg bg-sky-500/10 px-2 py-1 text-[11px] font-semibold text-sky-600 dark:text-sky-400">
+              <FaTruck size={9} />
+              {job.date_logistic || "-"}
+            </span>
+            {(job.delivery_round_name || job.delivery_round_code) && (
+              <span
+                className="inline-flex w-fit items-center gap-1 rounded-md bg-amber-500/10 px-1.5 py-0.5 text-[10px] font-semibold text-amber-700 dark:text-amber-400"
+                title={job.delivery_round_time_label || ""}
+              >
+                <FaClock size={8} />
+                {job.delivery_round_name || job.delivery_round_code}
+              </span>
+            )}
+          </div>
         </td>
         <td className="px-3 py-3">
           <div className="flex items-center gap-1.5 text-[12px] text-slate-700">
@@ -244,10 +259,20 @@ function JobRow({
             <p className="text-[9px] text-slate-400 truncate max-w-[160px]">{job.workers}</p>
           )}
         </td>
-        <td className="px-3 py-3 text-center">
-          <span className="inline-flex items-center justify-center min-w-[32px] px-2 py-0.5 rounded-full bg-teal-500/10 text-teal-600 dark:text-teal-400 text-xs font-bold tabular-nums">
-            {job.item_bill}
-          </span>
+        <td className="px-3 py-3 max-w-[220px]">
+          <div className="flex flex-col gap-1">
+            <span className="inline-flex w-fit items-center gap-1 px-2 py-0.5 rounded-full bg-teal-500/10 text-teal-600 dark:text-teal-400 text-xs font-bold tabular-nums">
+              {job.item_bill} ບິນ
+            </span>
+            {job.bill_nos && (
+              <p
+                className="text-[10px] text-slate-500 dark:text-slate-400 font-mono leading-tight line-clamp-2 break-all"
+                title={job.bill_nos}
+              >
+                {job.bill_nos}
+              </p>
+            )}
+          </div>
         </td>
         <td className="px-3 py-3">
           <div className="flex items-center gap-1 flex-wrap">
@@ -509,7 +534,8 @@ export default function JobsClient({ initialJobs = [] as Job[] }: { initialJobs?
         job.doc_no.toLowerCase().includes(q) ||
         job.car?.toLowerCase().includes(q) ||
         job.driver?.toLowerCase().includes(q) ||
-        job.user_created?.toLowerCase().includes(q)
+        job.user_created?.toLowerCase().includes(q) ||
+        job.bill_nos?.toLowerCase().includes(q)
       );
     });
   }, [jobs, searchText, filter]);
@@ -640,7 +666,7 @@ export default function JobsClient({ initialJobs = [] as Job[] }: { initialJobs?
                   <th className="px-4 py-3 text-left">ລົດ</th>
                   <th className="px-4 py-3 text-left">ຄົນຂັບ</th>
                   <th className="px-4 py-3 text-left">ກຳມະກອນ</th>
-                  <th className="px-4 py-3 text-center">ບິນ</th>
+                  <th className="px-4 py-3 text-left">ບິນ / ລະຫັດບິນ</th>
                   <th className="px-4 py-3 text-left">ສະຖານະ</th>
                   <th className="px-4 py-3 text-right">ຈັດການ</th>
                 </tr>

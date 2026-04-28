@@ -35,6 +35,13 @@ async function getJobs(session) {
       WHERE forward_transport_code IS NOT NULL
         AND ${getFixedYearSqlFilter("doc_date")}
       GROUP BY doc_no
+    ),
+    bill_summary AS (
+      SELECT doc_no,
+        string_agg(DISTINCT bill_no, ', ' ORDER BY bill_no) AS bill_nos
+      FROM public.odg_tms_detail
+      WHERE ${getFixedYearSqlFilter("doc_date")}
+      GROUP BY doc_no
     )
     SELECT
       to_char(a.doc_date,'DD-MM-YYYY') as doc_date, a.doc_no,
@@ -53,7 +60,11 @@ async function getJobs(session) {
       COALESCE(w.worker_count, 0) as worker_count,
       COALESCE(w.workers, '') as workers,
       COALESCE(fs.forward_transport_code, '') as forward_transport_code,
-      COALESCE(ftt.name_1, '') as forward_transport_name
+      COALESCE(ftt.name_1, '') as forward_transport_name,
+      COALESCE(bs.bill_nos, '') as bill_nos,
+      COALESCE(a.delivery_round_code, '') as delivery_round_code,
+      COALESCE(dr.name, '') as delivery_round_name,
+      COALESCE(dr.time_label, '') as delivery_round_time_label
     FROM odg_tms a
     LEFT JOIN public.odg_tms_car b ON b.code=a.car
     LEFT JOIN public.odg_tms_driver c ON c.code=a.driver
@@ -61,6 +72,8 @@ async function getJobs(session) {
     LEFT JOIN worker_summary w ON w.doc_no = a.doc_no
     LEFT JOIN forward_summary fs ON fs.doc_no = a.doc_no
     LEFT JOIN public.transport_type ftt ON ftt.code = fs.forward_transport_code
+    LEFT JOIN bill_summary bs ON bs.doc_no = a.doc_no
+    LEFT JOIN public.odg_tms_delivery_round dr ON dr.code = a.delivery_round_code
     WHERE a.user_created=$1
       AND (a.approve_status = 0 OR a.approve_status IS NULL)
       AND ${getFixedYearSqlFilter("a.doc_date")}
@@ -142,10 +155,16 @@ async function createJob(session, data) {
   );
 
   const originBranch = (session.logistic_code ?? "").trim() || null;
+  // Optional delivery round; auto-DDL creates the column on first run.
+  const { ensureDeliveryRoundSchema } = require("./delivery-round");
+  await ensureDeliveryRoundSchema();
+  const deliveryRoundCode = data.delivery_round_code
+    ? String(data.delivery_round_code).trim() || null
+    : null;
   await queryOne(
-    `INSERT INTO public.odg_tms(doc_no, doc_date, date_logistic, car, driver, item_bill, user_created, create_date_time_now, approve_status, job_status, origin_transport_code)
-     VALUES ($1,$2,$3,$4,$5,$6,$7,LOCALTIMESTAMP(0),0,0,$8)`,
-    [data.doc_no, fixedDocDate, fixedDateLog, data.car, data.driver, normalizedBills.length, session.usercode, originBranch]
+    `INSERT INTO public.odg_tms(doc_no, doc_date, date_logistic, car, driver, item_bill, user_created, create_date_time_now, approve_status, job_status, origin_transport_code, delivery_round_code)
+     VALUES ($1,$2,$3,$4,$5,$6,$7,LOCALTIMESTAMP(0),0,0,$8,$9)`,
+    [data.doc_no, fixedDocDate, fixedDateLog, data.car, data.driver, normalizedBills.length, session.usercode, originBranch, deliveryRoundCode]
   );
 
   for (const bill of normalizedBills) {
@@ -415,8 +434,8 @@ async function deleteJob(docNo) {
   if (job?.driver) {
     void pushToDriver(
       job.driver,
-      "❌ ຖ້ຽວຖືກຍົກເລີກ",
-      `📋 ຖ້ຽວ ${docNo}\n⚠️ admin ໄດ້ລຶບຖ້ຽວນີ້ແລ້ວ`,
+      "🗑️ ຖ້ຽວຖືກລຶບ",
+      `📋 ຖ້ຽວ ${docNo}\n⚠️ admin ໄດ້ລຶບຖ້ຽວນີ້ ບິນຈະກັບໄປຄິວ`,
       { type: "job_deleted", doc_no: docNo }
     );
   }

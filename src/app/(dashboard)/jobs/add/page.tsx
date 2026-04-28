@@ -157,6 +157,10 @@ export default function AddJobClient({
   const [driver, setDriver] = useState("");
   const [selectedWorkers, setSelectedWorkers] = useState<string[]>([]);
   const [jobForwardCode, setJobForwardCode] = useState<string>(""); // "" = ສົ່ງລູກຄ້າ, otherwise = branch code
+  const [deliveryRoundCode, setDeliveryRoundCode] = useState<string>("");
+  const [deliveryRounds, setDeliveryRounds] = useState<
+    Array<{ code: string; name: string; time_label?: string }>
+  >([]);
   const [saving, setSaving] = useState(false);
 
   const [cars, setCars] = useState<Option[]>(initialCars);
@@ -164,6 +168,17 @@ export default function AddJobClient({
   const [workers, setWorkers] = useState<Option[]>(initialWorkers);
   const [availableBills, setAvailableBills] = useState<AvailableBill[]>(initialBills);
   const [transportBranches, setTransportBranches] = useState<TransportBranch[]>([]);
+
+  // Load active delivery rounds once for the selector below.
+  useEffect(() => {
+    void Actions.listDeliveryRounds(true)
+      .then((data) =>
+        setDeliveryRounds(
+          (data ?? []) as Array<{ code: string; name: string; time_label?: string }>
+        )
+      )
+      .catch(() => setDeliveryRounds([]));
+  }, []);
   const { session } = useSession();
   const ownBranch = (session?.logistic_code ?? "").trim();
 
@@ -589,6 +604,7 @@ export default function AddJobClient({
         date_log: dateLog,
         car,
         driver,
+        delivery_round_code: deliveryRoundCode || null,
         workers: selectedWorkers,
         bills,
       });
@@ -744,6 +760,25 @@ export default function AddJobClient({
                       className="h-9 w-full rounded-lg glass-input px-3 text-xs transition-all"
                     />
                   </div>
+                </div>
+
+                <div>
+                  <label className="text-[11px] font-medium text-gray-500 dark:text-gray-400 mb-1.5 block flex items-center gap-1">
+                    🕐 ຮອບການຈັດສົ່ງ
+                  </label>
+                  <select
+                    value={deliveryRoundCode}
+                    onChange={(e) => setDeliveryRoundCode(e.target.value)}
+                    className="h-9 w-full rounded-lg glass-input px-3 text-xs transition-all"
+                  >
+                    <option value="">-- ບໍ່ກຳນົດ --</option>
+                    {deliveryRounds.map((r) => (
+                      <option key={r.code} value={r.code}>
+                        {r.name}
+                        {r.time_label ? ` (${r.time_label})` : ""}
+                      </option>
+                    ))}
+                  </select>
                 </div>
 
                 <div>

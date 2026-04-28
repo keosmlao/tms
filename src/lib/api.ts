@@ -3,6 +3,7 @@ import * as approve from "@/actions/approve";
 import * as billShipment from "@/actions/bill-shipment";
 import * as bills from "@/actions/bills";
 import * as dashboard from "@/actions/dashboard";
+import * as deliveryRound from "@/actions/delivery-round";
 import * as fuel from "@/actions/fuel";
 import * as gps from "@/actions/gps";
 import * as jobs from "@/actions/jobs";
@@ -128,6 +129,12 @@ export const Actions = {
   // Settings (notification test mode etc.)
   getNotifySettings: settings.getNotifySettings,
   saveNotifySettings: settings.saveNotifySettings,
+
+  // Delivery rounds
+  listDeliveryRounds: deliveryRound.listDeliveryRounds,
+  getDeliveryRound: deliveryRound.getDeliveryRound,
+  upsertDeliveryRound: deliveryRound.upsertDeliveryRound,
+  deleteDeliveryRound: deliveryRound.deleteDeliveryRound,
 };
 
 export const Auth = {
