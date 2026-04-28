@@ -29,6 +29,7 @@ import {
   StatusStatGrid,
   StatusTableShell,
 } from "@/components/status-page-shell";
+import { useConfirm } from "@/components/confirm-dialog";
 // Ported from server actions: approveJob, closeJob, deleteJob, getJobBillsWithProducts, getJobs
 
 // ==================== Types ====================
@@ -412,6 +413,7 @@ function JobRow({
 
 export default function JobsClient({ initialJobs = [] as Job[] }: { initialJobs?: Job[] }) {
   const router = useRouter();
+  const confirm = useConfirm();
   const [jobs, setJobs] = useState<Job[]>(initialJobs);
   const [expandedDoc, setExpandedDoc] = useState<string | null>(null);
   const [billDetailsByDoc, setBillDetailsByDoc] = useState<Record<string, BillDetail[]>>({});
@@ -464,7 +466,13 @@ export default function JobsClient({ initialJobs = [] as Job[] }: { initialJobs?
   };
 
   const handleDelete = async (docNo: string) => {
-    if (!confirm("ຕ້ອງການລຶບຖ້ຽວນີ້ແທ້ບໍ່?")) return;
+    const ok = await confirm({
+      title: "ລຶບຖ້ຽວ?",
+      message: `ຖ້ຽວ ${docNo} ຈະຖືກລຶບ ບິນທັງໝົດຈະກັບໄປຄິວ`,
+      tone: "danger",
+      confirmLabel: "ລຶບ",
+    });
+    if (!ok) return;
     setActingDoc(docNo);
     try {
       await Actions.deleteJob(docNo);
@@ -477,7 +485,13 @@ export default function JobsClient({ initialJobs = [] as Job[] }: { initialJobs?
   };
 
   const handleClose = async (docNo: string) => {
-    if (!confirm("ຕ້ອງການໃຫ້ admin ປິດຖ້ຽວນີ້ແທ້ບໍ່?")) return;
+    const ok = await confirm({
+      title: "admin ປິດຖ້ຽວ?",
+      message: `ຖ້ຽວ ${docNo} ຈະຖືກປິດ`,
+      tone: "warning",
+      confirmLabel: "ປິດຖ້ຽວ",
+    });
+    if (!ok) return;
     setActingDoc(docNo);
     try {
       await Actions.closeJob(docNo);
@@ -495,7 +509,13 @@ export default function JobsClient({ initialJobs = [] as Job[] }: { initialJobs?
   };
 
   const handleApprove = async (docNo: string) => {
-    if (!confirm("ຕ້ອງການອະນຸມັດຖ້ຽວນີ້ແທ້ບໍ່?")) return;
+    const ok = await confirm({
+      title: "ອະນຸມັດຖ້ຽວ?",
+      message: `ຖ້ຽວ ${docNo} ຈະຖືກອະນຸມັດໃຫ້ຄົນຂັບເລີ່ມວຽກ`,
+      tone: "info",
+      confirmLabel: "ອະນຸມັດ",
+    });
+    if (!ok) return;
     setActingDoc(docNo);
     try {
       await Actions.approveJob(docNo);

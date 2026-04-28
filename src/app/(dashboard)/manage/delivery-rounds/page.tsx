@@ -14,6 +14,7 @@ import {
   StatusPageHeader,
   StatusTableShell,
 } from "@/components/status-page-shell";
+import { useConfirm } from "@/components/confirm-dialog";
 
 interface Round {
   code: string;
@@ -32,6 +33,7 @@ const EMPTY: Round = {
 };
 
 export default function DeliveryRoundsPage() {
+  const confirm = useConfirm();
   const [rows, setRows] = useState<Round[]>([]);
   const [loading, setLoading] = useState(true);
   const [editing, setEditing] = useState<Round | null>(null);
