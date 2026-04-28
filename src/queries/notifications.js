@@ -28,22 +28,20 @@ function trackingLink(billNo) {
 }
 
 async function getBillContext(billNo) {
-  const row = await queryOne(
-    `SELECT d.bill_no, d.doc_no,
-            COALESCE(d.cust_code, '') as cust_code,
-            COALESCE(c.name_1, '') as cust_name,
-            COALESCE(NULLIF(TRIM(d.telephone), ''), NULLIF(TRIM(c.telephone), ''), '') as cust_phone,
-            COALESCE(c.register_line_id, '') as cust_line_id,
-            COALESCE(b.sale_code, '') as sale_code,
-            COALESCE(u.name_1, '') as sale_name,
-            COALESCE(u.line_id, '') as sale_line_id,
-            COALESCE(car.name_1, j.car, '') as car_name,
-            COALESCE(drv.name_1, j.driver, '') as driver_name
+  // Split the lookup so a malformed date value on one of the joined tables
+  // (ic_trans / ar_customer have legacy empty-string dates that pg refuses to
+  // parse when the row is fetched whole) can't poison the whole query. Each
+  // sub-select casts only the text fields we need.
+  const base = await queryOne(
+    `SELECT d.bill_no::text, d.doc_no::text,
+            COALESCE(d.cust_code, '')::text as cust_code,
+            COALESCE(d.telephone, '')::text as bill_phone,
+            COALESCE(j.car, '')::text as car_code,
+            COALESCE(j.driver, '')::text as driver_code,
+            COALESCE(car.name_1, j.car, '')::text as car_name,
+            COALESCE(drv.name_1, j.driver, '')::text as driver_name
      FROM public.odg_tms_detail d
      LEFT JOIN public.odg_tms j ON j.doc_no = d.doc_no
-     LEFT JOIN ic_trans b ON b.doc_no = d.bill_no
-     LEFT JOIN ar_customer c ON c.code = d.cust_code
-     LEFT JOIN erp_user u ON u.code = b.sale_code
      LEFT JOIN public.odg_tms_car car ON car.code = j.car
      LEFT JOIN public.odg_tms_driver drv ON drv.code = j.driver
      WHERE d.bill_no = $1
@@ -51,7 +49,50 @@ async function getBillContext(billNo) {
      LIMIT 1`,
     [billNo]
   );
-  return row;
+  if (!base) return null;
+
+  // Customer details (cast to text to dodge legacy date-parsing errors).
+  let cust = { cust_name: "", cust_phone: "", cust_line_id: "" };
+  if (base.cust_code) {
+    try {
+      const c = await queryOne(
+        `SELECT COALESCE(name_1, '')::text as cust_name,
+                COALESCE(telephone, '')::text as cust_phone,
+                COALESCE(register_line_id, '')::text as cust_line_id
+         FROM public.ar_customer WHERE code = $1 LIMIT 1`,
+        [base.cust_code]
+      );
+      if (c) cust = c;
+    } catch (err) {
+      console.warn("[notify] ar_customer lookup failed:", err?.message ?? err);
+    }
+  }
+
+  // Sales person — sale_code lives on ic_trans, line_id on erp_user.
+  let sale = { sale_code: "", sale_name: "", sale_line_id: "" };
+  try {
+    const s = await queryOne(
+      `SELECT COALESCE(b.sale_code, '')::text as sale_code,
+              COALESCE(u.name_1, '')::text as sale_name,
+              COALESCE(u.line_id, '')::text as sale_line_id
+       FROM ic_trans b
+       LEFT JOIN erp_user u ON u.code = b.sale_code
+       WHERE b.doc_no = $1
+       LIMIT 1`,
+      [base.bill_no]
+    );
+    if (s) sale = s;
+  } catch (err) {
+    console.warn("[notify] ic_trans lookup failed:", err?.message ?? err);
+  }
+
+  return {
+    ...base,
+    cust_phone: base.bill_phone || cust.cust_phone || "",
+    cust_name: cust.cust_name,
+    cust_line_id: cust.cust_line_id,
+    ...sale,
+  };
 }
 
 async function notifyCustomerWhatsApp(billNo) {
