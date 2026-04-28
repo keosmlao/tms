@@ -64,6 +64,9 @@ async function getAvailableBillProducts(docNo) {
   return getRemainingBillProducts(docNo);
 }
 
+const { getPendingBillScheduleMap } = require("./pending-bill");
+const { getBillTodoSummaryMap } = require("./bill-todo");
+
 async function getBillsPending(session, fromDate, toDate, transportCode) {
   await ensureTmsDetailItemTable();
   const scope = getBranchScope(session);
@@ -74,6 +77,8 @@ async function getBillsPending(session, fromDate, toDate, transportCode) {
     query(
       `SELECT
         a.doc_no, to_char(a.doc_date,'DD-MM-YYYY') as doc_date, a.transport_name,
+        to_char(b.send_date,'YYYY-MM-DD') as bill_sent_date,
+        to_char(b.send_date,'DD-MM-YYYY') as bill_sent_date_display,
         c.name_1 as sale, COALESCE(dep.name_1::text, c.department::text, '') as department,
         d.name_1 as transport, to_char(a.create_date_time_now,'DD-MM-YYYY HH:MI') as time_open,
         now() - a.create_date_time_now as time_use
@@ -82,8 +87,8 @@ async function getBillsPending(session, fromDate, toDate, transportCode) {
       LEFT JOIN erp_user c ON c.code=b.sale_code
       LEFT JOIN erp_department_list dep ON dep.code=c.department
       LEFT JOIN transport_type d ON d.code=a.transport_code
-      WHERE check_status=0 AND a.doc_date BETWEEN $1 AND $2 AND ${where}
-      ORDER BY a.doc_date ASC`,
+      WHERE check_status=0 AND b.send_date BETWEEN $1 AND $2 AND ${where}
+      ORDER BY b.send_date ASC, a.doc_date ASC`,
       params
     ),
     scope.scoped
@@ -107,18 +112,43 @@ async function getBillsPending(session, fromDate, toDate, transportCode) {
   );
   const detailItemBills = new Set(detailItemRows.map((row) => row.bill_no));
 
+  // Schedule + remark stamps for bills the admin has flagged as overdue.
+  const scheduleMap = await getPendingBillScheduleMap(billNos);
+
+  // Aggregated todo counts/earliest deadline so the row indicator can render
+  // without fetching every individual todo upfront.
+  const todoMap = await getBillTodoSummaryMap(billNos);
+
   const trans = transRaw
     .map((bill) => {
       const summary = summaries.get(bill.doc_no) ?? {
         remaining_count: 0,
         remaining_qty_total: 0,
       };
+      const sched = scheduleMap.get(bill.doc_no) ?? null;
+      const todo = todoMap.get(bill.doc_no) ?? null;
+      // Default delivery date is the bill's sent_date from ic_trans; admins can
+      // override it via odg_tms_pending_bill when reschedule is needed.
+      const effectiveDate = sched?.scheduled_date ?? bill.bill_sent_date ?? null;
+      const effectiveDisplay =
+        sched?.scheduled_date_display ?? bill.bill_sent_date_display ?? null;
       return {
         ...bill,
         remaining_count: summary.remaining_count,
         remaining_qty_total: summary.remaining_qty_total,
         partial_delivery:
           detailItemBills.has(bill.doc_no) && summary.remaining_count > 0,
+        scheduled_date: effectiveDate,
+        scheduled_date_display: effectiveDisplay,
+        scheduled_date_overridden: Boolean(sched?.scheduled_date),
+        schedule_remark: sched?.remark ?? "",
+        action_status: sched?.action_status ?? "",
+        schedule_updated_at: sched?.updated_at ?? null,
+        schedule_updated_by: sched?.updated_by ?? "",
+        todo_pending_count: Number(todo?.pending_count ?? 0),
+        todo_done_count: Number(todo?.done_count ?? 0),
+        todo_earliest_deadline: todo?.earliest_deadline ?? null,
+        todo_earliest_deadline_display: todo?.earliest_deadline_display ?? null,
       };
     })
     .filter((bill) => bill.remaining_count > 0)
@@ -210,6 +240,7 @@ async function getBillsWaitingSentDetails(docNo) {
     )
     SELECT
       d.bill_no, to_char(d.bill_date,'DD-MM-YYYY') as bill_date,
+      to_char(d.date_logistic,'DD-MM-YYYY') as date_logistic,
       COALESCE(NULLIF(TRIM(c.name_1), ''), d.cust_code, '-') as customer,
       COALESCE(NULLIF(TRIM(d.telephone), ''), NULLIF(TRIM(c.telephone), ''), '-') as telephone,
       COALESCE(d.count_item::int, 0) as count_item,

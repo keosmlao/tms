@@ -8,6 +8,7 @@ import * as gps from "@/actions/gps";
 import * as jobs from "@/actions/jobs";
 import * as masterData from "@/actions/master-data";
 import * as reports from "@/actions/reports";
+import * as settings from "@/actions/settings";
 import * as tracking from "@/actions/tracking";
 
 export const Actions = {
@@ -51,6 +52,12 @@ export const Actions = {
   getBillCompleteList: bills.getBillCompleteList,
   getBillsCancelledList: bills.getBillsCancelledList,
   getBillsPartialList: bills.getBillsPartialList,
+  getPendingBillSchedule: bills.getPendingBillSchedule,
+  upsertPendingBillSchedule: bills.upsertPendingBillSchedule,
+  getBillTodos: bills.getBillTodos,
+  createBillTodo: bills.createBillTodo,
+  setBillTodoDone: bills.setBillTodoDone,
+  deleteBillTodo: bills.deleteBillTodo,
 
   // Reports
   getReportDaily: reports.getReportDaily,
@@ -90,6 +97,7 @@ export const Actions = {
 
   // Tracking
   trackBill: tracking.trackBill,
+  searchActiveDeliveryBills: tracking.searchActiveDeliveryBills,
   getGpsRealtime: tracking.getGpsRealtime,
   getGpsRealtimeAll: tracking.getGpsRealtimeAll,
   getLocations: tracking.getLocations,
@@ -116,6 +124,10 @@ export const Actions = {
   getFuelImage: fuel.getFuelImage,
   deleteFuelLog: fuel.deleteFuelLog,
   saveFuelRefill: fuel.saveFuelRefill,
+
+  // Settings (notification test mode etc.)
+  getNotifySettings: settings.getNotifySettings,
+  saveNotifySettings: settings.saveNotifySettings,
 };
 
 export const Auth = {

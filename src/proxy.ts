@@ -15,6 +15,15 @@ async function isValidToken(token: string | undefined): Promise<boolean> {
   }
 }
 
+// Routes customers can reach without logging in.
+const PUBLIC_PREFIXES = ["/track"];
+
+function isPublicPath(pathname: string): boolean {
+  return PUBLIC_PREFIXES.some(
+    (p) => pathname === p || pathname.startsWith(`${p}/`)
+  );
+}
+
 export async function proxy(request: NextRequest) {
   const { pathname } = request.nextUrl;
   const token = request.cookies.get("token")?.value;
@@ -24,6 +33,10 @@ export async function proxy(request: NextRequest) {
     if (valid) {
       return NextResponse.redirect(new URL("/", request.url));
     }
+    return NextResponse.next();
+  }
+
+  if (isPublicPath(pathname)) {
     return NextResponse.next();
   }
 

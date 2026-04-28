@@ -15,6 +15,16 @@ import {
   getBillsCancelledList as svcGetBillsCancelledList,
   getBillsPartialList as svcGetBillsPartialList,
 } from "@/queries/bills.js";
+import {
+  getPendingBillSchedule as svcGetPendingBillSchedule,
+  upsertPendingBillSchedule as svcUpsertPendingBillSchedule,
+} from "@/queries/pending-bill.js";
+import {
+  getBillTodos as svcGetBillTodos,
+  createBillTodo as svcCreateBillTodo,
+  setBillTodoDone as svcSetBillTodoDone,
+  deleteBillTodo as svcDeleteBillTodo,
+} from "@/queries/bill-todo.js";
 
 export async function getAvailableBills() {
   const s = await requireSession();
@@ -78,4 +88,58 @@ export async function getBillsCancelledList(fromDate?: string, toDate?: string) 
 export async function getBillsPartialList(fromDate?: string, toDate?: string) {
   const s = await requireSession();
   return svcGetBillsPartialList(s, fromDate, toDate);
+}
+
+export async function getPendingBillSchedule(billNo: string) {
+  await requireSession();
+  return svcGetPendingBillSchedule(billNo);
+}
+
+export async function upsertPendingBillSchedule(input: {
+  bill_no: string;
+  scheduled_date?: string | null;
+  remark?: string | null;
+  action_status?: string | null;
+}) {
+  const s = await requireSession();
+  return svcUpsertPendingBillSchedule({
+    billNo: input.bill_no,
+    scheduledDate: input.scheduled_date ?? null,
+    remark: input.remark ?? null,
+    actionStatus: input.action_status ?? null,
+    userCode: (s as { code?: string })?.code,
+  });
+}
+
+export async function getBillTodos(billNo: string) {
+  await requireSession();
+  return svcGetBillTodos(billNo);
+}
+
+export async function createBillTodo(input: {
+  bill_no: string;
+  summary: string;
+  deadline?: string | null;
+}) {
+  const s = await requireSession();
+  return svcCreateBillTodo({
+    billNo: input.bill_no,
+    summary: input.summary,
+    deadline: input.deadline ?? null,
+    userCode: (s as { code?: string })?.code,
+  });
+}
+
+export async function setBillTodoDone(input: { id: number | string; done: boolean }) {
+  const s = await requireSession();
+  return svcSetBillTodoDone({
+    id: input.id,
+    done: input.done,
+    userCode: (s as { code?: string })?.code,
+  });
+}
+
+export async function deleteBillTodo(id: number | string) {
+  await requireSession();
+  return svcDeleteBillTodo(id);
 }

@@ -69,6 +69,7 @@ export interface WaitingSentJob {
 export interface WaitingSentBillDetail {
   bill_no: string;
   bill_date: string;
+  date_logistic: string;
   customer: string;
   telephone: string;
   count_item: number;
@@ -630,7 +631,16 @@ export default function BillsWaitingSentClient({
                                                   </span>
                                                   <div>
                                                     <p className="text-xs font-semibold text-slate-800">{detail.bill_no}</p>
-                                                    <p className="text-[10px] text-slate-500">{detail.bill_date} · {detail.customer}</p>
+                                                    <p className="text-[10px] text-slate-500">{detail.customer}</p>
+                                                    <p className="text-[10px] text-slate-400 mt-0.5">
+                                                      ວັນທີອອກບິນ: <span className="font-medium text-slate-600 dark:text-slate-300">{detail.bill_date}</span>
+                                                      {detail.date_logistic && (
+                                                        <>
+                                                          {" · "}ວັນທີຈັດສົ່ງ:{" "}
+                                                          <span className="font-medium text-teal-600 dark:text-teal-400">{detail.date_logistic}</span>
+                                                        </>
+                                                      )}
+                                                    </p>
                                                   </div>
                                                 </div>
                                                 <div className="flex items-center gap-2">
@@ -645,7 +655,7 @@ export default function BillsWaitingSentClient({
                                               {detail.telephone && (
                                                 <p className="text-[10px] text-slate-400 mt-1 ml-7">ໂທ: {detail.telephone}</p>
                                               )}
-                                              <div className="flex gap-4 mt-1.5 ml-7 text-[10px] text-slate-400">
+                                              <div className="flex gap-4 mt-1.5 ml-7 text-[10px] text-slate-400 flex-wrap">
                                                 <span>ເບີກ: {detail.recipt_job}</span>
                                                 <span>ເລີ່ມ: {detail.sent_start}</span>
                                                 <span>ຈົບ: {detail.sent_end}</span>

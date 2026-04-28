@@ -1,23 +1,34 @@
 "use client";
 
-import { Fragment, useEffect, useState } from "react";
+import { Fragment, useEffect, useRef, useState } from "react";
 import {
   FaBox,
   FaBoxOpen,
+  FaCalendar,
+  FaCheck,
   FaChevronDown,
   FaChevronRight,
+  FaClock,
   FaExchangeAlt,
+  FaExclamationTriangle,
   FaFileInvoice,
   FaSearch,
   FaSortAmountDown,
   FaSortAmountUp,
   FaSpinner,
+  FaStickyNote,
   FaTimes,
+  FaTrash,
   FaTruck,
 } from "react-icons/fa";
-import { FIXED_YEAR_END, FIXED_YEAR_START } from "@/lib/fixed-year";
+import { FIXED_YEAR_END, FIXED_YEAR_START, getFixedTodayDate } from "@/lib/fixed-year";
 import { Actions } from "@/lib/api";
 import { StatusPageHeader, StatusStatGrid } from "@/components/status-page-shell";
+import {
+  PendingBillScheduleDialog,
+  type PendingScheduleDefaults,
+} from "@/components/pending-bill-schedule-dialog";
+import { BillTodoPopover } from "@/components/bill-todo-popover";
 // Ported from server actions: getBillProducts, getBillsPending, updateBillTransport
 
 interface TimeUse {
@@ -38,7 +49,33 @@ export interface Bill {
   remaining_count: number;
   remaining_qty_total: number;
   partial_delivery?: boolean;
+  scheduled_date?: string | null;
+  scheduled_date_display?: string | null;
+  scheduled_date_overridden?: boolean;
+  schedule_remark?: string;
+  action_status?: string;
+  schedule_updated_at?: string | null;
+  schedule_updated_by?: string;
+  todo_pending_count?: number;
+  todo_done_count?: number;
+  todo_earliest_deadline?: string | null;
+  todo_earliest_deadline_display?: string | null;
 }
+
+const ACTION_STATUSES = [
+  { key: "waiting_contact", label: "ລໍຖ້າຕິດຕໍ່ລູກຄ້າ", color: "amber" },
+  { key: "cannot_contact", label: "ຕິດຕໍ່ບໍ່ໄດ້", color: "rose" },
+  { key: "not_due_yet", label: "ຍັງບໍ່ຮອດກຳນົດ", color: "sky" },
+  { key: "customer_postponed", label: "ລູກຄ້າຂໍເລື່ອນ", color: "orange" },
+] as const;
+type ActionStatusKey = (typeof ACTION_STATUSES)[number]["key"];
+
+const ACTION_STATUS_MAP: Record<string, { label: string; color: string }> = {
+  waiting_contact: { label: "ລໍຖ້າຕິດຕໍ່ລູກຄ້າ", color: "amber" },
+  cannot_contact: { label: "ຕິດຕໍ່ບໍ່ໄດ້", color: "rose" },
+  not_due_yet: { label: "ຍັງບໍ່ຮອດກຳນົດ", color: "sky" },
+  customer_postponed: { label: "ລູກຄ້າຂໍເລື່ອນ", color: "orange" },
+};
 
 export interface Transport {
   code: string;
@@ -82,7 +119,12 @@ export default function BillsPendingClient() {
   const [expandedDoc, setExpandedDoc] = useState<string | null>(null);
   const [productsByDoc, setProductsByDoc] = useState<Record<string, Product[]>>({});
   const [loadingDoc, setLoadingDoc] = useState<string | null>(null);
+  const [scheduleBill, setScheduleBill] = useState<{ billNo: string; defaults: PendingScheduleDefaults } | null>(null);
+  const [todoOpen, setTodoOpen] = useState<{ billNo: string; anchor: HTMLElement } | null>(null);
+  const [statusTab, setStatusTab] = useState<ActionStatusKey | "all" | "none">("all");
+  const [statusMenu, setStatusMenu] = useState<{ billNo: string; anchor: HTMLElement } | null>(null);
   const perPage = 20;
+  const today = getFixedTodayDate();
 
   useEffect(() => { const i = setInterval(() => setTick((v) => v + 1), 1000); return () => clearInterval(i); }, []);
   // Fetch on mount — replaces the Next.js server component that used to preload.
@@ -115,9 +157,23 @@ export default function BillsPendingClient() {
 
   const deptList = [...new Set(bills.map((b) => b.department).filter(Boolean))].sort();
 
+  // Count bills per action_status so each tab can show a badge.
+  const statusCounts = bills.reduce(
+    (acc, b) => {
+      const k = b.action_status?.trim() || "none";
+      acc[k] = (acc[k] ?? 0) + 1;
+      return acc;
+    },
+    {} as Record<string, number>
+  );
+
   const kw = searchText.trim().toLowerCase();
   const filtered = bills.filter((b) => {
     if (departmentFilter !== "all" && b.department !== departmentFilter) return false;
+    if (statusTab !== "all") {
+      const cur = b.action_status?.trim() || "none";
+      if (cur !== statusTab) return false;
+    }
     if (!kw) return true;
     return [
       b.doc_no,
@@ -131,11 +187,15 @@ export default function BillsPendingClient() {
     ].filter(Boolean).join(" ").toLowerCase().includes(kw);
   });
 
-  // Sort by doc_date first, then by time_use within each date group.
+  // Group/sort by the delivery date (scheduled_date — overridden value or
+  // send_date fallback). Bills missing a date go to the end of the list.
+  const groupKey = (b: Bill) => b.scheduled_date_display ?? "—";
+  const sortKey = (b: Bill) => b.scheduled_date ?? "9999-12-31";
+
   const sorted = [...filtered].sort((a, b) => {
     const dateCmp = sortOrder === "asc"
-      ? a.doc_date.localeCompare(b.doc_date)
-      : b.doc_date.localeCompare(a.doc_date);
+      ? sortKey(a).localeCompare(sortKey(b))
+      : sortKey(b).localeCompare(sortKey(a));
     if (dateCmp !== 0) return dateCmp;
     return sortOrder === "asc" ? baseSec(a.time_use) - baseSec(b.time_use) : baseSec(b.time_use) - baseSec(a.time_use);
   });
@@ -145,8 +205,9 @@ export default function BillsPendingClient() {
   // Per-date totals across the full filtered set, so the group header shows
   // meaningful numbers even when a date spans multiple pages.
   const dateTotals = filtered.reduce<Record<string, { count: number; qty: number }>>((acc, b) => {
-    const prev = acc[b.doc_date] ?? { count: 0, qty: 0 };
-    acc[b.doc_date] = {
+    const key = groupKey(b);
+    const prev = acc[key] ?? { count: 0, qty: 0 };
+    acc[key] = {
       count: prev.count + (Number(b.remaining_count) || 0),
       qty: prev.qty + (Number(b.remaining_qty_total) || 0),
     };
@@ -264,6 +325,61 @@ export default function BillsPendingClient() {
         </form>
       </div>
 
+      {/* ── Status tabs ── */}
+      <div className="glass rounded-lg p-1.5 flex flex-wrap gap-1">
+        {(
+          [
+            { key: "all", label: "ທັງໝົດ", count: bills.length, color: "slate" },
+            ...ACTION_STATUSES.map((s) => ({
+              key: s.key,
+              label: s.label,
+              count: statusCounts[s.key] ?? 0,
+              color: s.color,
+            })),
+            { key: "none", label: "ຍັງບໍ່ໄດ້ໝາຍ", count: statusCounts.none ?? 0, color: "slate" },
+          ] as const
+        ).map((tab) => {
+          const active = statusTab === tab.key;
+          const colorMap: Record<string, string> = {
+            slate: active
+              ? "bg-slate-700 text-white"
+              : "text-slate-600 dark:text-slate-300 hover:bg-slate-500/10",
+            rose: active
+              ? "bg-rose-600 text-white"
+              : "text-rose-600 dark:text-rose-400 hover:bg-rose-500/10",
+            amber: active
+              ? "bg-amber-600 text-white"
+              : "text-amber-700 dark:text-amber-400 hover:bg-amber-500/10",
+            sky: active
+              ? "bg-sky-600 text-white"
+              : "text-sky-600 dark:text-sky-400 hover:bg-sky-500/10",
+            emerald: active
+              ? "bg-emerald-600 text-white"
+              : "text-emerald-700 dark:text-emerald-400 hover:bg-emerald-500/10",
+          };
+          return (
+            <button
+              key={tab.key}
+              type="button"
+              onClick={() => {
+                setStatusTab(tab.key as ActionStatusKey | "all" | "none");
+                setCurrentPage(1);
+              }}
+              className={`px-3 py-1.5 rounded-md text-[11px] font-semibold transition-colors inline-flex items-center gap-1.5 ${colorMap[tab.color]}`}
+            >
+              {tab.label}
+              <span
+                className={`min-w-[18px] h-[18px] px-1 rounded-full text-[10px] font-bold flex items-center justify-center ${
+                  active ? "bg-white/25 text-white" : "bg-slate-500/10"
+                }`}
+              >
+                {tab.count}
+              </span>
+            </button>
+          );
+        })}
+      </div>
+
       {/* ── Content ── */}
       {loading ? (
         <div className="glass rounded-lg p-16 text-center">
@@ -290,11 +406,11 @@ export default function BillsPendingClient() {
           {/* Table */}
           <div className="glass rounded-lg overflow-hidden">
             <div className="overflow-x-auto">
-              <table className="w-full text-xs">
+              <table className="w-full min-w-[1400px] text-xs">
                 <thead>
                   <tr className="bg-teal-500/10">
-                    {["#", "ເລກທີ", "ວັນທີ", "ລູກຄ້າ", "ຄົງເຫຼືອ", "ຂາຍ", "ພະແນກ", "ຂົນສົ່ງ", "ເວລາ", "ດຳເນີນ"].map((h) => (
-                      <th key={h} className="px-3 py-2.5 text-left text-[10px] font-bold uppercase tracking-wider text-teal-600 dark:text-teal-400">{h}</th>
+                    {["#", "ເລກທີ", "ວັນທີ", "ວັນຈັດສົ່ງ", "ໝາຍເຫດ", "ລູກຄ້າ", "ຄົງເຫຼືອ", "ຂາຍ", "ພະແນກ", "ຂົນສົ່ງ", "ເວລາ", "ດຳເນີນ"].map((h) => (
+                      <th key={h} className="px-3 py-2.5 text-left text-[10px] font-bold uppercase tracking-wider text-teal-600 dark:text-teal-400 whitespace-nowrap">{h}</th>
                     ))}
                   </tr>
                 </thead>
@@ -302,17 +418,18 @@ export default function BillsPendingClient() {
                   {paged.map((bill, i) => {
                     const prods = productsByDoc[bill.doc_no] ?? [];
                     const exp = expandedDoc === bill.doc_no;
-                    const showDateHeader = i === 0 || paged[i - 1].doc_date !== bill.doc_date;
-                    const groupTotal = dateTotals[bill.doc_date] ?? { count: 0, qty: 0 };
+                    const billGroup = groupKey(bill);
+                    const showDateHeader = i === 0 || groupKey(paged[i - 1]) !== billGroup;
+                    const groupTotal = dateTotals[billGroup] ?? { count: 0, qty: 0 };
 
                     return (
                       <Fragment key={bill.doc_no}>
                         {showDateHeader && (
                           <tr className="border-b border-slate-200/30 dark:border-white/5 bg-white/30 dark:bg-white/5">
-                            <td colSpan={10} className="px-3 py-2">
+                            <td colSpan={12} className="px-3 py-2">
                               <div className="flex items-center justify-between text-[11px]">
                                 <span className="font-semibold" style={{ color: T.primary }}>
-                                  ວັນທີ {bill.doc_date}
+                                  ວັນຈັດສົ່ງ {billGroup}
                                 </span>
                                 <span className="text-slate-500">
                                   <span className="font-bold text-amber-700">{fmtQty(groupTotal.qty)} qty</span>
@@ -336,6 +453,97 @@ export default function BillsPendingClient() {
                             </button>
                           </td>
                           <td className="px-3 py-2.5 text-slate-500">{bill.doc_date}</td>
+                          <td className="px-3 py-2.5">
+                            <button
+                              onClick={() =>
+                                setScheduleBill({
+                                  billNo: bill.doc_no,
+                                  defaults: {
+                                    scheduled_date: bill.scheduled_date ?? null,
+                                    remark: bill.schedule_remark ?? "",
+                                    updated_by: bill.schedule_updated_by ?? "",
+                                    updated_at: bill.schedule_updated_at ?? null,
+                                  },
+                                })
+                              }
+                              className={`flex flex-col gap-0.5 text-left rounded-md px-1.5 py-1 -mx-1 hover:bg-white/40 dark:hover:bg-white/5 transition-colors ${
+                                bill.scheduled_date && bill.scheduled_date < today
+                                  ? "ring-1 ring-rose-300/40"
+                                  : ""
+                              }`}
+                              title="ກຳນົດ/ແກ້ໄຂ ວັນຈັດສົ່ງ"
+                            >
+                              {bill.scheduled_date_display ? (
+                                <span
+                                  className={`inline-flex items-center gap-1 text-[11px] font-bold ${
+                                    bill.scheduled_date! < today
+                                      ? "text-rose-600 dark:text-rose-400"
+                                      : "text-slate-700 dark:text-slate-200"
+                                  }`}
+                                >
+                                  {bill.scheduled_date! < today && (
+                                    <FaExclamationTriangle size={9} />
+                                  )}
+                                  <FaCalendar size={9} className="opacity-60" />
+                                  {bill.scheduled_date_display}
+                                  {bill.scheduled_date_overridden && (
+                                    <span className="ml-1 text-[9px] font-semibold text-amber-600 dark:text-amber-400">
+                                      (ແກ້ໄຂ)
+                                    </span>
+                                  )}
+                                </span>
+                              ) : (
+                                <span className="inline-flex items-center gap-1 text-[10px] text-amber-600 dark:text-amber-400 font-semibold">
+                                  <FaCalendar size={9} /> ກຳນົດວັນສົ່ງ
+                                </span>
+                              )}
+                            </button>
+                          </td>
+                          <td className="px-3 py-2.5 text-slate-600 dark:text-slate-300 align-top max-w-[260px]">
+                            <div className="flex flex-col gap-1">
+                              <button
+                                type="button"
+                                onClick={(e) =>
+                                  setStatusMenu({ billNo: bill.doc_no, anchor: e.currentTarget })
+                                }
+                                className="self-start"
+                                title="ປ່ຽນສະຖານະ"
+                              >
+                                {bill.action_status && ACTION_STATUS_MAP[bill.action_status] ? (
+                                  <span
+                                    className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-semibold border ${
+                                      ACTION_STATUS_MAP[bill.action_status].color === "rose"
+                                        ? "bg-rose-500/10 text-rose-600 dark:text-rose-400 border-rose-500/30"
+                                        : ACTION_STATUS_MAP[bill.action_status].color === "amber"
+                                        ? "bg-amber-500/10 text-amber-700 dark:text-amber-400 border-amber-500/30"
+                                        : "bg-sky-500/10 text-sky-600 dark:text-sky-400 border-sky-500/30"
+                                    }`}
+                                  >
+                                    {ACTION_STATUS_MAP[bill.action_status].label}
+                                    <FaChevronDown size={7} className="opacity-60" />
+                                  </span>
+                                ) : (
+                                  <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] text-slate-500 border border-dashed border-slate-300 hover:bg-slate-500/5">
+                                    + ໝາຍສະຖານະ
+                                  </span>
+                                )}
+                              </button>
+                              {bill.schedule_remark ? (
+                                <span
+                                  className="inline-flex items-start gap-1.5 text-[11px]"
+                                  title={bill.schedule_remark}
+                                >
+                                  <FaStickyNote
+                                    size={9}
+                                    className="text-amber-500 shrink-0 mt-0.5"
+                                  />
+                                  <span className="whitespace-pre-wrap break-words">
+                                    {bill.schedule_remark}
+                                  </span>
+                                </span>
+                              ) : null}
+                            </div>
+                          </td>
                           <td className="px-3 py-2.5 text-slate-700 max-w-[140px] truncate" title={bill.transport_name}>{bill.transport_name}</td>
                           <td className="px-3 py-2.5">
                             <div className="flex flex-col gap-0.5">
@@ -363,16 +571,40 @@ export default function BillsPendingClient() {
                             ) : <span className="text-slate-400">-</span>}
                           </td>
                           <td className="px-3 py-2.5">
-                            <button onClick={() => openModal(bill)} className="px-2.5 py-1 rounded-lg text-[10px] font-semibold text-white transition-colors bg-teal-600 hover:bg-teal-700 dark:bg-teal-500">
-                              <FaExchangeAlt className="inline mr-1" size={9} />ປ່ຽນ
-                            </button>
+                            <div className="inline-flex items-center gap-1.5">
+                              <button
+                                onClick={(e) =>
+                                  setTodoOpen({ billNo: bill.doc_no, anchor: e.currentTarget })
+                                }
+                                className={`relative inline-flex items-center justify-center w-7 h-7 rounded-lg transition-colors ${
+                                  bill.todo_pending_count && bill.todo_earliest_deadline && bill.todo_earliest_deadline < today
+                                    ? "text-rose-600 bg-rose-500/10 hover:bg-rose-500/20"
+                                    : bill.todo_pending_count && bill.todo_earliest_deadline === today
+                                    ? "text-amber-600 bg-amber-500/10 hover:bg-amber-500/20"
+                                    : bill.todo_pending_count
+                                    ? "text-emerald-600 bg-emerald-500/10 hover:bg-emerald-500/20"
+                                    : "text-slate-400 hover:bg-slate-500/10"
+                                }`}
+                                title="ກິດຈະກຳ"
+                              >
+                                <FaClock size={11} />
+                                {(bill.todo_pending_count ?? 0) > 0 && (
+                                  <span className="absolute -top-1 -right-1 min-w-[14px] h-[14px] px-0.5 rounded-full bg-rose-500 text-white text-[8px] font-bold flex items-center justify-center">
+                                    {bill.todo_pending_count}
+                                  </span>
+                                )}
+                              </button>
+                              <button onClick={() => openModal(bill)} className="px-2.5 py-1 rounded-lg text-[10px] font-semibold text-white transition-colors bg-teal-600 hover:bg-teal-700 dark:bg-teal-500">
+                                <FaExchangeAlt className="inline mr-1" size={9} />ປ່ຽນ
+                              </button>
+                            </div>
                           </td>
                         </tr>
 
                         {/* Expanded products */}
                         {exp && (
                           <tr>
-                            <td colSpan={10} className="p-0">
+                            <td colSpan={12} className="p-0">
                               <div className="mx-3 my-2 rounded-lg glass overflow-hidden">
                                 <div className="px-3 py-2 flex items-center justify-between bg-teal-500/10">
                                   <span className="text-[11px] font-bold flex items-center gap-1.5 text-teal-600 dark:text-teal-400">
@@ -507,6 +739,206 @@ export default function BillsPendingClient() {
           </div>
         </div>
       )}
+
+      <PendingBillScheduleDialog
+        open={scheduleBill !== null}
+        billNo={scheduleBill?.billNo ?? null}
+        initial={scheduleBill?.defaults ?? null}
+        onClose={() => setScheduleBill(null)}
+        onSaved={() => void fetchBills()}
+      />
+
+      <BillTodoPopover
+        open={todoOpen !== null}
+        billNo={todoOpen?.billNo ?? null}
+        anchorEl={todoOpen?.anchor ?? null}
+        onClose={() => setTodoOpen(null)}
+        onChanged={() => void fetchBills()}
+      />
+
+      <StatusMenu
+        billNo={statusMenu?.billNo ?? null}
+        currentStatus={
+          statusMenu
+            ? bills.find((b) => b.doc_no === statusMenu.billNo)?.action_status ?? ""
+            : ""
+        }
+        currentRemark={
+          statusMenu
+            ? bills.find((b) => b.doc_no === statusMenu.billNo)?.schedule_remark ?? ""
+            : ""
+        }
+        anchorEl={statusMenu?.anchor ?? null}
+        onClose={() => setStatusMenu(null)}
+        onSaved={() => void fetchBills()}
+      />
+    </div>
+  );
+}
+
+function StatusMenu({
+  billNo,
+  currentStatus,
+  currentRemark,
+  anchorEl,
+  onClose,
+  onSaved,
+}: {
+  billNo: string | null;
+  currentStatus: string;
+  currentRemark: string;
+  anchorEl: HTMLElement | null;
+  onClose: () => void;
+  onSaved: () => void;
+}) {
+  const [pos, setPos] = useState<{ top: number; left: number } | null>(null);
+  const [saving, setSaving] = useState(false);
+  const [pickedStatus, setPickedStatus] = useState<string>("");
+  const [remark, setRemark] = useState("");
+  const ref = useRef<HTMLDivElement>(null);
+  const open = billNo !== null && anchorEl !== null;
+
+  useEffect(() => {
+    if (!open) return;
+    setPickedStatus(currentStatus ?? "");
+    setRemark(currentRemark ?? "");
+  }, [open, currentStatus, currentRemark]);
+
+  useEffect(() => {
+    if (!open || !anchorEl) return;
+    const update = () => {
+      const rect = anchorEl.getBoundingClientRect();
+      const w = 280;
+      const left = Math.max(8, Math.min(window.innerWidth - w - 8, rect.left));
+      setPos({ top: rect.bottom + 4, left });
+    };
+    update();
+    window.addEventListener("resize", update);
+    window.addEventListener("scroll", update, true);
+    return () => {
+      window.removeEventListener("resize", update);
+      window.removeEventListener("scroll", update, true);
+    };
+  }, [open, anchorEl]);
+
+  useEffect(() => {
+    if (!open) return;
+    const onClick = (e: MouseEvent) => {
+      const t = e.target as Node;
+      if (ref.current?.contains(t)) return;
+      if (anchorEl?.contains(t)) return;
+      onClose();
+    };
+    document.addEventListener("mousedown", onClick);
+    return () => document.removeEventListener("mousedown", onClick);
+  }, [open, anchorEl, onClose]);
+
+  const save = async (clear = false) => {
+    if (!billNo) return;
+    setSaving(true);
+    try {
+      await Actions.upsertPendingBillSchedule({
+        bill_no: billNo,
+        action_status: clear ? null : pickedStatus || null,
+        remark: clear ? null : remark.trim() || null,
+      });
+      onSaved();
+      onClose();
+    } catch (e) {
+      console.error(e);
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  if (!open || !pos) return null;
+
+  return (
+    <div
+      ref={ref}
+      className="fixed z-50 w-[280px] glass rounded-lg shadow-xl border border-slate-200/40 dark:border-white/10 overflow-hidden"
+      style={{ top: pos.top, left: pos.left }}
+    >
+      <div className="px-3 py-2 bg-white/40 dark:bg-white/5 border-b border-slate-200/30 dark:border-white/5 flex items-center justify-between">
+        <p className="text-[11px] font-bold text-slate-700 dark:text-slate-200">
+          ສະຖານະບິນ
+        </p>
+        <button
+          onClick={onClose}
+          className="w-5 h-5 rounded text-slate-400 hover:bg-slate-100 dark:hover:bg-white/5 flex items-center justify-center"
+        >
+          <FaTimes size={9} />
+        </button>
+      </div>
+
+      <div className="p-2 space-y-1">
+        {ACTION_STATUSES.map((s) => {
+          const active = pickedStatus === s.key;
+          return (
+            <button
+              key={s.key}
+              type="button"
+              disabled={saving}
+              onClick={() => setPickedStatus(s.key)}
+              className={`w-full text-left px-2.5 py-1.5 rounded text-[11px] flex items-center gap-2 transition-colors ${
+                active
+                  ? s.color === "rose"
+                    ? "bg-rose-500/15 text-rose-700 dark:text-rose-400 ring-1 ring-rose-500/40"
+                    : s.color === "amber"
+                    ? "bg-amber-500/15 text-amber-800 dark:text-amber-400 ring-1 ring-amber-500/40"
+                    : "bg-sky-500/15 text-sky-700 dark:text-sky-400 ring-1 ring-sky-500/40"
+                  : "text-slate-700 dark:text-slate-200 hover:bg-white/40 dark:hover:bg-white/5"
+              }`}
+            >
+              <span
+                className={`w-2 h-2 rounded-full ${
+                  s.color === "rose"
+                    ? "bg-rose-500"
+                    : s.color === "amber"
+                    ? "bg-amber-500"
+                    : "bg-sky-500"
+                }`}
+              />
+              {s.label}
+              {active && <FaCheck size={9} className="ml-auto" />}
+            </button>
+          );
+        })}
+      </div>
+
+      <div className="px-3 pt-1 pb-2 border-t border-slate-200/30 dark:border-white/5">
+        <label className="block text-[10px] font-semibold text-slate-500 uppercase tracking-wider mb-1">
+          <FaStickyNote className="inline mr-1" size={9} /> ໝາຍເຫດ
+        </label>
+        <textarea
+          value={remark}
+          onChange={(e) => setRemark(e.target.value)}
+          rows={2}
+          placeholder="ເຫດຜົນ ຫຼື ບັນທຶກສ້ວນ..."
+          className="w-full glass-input rounded-md px-2 py-1.5 text-[11px] text-slate-700 dark:text-slate-200 resize-none"
+        />
+      </div>
+
+      <div className="px-3 py-2 border-t border-slate-200/30 dark:border-white/5 bg-white/30 dark:bg-white/5 flex items-center justify-between gap-2">
+        <button
+          type="button"
+          disabled={saving || (!currentStatus && !currentRemark)}
+          onClick={() => void save(true)}
+          className="px-2 py-1 text-[11px] font-semibold rounded text-rose-600 hover:bg-rose-500/10 disabled:opacity-40 inline-flex items-center gap-1"
+          title="ລ້າງສະຖານະ + ໝາຍເຫດ"
+        >
+          <FaTrash size={8} /> ລ້າງ
+        </button>
+        <button
+          type="button"
+          disabled={saving}
+          onClick={() => void save(false)}
+          className="px-3 py-1 text-[11px] font-semibold rounded bg-emerald-600 hover:bg-emerald-700 text-white disabled:opacity-50 inline-flex items-center gap-1"
+        >
+          {saving ? <FaSpinner className="animate-spin" size={9} /> : <FaCheck size={9} />}
+          ບັນທຶກ
+        </button>
+      </div>
     </div>
   );
 }

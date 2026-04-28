@@ -1,6 +1,6 @@
 "use client";
 
-import { Suspense, useEffect, useState } from "react";
+import { Suspense, useEffect, useMemo, useRef, useState } from "react";
 import { useSearchParams } from "next/navigation";
 import {
   FaSearch,
@@ -21,6 +21,7 @@ import {
   FaCommentDots,
 } from "react-icons/fa";
 import { Actions } from "@/lib/api";
+import { TrackingLiveMap } from "@/components/tracking-live-map";
 // Ported from server actions: trackBill
 
 // ==================== Types ====================
@@ -31,20 +32,45 @@ interface TrackingStep {
   remark: string;
 }
 
+interface TrackingItem {
+  item_code: string;
+  item_name: string;
+  qty: number | string;
+  selected_qty: number | string;
+  delivered_qty: number | string;
+  unit_code: string;
+}
+
+interface CarPosition {
+  lat: number;
+  lng: number;
+  speed: number;
+  heading: number;
+  recorded_at: string;
+  address: string;
+  state_detail?: string;
+  age_seconds: number;
+}
+
 interface TrackingResult {
   doc_no: string;
   doc_date: string;
   bill_no: string;
   bill_date: string;
   car: string;
+  car_code?: string;
   driver: string;
+  driver_photo?: string;
   url_img: string;
   lat: string;
   lng: string;
   lat_end: string;
   lng_end: string;
   remark: string;
+  bill_status?: number;
   list: TrackingStep[];
+  items?: TrackingItem[];
+  car_position?: CarPosition | null;
 }
 
 // ==================== Status Config ====================
@@ -413,6 +439,392 @@ function NotFoundState() {
   );
 }
 
+// ==================== Active Bills Combobox ====================
+interface ActiveBill {
+  bill_no: string;
+  doc_no: string;
+  bill_date: string;
+  cust_code: string;
+  cust_name: string;
+  car: string;
+  driver: string;
+  phase: string;
+}
+
+function ActiveBillsCombobox({
+  value,
+  onChange,
+  onPick,
+}: {
+  value: string;
+  onChange: (v: string) => void;
+  onPick: (billNo: string) => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const [bills, setBills] = useState<ActiveBill[]>([]);
+  const [loading, setLoading] = useState(false);
+  const ref = useRef<HTMLDivElement>(null);
+  const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  // Fetch active bills, debounced; refreshes whenever the search text changes.
+  useEffect(() => {
+    if (!open) return;
+    if (debounceRef.current) clearTimeout(debounceRef.current);
+    setLoading(true);
+    debounceRef.current = setTimeout(() => {
+      Actions.searchActiveDeliveryBills(value)
+        .then((data) => setBills((data ?? []) as ActiveBill[]))
+        .catch((e) => {
+          console.error(e);
+          setBills([]);
+        })
+        .finally(() => setLoading(false));
+    }, 200);
+    return () => {
+      if (debounceRef.current) clearTimeout(debounceRef.current);
+    };
+  }, [open, value]);
+
+  // Click outside to close.
+  useEffect(() => {
+    if (!open) return;
+    const onClick = (e: MouseEvent) => {
+      if (ref.current && !ref.current.contains(e.target as Node)) {
+        setOpen(false);
+      }
+    };
+    document.addEventListener("mousedown", onClick);
+    return () => document.removeEventListener("mousedown", onClick);
+  }, [open]);
+
+  const phaseTone = (phase: string) =>
+    phase === "ກຳລັງຈັດສົ່ງ"
+      ? "bg-sky-500/10 text-sky-600 dark:text-sky-400"
+      : phase === "ເບີກເຄື່ອງແລ້ວ"
+      ? "bg-amber-500/10 text-amber-700 dark:text-amber-400"
+      : "bg-slate-500/10 text-slate-600 dark:text-slate-400";
+
+  return (
+    <div ref={ref} className="flex-1 relative">
+      <FaFileInvoice
+        className="absolute left-3.5 top-1/2 -translate-y-1/2 text-slate-300"
+        size={13}
+      />
+      <input
+        type="text"
+        value={value}
+        onChange={(e) => {
+          onChange(e.target.value);
+          if (!open) setOpen(true);
+        }}
+        onFocus={() => setOpen(true)}
+        placeholder="ເລກບິນ, ລູກຄ້າ, ລົດ..."
+        className="glass-input w-full pl-10 pr-10 py-2.5 rounded-lg text-sm"
+        autoComplete="off"
+      />
+      {loading && (
+        <FaSpinner
+          size={12}
+          className="absolute right-3.5 top-1/2 -translate-y-1/2 text-slate-400 animate-spin"
+        />
+      )}
+
+      {open && (
+        <div className="absolute z-30 mt-1 w-full glass rounded-lg shadow-xl border border-slate-200/40 dark:border-white/10 overflow-hidden max-h-[60vh] flex flex-col">
+          <div className="px-3 py-1.5 bg-white/40 dark:bg-white/5 border-b border-slate-200/30 dark:border-white/5 flex items-center justify-between">
+            <span className="text-[10px] font-bold uppercase tracking-wider text-slate-500">
+              ບິນທີ່ກຳລັງຈັດສົ່ງ
+            </span>
+            <span className="text-[10px] text-slate-400">{bills.length} ລາຍການ</span>
+          </div>
+          <div className="flex-1 overflow-y-auto">
+            {loading && bills.length === 0 ? (
+              <div className="py-6 text-center text-xs text-slate-400">
+                <FaSpinner className="animate-spin inline mr-1.5" size={11} />
+                ກຳລັງໂຫຼດ...
+              </div>
+            ) : bills.length === 0 ? (
+              <div className="py-6 text-center text-xs text-slate-400">
+                ບໍ່ພົບບິນທີ່ກຳລັງຈັດສົ່ງ
+              </div>
+            ) : (
+              bills.map((b) => (
+                <button
+                  type="button"
+                  key={`${b.doc_no}-${b.bill_no}`}
+                  onClick={() => {
+                    onPick(b.bill_no);
+                    setOpen(false);
+                  }}
+                  className="w-full text-left px-3 py-2 hover:bg-white/40 dark:hover:bg-white/5 transition-colors border-b border-slate-200/20 dark:border-white/5 last:border-0"
+                >
+                  <div className="flex items-center justify-between gap-2">
+                    <div className="min-w-0 flex-1">
+                      <div className="flex items-center gap-2">
+                        <span className="text-xs font-bold text-slate-800 dark:text-white">
+                          {b.bill_no}
+                        </span>
+                        <span className="text-[10px] text-slate-400">{b.bill_date}</span>
+                      </div>
+                      <p className="text-[11px] text-slate-500 dark:text-slate-400 truncate">
+                        {b.cust_name}
+                      </p>
+                      <p className="text-[10px] text-slate-400 truncate">
+                        🚚 {b.car} · {b.driver}
+                      </p>
+                    </div>
+                    <span
+                      className={`text-[10px] font-bold px-2 py-0.5 rounded-full whitespace-nowrap ${phaseTone(
+                        b.phase
+                      )}`}
+                    >
+                      {b.phase}
+                    </span>
+                  </div>
+                </button>
+              ))
+            )}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ==================== Driver Card ====================
+const PHOTO_BASE_URL = process.env.NEXT_PUBLIC_BIOTIME_PHOTO_URL ?? "";
+
+function DriverCard({
+  name,
+  photoFile,
+  car,
+}: {
+  name: string;
+  photoFile: string;
+  car: string;
+}) {
+  const [imgFailed, setImgFailed] = useState(false);
+  const photoUrl =
+    photoFile && PHOTO_BASE_URL
+      ? `${PHOTO_BASE_URL.replace(/\/$/, "")}/${photoFile}`
+      : "";
+  const initial =
+    name?.trim()?.replace(/^(ທ\.|ທ່ານ|ທ້າວ|ນາງ)\s*/, "")?.[0] ?? "?";
+  return (
+    <div className="glass rounded-lg p-4 flex items-center gap-3">
+      {photoUrl && !imgFailed ? (
+        // eslint-disable-next-line @next/next/no-img-element
+        <img
+          src={photoUrl}
+          alt={name}
+          onError={() => setImgFailed(true)}
+          className="w-14 h-14 rounded-full object-cover border-2 border-teal-500/40 shrink-0"
+        />
+      ) : (
+        <div className="w-14 h-14 rounded-full bg-gradient-to-br from-teal-500 to-sky-600 text-white text-xl font-black flex items-center justify-center shrink-0">
+          {initial}
+        </div>
+      )}
+      <div className="flex-1 min-w-0">
+        <p className="text-[10px] text-slate-400 mb-0.5">ຄົນຂັບລົດ</p>
+        <p className="text-sm font-bold text-slate-800 dark:text-slate-200 truncate">
+          {name || "-"}
+        </p>
+        {car && (
+          <p className="text-[11px] text-slate-500 dark:text-slate-400 inline-flex items-center gap-1 mt-0.5">
+            <FaTruck size={9} /> {car}
+          </p>
+        )}
+      </div>
+    </div>
+  );
+}
+
+// ==================== Items Card ====================
+function ItemsCard({ items }: { items: TrackingItem[] }) {
+  const fmt = (v: number | string) => {
+    const n = Number(v ?? 0);
+    if (!Number.isFinite(n)) return "0";
+    return Math.abs(n % 1) < 0.000001
+      ? n.toLocaleString("en-US", { maximumFractionDigits: 0 })
+      : n.toLocaleString("en-US", { minimumFractionDigits: 0, maximumFractionDigits: 2 });
+  };
+  const totals = items.reduce(
+    (acc, it) => {
+      acc.selected += Number(it.selected_qty ?? 0) || 0;
+      acc.delivered += Number(it.delivered_qty ?? 0) || 0;
+      return acc;
+    },
+    { selected: 0, delivered: 0 }
+  );
+  return (
+    <div className="glass rounded-lg overflow-hidden">
+      <div className="px-5 py-3.5 border-b border-slate-200/30 dark:border-white/5 flex items-center justify-between">
+        <div className="flex items-center gap-2">
+          <div className="w-7 h-7 rounded-lg bg-amber-500/10 flex items-center justify-center">
+            <FaBox className="text-amber-500" size={12} />
+          </div>
+          <h2 className="text-sm font-bold text-slate-800 dark:text-white">
+            ສິນຄ້າທີ່ຈັດສົ່ງ
+          </h2>
+        </div>
+        <span className="text-[10px] text-slate-500">
+          {items.length} ລາຍການ · ສົ່ງ{" "}
+          <span className="font-bold text-emerald-600">{fmt(totals.delivered)}</span>
+          {" / "}
+          <span className="font-bold text-amber-700">{fmt(totals.selected)}</span>
+        </span>
+      </div>
+      <div className="overflow-x-auto">
+        <table className="w-full text-xs">
+          <thead>
+            <tr className="bg-white/30 dark:bg-white/5 border-b border-slate-200/30 dark:border-white/5">
+              <th className="px-4 py-2 text-left text-[10px] font-bold uppercase tracking-wider text-slate-500 dark:text-slate-400 w-6">
+                #
+              </th>
+              <th className="px-4 py-2 text-left text-[10px] font-bold uppercase tracking-wider text-slate-500 dark:text-slate-400">
+                ລະຫັດ
+              </th>
+              <th className="px-4 py-2 text-left text-[10px] font-bold uppercase tracking-wider text-slate-500 dark:text-slate-400">
+                ຊື່ສິນຄ້າ
+              </th>
+              <th className="px-4 py-2 text-right text-[10px] font-bold uppercase tracking-wider text-slate-500 dark:text-slate-400">
+                ຈັດສົ່ງ
+              </th>
+              <th className="px-4 py-2 text-right text-[10px] font-bold uppercase tracking-wider text-slate-500 dark:text-slate-400">
+                ສົ່ງແລ້ວ
+              </th>
+              <th className="px-4 py-2 text-left text-[10px] font-bold uppercase tracking-wider text-slate-500 dark:text-slate-400">
+                ຫົວໜ່ວຍ
+              </th>
+            </tr>
+          </thead>
+          <tbody>
+            {items.map((it, idx) => {
+              const sel = Number(it.selected_qty ?? 0) || 0;
+              const del = Number(it.delivered_qty ?? 0) || 0;
+              const fullyDelivered = del > 0 && del >= sel;
+              const partial = del > 0 && del < sel;
+              return (
+                <tr
+                  key={`${it.item_code}-${idx}`}
+                  className="border-b border-slate-200/20 dark:border-white/5 last:border-0 hover:bg-white/30 dark:hover:bg-white/5"
+                >
+                  <td className="px-4 py-2 text-slate-400">{idx + 1}</td>
+                  <td className="px-4 py-2 font-mono text-[10px] text-slate-500">{it.item_code}</td>
+                  <td className="px-4 py-2 text-slate-700 dark:text-slate-200">{it.item_name}</td>
+                  <td className="px-4 py-2 text-right font-bold text-amber-700 dark:text-amber-400">
+                    {fmt(it.selected_qty)}
+                  </td>
+                  <td className="px-4 py-2 text-right">
+                    <span
+                      className={`inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-bold ${
+                        fullyDelivered
+                          ? "bg-emerald-500/10 text-emerald-600 dark:text-emerald-400"
+                          : partial
+                          ? "bg-amber-500/10 text-amber-700 dark:text-amber-400"
+                          : "bg-slate-500/10 text-slate-500"
+                      }`}
+                    >
+                      {fullyDelivered && <FaCheckCircle size={9} />}
+                      {fmt(it.delivered_qty)}
+                    </span>
+                  </td>
+                  <td className="px-4 py-2 text-slate-500">{it.unit_code}</td>
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  );
+}
+
+// ==================== Car Position Card ====================
+function CarPositionCard({ pos, carName }: { pos: CarPosition; carName: string }) {
+  const fresh = pos.age_seconds < 120;
+  const stale = pos.age_seconds >= 600;
+  const ageLabel =
+    pos.age_seconds < 60
+      ? `${pos.age_seconds}s ກ່ອນ`
+      : pos.age_seconds < 3600
+      ? `${Math.floor(pos.age_seconds / 60)} ນາທີກ່ອນ`
+      : `${Math.floor(pos.age_seconds / 3600)} ຊມ ${Math.floor((pos.age_seconds % 3600) / 60)} ນາທີກ່ອນ`;
+  const tone = fresh ? "emerald" : stale ? "rose" : "amber";
+  const toneCls: Record<string, string> = {
+    emerald: "bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border-emerald-500/20",
+    amber: "bg-amber-500/10 text-amber-700 dark:text-amber-400 border-amber-500/20",
+    rose: "bg-rose-500/10 text-rose-600 dark:text-rose-400 border-rose-500/20",
+  };
+  return (
+    <div className="glass rounded-lg overflow-hidden">
+      <div className="px-5 py-3.5 border-b border-slate-200/30 dark:border-white/5 flex items-center justify-between">
+        <div className="flex items-center gap-2">
+          <div className="w-7 h-7 rounded-lg bg-sky-500/10 flex items-center justify-center">
+            <FaTruck className="text-sky-500" size={12} />
+          </div>
+          <div>
+            <h2 className="text-sm font-bold text-slate-800 dark:text-white">
+              ຕຳແໜ່ງລົດປະຈຸບັນ
+            </h2>
+            <p className="text-[10px] text-slate-500">{carName}</p>
+          </div>
+        </div>
+        <span
+          className={`text-[10px] font-bold border px-2 py-0.5 rounded-full ${toneCls[tone]}`}
+        >
+          {ageLabel}
+        </span>
+      </div>
+      <div className="p-4 grid grid-cols-1 sm:grid-cols-3 gap-3 text-xs">
+        <div>
+          <p className="text-[10px] text-slate-500 mb-1">ຄວາມໄວ</p>
+          <p className="text-base font-bold text-slate-800 dark:text-white">
+            {pos.speed.toFixed(0)}
+            <span className="text-[10px] font-normal text-slate-500 ml-1">km/h</span>
+          </p>
+        </div>
+        <div>
+          <p className="text-[10px] text-slate-500 mb-1">ບັນທຶກລ່າສຸດ</p>
+          <p className="text-[11px] font-mono text-slate-700 dark:text-slate-200">
+            {pos.recorded_at}
+          </p>
+        </div>
+        <div>
+          <p className="text-[10px] text-slate-500 mb-1">ພິກັດ</p>
+          <p className="text-[11px] font-mono text-slate-700 dark:text-slate-200 truncate">
+            {pos.lat.toFixed(5)}, {pos.lng.toFixed(5)}
+          </p>
+        </div>
+      </div>
+      {pos.state_detail && (
+        <div className="px-4 pb-2">
+          <p className="text-[10px] text-slate-500">ສະຖານະເຄື່ອງຈັກ</p>
+          <p className="text-[11px] text-slate-700 dark:text-slate-200">{pos.state_detail}</p>
+        </div>
+      )}
+      {pos.address && (
+        <div className="px-4 pb-3">
+          <p className="text-[10px] text-slate-500">ທີ່ຢູ່</p>
+          <p className="text-[11px] text-slate-700 dark:text-slate-200">{pos.address}</p>
+        </div>
+      )}
+      <div className="px-4 pb-4">
+        <a
+          href={`https://www.google.com/maps?q=${pos.lat},${pos.lng}`}
+          target="_blank"
+          rel="noreferrer"
+          className="inline-flex items-center gap-1.5 text-[11px] font-semibold text-sky-600 hover:text-sky-700 dark:text-sky-400"
+        >
+          <FaMapMarkerAlt size={10} /> ເປີດໃນ Google Maps
+          <FaExternalLinkAlt size={9} />
+        </a>
+      </div>
+    </div>
+  );
+}
+
 // ==================== Main Page ====================
 function TrackingPageInner() {
   const searchParams = useSearchParams();
@@ -445,16 +857,14 @@ function TrackingPageInner() {
           </div>
         </div>
         <form onSubmit={handleSubmit} className="flex gap-2">
-          <div className="flex-1 relative">
-            <FaFileInvoice className="absolute left-3.5 top-1/2 -translate-y-1/2 text-slate-300" size={13} />
-            <input
-              type="text"
-              value={searchText}
-              onChange={(e) => setSearchText(e.target.value)}
-              placeholder="ເລກບິນ..."
-              className="glass-input w-full pl-10 pr-4 py-2.5 rounded-lg text-sm"
-            />
-          </div>
+          <ActiveBillsCombobox
+            value={searchText}
+            onChange={setSearchText}
+            onPick={(billNo) => {
+              setSearchText(billNo);
+              search(billNo);
+            }}
+          />
           <button
             type="submit"
             disabled={loading}
@@ -480,9 +890,40 @@ function TrackingPageInner() {
           <HorizontalProgress steps={result.list} />
           <InfoStrip result={result} />
 
+          {(result.driver || result.driver_photo) && (
+            <DriverCard name={result.driver} photoFile={result.driver_photo ?? ""} car={result.car} />
+          )}
+
+          {result.car_position && (
+            <CarPositionCard pos={result.car_position} carName={result.car} />
+          )}
+
+          <TrackingLiveMap
+            billNo={result.bill_no}
+            carName={result.car}
+            initialCar={
+              result.car_position
+                ? { lat: result.car_position.lat, lng: result.car_position.lng }
+                : null
+            }
+            start={
+              result.lat && result.lng
+                ? { lat: Number(result.lat), lng: Number(result.lng) }
+                : null
+            }
+            end={
+              result.lat_end && result.lng_end
+                ? { lat: Number(result.lat_end), lng: Number(result.lng_end) }
+                : null
+            }
+          />
+
           <div className="grid grid-cols-1 lg:grid-cols-5 gap-4">
-            <div className="lg:col-span-3">
+            <div className="lg:col-span-3 space-y-4">
               <Timeline steps={result.list} />
+              {result.items && result.items.length > 0 && (
+                <ItemsCard items={result.items} />
+              )}
             </div>
             <div className="lg:col-span-2 space-y-4">
               <LocationCard result={result} />

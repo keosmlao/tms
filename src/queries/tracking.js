@@ -30,7 +30,220 @@ async function trackBill(session, search) {
   const branchClause = scope.scoped
     ? `AND EXISTS (SELECT 1 FROM public.ic_trans_shipment __ts WHERE __ts.doc_no = a.bill_no AND __ts.transport_code = '${scope.branch}')`
     : "";
-  return queryOne(`SELECT a.doc_no, to_char(a.doc_date,'DD-MM-YYYY') as doc_date, bill_no, to_char(bill_date,'DD-MM-YYYY') as bill_date, c.name_1 as car, d.name_1 as driver, url_img, a.lat, a.lng, a.lat_end, a.lng_end, a.remark, (SELECT json_agg(row) FROM (SELECT to_char(create_date_time_now,'DD-MM-YYYY') as doc_date, to_char(create_date_time_now,'HH:MI') as doc_time, 'ຈັດຖ້ຽວແລ້ວ' as status, '' as remark FROM odg_tms_detail WHERE recipt_job IS NULL AND bill_no=a.bill_no UNION ALL SELECT to_char(recipt_job,'DD-MM-YYYY'), to_char(recipt_job,'HH:MI'), 'ຮັບຖ້ຽວ / ເບີກເຄື່ອງ', '' FROM odg_tms_detail WHERE recipt_job IS NOT NULL AND bill_no=a.bill_no UNION ALL SELECT to_char(sent_start,'DD-MM-YYYY'), to_char(sent_start,'HH:MI'), 'ເລີ່ມຈັດສົ່ງ', '' FROM odg_tms_detail WHERE sent_start IS NOT NULL AND bill_no=a.bill_no UNION ALL SELECT to_char(sent_end,'DD-MM-YYYY'), to_char(sent_end,'HH:MI'), case when status=2 then 'ຍົກເລີກຈັດສົ່ງ' else 'ຈັດສົ່ງສຳເລັດ' end, remark FROM odg_tms_detail WHERE sent_end IS NOT NULL AND bill_no=a.bill_no) row) as list FROM odg_tms_detail a LEFT JOIN odg_tms b ON b.doc_no=a.doc_no LEFT JOIN odg_tms_car c ON c.code=a.car LEFT JOIN odg_tms_driver d ON d.code=b.driver WHERE bill_no LIKE $1 AND ${getFixedYearSqlFilter("a.doc_date")} ${branchClause}`, [search.toUpperCase()]);
+  const row = await queryOne(`SELECT a.doc_no, to_char(a.doc_date,'DD-MM-YYYY') as doc_date, bill_no, to_char(bill_date,'DD-MM-YYYY') as bill_date,
+      a.car as car_code, c.name_1 as car, d.name_1 as driver, b2.code as driver_code,
+      COALESCE(b2.employee_photo, '') as driver_photo,
+      c.imei as car_imei,
+      url_img, COALESCE(a.sight_img, '') as sight_img,
+      a.lat, a.lng, a.lat_end, a.lng_end, a.remark,
+      COALESCE(a.status, 0) as bill_status,
+      (SELECT json_agg(row) FROM (
+        SELECT to_char(create_date_time_now,'DD-MM-YYYY') as doc_date, to_char(create_date_time_now,'HH:MI') as doc_time, 'ຈັດຖ້ຽວແລ້ວ' as status, '' as remark FROM odg_tms_detail WHERE recipt_job IS NULL AND bill_no=a.bill_no
+        UNION ALL SELECT to_char(recipt_job,'DD-MM-YYYY'), to_char(recipt_job,'HH:MI'), 'ຮັບຖ້ຽວ / ເບີກເຄື່ອງ', '' FROM odg_tms_detail WHERE recipt_job IS NOT NULL AND bill_no=a.bill_no
+        UNION ALL SELECT to_char(sent_start,'DD-MM-YYYY'), to_char(sent_start,'HH:MI'), 'ເລີ່ມຈັດສົ່ງ', '' FROM odg_tms_detail WHERE sent_start IS NOT NULL AND bill_no=a.bill_no
+        UNION ALL SELECT to_char(sent_end,'DD-MM-YYYY'), to_char(sent_end,'HH:MI'), case when status=2 then 'ຍົກເລີກຈັດສົ່ງ' else 'ຈັດສົ່ງສຳເລັດ' end, remark FROM odg_tms_detail WHERE sent_end IS NOT NULL AND bill_no=a.bill_no
+      ) row) as list
+    FROM odg_tms_detail a
+    LEFT JOIN odg_tms b ON b.doc_no=a.doc_no
+    LEFT JOIN odg_tms_car c ON c.code=a.car
+    LEFT JOIN odg_tms_driver d ON d.code=b.driver
+    LEFT JOIN biotime_employee b2 ON b2.code = b.driver
+    WHERE bill_no LIKE $1 AND ${getFixedYearSqlFilter("a.doc_date")} ${branchClause}
+    ORDER BY a.create_date_time_now DESC NULLS LAST
+    LIMIT 1`, [search.toUpperCase()]);
+
+  if (!row) return null;
+
+  // Items selected for this dispatch (with delivered progress).
+  const items = await query(
+    `SELECT i.item_code, i.item_name,
+            COALESCE(i.qty, 0)::numeric as qty,
+            COALESCE(i.selected_qty, 0)::numeric as selected_qty,
+            COALESCE(i.delivered_qty, 0)::numeric as delivered_qty,
+            i.unit_code
+     FROM public.odg_tms_detail_item i
+     INNER JOIN public.odg_tms_detail d
+       ON d.bill_no = i.bill_no AND d.doc_no = i.doc_no
+     WHERE i.bill_no = $1 AND d.doc_no = $2
+     ORDER BY i.roworder NULLS LAST, i.item_code`,
+    [row.bill_no, row.doc_no]
+  );
+
+  // Latest GPS position for the car. We query odg_tms_gps_current (the live
+  // sync table) by car_code first, falling back to imei. Wrap in try/catch
+  // so any GPS issue never breaks the bill tracking.
+  let car_position = null;
+  try {
+    const params = [];
+    const conds = [];
+    if (row.car_code) {
+      params.push(String(row.car_code).trim());
+      conds.push(`car_code = $${params.length}`);
+    }
+    if (row.car_imei) {
+      params.push(String(row.car_imei).trim());
+      conds.push(`imei = $${params.length}`);
+    }
+    if (conds.length > 0) {
+      // recorded_at is stored as wall-clock Bangkok time (UTC+7) without
+      // timezone info; the DB itself runs in UTC. Compare against NOW() in
+      // Bangkok so the age is non-negative.
+      const pos = await queryOne(
+        `SELECT lat::float as lat, lng::float as lng,
+                COALESCE(speed::float, 0) as speed,
+                COALESCE(heading::float, 0) as heading,
+                to_char(recorded_at::timestamp,'DD-MM-YYYY HH24:MI:SS') as recorded_at,
+                COALESCE(address, '') as address,
+                COALESCE(state_detail, '') as state_detail,
+                GREATEST(0, EXTRACT(EPOCH FROM ((NOW() AT TIME ZONE 'Asia/Bangkok') - recorded_at::timestamp)))::int as age_seconds
+         FROM public.odg_tms_gps_current
+         WHERE ${conds.join(" OR ")}
+         ORDER BY recorded_at DESC NULLS LAST
+         LIMIT 1`,
+        params
+      );
+      if (pos) car_position = pos;
+    }
+  } catch (err) {
+    console.warn("[trackBill] gps lookup failed:", err?.message ?? err);
+  }
+
+  return { ...row, items, car_position };
+}
+
+// Public tracking — strips internal fields (driver, customer details) so a
+// customer-facing page can show delivery status without exposing private
+// data. Looks up the most recent dispatch for the given bill_no.
+async function trackBillPublic(billNo) {
+  const text = String(billNo ?? "").trim().toUpperCase();
+  if (!text) return null;
+
+  const row = await queryOne(
+    `SELECT a.doc_no, to_char(a.doc_date,'DD-MM-YYYY') as doc_date,
+            a.bill_no, to_char(a.bill_date,'DD-MM-YYYY') as bill_date,
+            a.car as car_code, c.name_1 as car, c.imei as car_imei,
+            d.name_1 as driver, COALESCE(b2.employee_photo, '') as driver_photo,
+            a.lat, a.lng, a.lat_end, a.lng_end,
+            COALESCE(a.url_img, '') as url_img,
+            COALESCE(a.sight_img, '') as sight_img,
+            COALESCE(a.remark, '') as bill_remark,
+            COALESCE(a.status, 0) as bill_status,
+            (SELECT json_agg(row) FROM (
+              SELECT to_char(create_date_time_now,'DD-MM-YYYY') as doc_date, to_char(create_date_time_now,'HH:MI') as doc_time, 'ຈັດຖ້ຽວແລ້ວ' as status, '' as remark FROM odg_tms_detail WHERE recipt_job IS NULL AND bill_no=a.bill_no
+              UNION ALL SELECT to_char(recipt_job,'DD-MM-YYYY'), to_char(recipt_job,'HH:MI'), 'ຮັບຖ້ຽວ / ເບີກເຄື່ອງ', '' FROM odg_tms_detail WHERE recipt_job IS NOT NULL AND bill_no=a.bill_no
+              UNION ALL SELECT to_char(sent_start,'DD-MM-YYYY'), to_char(sent_start,'HH:MI'), 'ເລີ່ມຈັດສົ່ງ', '' FROM odg_tms_detail WHERE sent_start IS NOT NULL AND bill_no=a.bill_no
+              UNION ALL SELECT to_char(sent_end,'DD-MM-YYYY'), to_char(sent_end,'HH:MI'), case when status=2 then 'ຍົກເລີກຈັດສົ່ງ' else 'ຈັດສົ່ງສຳເລັດ' end, '' FROM odg_tms_detail WHERE sent_end IS NOT NULL AND bill_no=a.bill_no
+            ) row) as list
+     FROM odg_tms_detail a
+     LEFT JOIN odg_tms_car c ON c.code = a.car
+     LEFT JOIN odg_tms j ON j.doc_no = a.doc_no
+     LEFT JOIN odg_tms_driver d ON d.code = j.driver
+     LEFT JOIN biotime_employee b2 ON b2.code = j.driver
+     WHERE bill_no = $1 AND ${getFixedYearSqlFilter("a.doc_date")}
+     ORDER BY a.create_date_time_now DESC NULLS LAST
+     LIMIT 1`,
+    [text]
+  );
+  if (!row) return null;
+
+  // Items at delivery progress (no internal codes leaked beyond what shows
+  // on the customer's invoice anyway).
+  const items = await query(
+    `SELECT i.item_code, i.item_name,
+            COALESCE(i.selected_qty, 0)::numeric as selected_qty,
+            COALESCE(i.delivered_qty, 0)::numeric as delivered_qty,
+            i.unit_code
+     FROM public.odg_tms_detail_item i
+     INNER JOIN public.odg_tms_detail d
+       ON d.bill_no = i.bill_no AND d.doc_no = i.doc_no
+     WHERE i.bill_no = $1 AND d.doc_no = $2
+     ORDER BY i.roworder NULLS LAST, i.item_code`,
+    [row.bill_no, row.doc_no]
+  );
+
+  // Current vehicle position (best-effort — never blocks tracking).
+  let car_position = null;
+  try {
+    const params = [];
+    const conds = [];
+    if (row.car_code) {
+      params.push(String(row.car_code).trim());
+      conds.push(`car_code = $${params.length}`);
+    }
+    if (row.car_imei) {
+      params.push(String(row.car_imei).trim());
+      conds.push(`imei = $${params.length}`);
+    }
+    if (conds.length > 0) {
+      const pos = await queryOne(
+        `SELECT lat::float as lat, lng::float as lng,
+                COALESCE(speed::float, 0) as speed,
+                to_char(recorded_at::timestamp,'DD-MM-YYYY HH24:MI:SS') as recorded_at,
+                GREATEST(0, EXTRACT(EPOCH FROM ((NOW() AT TIME ZONE 'Asia/Bangkok') - recorded_at::timestamp)))::int as age_seconds
+         FROM public.odg_tms_gps_current
+         WHERE ${conds.join(" OR ")}
+         ORDER BY recorded_at DESC NULLS LAST
+         LIMIT 1`,
+        params
+      );
+      if (pos) car_position = pos;
+    }
+  } catch (err) {
+    console.warn("[trackBillPublic] gps lookup failed:", err?.message ?? err);
+  }
+
+  // Strip private fields (car_imei, car_code) before returning.
+  const { car_imei: _imei, car_code: _code, ...safe } = row;
+  void _imei;
+  void _code;
+  return { ...safe, items, car_position };
+}
+
+// Bills currently in active delivery — used by the tracking search to power
+// an autocomplete. "Active" = on an approved job, not yet completed/cancelled
+// at the bill level.
+async function searchActiveDeliveryBills(session, q) {
+  const scope = getBranchScope(session);
+  const text = String(q ?? "").trim();
+  const params = [];
+  let searchClause = "";
+  if (text) {
+    params.push(`%${text.toUpperCase()}%`);
+    searchClause = `AND (UPPER(d.bill_no) LIKE $${params.length} OR UPPER(d.cust_code) LIKE $${params.length} OR UPPER(COALESCE(cu.name_1,'')) LIKE $${params.length})`;
+  }
+  const branchClause = scope.scoped
+    ? `AND EXISTS (SELECT 1 FROM public.ic_trans_shipment __ts WHERE __ts.doc_no = d.bill_no AND __ts.transport_code = '${scope.branch}')`
+    : "";
+  return query(
+    `SELECT
+       d.bill_no, d.doc_no,
+       to_char(d.bill_date,'DD-MM-YYYY') as bill_date,
+       d.cust_code,
+       COALESCE(NULLIF(TRIM(cu.name_1),''), d.cust_code, '-') as cust_name,
+       COALESCE(NULLIF(TRIM(car.name_1),''), j.car, '-') as car,
+       COALESCE(NULLIF(TRIM(drv.name_1),''), j.driver, '-') as driver,
+       CASE
+         WHEN d.sent_start IS NOT NULL THEN 'ກຳລັງຈັດສົ່ງ'
+         WHEN d.recipt_job  IS NOT NULL THEN 'ເບີກເຄື່ອງແລ້ວ'
+         ELSE 'ລໍຖ້າຈັດສົ່ງ'
+       END as phase
+     FROM public.odg_tms_detail d
+     INNER JOIN public.odg_tms j ON j.doc_no = d.doc_no
+     LEFT JOIN ar_customer cu ON cu.code = d.cust_code
+     LEFT JOIN public.odg_tms_car car ON car.code = j.car
+     LEFT JOIN public.odg_tms_driver drv ON drv.code = j.driver
+     WHERE COALESCE(j.approve_status,0) = 1
+       AND COALESCE(j.job_status,0) IN (1, 2)
+       AND COALESCE(d.status,0) NOT IN (1, 2)
+       AND ${getFixedYearSqlFilter("d.doc_date")}
+       ${searchClause}
+       ${branchClause}
+     ORDER BY (d.sent_start IS NOT NULL) DESC,
+              d.create_date_time_now DESC NULLS LAST,
+              d.bill_no
+     LIMIT 30`,
+    params
+  );
 }
 
 // ==================== GPS ====================
@@ -549,6 +762,8 @@ async function getLocations(session, search) {
 
 module.exports = {
   trackBill,
+  trackBillPublic,
+  searchActiveDeliveryBills,
   getGpsRealtime,
   getGpsRealtimeAll,
   getLocations,

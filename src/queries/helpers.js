@@ -190,8 +190,20 @@ async function getRemainingBillProducts(billNo) {
       GROUP BY item.item_code
     ),
     delivered AS (
+      -- Drivers sometimes mark a job done (status=1) without filling
+      -- per-item delivered_qty. Treat that data gap as "fully delivered up
+      -- to the selected_qty" so the bill stops re-appearing in the pending
+      -- list. Cancelled rows (status=2) keep the actual delivered_qty
+      -- (typically 0).
       SELECT item.item_code,
-             COALESCE(SUM(item.delivered_qty), 0)::numeric AS delivered_qty
+             COALESCE(SUM(
+               CASE
+                 WHEN COALESCE(det.status, 0) = 1
+                  AND COALESCE(item.delivered_qty, 0) = 0
+                   THEN COALESCE(item.selected_qty, 0)
+                 ELSE COALESCE(item.delivered_qty, 0)
+               END
+             ), 0)::numeric AS delivered_qty
       FROM public.odg_tms_detail_item item
       INNER JOIN public.odg_tms_detail det
         ON det.bill_no = item.bill_no AND det.doc_no = item.doc_no
@@ -260,8 +272,18 @@ async function getRemainingSummaryMap(billNos) {
       GROUP BY item.bill_no, item.item_code
     ),
     delivered AS (
+      -- See note above: when a row is marked done (status=1) but the
+      -- driver never filled in delivered_qty, treat the selected_qty as
+      -- delivered so the bill drops out of the pending list.
       SELECT item.bill_no, item.item_code,
-             COALESCE(SUM(item.delivered_qty), 0)::numeric AS delivered_qty
+             COALESCE(SUM(
+               CASE
+                 WHEN COALESCE(det.status, 0) = 1
+                  AND COALESCE(item.delivered_qty, 0) = 0
+                   THEN COALESCE(item.selected_qty, 0)
+                 ELSE COALESCE(item.delivered_qty, 0)
+               END
+             ), 0)::numeric AS delivered_qty
       FROM public.odg_tms_detail_item item
       INNER JOIN public.odg_tms_detail det
         ON det.bill_no = item.bill_no AND det.doc_no = item.doc_no

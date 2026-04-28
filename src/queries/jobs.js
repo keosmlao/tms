@@ -16,6 +16,7 @@ const {
   getRemainingSummaryMap,
 } = require("./helpers");
 const { pushToDriver } = require("./push");
+const { notifyJobCreated } = require("./notifications");
 
 async function getJobs(session) {
   await ensureTmsWorkerTable();
@@ -218,6 +219,9 @@ async function createJob(session, data) {
       { type: "job_created", doc_no: data.doc_no }
     );
   }
+
+  // Fire-and-forget: WhatsApp customers + LINE sales for every bill on the job.
+  void notifyJobCreated(data.doc_no);
 }
 
 async function addBillsToJob(docNo, bills) {

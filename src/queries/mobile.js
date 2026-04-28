@@ -15,6 +15,7 @@ const {
 } = require("../lib/fixed-year");
 const { saveToken: saveFcmToken, deleteToken: deleteFcmToken } = require("./push");
 const { saveFuelRefill, getFuelLogs, getFuelSummary } = require("./fuel");
+const { notifyBillStatus } = require("./notifications");
 
 function asText(value) {
   return typeof value === "string" ? value.trim() : "";
@@ -235,6 +236,7 @@ async function mobileJobAction(body) {
         );
 
         await client.query("COMMIT");
+        void notifyBillStatus(billNo, "📦 ເບີກເຄື່ອງແລ້ວ");
         return { success: true, doc_no: currentDocNo };
       }
 
@@ -269,6 +271,15 @@ async function mobileJobAction(body) {
         );
 
         await client.query("COMMIT");
+
+        // Fan out a sales LINE per bill on this job — dispatch is job-level.
+        const dispatchBills = await query(
+          `SELECT bill_no FROM public.odg_tms_detail WHERE doc_no=$1 AND ${getFixedYearSqlFilter("doc_date")}`,
+          [docNo]
+        );
+        for (const b of dispatchBills) {
+          void notifyBillStatus(b.bill_no, "🚚 ເລີ່ມຈັດສົ່ງ");
+        }
         return { success: true };
       }
 
@@ -352,6 +363,7 @@ async function mobileJobAction(body) {
         }
 
         await client.query("COMMIT");
+        void notifyBillStatus(billNo, "📍 ຮອດຈຸດສົ່ງ");
         return { success: true, doc_no: currentDocNo };
       }
 
@@ -504,6 +516,7 @@ async function mobileJobAction(body) {
         const openBillCount = await getOpenBillCount(currentDocNo, client);
 
         await client.query("COMMIT");
+        void notifyBillStatus(billNo, "✅ ຈັດສົ່ງສຳເລັດ");
         return {
           success: true,
           doc_no: currentDocNo,
@@ -549,6 +562,7 @@ async function mobileJobAction(body) {
         const openBillCount = await getOpenBillCount(currentDocNo, client);
 
         await client.query("COMMIT");
+        void notifyBillStatus(billNo, "❌ ຍົກເລີກຈັດສົ່ງ");
         return {
           success: true,
           doc_no: currentDocNo,
