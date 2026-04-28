@@ -16,7 +16,6 @@ import {
 import Link from "next/link";
 import { Actions } from "@/lib/api";
 import { useConfirm } from "@/components/confirm-dialog";
-import { useConfirm } from "@/components/confirm-dialog";
 import { getFixedTodayDate } from "@/lib/fixed-year";
 import {
   StatusControlPanel,
