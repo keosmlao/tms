@@ -27,6 +27,60 @@ function trackingLink(billNo) {
   return `${base}/track?bill=${encodeURIComponent(billNo)}`;
 }
 
+// Timeline of delivery checkpoints for a bill — used by the LINE Flex bubble
+// to show progress at a glance. The "active" step is the one matching the
+// label that triggered the notification (passed in by the caller).
+async function getBillTimeline(billNo, activeLabel) {
+  try {
+    const row = await queryOne(
+      `SELECT to_char(create_date_time_now,'DD-MM HH24:MI') as created_at,
+              to_char(recipt_job,'DD-MM HH24:MI') as picked_at,
+              to_char(sent_start,'DD-MM HH24:MI') as dispatch_at,
+              to_char(sent_end,'DD-MM HH24:MI') as finished_at,
+              COALESCE(status, 0) as status
+       FROM public.odg_tms_detail
+       WHERE bill_no = $1
+       ORDER BY create_date_time_now DESC NULLS LAST
+       LIMIT 1`,
+      [billNo]
+    );
+    if (!row) return [];
+    const cancelled = Number(row.status) === 2;
+    const finalLabel = cancelled ? "❌ ຍົກເລີກ" : "✅ ສຳເລັດ";
+    const steps = [
+      { key: "created", label: "📋 ສ້າງຖ້ຽວ", time: row.created_at, done: true },
+      { key: "picked", label: "📦 ເບີກເຄື່ອງ", time: row.picked_at, done: Boolean(row.picked_at) },
+      { key: "dispatch", label: "🚚 ກຳລັງສົ່ງ", time: row.dispatch_at, done: Boolean(row.dispatch_at) },
+      {
+        key: "finished",
+        label: finalLabel,
+        time: row.finished_at,
+        done: Boolean(row.finished_at),
+      },
+    ];
+
+    // Mark the step matching the active label so it pops in the bubble.
+    const labelMap = {
+      "📋 ຖ້ຽວຈັດສົ່ງໄດ້ຖືກສ້າງ": "created",
+      "📦 ເບີກເຄື່ອງແລ້ວ": "picked",
+      "🚚 ເລີ່ມຈັດສົ່ງ": "dispatch",
+      "📍 ຮອດຈຸດສົ່ງ": "dispatch",
+      "✅ ຈັດສົ່ງສຳເລັດ": "finished",
+      "❌ ຍົກເລີກຈັດສົ່ງ": "finished",
+    };
+    const activeKey = labelMap[String(activeLabel ?? "")];
+    if (activeKey) {
+      const target = steps.find((s) => s.key === activeKey);
+      if (target) target.active = true;
+    }
+
+    return steps;
+  } catch (err) {
+    console.warn("[notify] timeline lookup failed:", err?.message ?? err);
+    return [];
+  }
+}
+
 async function getBillContext(billNo) {
   // Split the lookup so a malformed date value on one of the joined tables
   // (ic_trans / ar_customer have legacy empty-string dates that pg refuses to
@@ -132,6 +186,7 @@ async function notifyCustomerLine(billNo, statusLabel) {
     if (!ctx) return;
     const recipient = ctx.cust_line_id;
     if (!recipient) return; // customer hasn't linked LINE — silently skip
+    const timeline = await getBillTimeline(billNo, statusLabel);
     await sendDeliveryFlex({
       to: recipient,
       statusLabel,
@@ -142,6 +197,7 @@ async function notifyCustomerLine(billNo, statusLabel) {
       carName: ctx.car_name,
       driverName: ctx.driver_name,
       trackingUrl: trackingLink(billNo),
+      timeline,
     });
   } catch (err) {
     console.warn("[notify] customer LINE failed:", err?.message ?? err);
@@ -161,6 +217,7 @@ async function notifySalesLine(billNo, statusLabel) {
       return;
     }
 
+    const timeline = await getBillTimeline(billNo, statusLabel);
     await sendDeliveryFlex({
       to: recipient,
       statusLabel,
@@ -171,6 +228,7 @@ async function notifySalesLine(billNo, statusLabel) {
       carName: ctx.car_name,
       driverName: ctx.driver_name,
       trackingUrl: trackingLink(billNo),
+      timeline,
     });
   } catch (err) {
     console.warn("[notify] sales LINE failed:", err?.message ?? err);

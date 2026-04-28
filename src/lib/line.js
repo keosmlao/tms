@@ -96,6 +96,10 @@ const STATUS_COLORS = {
  * @param {string} [input.carName]
  * @param {string} [input.driverName]
  * @param {string} [input.trackingUrl]     adds an "ຕິດຕາມ" CTA button
+ * @param {Array<{label:string,time?:string,done:boolean,active?:boolean}>} [input.timeline]
+ *        Optional ordered timeline of delivery checkpoints. Done steps render
+ *        in green, the active step in the bubble's accent colour, future
+ *        steps muted. Pass an empty array or omit to skip the timeline.
  */
 async function sendDeliveryFlex(input) {
   const {
@@ -108,6 +112,7 @@ async function sendDeliveryFlex(input) {
     carName,
     driverName,
     trackingUrl,
+    timeline,
   } = input ?? {};
 
   const accent = STATUS_COLORS[color] ?? STATUS_COLORS.default;
@@ -142,6 +147,67 @@ async function sendDeliveryFlex(input) {
     { type: "separator", margin: "md" },
     { type: "box", layout: "vertical", spacing: "sm", margin: "md", contents: rows },
   ];
+
+  if (Array.isArray(timeline) && timeline.length > 0) {
+    const timelineRows = timeline.map((step) => {
+      const stepColor = step.done
+        ? "#10B981"
+        : step.active
+        ? accent
+        : "#CBD5E1";
+      const dot = step.done ? "●" : step.active ? "◉" : "○";
+      return {
+        type: "box",
+        layout: "baseline",
+        spacing: "sm",
+        contents: [
+          {
+            type: "text",
+            text: dot,
+            color: stepColor,
+            size: "sm",
+            flex: 0,
+          },
+          {
+            type: "text",
+            text: String(step.label ?? ""),
+            wrap: true,
+            size: "sm",
+            color: step.done || step.active ? "#1E293B" : "#94A3B8",
+            flex: 4,
+            weight: step.active ? "bold" : "regular",
+          },
+          {
+            type: "text",
+            text: step.time ? String(step.time) : "—",
+            size: "xs",
+            color: "#94A3B8",
+            align: "end",
+            flex: 3,
+          },
+        ],
+      };
+    });
+
+    bodyContents.push(
+      { type: "separator", margin: "md" },
+      {
+        type: "text",
+        text: "ສະຖານະການຈັດສົ່ງ",
+        size: "xs",
+        color: "#64748B",
+        weight: "bold",
+        margin: "md",
+      },
+      {
+        type: "box",
+        layout: "vertical",
+        spacing: "sm",
+        margin: "sm",
+        contents: timelineRows,
+      }
+    );
+  }
 
   const footer = trackingUrl
     ? {
