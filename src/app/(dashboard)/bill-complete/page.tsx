@@ -14,6 +14,7 @@ import {
   FaTrash,
 } from "react-icons/fa";
 import { Actions } from "@/lib/api";
+import { useConfirm } from "@/components/confirm-dialog";
 import { getFixedTodayDate, FIXED_YEAR_START, FIXED_YEAR_END } from "@/lib/fixed-year";
 import { StatusPageHeader, StatusStatGrid } from "@/components/status-page-shell";
 // Ported from server actions: getBillsWaitingSentDetails, deleteJob
@@ -195,6 +196,7 @@ export default function BillCompleteClient({
   initialJobs = [],
 }: BillCompleteClientProps) {
   const [jobs, setJobs] = useState<CompletedJob[]>(initialJobs);
+  const confirm = useConfirm();
   const [searchText, setSearchText] = useState("");
   const [expandedDoc, setExpandedDoc] = useState<string | null>(null);
   const [detailsByDoc, setDetailsByDoc] = useState<
@@ -287,7 +289,7 @@ export default function BillCompleteClient({
   );
 
   const handleDelete = async (docNo: string) => {
-    if (!confirm(`ຕ້ອງການລົບຖ້ຽວ ${docNo} ແທ້ບໍ?`)) return;
+    if (!await confirm({ title: "ລຶບຖ້ຽວ", message: `ຕ້ອງການລົບຖ້ຽວ ${docNo} ແທ້ບໍ?`, tone: "danger", confirmLabel: "ລຶບ" })) return;
     setDeletingDoc(docNo);
     try {
       await Actions.deleteJob(docNo);
@@ -295,7 +297,7 @@ export default function BillCompleteClient({
       if (expandedDoc === docNo) setExpandedDoc(null);
     } catch (error) {
       console.error(error);
-      alert("ລົບບໍ່ສຳເລັດ");
+      void confirm({ title: "ຜິດພາດ", message: "ລຶບບໍ່ສຳເລັດ", tone: "warning", single: true });
     } finally {
       setDeletingDoc(null);
     }

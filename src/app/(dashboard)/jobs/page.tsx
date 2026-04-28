@@ -440,7 +440,7 @@ export default function JobsClient({ initialJobs = [] as Job[] }: { initialJobs?
         })
         .catch((error) => {
           console.error(error);
-          alert("ບໍ່ສາມາດໂຫຼດຂໍ້ມູນຖ້ຽວໄດ້");
+          void confirm({ title: "ຜິດພາດ", message: "ບໍ່ສາມາດໂຫຼດຂໍ້ມູນຖ້ຽວໄດ້", tone: "warning", single: true });
         });
     });
   };
@@ -502,7 +502,7 @@ export default function JobsClient({ initialJobs = [] as Job[] }: { initialJobs?
       );
       refreshJobs();
     } catch (error) {
-      alert(error instanceof Error ? error.message : "ບໍ່ສາມາດປິດຖ້ຽວໄດ້");
+      void confirm({ title: "ຜິດພາດ", message: error instanceof Error ? error.message : "ບໍ່ສາມາດປິດຖ້ຽວໄດ້", tone: "warning", single: true });
     } finally {
       setActingDoc(null);
     }
@@ -526,7 +526,7 @@ export default function JobsClient({ initialJobs = [] as Job[] }: { initialJobs?
       );
       refreshJobs();
     } catch (error) {
-      alert(error instanceof Error ? error.message : "ບໍ່ສາມາດອະນຸມັດຖ້ຽວໄດ້");
+      void confirm({ title: "ຜິດພາດ", message: error instanceof Error ? error.message : "ບໍ່ສາມາດອະນຸມັດຖ້ຽວໄດ້", tone: "warning", single: true });
     } finally {
       setActingDoc(null);
     }

@@ -15,6 +15,7 @@ import {
   FaUserTie,
 } from "react-icons/fa";
 import { Actions } from "@/lib/api";
+import { useConfirm } from "@/components/confirm-dialog";
 import { getFixedTodayDate } from "@/lib/fixed-year";
 import {
   StatusControlPanel,
@@ -53,6 +54,7 @@ const formatNumber = (n: number | string | null | undefined) => {
 };
 
 export default function FuelPage() {
+  const confirm = useConfirm();
   const [logs, setLogs] = useState<FuelLog[]>([]);
   const [fromDate, setFromDate] = useState(getFixedTodayDate());
   const [toDate, setToDate] = useState(getFixedTodayDate());
@@ -125,14 +127,14 @@ export default function FuelPage() {
   };
 
   const deleteLog = async (id: number) => {
-    if (!confirm("ຢືນຢັນລຶບລາຍການນີ້?")) return;
+    if (!await confirm({ title: "ລຶບ", message: "ຢືນຢັນລຶບລາຍການນີ້?", tone: "danger", confirmLabel: "ລຶບ" })) return;
     setDeletingId(id);
     try {
       await Actions.deleteFuelLog(id);
       setLogs((c) => c.filter((x) => x.id !== id));
     } catch (e) {
       console.error(e);
-      alert("ລຶບບໍ່ສຳເລັດ");
+      void confirm({ title: "ຜິດພາດ", message: "ລຶບບໍ່ສຳເລັດ", tone: "warning", single: true });
     } finally {
       setDeletingId(null);
     }

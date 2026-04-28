@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import { FaPlus, FaEdit, FaTrash, FaSave, FaTimes } from "react-icons/fa";
 import { Actions } from "@/lib/api";
+import { useConfirm } from "@/components/confirm-dialog";
 // Ported from server actions: getDrivers, addDriver, updateDriver, deleteDriver
 
 interface Driver { code: string; name_1: string; }
@@ -13,6 +14,7 @@ export default function DriversManagePage() {
   const [showAdd, setShowAdd] = useState(false);
   const [editCode, setEditCode] = useState<string | null>(null);
   const [form, setForm] = useState({ code: "", name_1: "" });
+  const confirm = useConfirm();
 
   const fetchDrivers = () => { setLoading(true); Actions.getDrivers().then((data) => setDrivers(data as Driver[])).catch(console.error).finally(() => setLoading(false)); };
   useEffect(() => { fetchDrivers(); }, []);
@@ -27,7 +29,7 @@ export default function DriversManagePage() {
     setEditCode(null); fetchDrivers();
   };
   const handleDelete = async (code: string) => {
-    if (!confirm("ຕ້ອງການລຶບແທ້ບໍ່?")) return;
+    if (!await confirm({ title: "ລຶບ", message: "ຕ້ອງການລຶບແທ້ບໍ່?", tone: "danger", confirmLabel: "ລຶບ" })) return;
     await Actions.deleteDriver(code); fetchDrivers();
   };
 

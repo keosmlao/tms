@@ -12,6 +12,7 @@ import {
   FaTrash,
 } from "react-icons/fa";
 import { Actions } from "@/lib/api";
+import { useConfirm } from "@/components/confirm-dialog";
 import { getFixedTodayDate } from "@/lib/fixed-year";
 
 interface Todo {
@@ -41,6 +42,7 @@ export function BillTodoPopover({
   onClose: () => void;
   onChanged?: () => void;
 }) {
+  const confirm = useConfirm();
   const [todos, setTodos] = useState<Todo[]>([]);
   const [loading, setLoading] = useState(false);
   const [submitting, setSubmitting] = useState(false);
@@ -146,7 +148,7 @@ export function BillTodoPopover({
   };
 
   const remove = async (t: Todo) => {
-    if (!confirm("ລຶບລາຍການນີ້?")) return;
+    if (!await confirm({ title: "ລຶບ", message: "ລຶບລາຍການນີ້?", tone: "danger", confirmLabel: "ລຶບ" })) return;
     try {
       await Actions.deleteBillTodo(t.id);
       await load();

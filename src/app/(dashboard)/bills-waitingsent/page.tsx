@@ -18,6 +18,7 @@ import {
   FaTruck,
 } from "react-icons/fa";
 import { Actions } from "@/lib/api";
+import { useConfirm } from "@/components/confirm-dialog";
 import { StatusPageHeader, StatusStatGrid } from "@/components/status-page-shell";
 
 function ImageThumb({ src, label }: { src: string; label: string }) {
@@ -198,6 +199,7 @@ export default function BillsWaitingSentClient({
   initialJobs = [],
 }: BillsWaitingSentClientProps) {
   const [jobs, setJobs] = useState<WaitingSentJob[]>(initialJobs);
+  const confirm = useConfirm();
   const [searchText, setSearchText] = useState("");
   const [selectedTransport, setSelectedTransport] = useState<string>("all");
   const [expandedDoc, setExpandedDoc] = useState<string | null>(null);
@@ -315,7 +317,7 @@ export default function BillsWaitingSentClient({
   };
 
   const handleDelete = async (docNo: string) => {
-    if (!confirm(`ຕ້ອງການລົບຖ້ຽວ ${docNo} ແທ້ບໍ?`)) return;
+    if (!await confirm({ title: "ລຶບຖ້ຽວ", message: `ຕ້ອງການລົບຖ້ຽວ ${docNo} ແທ້ບໍ?`, tone: "danger", confirmLabel: "ລຶບ" })) return;
 
     setDeletingDoc(docNo);
     try {
@@ -324,7 +326,7 @@ export default function BillsWaitingSentClient({
       if (expandedDoc === docNo) setExpandedDoc(null);
     } catch (error) {
       console.error(error);
-      alert("ລົບບໍ່ສຳເລັດ");
+      void confirm({ title: "ຜິດພາດ", message: "ລຶບບໍ່ສຳເລັດ", tone: "warning", single: true });
     } finally {
       setDeletingDoc(null);
     }

@@ -79,7 +79,7 @@ export default function DeliveryRoundsPage() {
   };
 
   const remove = async (code: string) => {
-    if (!confirm(`ລຶບຮອບ "${code}" ?`)) return;
+    if (!await confirm({ title: "ລຶບຮອບ", message: `ລຶບຮອບ "${code}" ?` })) return;
     try {
       await Actions.deleteDeliveryRound(code);
       await load();

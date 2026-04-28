@@ -11,9 +11,12 @@ import {
   FaSearch,
   FaSpinner,
   FaTimesCircle,
+  FaTrash,
 } from "react-icons/fa";
 import Link from "next/link";
 import { Actions } from "@/lib/api";
+import { useConfirm } from "@/components/confirm-dialog";
+import { useConfirm } from "@/components/confirm-dialog";
 import { getFixedTodayDate } from "@/lib/fixed-year";
 import {
   StatusControlPanel,
@@ -63,6 +66,8 @@ export default function JobsClosedPage() {
   const [expandedDoc, setExpandedDoc] = useState<string | null>(null);
   const [billsByDoc, setBillsByDoc] = useState<Record<string, JobBill[]>>({});
   const [loadingDoc, setLoadingDoc] = useState<string | null>(null);
+  const [deletingDoc, setDeletingDoc] = useState<string | null>(null);
+  const confirm = useConfirm();
   const perPage = 20;
 
   const load = () => {
@@ -126,6 +131,21 @@ export default function JobsClosedPage() {
 
   const totalPages = Math.max(1, Math.ceil(filteredJobs.length / perPage));
   const pagedJobs = filteredJobs.slice((currentPage - 1) * perPage, currentPage * perPage);
+
+  const handleDelete = async (docNo: string) => {
+    if (!await confirm({ title: "ລຶບຖ້ຽວ", message: `ຕ້ອງການລຶບຖ້ຽວ ${docNo} ແທ້ບໍ່?`, tone: "danger", confirmLabel: "ລຶບ" })) return;
+    setDeletingDoc(docNo);
+    try {
+      await Actions.deleteJob(docNo);
+      setJobs((c) => c.filter((j) => j.doc_no !== docNo));
+      if (expandedDoc === docNo) setExpandedDoc(null);
+    } catch (e) {
+      console.error(e);
+      void confirm({ title: "ຜິດພາດ", message: "ລຶບບໍ່ສຳເລັດ", tone: "warning", single: true });
+    } finally {
+      setDeletingDoc(null);
+    }
+  };
 
   return (
     <div className="space-y-5">
@@ -284,6 +304,15 @@ export default function JobsClosedPage() {
                                 <FaBroadcastTower size={12} />
                               </Link>
                             )}
+                            <button
+                              type="button"
+                              onClick={() => void handleDelete(job.doc_no)}
+                              disabled={deletingDoc === job.doc_no}
+                              className="inline-flex items-center justify-center w-7 h-7 rounded-lg text-rose-500 hover:bg-rose-50 hover:text-rose-700 dark:text-rose-400 dark:hover:bg-rose-500/10 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+                              title="ລຶບຖ້ຽວ"
+                            >
+                              {deletingDoc === job.doc_no ? <FaSpinner className="animate-spin" size={11} /> : <FaTrash size={11} />}
+                            </button>
                           </td>
                         </tr>
                         {isExpanded && (

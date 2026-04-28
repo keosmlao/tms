@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { Fragment, useDeferredValue, useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
+import { useConfirm } from "@/components/confirm-dialog";
 import {
   FaArrowLeft,
   FaBoxOpen,
@@ -149,6 +150,7 @@ export default function AddJobClient({
   initialBills = [],
 }: AddJobClientProps) {
   const router = useRouter();
+  const confirm = useConfirm();
 
   const [docNo, setDocNo] = useState(initialDocNo);
   const [docDate, setDocDate] = useState(getFixedTodayDate());
@@ -575,7 +577,7 @@ export default function AddJobClient({
   const handleSave = async () => {
     const billCount = Object.keys(addedByBill).length;
     if (!car || !driver || billCount === 0) {
-      alert("ກະລຸນາເລືອກລົດ, ຄົນຂັບ ແລະ ເພີ່ມສິນຄ້າກ່ອນ");
+            void confirm({ title: "ຂໍ້ມູນບໍ່ຄົບ", message: "ກະລຸນາເລືອກລົດ, ຄົນຂັບ ແລະ ເພີ່ມສິນຄ້າກ່ອນ", tone: "warning", single: true });
       return;
     }
 

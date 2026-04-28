@@ -20,6 +20,7 @@ import {
   FaUsers,
 } from "react-icons/fa";
 import { Actions } from "@/lib/api";
+import { useConfirm } from "@/components/confirm-dialog";
 // Ported from server actions: addCarProfile, deleteCarProfile, getCarProfiles, getDispatchDrivers, getDispatchWorkers, updateCarProfile
 
 // ==================== Types ====================
@@ -291,6 +292,7 @@ function SearchableMultiSelectField({
 // ==================== Main Page ====================
 
 export default function CarsManagePage() {
+  const confirm = useConfirm();
   const [cars, setCars] = useState<CarProfile[]>([]);
   const [driverOptions, setDriverOptions] = useState<Option[]>([]);
   const [workerOptions, setWorkerOptions] = useState<Option[]>([]);
@@ -400,7 +402,7 @@ export default function CarsManagePage() {
 
   const handleSave = async () => {
     if (!form.code.trim() || !form.name_1.trim()) {
-      alert("ກະລຸນາປ້ອນລະຫັດ ແລະ ຊື່ລົດໃຫ້ຄົບ");
+      void confirm({ title: "ຂໍ້ມູນບໍ່ຄົບ", message: "ກະລຸນາປ້ອນລະຫັດ ແລະ ຊື່ລົດໃຫ້ຄົບ", tone: "warning", single: true });
       return;
     }
     setSaving(true);
@@ -426,20 +428,20 @@ export default function CarsManagePage() {
       await refreshData();
     } catch (error) {
       console.error(error);
-      alert(error instanceof Error ? error.message : "ບັນທຶກຂໍ້ມູນບໍ່ສຳເລັດ");
+      void confirm({ title: "ຜິດພາດ", message: error instanceof Error ? error.message : "ບັນທຶກຂໍ້ມູນບໍ່ສຳເລັດ", tone: "warning", single: true });
     } finally {
       setSaving(false);
     }
   };
 
   const handleDelete = async (code: string) => {
-    if (!confirm("ຕ້ອງການລຶບລົດນີ້ແທ້ບໍ່?")) return;
+    if (!await confirm({ title: "ລຶບລົດ", message: "ຕ້ອງການລຶບລົດນີ້ແທ້ບໍ່?", tone: "danger", confirmLabel: "ລຶບ" })) return;
     try {
       await Actions.deleteCarProfile(code);
       await refreshData();
     } catch (error) {
       console.error(error);
-      alert("ລຶບຂໍ້ມູນບໍ່ສຳເລັດ");
+      void confirm({ title: "ຜິດພາດ", message: "ລຶບຂໍ້ມູນບໍ່ສຳເລັດ", tone: "warning", single: true });
     }
   };
 

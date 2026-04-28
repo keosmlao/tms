@@ -15,6 +15,7 @@ import {
   FaUser,
 } from "react-icons/fa";
 import { Actions } from "@/lib/api";
+import { useConfirm } from "@/components/confirm-dialog";
 import {
   StatusControlPanel,
   StatusPageHeader,
@@ -53,6 +54,7 @@ interface ApprovalItem {
 
 export default function ApprovePage() {
   const router = useRouter();
+  const confirm = useConfirm();
   const [items, setItems] = useState<ApprovalItem[]>([]);
   const [searchText, setSearchText] = useState("");
   const [expandedDoc, setExpandedDoc] = useState<string | null>(null);
@@ -129,7 +131,7 @@ export default function ApprovePage() {
   };
 
   const handleApprove = async (docNo: string) => {
-    if (!confirm(`ຕ້ອງການອະນຸມັດຖ້ຽວ ${docNo} ແທ້ບໍ?`)) return;
+    if (!await confirm({ title: "ອະນຸມັດຖ້ຽວ", message: `ຕ້ອງການອະນຸມັດຖ້ຽວ ${docNo} ແທ້ບໍ?`, tone: "info", confirmLabel: "ອະນຸມັດ" })) return;
     setApproving(docNo);
     try {
       await Actions.approveJob(docNo);
@@ -137,7 +139,7 @@ export default function ApprovePage() {
       if (expandedDoc === docNo) setExpandedDoc(null);
     } catch (error) {
       console.error(error);
-      alert("ອະນຸມັດບໍ່ສຳເລັດ");
+      void confirm({ title: "ຜິດພາດ", message: "ອະນຸມັດບໍ່ສຳເລັດ", tone: "warning", single: true });
     } finally {
       setApproving(null);
     }
