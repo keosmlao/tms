@@ -35,15 +35,18 @@ function applyLineTestOverride(testTo, to, messages) {
   return { to: testTo, messages: tagged };
 }
 
-async function pushMessages(originalTo, originalMessages) {
+async function pushMessages(originalTo, originalMessages, options = {}) {
   const cfg = await getLineConfig();
   if (!cfg.token) {
     console.warn("[line] LINE token not configured; skip push to", originalTo);
     return { success: false, skipped: true };
   }
   if (!originalTo) return { success: false, error: "missing recipient" };
+  const testTo = Object.prototype.hasOwnProperty.call(options, "testTo")
+    ? options.testTo
+    : cfg.testTo;
   const { to, messages } = applyLineTestOverride(
-    cfg.testTo,
+    testTo,
     originalTo,
     originalMessages
   );
@@ -96,6 +99,7 @@ const STATUS_COLORS = {
  * @param {string} [input.carName]
  * @param {string} [input.driverName]
  * @param {string} [input.trackingUrl]     adds an "ຕິດຕາມ" CTA button
+ * @param {string} [input.testTo]          optional per-message test redirect
  * @param {Array<{label:string,time?:string,done:boolean,active?:boolean}>} [input.timeline]
  *        Optional ordered timeline of delivery checkpoints. Done steps render
  *        in green, the active step in the bubble's accent colour, future
@@ -112,6 +116,7 @@ async function sendDeliveryFlex(input) {
     carName,
     driverName,
     trackingUrl,
+    testTo,
     timeline,
   } = input ?? {};
 
@@ -247,9 +252,11 @@ async function sendDeliveryFlex(input) {
     ...(footer ? { footer } : {}),
   };
 
-  return pushMessages(to, [
-    { type: "flex", altText: `${statusLabel} · ${billNo ?? ""}`.trim(), contents: bubble },
-  ]);
+  return pushMessages(
+    to,
+    [{ type: "flex", altText: `${statusLabel} · ${billNo ?? ""}`.trim(), contents: bubble }],
+    Object.prototype.hasOwnProperty.call(input ?? {}, "testTo") ? { testTo } : {}
+  );
 }
 
 module.exports = { sendDeliveryFlex, sendLineText, pushMessages };

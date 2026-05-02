@@ -9,6 +9,8 @@ import {
 const NOTIFY_KEYS = [
   "line.test_enabled",
   "line.test_to",
+  "line.customer.test_enabled",
+  "line.customer.test_to",
   "whatsapp.test_enabled",
   "whatsapp.test_to",
 ] as const;
@@ -16,6 +18,8 @@ const NOTIFY_KEYS = [
 export interface NotifySettings {
   "line.test_enabled": string;
   "line.test_to": string;
+  "line.customer.test_enabled": string;
+  "line.customer.test_to": string;
   "whatsapp.test_enabled": string;
   "whatsapp.test_to": string;
 }

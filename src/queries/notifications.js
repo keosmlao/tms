@@ -3,6 +3,7 @@
 // transient WA/LINE outage can't break the order workflow.
 const { query, queryOne } = require("../lib/db");
 const { sendDeliveryFlex } = require("../lib/line");
+const { getSetting } = require("./settings");
 
 // Optional fallback recipient when the bill's sale_code has no line_id mapped.
 // Set to a LINE groupId / userId of the OA admin so updates aren't lost.
@@ -19,6 +20,16 @@ const STATUS_COLOR = {
 
 const PUBLIC_BASE_URL =
   process.env.PUBLIC_BASE_URL || process.env.NEXT_PUBLIC_BASE_URL || "";
+
+async function getCustomerLineTestTo() {
+  const [enabled, to] = await Promise.all([
+    getSetting("line.customer.test_enabled", ""),
+    getSetting("line.customer.test_to", ""),
+  ]);
+  return enabled === "1" || enabled === "true"
+    ? to || process.env.LINE_CUSTOMER_TEST_TO || ""
+    : "";
+}
 
 function trackingLink(billNo) {
   if (!PUBLIC_BASE_URL) return `/track?bill=${encodeURIComponent(billNo)}`;
@@ -155,9 +166,12 @@ async function getBillContext(billNo) {
 // link so they can open the live map directly from chat.
 async function notifyCustomerLine(billNo, statusLabel) {
   try {
-    const ctx = await getBillContext(billNo);
+    const [ctx, customerTestTo] = await Promise.all([
+      getBillContext(billNo),
+      getCustomerLineTestTo(),
+    ]);
     if (!ctx) return;
-    const recipient = ctx.cust_line_id;
+    const recipient = ctx.cust_line_id || (customerTestTo ? "customer-line-missing" : "");
     if (!recipient) return; // customer hasn't linked LINE — silently skip
     const timeline = await getBillTimeline(billNo, statusLabel);
     await sendDeliveryFlex({
@@ -170,6 +184,7 @@ async function notifyCustomerLine(billNo, statusLabel) {
       carName: ctx.car_name,
       driverName: ctx.driver_name,
       trackingUrl: trackingLink(billNo),
+      testTo: customerTestTo,
       timeline,
     });
   } catch (err) {

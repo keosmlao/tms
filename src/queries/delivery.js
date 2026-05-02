@@ -110,13 +110,20 @@ async function ensureDeliveryWorkflowSchemaInternal(db) {
 }
 
 async function ensureDeliveryWorkflowSchema(client) {
+  // Schema is process-global — once any caller has applied the DDL in this
+  // process, every subsequent call (pool or transaction) is a no-op. Without
+  // this short-circuit each mobile API request was re-running ~10 DDL
+  // statements, which can stall under concurrent load while ALTER TABLE waits
+  // for an ACCESS EXCLUSIVE lock.
+  if (deliveryCache.__tmsDeliverySchemaReady) return;
+
   const isSharedPool = !client || client === pool;
   if (!isSharedPool) {
     await ensureDeliveryWorkflowSchemaInternal(client);
+    deliveryCache.__tmsDeliverySchemaReady = true;
     return;
   }
 
-  if (deliveryCache.__tmsDeliverySchemaReady) return;
   if (!deliveryCache.__tmsDeliverySchemaPromise) {
     deliveryCache.__tmsDeliverySchemaPromise = ensureDeliveryWorkflowSchemaInternal(pool)
       .then(() => {
