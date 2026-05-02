@@ -77,8 +77,8 @@ async function getBillsPending(session, fromDate, toDate, transportCode) {
     query(
       `SELECT
         a.doc_no, to_char(a.doc_date,'DD-MM-YYYY') as doc_date, a.transport_name,
-        to_char(b.send_date,'YYYY-MM-DD') as bill_sent_date,
-        to_char(b.send_date,'DD-MM-YYYY') as bill_sent_date_display,
+        to_char(b.send_date,'YYYY-MM-DD') as send_date,
+        to_char(b.send_date,'DD-MM-YYYY') as send_date_display,
         c.name_1 as sale, COALESCE(dep.name_1::text, c.department::text, '') as department,
         d.name_1 as transport, to_char(a.create_date_time_now,'DD-MM-YYYY HH:MI') as time_open,
         now() - a.create_date_time_now as time_use
@@ -87,7 +87,7 @@ async function getBillsPending(session, fromDate, toDate, transportCode) {
       LEFT JOIN erp_user c ON c.code=b.sale_code
       LEFT JOIN erp_department_list dep ON dep.code=c.department
       LEFT JOIN transport_type d ON d.code=a.transport_code
-      WHERE check_status=0 AND b.send_date BETWEEN $1 AND $2 AND ${where}
+      WHERE check_status=0 AND b.send_date::date BETWEEN $1::date AND $2::date AND ${where}
       ORDER BY b.send_date ASC, a.doc_date ASC`,
       params
     ),
@@ -127,11 +127,11 @@ async function getBillsPending(session, fromDate, toDate, transportCode) {
       };
       const sched = scheduleMap.get(bill.doc_no) ?? null;
       const todo = todoMap.get(bill.doc_no) ?? null;
-      // Default delivery date is the bill's sent_date from ic_trans; admins can
+      // Default delivery date is the bill's send_date from ic_trans; admins can
       // override it via odg_tms_pending_bill when reschedule is needed.
-      const effectiveDate = sched?.scheduled_date ?? bill.bill_sent_date ?? null;
+      const effectiveDate = sched?.scheduled_date ?? bill.send_date ?? null;
       const effectiveDisplay =
-        sched?.scheduled_date_display ?? bill.bill_sent_date_display ?? null;
+        sched?.scheduled_date_display ?? bill.send_date_display ?? null;
       return {
         ...bill,
         remaining_count: summary.remaining_count,

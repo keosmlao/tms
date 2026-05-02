@@ -119,9 +119,14 @@ async function mobileJobsList(driverId, date) {
       COALESCE(to_char(bs.received_at,'DD-MM-YYYY HH24:MI'), '-') as received_at,
       COALESCE(to_char(bs.dispatch_started_at,'DD-MM-YYYY HH24:MI'), '-') as dispatch_started_at,
       COALESCE(a.miles_start, '') as miles_start,
-      COALESCE(a.img_start, '') as img_start,
+      -- Same rationale as the bills query — keep image bytes out of the list
+      -- response, expose only a presence flag. Drivers rarely need to see
+      -- their own odometer photo, so lazy-loading is fine when they do.
+      '' as img_start,
+      (a.img_start IS NOT NULL AND a.img_start <> '') as has_img_start,
       COALESCE(a.miles_end, '') as miles_end,
-      COALESCE(a.img_end, '') as img_end,
+      '' as img_end,
+      (a.img_end IS NOT NULL AND a.img_end <> '') as has_img_end,
       case when a.approve_status = 0 then 'ລໍຖ້າອະນຸມັດ'
         else case
           when a.job_status = 0 then 'ລໍຖ້າຈັດສົ່ງ'
@@ -457,7 +462,8 @@ async function mobileJobAction(body) {
         await ensureBillDeliveryItems(billNo, client);
 
         const billRow = await client.query(
-          `SELECT d.doc_no, t.approve_status, t.job_status, d.recipt_job, d.forward_transport_code
+          `SELECT d.doc_no, t.approve_status, t.job_status, d.recipt_job, d.forward_transport_code,
+                  COALESCE(d.status, 0) AS status
            FROM public.odg_tms_detail d
            INNER JOIN odg_tms t ON t.doc_no = d.doc_no
            WHERE d.bill_no = $1 AND ${getFixedYearSqlFilter("d.doc_date")}
@@ -469,6 +475,18 @@ async function mobileJobAction(body) {
         const currentBill = billRow.rows[0];
         const currentDocNo = currentBill?.doc_no;
         if (!currentDocNo) throw new Error("Bill was not found");
+        if (Number(currentBill.status ?? 0) === 1) {
+          const openBillCount = await getOpenBillCount(currentDocNo, client);
+          await client.query("COMMIT");
+          return {
+            success: true,
+            doc_no: currentDocNo,
+            bill_no: billNo,
+            finished: true,
+            already_completed: true,
+            open_bill_count: openBillCount,
+          };
+        }
         if (Number(currentBill.approve_status ?? 0) !== 1) throw new Error("ຖ້ຽວນີ້ຍັງບໍ່ຖືກອະນຸມັດ");
         if (Number(currentBill.job_status ?? 0) !== 2) throw new Error("ກະລຸນາເລີ່ມຈັດສົ່ງກ່ອນ");
         if (!currentBill.recipt_job) throw new Error("ກະລຸນາເບີກເຄື່ອງກ່ອນ");
@@ -545,7 +563,16 @@ async function mobileJobAction(body) {
                 .filter((row) => row.qty > 0);
 
         if (itemsToDeliver.length === 0) {
-          throw new Error("No remaining delivery items");
+          const openBillCount = await getOpenBillCount(currentDocNo, client);
+          await client.query("COMMIT");
+          return {
+            success: true,
+            doc_no: currentDocNo,
+            bill_no: billNo,
+            finished: true,
+            already_completed: true,
+            open_bill_count: openBillCount,
+          };
         }
 
         const currentItems = new Map(
@@ -617,7 +644,8 @@ async function mobileJobAction(body) {
         if (!billNo) throw new Error("bill_no is required");
         if (!comment) throw new Error("ກະລຸນາໃສ່ໝາຍເຫດການຍົກເລີກ");
         const billRow = await client.query(
-          `SELECT d.doc_no, t.approve_status, t.job_status, d.recipt_job
+          `SELECT d.doc_no, t.approve_status, t.job_status, d.recipt_job,
+                  COALESCE(d.status, 0) AS status
            FROM public.odg_tms_detail d
            INNER JOIN odg_tms t ON t.doc_no = d.doc_no
            WHERE d.bill_no = $1 AND ${getFixedYearSqlFilter("d.doc_date")}
@@ -629,6 +657,17 @@ async function mobileJobAction(body) {
         const currentBill = billRow.rows[0];
         const currentDocNo = currentBill?.doc_no;
         if (!currentDocNo) throw new Error("Bill was not found");
+        if (Number(currentBill.status ?? 0) === 2) {
+          const openBillCount = await getOpenBillCount(currentDocNo, client);
+          await client.query("COMMIT");
+          return {
+            success: true,
+            doc_no: currentDocNo,
+            bill_no: billNo,
+            already_cancelled: true,
+            open_bill_count: openBillCount,
+          };
+        }
         if (Number(currentBill.approve_status ?? 0) !== 1) throw new Error("ຖ້ຽວນີ້ຍັງບໍ່ຖືກອະນຸມັດ");
         if (Number(currentBill.job_status ?? 0) !== 2) throw new Error("ກະລຸນາເລີ່ມຈັດສົ່ງກ່ອນ");
         if (!currentBill.recipt_job) throw new Error("ກະລຸນາເບີກເຄື່ອງກ່ອນ");
@@ -658,6 +697,17 @@ async function mobileJobAction(body) {
 
       case "complete_job": {
         if (!docNo) throw new Error("doc_no is required");
+        const jobRow = await client.query(
+          `SELECT COALESCE(job_status, 0) AS job_status
+           FROM odg_tms
+           WHERE doc_no = $1 AND ${getFixedYearSqlFilter("doc_date")}
+           LIMIT 1`,
+          [docNo]
+        );
+        if (Number(jobRow.rows[0]?.job_status ?? 0) >= 3) {
+          await client.query("COMMIT");
+          return { success: true, already_closed: true };
+        }
         const openBillCount = await getOpenBillCount(docNo, client);
         if (openBillCount > 0) throw new Error("Still has pending bills");
 
@@ -764,8 +814,15 @@ async function mobileBills({ docNo, billNo, type }) {
         COALESCE(to_char(a.recipt_job,'DD-MM-YYYY HH24:MI'), '-') as recipt_job,
         COALESCE(to_char(a.sent_start,'DD-MM-YYYY HH24:MI'), '-') as sent_start,
         COALESCE(to_char(a.sent_end,'DD-MM-YYYY HH24:MI'), '-') as sent_end,
-        COALESCE(a.url_img, '') as url_img,
-        COALESCE(a.sight_img, '') as sight_img,
+        -- Image bytes are excluded from the list response — they were causing
+        -- huge JSON payloads (each image is 3-5MB base64) which timed out the
+        -- mobile request when a bill had photos. The app uses the boolean
+        -- flag below; full bytes are fetched lazily via a dedicated endpoint
+        -- when the user taps to preview.
+        '' as url_img,
+        '' as sight_img,
+        (a.url_img IS NOT NULL AND a.url_img <> '') as has_url_img,
+        (a.sight_img IS NOT NULL AND a.sight_img <> '') as has_sight_img,
         COALESCE(a.remark, '') as remark
       FROM public.odg_tms_detail a
       LEFT JOIN ar_customer b ON b.code = a.cust_code

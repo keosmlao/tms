@@ -40,6 +40,8 @@ export interface Bill {
   row_num: number;
   doc_no: string;
   doc_date: string;
+  send_date?: string | null;
+  send_date_display?: string | null;
   transport_name: string;
   sale: string;
   department: string;
@@ -341,11 +343,11 @@ export default function BillsPendingClient() {
             </div>
           </div>
           <div>
-            <label className="block text-[10px] font-semibold text-slate-500 uppercase tracking-wider mb-1">ຈາກ</label>
+            <label className="block text-[10px] font-semibold text-slate-500 uppercase tracking-wider mb-1">Send date ຈາກ</label>
             <input type="date" value={fromDate} min={FIXED_YEAR_START} max={FIXED_YEAR_END} onChange={(e) => setFromDate(e.target.value)} className={inputCls} />
           </div>
           <div>
-            <label className="block text-[10px] font-semibold text-slate-500 uppercase tracking-wider mb-1">ຫາ</label>
+            <label className="block text-[10px] font-semibold text-slate-500 uppercase tracking-wider mb-1">Send date ຫາ</label>
             <input type="date" value={toDate} min={FIXED_YEAR_START} max={FIXED_YEAR_END} onChange={(e) => setToDate(e.target.value)} className={inputCls} />
           </div>
           <div>
@@ -527,7 +529,9 @@ export default function BillsPendingClient() {
                                 <span className="block text-[12px] font-bold leading-tight" style={{ color: exp ? T.primary : undefined }}>
                                   {bill.doc_no}
                                 </span>
-                                <span className="block text-[9px] text-slate-500 leading-tight mt-0.5">{bill.doc_date}</span>
+                                <span className="block text-[9px] text-slate-500 leading-tight mt-0.5">
+                                  Send {bill.send_date_display ?? bill.doc_date}
+                                </span>
                               </span>
                             </button>
 

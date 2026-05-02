@@ -330,7 +330,11 @@ async function saveDeliveryImages(billNo, images, client) {
     if (imageData && imageData.length > 0) {
       await db.query(
         `INSERT INTO public.odg_tms_delivery_images (bill_no, doc_date, image_data)
-         VALUES ($1, $2, $3)`,
+         SELECT $1, $2, $3
+         WHERE NOT EXISTS (
+           SELECT 1 FROM public.odg_tms_delivery_images
+           WHERE bill_no = $1 AND image_data = $3
+         )`,
         [billNo, docDate, imageData]
       );
     }
