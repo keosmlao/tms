@@ -28,7 +28,8 @@ export async function POST(request: Request) {
       message === "Invalid action" ||
       message.includes("required") ||
       message.includes("remaining only") ||
-      message.includes("Still has pending")
+      message.includes("Still has pending") ||
+      message.includes("must be")
         ? 400
         : 500;
     return Response.json({ error: message }, { status });

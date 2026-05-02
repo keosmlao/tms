@@ -367,6 +367,59 @@ async function mobileJobAction(body) {
         return { success: true, doc_no: currentDocNo };
       }
 
+      case "attach_bill_image": {
+        // Upload one image at a time so the JSON payload stays small. The app
+        // calls this per image before issuing complete_bill / cancel_bill so
+        // the close action can run with no images in its body.
+        if (!billNo) throw new Error("bill_no is required");
+        const kind = asText(body.kind);
+        const imageData = asNullableText(body.image_data);
+        if (!imageData) throw new Error("image_data is required");
+
+        if (kind === "delivery") {
+          await saveDeliveryImages(billNo, [imageData], client);
+        } else if (kind === "signature") {
+          await client.query(
+            `UPDATE public.odg_tms_detail
+             SET sight_img = $2
+             WHERE bill_no = $1 AND ${getFixedYearSqlFilter("doc_date")}`,
+            [billNo, imageData]
+          );
+        } else if (kind === "primary") {
+          await client.query(
+            `UPDATE public.odg_tms_detail
+             SET url_img = $2
+             WHERE bill_no = $1 AND ${getFixedYearSqlFilter("doc_date")}`,
+            [billNo, imageData]
+          );
+        } else {
+          throw new Error("kind must be delivery|signature|primary");
+        }
+
+        await client.query("COMMIT");
+        return { success: true };
+      }
+
+      case "attach_job_image": {
+        // Per-job odometer photos (start / end). Same rationale as
+        // attach_bill_image — keeps each upload payload tiny.
+        if (!docNo) throw new Error("doc_no is required");
+        const kind = asText(body.kind);
+        const imageData = asNullableText(body.image_data);
+        if (!imageData) throw new Error("image_data is required");
+
+        const col = kind === "start" ? "img_start" : kind === "end" ? "img_end" : null;
+        if (!col) throw new Error("kind must be start|end");
+
+        await client.query(
+          `UPDATE odg_tms SET ${col} = $2 WHERE doc_no = $1 AND ${getFixedYearSqlFilter("doc_date")}`,
+          [docNo, imageData]
+        );
+
+        await client.query("COMMIT");
+        return { success: true };
+      }
+
       case "complete_bill": {
         if (!billNo) throw new Error("bill_no is required");
         await ensureBillDeliveryItems(billNo, client);
