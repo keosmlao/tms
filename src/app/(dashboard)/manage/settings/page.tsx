@@ -5,6 +5,7 @@ import {
   FaCheck,
   FaCog,
   FaFlask,
+  FaLine,
   FaSave,
   FaSpinner,
   FaUserTie,
@@ -18,6 +19,8 @@ import {
 interface NotifySettings {
   "line.test_enabled": string;
   "line.test_to": string;
+  "line.customer.test_enabled": string;
+  "line.customer.test_to": string;
   "whatsapp.test_enabled": string;
   "whatsapp.test_to": string;
 }
@@ -25,6 +28,8 @@ interface NotifySettings {
 const EMPTY: NotifySettings = {
   "line.test_enabled": "",
   "line.test_to": "",
+  "line.customer.test_enabled": "",
+  "line.customer.test_to": "",
   "whatsapp.test_enabled": "",
   "whatsapp.test_to": "",
 };
@@ -73,6 +78,9 @@ export default function SettingsPage() {
 
   const lineEnabled =
     data["line.test_enabled"] === "1" || data["line.test_enabled"] === "true";
+  const customerLineEnabled =
+    data["line.customer.test_enabled"] === "1" ||
+    data["line.customer.test_enabled"] === "true";
   const waEnabled =
     data["whatsapp.test_enabled"] === "1" ||
     data["whatsapp.test_enabled"] === "true";
@@ -114,6 +122,31 @@ export default function SettingsPage() {
               placeholder="U1234..."
               icon={<FaFlask />}
               disabled={!lineEnabled}
+            />
+          </SectionCard>
+
+          <SectionCard
+            title="LINE — ລູກຄ້າ"
+            subtitle="ຂໍ້ຄວາມສະຖານະການຈັດສົ່ງສົ່ງຫາ LINE OA ຂອງລູກຄ້າ"
+            icon={<FaLine className="text-emerald-500" />}
+            tone="emerald"
+          >
+            <Toggle
+              label="ໂໝດທົດສອບ LINE ລູກຄ້າ"
+              description="ເມື່ອເປີດ ຂໍ້ຄວາມ LINE ທີ່ຈະສົ່ງຫາລູກຄ້າຈະຖືກສົ່ງໄປ user ທົດສອບ ແທນທີ່ຈະສົ່ງຫາລູກຄ້າຈິງ"
+              checked={customerLineEnabled}
+              onChange={(v) =>
+                update("line.customer.test_enabled", v ? "1" : "0")
+              }
+            />
+            <Field
+              label="LINE userId / groupId ລູກຄ້າສຳລັບທົດສອບ"
+              hint="ເຊັ່ນ U1234567890abcdef... ຫຼື C12345... (group ID)"
+              value={data["line.customer.test_to"]}
+              onChange={(v) => update("line.customer.test_to", v)}
+              placeholder="U1234..."
+              icon={<FaFlask />}
+              disabled={!customerLineEnabled}
             />
           </SectionCard>
 

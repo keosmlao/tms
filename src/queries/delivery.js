@@ -156,11 +156,11 @@ async function ensureJobDeliveryItems(docNo, client) {
       d.doc_no,
       d.bill_no,
       t.item_code,
-      t.item_name,
-      COALESCE(t.qty, 0)::numeric,
-      COALESCE(t.qty, 0)::numeric,
-      0::numeric,
-      t.unit_code
+      MAX(t.item_name) AS item_name,
+      SUM(COALESCE(t.qty, 0))::numeric AS qty,
+      SUM(COALESCE(t.qty, 0))::numeric AS selected_qty,
+      0::numeric AS delivered_qty,
+      MAX(t.unit_code) AS unit_code
     FROM public.odg_tms_detail d
     INNER JOIN ic_trans_detail t ON t.doc_no = d.bill_no
     WHERE d.doc_no = $1
@@ -171,6 +171,7 @@ async function ensureJobDeliveryItems(docNo, client) {
         FROM public.odg_tms_detail_item i
         WHERE i.doc_no = d.doc_no AND i.bill_no = d.bill_no
       )
+    GROUP BY d.doc_no, d.bill_no, t.item_code
     ORDER BY d.bill_no, t.item_code`,
     [docNo]
   );
@@ -256,19 +257,25 @@ async function getBillDeliveryItems(params, client) {
       i.doc_no,
       i.bill_no,
       i.item_code,
-      i.item_name,
-      GREATEST(COALESCE(i.selected_qty, 0)::numeric - COALESCE(i.delivered_qty, 0)::numeric, 0)::numeric AS qty,
-      COALESCE(i.selected_qty, 0)::numeric AS selected_qty,
-      COALESCE(i.delivered_qty, 0)::numeric AS delivered_qty,
-      GREATEST(COALESCE(i.selected_qty, 0)::numeric - COALESCE(i.delivered_qty, 0)::numeric, 0)::numeric AS remaining_qty,
-      i.unit_code,
-      COALESCE(w.name_1, '') AS wh_code
+      MAX(i.item_name) AS item_name,
+      GREATEST(SUM(COALESCE(i.selected_qty, 0))::numeric - SUM(COALESCE(i.delivered_qty, 0))::numeric, 0)::numeric AS qty,
+      SUM(COALESCE(i.selected_qty, 0))::numeric AS selected_qty,
+      SUM(COALESCE(i.delivered_qty, 0))::numeric AS delivered_qty,
+      GREATEST(SUM(COALESCE(i.selected_qty, 0))::numeric - SUM(COALESCE(i.delivered_qty, 0))::numeric, 0)::numeric AS remaining_qty,
+      MAX(i.unit_code) AS unit_code,
+      COALESCE(MAX(w.name_1), '') AS wh_code
     FROM public.odg_tms_detail_item i
-    LEFT JOIN ic_trans_detail t
+    LEFT JOIN (
+      -- Pick one warehouse per (bill, item) so a multi-warehouse split in
+      -- ic_trans_detail doesn't multiply rows in the result.
+      SELECT DISTINCT ON (doc_no, item_code) doc_no, item_code, wh_code
+      FROM ic_trans_detail
+    ) t
       ON t.doc_no = i.bill_no
      AND t.item_code = i.item_code
     LEFT JOIN public.ic_warehouse w ON w.code = t.wh_code
     WHERE ${where}
+    GROUP BY i.doc_no, i.bill_no, i.item_code
     ORDER BY i.bill_no, i.item_code`,
     values
   );

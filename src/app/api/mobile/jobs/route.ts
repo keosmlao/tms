@@ -29,7 +29,8 @@ export async function POST(request: Request) {
       message.includes("required") ||
       message.includes("remaining only") ||
       message.includes("Still has pending") ||
-      message.includes("must be")
+      message.includes("must be") ||
+      message.startsWith("ກະລຸນາ") // Lao "please" — workflow validation prompts
         ? 400
         : 500;
     return Response.json({ error: message }, { status });

@@ -304,6 +304,27 @@ async function mobileJobAction(body) {
         if (Number(currentBill.job_status ?? 0) !== 2) throw new Error("ກະລຸນາເລີ່ມຈັດສົ່ງກ່ອນ");
         if (!currentBill.recipt_job) throw new Error("ກະລຸນາເບີກເຄື່ອງກ່ອນ");
 
+        // One active checkin per job — block until the previously checked-in
+        // bill is completed or cancelled. A bill is "active" when sent_start
+        // is set, sent_end is still null, and the bill hasn't been finalised
+        // (status NOT IN 1=delivered, 2=cancelled).
+        const activeCheckin = await client.query(
+          `SELECT bill_no FROM public.odg_tms_detail
+           WHERE doc_no = $1
+             AND bill_no <> $2
+             AND sent_start IS NOT NULL
+             AND sent_end IS NULL
+             AND COALESCE(status, 0) NOT IN (1, 2)
+             AND ${getFixedYearSqlFilter("doc_date")}
+           LIMIT 1`,
+          [currentDocNo, billNo]
+        );
+        if (activeCheckin.rows.length > 0) {
+          throw new Error(
+            `ກະລຸນາສຳເລັດ ຫຼື ຍົກເລີກບິນ ${activeCheckin.rows[0].bill_no} ກ່ອນ checkin ບິນອື່ນ`
+          );
+        }
+
         await client.query(
           `UPDATE public.odg_tms_detail
            SET sent_start = COALESCE(sent_start, LOCALTIMESTAMP(0)),
