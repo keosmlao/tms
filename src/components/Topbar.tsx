@@ -11,6 +11,7 @@ import {
   FaChevronRight,
   FaMoon,
   FaSun,
+  FaDownload,
 } from "react-icons/fa";
 import { useTheme } from "@/hooks/use-theme";
 import { useSession } from "@/providers/session-provider";
@@ -115,6 +116,17 @@ export default function Topbar() {
 
         {/* Right: Actions */}
         <div className="flex items-center gap-2">
+          {/* Download APK */}
+          <a
+            href="/tms.apk"
+            download
+            className="inline-flex items-center gap-1.5 rounded-lg bg-emerald-600 px-2.5 py-1.5 text-xs font-semibold text-white shadow-sm transition-all hover:bg-emerald-700 hover:shadow"
+            title="ດາວໂຫຼດ App ສຳລັບ Android"
+          >
+            <FaDownload size={12} />
+            <span className="hidden md:inline">ດາວໂຫຼດ App</span>
+          </a>
+
           {/* Theme toggle */}
           <button
             onClick={toggleTheme}

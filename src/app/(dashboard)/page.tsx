@@ -35,7 +35,7 @@ interface TeamData {
   bill_count: CountValue; still: CountValue; complete: CountValue;
 }
 
-interface PendingShipment {
+interface PendingShipment { 
   doc_no: string; doc_date: string; transport_name: string | null;
   sale: string | null; transport: string | null;
   time_open: string | null; time_use: string | null; time_use_seconds?: CountValue;
