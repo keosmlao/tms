@@ -107,6 +107,23 @@ async function ensureDeliveryWorkflowSchemaInternal(db) {
     CREATE INDEX IF NOT EXISTS idx_odg_tms_delivery_images_bill_no
     ON public.odg_tms_delivery_images (bill_no)
   `);
+
+  // Per-user "read" state for the topbar activity feed. The notification_key
+  // is built in SQL from (type|doc_no|bill_no|event_epoch) so a row uniquely
+  // identifies a single event-for-user pair regardless of which user marks
+  // it read first.
+  await safeDdl(db, `
+    CREATE TABLE IF NOT EXISTS public.odg_tms_notification_reads (
+      user_code character varying NOT NULL,
+      notification_key character varying NOT NULL,
+      read_at timestamp without time zone DEFAULT LOCALTIMESTAMP(0),
+      PRIMARY KEY (user_code, notification_key)
+    )
+  `);
+  await safeDdl(db, `
+    CREATE INDEX IF NOT EXISTS idx_odg_tms_notification_reads_user
+    ON public.odg_tms_notification_reads (user_code)
+  `);
 }
 
 async function ensureDeliveryWorkflowSchema(client) {
@@ -115,19 +132,19 @@ async function ensureDeliveryWorkflowSchema(client) {
   // this short-circuit each mobile API request was re-running ~10 DDL
   // statements, which can stall under concurrent load while ALTER TABLE waits
   // for an ACCESS EXCLUSIVE lock.
-  if (deliveryCache.__tmsDeliverySchemaReady) return;
+  if (deliveryCache.__tmsDeliverySchemaReady_v2) return;
 
   const isSharedPool = !client || client === pool;
   if (!isSharedPool) {
     await ensureDeliveryWorkflowSchemaInternal(client);
-    deliveryCache.__tmsDeliverySchemaReady = true;
+    deliveryCache.__tmsDeliverySchemaReady_v2 = true;
     return;
   }
 
   if (!deliveryCache.__tmsDeliverySchemaPromise) {
     deliveryCache.__tmsDeliverySchemaPromise = ensureDeliveryWorkflowSchemaInternal(pool)
       .then(() => {
-        deliveryCache.__tmsDeliverySchemaReady = true;
+        deliveryCache.__tmsDeliverySchemaReady_v2 = true;
       })
       .catch((err) => {
         deliveryCache.__tmsDeliverySchemaPromise = null;

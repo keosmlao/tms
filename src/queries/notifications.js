@@ -251,9 +251,18 @@ async function notifyBillStatus(billNo, statusLabel) {
   void notifyCustomerLine(billNo, statusLabel);
 }
 
+// Composite key used to identify a single activity event across the union
+// branches. Built identically here and on the client mark-read call so the
+// reads table stays consistent.
+const NOTIFICATION_KEY_SQL = `
+  type || '|' || doc_no || '|' || COALESCE(bill_no, '') ||
+  '|' || EXTRACT(EPOCH FROM event_at)::bigint::text
+`;
+
 async function getActivityNotifications(session, limit = 30) {
   const scope = getBranchScope(session);
   const max = Math.min(Math.max(Number(limit) || 30, 1), 80);
+  const userCode = String(session?.usercode ?? "");
   return query(
     `WITH activity AS (
       SELECT
@@ -352,13 +361,54 @@ async function getActivityNotifications(session, limit = 30) {
       href,
       tone,
       to_char(event_at, 'DD-MM-YYYY HH24:MI') AS event_time,
-      EXTRACT(EPOCH FROM (now() - event_at))::int AS age_seconds
+      EXTRACT(EPOCH FROM (now() - event_at))::int AS age_seconds,
+      ${NOTIFICATION_KEY_SQL} AS notification_key,
+      (r.user_code IS NOT NULL) AS read
     FROM activity
+    LEFT JOIN public.odg_tms_notification_reads r
+      ON r.user_code = $2
+     AND r.notification_key = ${NOTIFICATION_KEY_SQL}
     WHERE event_at IS NOT NULL
     ORDER BY event_at DESC
     LIMIT $1`,
-    [max]
+    [max, userCode]
   );
+}
+
+async function markActivityNotificationRead(session, notificationKey) {
+  const userCode = String(session?.usercode ?? "");
+  const key = String(notificationKey ?? "");
+  if (!userCode || !key) return { success: false };
+  await query(
+    `INSERT INTO public.odg_tms_notification_reads (user_code, notification_key)
+     VALUES ($1, $2)
+     ON CONFLICT (user_code, notification_key) DO NOTHING`,
+    [userCode, key]
+  );
+  return { success: true };
+}
+
+async function markAllActivityNotificationsRead(session, limit = 80) {
+  const userCode = String(session?.usercode ?? "");
+  if (!userCode) return { success: false };
+  // Fetch the visible notifications and bulk-insert their keys for this
+  // user — keeps "mark all" semantics consistent with what the dropdown
+  // actually shows.
+  const rows = await getActivityNotifications(session, limit);
+  if (rows.length === 0) return { success: true, marked: 0 };
+  const values = [];
+  const placeholders = [];
+  rows.forEach((row, i) => {
+    placeholders.push(`($1, $${i + 2})`);
+    values.push(String(row.notification_key));
+  });
+  await query(
+    `INSERT INTO public.odg_tms_notification_reads (user_code, notification_key)
+     VALUES ${placeholders.join(", ")}
+     ON CONFLICT (user_code, notification_key) DO NOTHING`,
+    [userCode, ...values]
+  );
+  return { success: true, marked: rows.length };
 }
 
 module.exports = {
@@ -367,5 +417,7 @@ module.exports = {
   notifyCustomerLine,
   notifySalesLine,
   getActivityNotifications,
+  markActivityNotificationRead,
+  markAllActivityNotificationsRead,
   trackingLink,
 };

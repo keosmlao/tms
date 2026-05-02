@@ -133,6 +133,8 @@ export const Actions = {
 
   // Notifications
   getActivityNotifications: notifications.getActivityNotifications,
+  markActivityNotificationRead: notifications.markActivityNotificationRead,
+  markAllActivityNotificationsRead: notifications.markAllActivityNotificationsRead,
 
   // Delivery rounds
   listDeliveryRounds: deliveryRound.listDeliveryRounds,

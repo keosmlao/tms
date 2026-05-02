@@ -59,6 +59,8 @@ interface ActivityNotification {
   tone: string;
   event_time: string;
   age_seconds: number;
+  notification_key: string;
+  read: boolean;
 }
 
 const toneClasses: Record<string, string> = {
@@ -109,10 +111,39 @@ export default function Topbar() {
     return () => window.clearInterval(timer);
   }, [loadNotifications]);
 
-  const recentCount = useMemo(
-    () => notifications.filter((item) => Number(item.age_seconds) <= 600).length,
+  const unreadCount = useMemo(
+    () => notifications.filter((item) => !item.read).length,
     [notifications]
   );
+
+  const handleNotificationClick = useCallback(
+    async (item: ActivityNotification) => {
+      setShowNotifications(false);
+      // Optimistic local update so the dropdown reflects "read" state
+      // immediately even before the server confirms the insert.
+      setNotifications((prev) =>
+        prev.map((n) =>
+          n.notification_key === item.notification_key ? { ...n, read: true } : n
+        )
+      );
+      try {
+        await Actions.markActivityNotificationRead(item.notification_key);
+      } catch (err) {
+        console.error("Failed to mark notification read", err);
+      }
+    },
+    []
+  );
+
+  const handleMarkAllRead = useCallback(async () => {
+    setNotifications((prev) => prev.map((n) => ({ ...n, read: true })));
+    try {
+      await Actions.markAllActivityNotificationsRead();
+    } catch (err) {
+      console.error("Failed to mark all notifications read", err);
+      void loadNotifications();
+    }
+  }, [loadNotifications]);
 
   const handleSearch = (e: React.FormEvent) => {
     e.preventDefault();
@@ -222,9 +253,9 @@ export default function Topbar() {
               aria-label="Notifications"
             >
               <FaBell size={15} />
-              {recentCount > 0 && (
+              {unreadCount > 0 && (
                 <span className="absolute -right-0.5 -top-0.5 flex h-4 min-w-4 items-center justify-center rounded-full bg-rose-500 px-1 text-[9px] font-bold leading-none text-white ring-2 ring-white/80 dark:ring-gray-900/80">
-                  {recentCount > 9 ? "9+" : recentCount}
+                  {unreadCount > 9 ? "9+" : unreadCount}
                 </span>
               )}
             </button>
@@ -242,12 +273,25 @@ export default function Topbar() {
                         ການເຄື່ອນໄຫວ
                       </p>
                       <p className="mt-0.5 text-[11px] text-slate-400 dark:text-slate-500">
-                        ແຈ້ງເຕືອນທຸກສະຖານະຈັດສົ່ງ
+                        {unreadCount > 0
+                          ? `${unreadCount} ລາຍການໃໝ່`
+                          : "ອ່ານຫມົດແລ້ວ"}
                       </p>
                     </div>
-                    {notificationsLoading && (
-                      <FaSpinner className="animate-spin text-xs text-slate-400" />
-                    )}
+                    <div className="flex items-center gap-2">
+                      {notificationsLoading && (
+                        <FaSpinner className="animate-spin text-xs text-slate-400" />
+                      )}
+                      {unreadCount > 0 && (
+                        <button
+                          type="button"
+                          onClick={() => void handleMarkAllRead()}
+                          className="text-[11px] font-semibold text-teal-600 hover:text-teal-700 dark:text-teal-400 dark:hover:text-teal-300"
+                        >
+                          ອ່ານທັງໝົດ
+                        </button>
+                      )}
+                    </div>
                   </div>
 
                   <div className="max-h-[26rem] overflow-y-auto py-1">
@@ -260,17 +304,38 @@ export default function Topbar() {
                         <Link
                           key={`${item.type}-${item.doc_no}-${item.bill_no ?? ""}-${item.event_time}-${index}`}
                           href={item.href}
-                          onClick={() => setShowNotifications(false)}
-                          className="flex gap-3 px-4 py-3 transition-colors hover:bg-slate-50 dark:hover:bg-white/5"
+                          onClick={() => void handleNotificationClick(item)}
+                          className={`flex gap-3 px-4 py-3 transition-colors ${
+                            item.read
+                              ? "hover:bg-slate-50 dark:hover:bg-white/5"
+                              : "bg-teal-50/40 hover:bg-teal-50 dark:bg-teal-500/[0.06] dark:hover:bg-teal-500/10"
+                          }`}
                         >
-                          <span
-                            className={`mt-1.5 h-2.5 w-2.5 shrink-0 rounded-full ${toneClasses[item.tone] ?? "bg-teal-500"}`}
-                          />
+                          <span className="relative mt-1.5 shrink-0">
+                            <span
+                              className={`block h-2.5 w-2.5 rounded-full ${toneClasses[item.tone] ?? "bg-teal-500"}`}
+                            />
+                            {!item.read && (
+                              <span className="absolute -right-1 -top-1 h-2 w-2 rounded-full bg-rose-500 ring-2 ring-white dark:ring-slate-900" />
+                            )}
+                          </span>
                           <span className="min-w-0 flex-1">
-                            <span className="block truncate text-sm font-semibold text-slate-700 dark:text-slate-100">
+                            <span
+                              className={`block truncate text-sm ${
+                                item.read
+                                  ? "font-medium text-slate-500 dark:text-slate-400"
+                                  : "font-semibold text-slate-700 dark:text-slate-100"
+                              }`}
+                            >
                               {item.title}
                             </span>
-                            <span className="mt-0.5 block truncate text-xs text-slate-500 dark:text-slate-400">
+                            <span
+                              className={`mt-0.5 block truncate text-xs ${
+                                item.read
+                                  ? "text-slate-400 dark:text-slate-500"
+                                  : "text-slate-500 dark:text-slate-400"
+                              }`}
+                            >
                               {item.body}
                             </span>
                             <span className="mt-1 block text-[11px] text-slate-400 dark:text-slate-500">
