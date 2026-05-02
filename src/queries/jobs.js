@@ -1,4 +1,4 @@
-const { query, queryOne } = require("../lib/db");
+const { pool, query, queryOne } = require("../lib/db");
 const { ensureDeliveryWorkflowSchema } = require("./delivery");
 const {
   coerceDateToFixedYear,
@@ -17,6 +17,34 @@ const {
 } = require("./helpers");
 const { pushToDriver } = require("./push");
 const { notifyJobCreated } = require("./notifications");
+
+function nextJobDocNoFromMax(maxDocNo, fixedMonth) {
+  const pfx = fixedMonth.replace("-", "");
+  if (!maxDocNo) return pfx + "00001";
+
+  const current = String(maxDocNo);
+  const suffix = Number.parseInt(current.slice(pfx.length), 10);
+  if (!Number.isFinite(suffix)) return pfx + "00001";
+  return pfx + String(suffix + 1).padStart(5, "0");
+}
+
+async function getNextJobDocNo(client, fixedDocDate) {
+  const fixedMonth = fixedDocDate.slice(0, 7);
+  const pfx = fixedMonth.replace("-", "");
+
+  await client.query("SELECT pg_advisory_xact_lock(hashtext($1))", [`odg_tms_doc_no:${pfx}`]);
+  const result = await client.query(
+    `SELECT doc_no
+     FROM public.odg_tms
+     WHERE to_char(doc_date,'YYYY-MM')=$1
+       AND doc_no ~ $2
+     ORDER BY doc_no DESC
+     LIMIT 1`,
+    [fixedMonth, `^${pfx}[0-9]+$`]
+  );
+
+  return nextJobDocNoFromMax(result.rows[0]?.doc_no, fixedMonth);
+}
 
 async function getJobs(session) {
   await ensureTmsWorkerTable();
@@ -161,56 +189,70 @@ async function createJob(session, data) {
   const deliveryRoundCode = data.delivery_round_code
     ? String(data.delivery_round_code).trim() || null
     : null;
-  await queryOne(
-    `INSERT INTO public.odg_tms(doc_no, doc_date, date_logistic, car, driver, item_bill, user_created, create_date_time_now, approve_status, job_status, origin_transport_code, delivery_round_code)
-     VALUES ($1,$2,$3,$4,$5,$6,$7,LOCALTIMESTAMP(0),0,0,$8,$9)`,
-    [data.doc_no, fixedDocDate, fixedDateLog, data.car, data.driver, normalizedBills.length, session.usercode, originBranch, deliveryRoundCode]
-  );
+  const client = await pool.connect();
+  let docNo = null;
+  try {
+    await client.query("BEGIN");
+    docNo = await getNextJobDocNo(client, fixedDocDate);
 
-  for (const bill of normalizedBills) {
-    const forwardCode = bill.forward_transport_code && String(bill.forward_transport_code).trim()
-      ? String(bill.forward_transport_code).trim()
-      : null;
-    await queryOne(
-      `INSERT INTO public.odg_tms_detail(doc_no, doc_date, car, bill_no, bill_date, cust_code, create_date_time_now, date_logistic, count_item, telephone, forward_transport_code)
-       VALUES ($1,$2,$3,$4,$5,$6,LOCALTIMESTAMP(0),$7,$8,$9,$10)`,
-      [data.doc_no, fixedDocDate, data.car, bill.bill_no, coerceDateToFixedYear(bill.bill_date), bill.cust_code, fixedDateLog, bill.count_item, bill.telephone, forwardCode]
+    await client.query(
+      `INSERT INTO public.odg_tms(doc_no, doc_date, date_logistic, car, driver, item_bill, user_created, create_date_time_now, approve_status, job_status, origin_transport_code, delivery_round_code)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,LOCALTIMESTAMP(0),0,0,$8,$9)`,
+      [docNo, fixedDocDate, fixedDateLog, data.car, data.driver, normalizedBills.length, session.usercode, originBranch, deliveryRoundCode]
     );
-    if (bill.items && bill.items.length > 0) {
-      for (const item of bill.items) {
-        await queryOne(
-          `INSERT INTO public.odg_tms_detail_item(doc_no, bill_no, item_code, item_name, qty, selected_qty, unit_code)
-           VALUES ($1,$2,$3,$4,$5,$6,$7)`,
-          [data.doc_no, bill.bill_no, item.item_code, item.item_name, item.qty, item.selectedQty, item.unit_code]
+
+    for (const bill of normalizedBills) {
+      const forwardCode = bill.forward_transport_code && String(bill.forward_transport_code).trim()
+        ? String(bill.forward_transport_code).trim()
+        : null;
+      await client.query(
+        `INSERT INTO public.odg_tms_detail(doc_no, doc_date, car, bill_no, bill_date, cust_code, create_date_time_now, date_logistic, count_item, telephone, forward_transport_code)
+         VALUES ($1,$2,$3,$4,$5,$6,LOCALTIMESTAMP(0),$7,$8,$9,$10)`,
+        [docNo, fixedDocDate, data.car, bill.bill_no, coerceDateToFixedYear(bill.bill_date), bill.cust_code, fixedDateLog, bill.count_item, bill.telephone, forwardCode]
+      );
+      if (bill.items && bill.items.length > 0) {
+        for (const item of bill.items) {
+          await client.query(
+            `INSERT INTO public.odg_tms_detail_item(doc_no, bill_no, item_code, item_name, qty, selected_qty, unit_code)
+             VALUES ($1,$2,$3,$4,$5,$6,$7)`,
+            [docNo, bill.bill_no, item.item_code, item.item_name, item.qty, item.selectedQty, item.unit_code]
+          );
+        }
+      }
+    }
+
+    if (uniqueWorkers.length > 0) {
+      const workerResult = await client.query(
+        `SELECT e.employee_code AS code,
+          COALESCE(NULLIF(TRIM(e.fullname_lo), ''), NULLIF(TRIM(e.nickname), ''), e.employee_code) AS name_1
+        FROM public.odg_employee e
+        LEFT JOIN public.odg_department d ON d.department_code = e.department_code
+        WHERE e.employee_code = ANY($1::varchar[])
+          AND e.employment_status = 'ACTIVE'
+          AND d.department_name_lo ILIKE '%ຂົນສົ່ງ%'
+        ORDER BY name_1 ASC, e.employee_code ASC`,
+        [uniqueWorkers]
+      );
+
+      for (const worker of workerResult.rows) {
+        await client.query(
+          `INSERT INTO public.odg_tms_worker(doc_no, doc_date, worker_code, worker_name, user_create, create_date_time_now)
+          VALUES ($1, $2, $3, $4, $5, LOCALTIMESTAMP(0))
+          ON CONFLICT (doc_no, worker_code)
+          DO UPDATE SET doc_date = EXCLUDED.doc_date, worker_name = EXCLUDED.worker_name, user_create = EXCLUDED.user_create`,
+          [docNo, fixedDocDate, worker.code, worker.name_1, session.usercode]
         );
       }
     }
-  }
 
-  if (uniqueWorkers.length > 0) {
-    const workerRows = await query(
-      `SELECT e.employee_code AS code,
-        COALESCE(NULLIF(TRIM(e.fullname_lo), ''), NULLIF(TRIM(e.nickname), ''), e.employee_code) AS name_1
-      FROM public.odg_employee e
-      LEFT JOIN public.odg_department d ON d.department_code = e.department_code
-      WHERE e.employee_code = ANY($1::varchar[])
-        AND e.employment_status = 'ACTIVE'
-        AND d.department_name_lo ILIKE '%ຂົນສົ່ງ%'
-      ORDER BY name_1 ASC, e.employee_code ASC`,
-      [uniqueWorkers]
-    );
-
-    for (const worker of workerRows) {
-      await queryOne(
-        `INSERT INTO public.odg_tms_worker(doc_no, doc_date, worker_code, worker_name, user_create, create_date_time_now)
-        VALUES ($1, $2, $3, $4, $5, LOCALTIMESTAMP(0))
-        ON CONFLICT (doc_no, worker_code)
-        DO UPDATE SET doc_date = EXCLUDED.doc_date, worker_name = EXCLUDED.worker_name, user_create = EXCLUDED.user_create`,
-        [data.doc_no, fixedDocDate, worker.code, worker.name_1, session.usercode]
-      );
-    }
+    await client.query("DELETE FROM public.odg_tms_listbill_draft WHERE user_create=$1", [session.usercode]);
+    await client.query("COMMIT");
+  } catch (error) {
+    await client.query("ROLLBACK").catch(() => {});
+    throw error;
+  } finally {
+    client.release();
   }
-  await queryOne("DELETE FROM public.odg_tms_listbill_draft WHERE user_create=$1", [session.usercode]);
 
   // Notify driver about the new dispatch
   if (data.driver) {
@@ -226,7 +268,7 @@ async function createJob(session, data) {
       : "";
     const billCount = normalizedBills.length;
     const lines = [
-      `📋 ຖ້ຽວ ${data.doc_no}`,
+      `📋 ຖ້ຽວ ${docNo}`,
       logisticDate ? `📅 ສົ່ງວັນທີ ${logisticDate}` : null,
       carName ? `🚚 ລົດ ${carName}` : null,
       `📦 ${billCount} ບິນ`,
@@ -235,12 +277,13 @@ async function createJob(session, data) {
       data.driver,
       "🚚 ມີຖ້ຽວໃໝ່ໃຫ້ທ່ານ",
       lines.join("\n"),
-      { type: "job_created", doc_no: data.doc_no }
+      { type: "job_created", doc_no: docNo }
     );
   }
 
   // Fire-and-forget: WhatsApp customers + LINE sales for every bill on the job.
-  void notifyJobCreated(data.doc_no);
+  void notifyJobCreated(docNo);
+  return { doc_no: docNo };
 }
 
 async function addBillsToJob(docNo, bills) {
@@ -471,8 +514,7 @@ async function getJobInit(session) {
   const fixedToday = getFixedTodayDate();
   const fixedMonth = fixedToday.slice(0, 7);
   const result = await queryOne("SELECT max(doc_no) as doc_no FROM public.odg_tms WHERE to_char(doc_date,'YYYY-MM')=$1", [fixedMonth]);
-  const pfx = fixedMonth.replace("-", "");
-  const doc_no = !result?.doc_no ? pfx + "00001" : String(parseInt(result.doc_no) + 1);
+  const doc_no = nextJobDocNoFromMax(result?.doc_no, fixedMonth);
   const drafts = await query(`SELECT bill_date, to_char(bill_date,'DD-MM-YYYY') as bill_date_display, bill_no, cust_code, telephone, count_item FROM odg_tms_listbill_draft WHERE user_create=$1 AND ${getFixedYearSqlFilter("bill_date")}`, [session.usercode]);
   const scope = getBranchScope(session);
   const bills = await query(`SELECT doc_no, doc_date, to_char(doc_date,'DD-MM-YYYY') as doc_date_display, cust_code, b.telephone, (SELECT count(item_code) FROM ic_trans_detail WHERE doc_no=a.doc_no) as count_item FROM ic_trans_shipment a LEFT JOIN ar_customer b ON b.code=a.cust_code WHERE trans_flag=44 AND check_status=0 AND doc_no NOT IN (SELECT bill_no FROM odg_tms_listbill_draft) ${branchFilterShipment(scope, "a")} AND ${getFixedYearSqlFilter("a.doc_date")}`);
@@ -496,9 +538,8 @@ async function getJobAddPageData(session) {
     getAvailableBills(session),
   ]);
 
-  const pfx = fixedMonth.replace("-", "");
   const maxDocNo = result.status === "fulfilled" ? result.value?.doc_no : null;
-  const doc_no = !maxDocNo ? pfx + "00001" : String(parseInt(maxDocNo) + 1);
+  const doc_no = nextJobDocNoFromMax(maxDocNo, fixedMonth);
 
   if (result.status === "rejected") console.error("getJobAddPageData/docNo", result.reason);
   if (cars.status === "rejected") console.error("getJobAddPageData/cars", cars.reason);

@@ -23,6 +23,7 @@ import {
   StatusTableShell,
 } from "@/components/status-page-shell";
 import { Pagination, toNumber } from "@/components/status-page-helpers";
+import { WhatsappLink, buildBillWhatsappMessage } from "@/components/whatsapp-link";
 
 interface Product {
   item_code: string;
@@ -330,7 +331,17 @@ export default function ApprovePage() {
                                               </span>
                                             </div>
                                             {bill.telephone && (
-                                              <p className="text-[10px] text-slate-400 mt-1 ml-7">ໂທ: {bill.telephone}</p>
+                                              <p className="text-[10px] text-slate-400 mt-1 ml-7 flex items-center gap-1.5">
+                                                <span>ໂທ: {bill.telephone}</span>
+                                                <WhatsappLink
+                                                  phone={bill.telephone}
+                                                  message={buildBillWhatsappMessage({
+                                                    billNo: bill.bill_no,
+                                                    customerName: bill.cust_name,
+                                                    trackingUrl: `/track?bill=${encodeURIComponent(bill.bill_no)}`,
+                                                  })}
+                                                />
+                                              </p>
                                             )}
                                           </div>
                                           {bill.products && bill.products.length > 0 && (

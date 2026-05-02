@@ -17,6 +17,7 @@ import { Actions } from "@/lib/api";
 import { useConfirm } from "@/components/confirm-dialog";
 import { getFixedTodayDate, FIXED_YEAR_START, FIXED_YEAR_END } from "@/lib/fixed-year";
 import { StatusPageHeader, StatusStatGrid } from "@/components/status-page-shell";
+import { WhatsappLink, buildBillWhatsappMessage } from "@/components/whatsapp-link";
 // Ported from server actions: getBillsWaitingSentDetails, deleteJob
 
 function ImageThumb({ src, label }: { src: string; label: string }) {
@@ -616,7 +617,19 @@ export default function BillCompleteClient({
                                               <td className="py-2 pr-3">
                                                 <div className="space-y-0.5">
                                                   <p className="text-slate-700">{detail.customer}</p>
-                                                  <p className="text-[10px] text-slate-400">{detail.telephone}</p>
+                                                  {detail.telephone && (
+                                                    <p className="text-[10px] text-slate-400 flex items-center gap-1.5">
+                                                      <span>{detail.telephone}</span>
+                                                      <WhatsappLink
+                                                        phone={detail.telephone}
+                                                        message={buildBillWhatsappMessage({
+                                                          billNo: detail.bill_no,
+                                                          customerName: detail.customer,
+                                                          trackingUrl: `/track?bill=${encodeURIComponent(detail.bill_no)}`,
+                                                        })}
+                                                      />
+                                                    </p>
+                                                  )}
                                                 </div>
                                               </td>
                                               <td className="py-2 pr-3 text-slate-600">{toNumber(detail.count_item)}</td>

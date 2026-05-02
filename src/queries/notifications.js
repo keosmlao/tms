@@ -2,7 +2,6 @@
 // Failures are logged but never thrown — callers should fire-and-forget so a
 // transient WA/LINE outage can't break the order workflow.
 const { query, queryOne } = require("../lib/db");
-const { sendWhatsApp } = require("../lib/whatsapp");
 const { sendDeliveryFlex } = require("../lib/line");
 
 // Optional fallback recipient when the bill's sale_code has no line_id mapped.
@@ -150,33 +149,6 @@ async function getBillContext(billNo) {
   };
 }
 
-async function notifyCustomerWhatsApp(billNo) {
-  try {
-    const ctx = await getBillContext(billNo);
-    if (!ctx?.cust_phone) {
-      console.warn("[notify] customer phone missing for bill", billNo);
-      return;
-    }
-    const link = trackingLink(billNo);
-    const lines = [
-      "🚚 ODG Group ຈັດສົ່ງສິນຄ້າ",
-      "",
-      `ບິນ: ${billNo}`,
-      ctx.cust_name ? `ລູກຄ້າ: ${ctx.cust_name}` : null,
-      ctx.car_name ? `ລົດ: ${ctx.car_name}` : null,
-      ctx.driver_name ? `ຄົນຂັບ: ${ctx.driver_name}` : null,
-      "",
-      "ຕິດຕາມການສົ່ງສິນຄ້າຂອງທ່ານທີ່:",
-      link,
-      "",
-      "ຂອບໃຊ້ທີ່ໃຊ້ບໍລິການ 🙏",
-    ].filter(Boolean);
-    await sendWhatsApp(ctx.cust_phone, lines.join("\n"));
-  } catch (err) {
-    console.warn("[notify] customer WA failed:", err?.message ?? err);
-  }
-}
-
 // Push the same Flex bubble used for sales staff to the customer's LINE OA
 // (uses ar_customer.register_line_id — the userId saved when the customer
 // added the OA as a friend). The customer flex includes the public tracking
@@ -236,9 +208,9 @@ async function notifySalesLine(billNo, statusLabel) {
   }
 }
 
-// Convenience: full job-created fan-out — one WA + one customer-LINE per
-// customer plus one sales-LINE per bill. Driven by doc_no so callers don't
-// need to enumerate bills first.
+// Convenience: full job-created fan-out — one customer-LINE per customer
+// plus one sales-LINE per bill (the sales LINE flex now carries the wa.me
+// share URL, so we no longer push WhatsApp via Meta API).
 async function notifyJobCreated(docNo) {
   try {
     const bills = await query(
@@ -247,7 +219,6 @@ async function notifyJobCreated(docNo) {
     );
     const label = "📋 ຖ້ຽວຈັດສົ່ງໄດ້ຖືກສ້າງ";
     for (const b of bills) {
-      void notifyCustomerWhatsApp(b.bill_no);
       void notifyCustomerLine(b.bill_no, label);
       void notifySalesLine(b.bill_no, label);
     }
@@ -266,7 +237,7 @@ async function notifyBillStatus(billNo, statusLabel) {
 module.exports = {
   notifyJobCreated,
   notifyBillStatus,
-  notifyCustomerWhatsApp,
+  customerWhatsappShareUrl,
   notifyCustomerLine,
   notifySalesLine,
   trackingLink,

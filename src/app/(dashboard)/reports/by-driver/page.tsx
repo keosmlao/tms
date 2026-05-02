@@ -22,6 +22,7 @@ import {
 } from "react-icons/fa";
 import { FIXED_YEAR_END, FIXED_YEAR_START, getFixedTodayDate } from "@/lib/fixed-year";
 import { Actions } from "@/lib/api";
+import { WhatsappLink, buildBillWhatsappMessage } from "@/components/whatsapp-link";
 // Ported from server actions: getJobBillsWithProducts, getReportByDriver
 
 // ==================== Types ====================
@@ -548,9 +549,17 @@ export default function ByDriverReportPage() {
                                             </div>
                                             <div className="flex items-center gap-2 shrink-0">
                                               {bill.telephone && (
-                                                <span className="hidden sm:inline-flex items-center gap-1 text-[10px] text-slate-500">
+                                                <span className="hidden sm:inline-flex items-center gap-1.5 text-[10px] text-slate-500">
                                                   <FaPhone size={8} />
                                                   {bill.telephone}
+                                                  <WhatsappLink
+                                                    phone={bill.telephone}
+                                                    message={buildBillWhatsappMessage({
+                                                      billNo: bill.bill_no,
+                                                      customerName: bill.cust_name,
+                                                      trackingUrl: `/track?bill=${encodeURIComponent(bill.bill_no)}`,
+                                                    })}
+                                                  />
                                                 </span>
                                               )}
                                               <span className="rounded-full bg-teal-500/10 px-2 py-0.5 text-[10px] font-bold text-teal-600 dark:text-teal-400">

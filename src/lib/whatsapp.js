@@ -88,4 +88,17 @@ async function sendWhatsApp(toRaw, message) {
   }
 }
 
-module.exports = { sendWhatsApp, normalizePhone };
+// Build a wa.me share URL — opens WhatsApp with the recipient + message
+// pre-filled. Used as a click-to-send link inside LINE notifications so a
+// salesperson can forward the message manually instead of relying on the
+// WhatsApp Business API.
+function whatsappShareUrl(rawPhone, message, defaultCc) {
+  const phone = normalizePhone(rawPhone, defaultCc);
+  if (!phone) return "";
+  const text = encodeURIComponent(String(message ?? ""));
+  return text
+    ? `https://wa.me/${phone}?text=${text}`
+    : `https://wa.me/${phone}`;
+}
+
+module.exports = { sendWhatsApp, normalizePhone, whatsappShareUrl };

@@ -20,6 +20,7 @@ import {
 import { Actions } from "@/lib/api";
 import { useConfirm } from "@/components/confirm-dialog";
 import { StatusPageHeader, StatusStatGrid } from "@/components/status-page-shell";
+import { WhatsappLink, buildBillWhatsappMessage } from "@/components/whatsapp-link";
 
 function ImageThumb({ src, label }: { src: string; label: string }) {
   const [open, setOpen] = useState(false);
@@ -655,7 +656,17 @@ export default function BillsWaitingSentClient({
                                                 </div>
                                               </div>
                                               {detail.telephone && (
-                                                <p className="text-[10px] text-slate-400 mt-1 ml-7">ໂທ: {detail.telephone}</p>
+                                                <p className="text-[10px] text-slate-400 mt-1 ml-7 flex items-center gap-1.5">
+                                                  <span>ໂທ: {detail.telephone}</span>
+                                                  <WhatsappLink
+                                                    phone={detail.telephone}
+                                                    message={buildBillWhatsappMessage({
+                                                      billNo: detail.bill_no,
+                                                      customerName: detail.customer,
+                                                      trackingUrl: `/track?bill=${encodeURIComponent(detail.bill_no)}`,
+                                                    })}
+                                                  />
+                                                </p>
                                               )}
                                               <div className="flex gap-4 mt-1.5 ml-7 text-[10px] text-slate-400 flex-wrap">
                                                 <span>ເບີກ: {detail.recipt_job}</span>

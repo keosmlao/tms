@@ -18,6 +18,7 @@ import {
   StatusTableShell,
 } from "@/components/status-page-shell";
 import { Pagination, StatusBadge } from "@/components/status-page-helpers";
+import { WhatsappLink, buildBillWhatsappMessage } from "@/components/whatsapp-link";
 
 interface PartialBill {
   doc_date: string;
@@ -213,8 +214,16 @@ export default function BillsPartialPage() {
                         <div className="space-y-1">
                           <p className="text-slate-700 dark:text-slate-200 font-medium">{b.cust_name}</p>
                           {b.telephone && (
-                            <p className="text-[11px] text-slate-500 inline-flex items-center gap-1">
+                            <p className="text-[11px] text-slate-500 inline-flex items-center gap-1.5">
                               <FaPhone size={9} /> {b.telephone}
+                              <WhatsappLink
+                                phone={b.telephone}
+                                message={buildBillWhatsappMessage({
+                                  billNo: b.bill_no,
+                                  customerName: b.cust_name,
+                                  trackingUrl: `/track?bill=${encodeURIComponent(b.bill_no)}`,
+                                })}
+                              />
                             </p>
                           )}
                         </div>
