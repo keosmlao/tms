@@ -237,7 +237,6 @@ async function notifyBillStatus(billNo, statusLabel) {
 module.exports = {
   notifyJobCreated,
   notifyBillStatus,
-  customerWhatsappShareUrl,
   notifyCustomerLine,
   notifySalesLine,
   trackingLink,
