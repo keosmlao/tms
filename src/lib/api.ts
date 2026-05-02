@@ -8,6 +8,7 @@ import * as fuel from "@/actions/fuel";
 import * as gps from "@/actions/gps";
 import * as jobs from "@/actions/jobs";
 import * as masterData from "@/actions/master-data";
+import * as notifications from "@/actions/notifications";
 import * as reports from "@/actions/reports";
 import * as settings from "@/actions/settings";
 import * as tracking from "@/actions/tracking";
@@ -129,6 +130,9 @@ export const Actions = {
   // Settings (notification test mode etc.)
   getNotifySettings: settings.getNotifySettings,
   saveNotifySettings: settings.saveNotifySettings,
+
+  // Notifications
+  getActivityNotifications: notifications.getActivityNotifications,
 
   // Delivery rounds
   listDeliveryRounds: deliveryRound.listDeliveryRounds,

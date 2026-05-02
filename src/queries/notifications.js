@@ -4,6 +4,8 @@
 const { query, queryOne } = require("../lib/db");
 const { sendDeliveryFlex } = require("../lib/line");
 const { getSetting } = require("./settings");
+const { getBranchScope, branchFilterJob } = require("./helpers");
+const { getFixedYearSqlFilter } = require("../lib/fixed-year");
 
 // Optional fallback recipient when the bill's sale_code has no line_id mapped.
 // Set to a LINE groupId / userId of the OA admin so updates aren't lost.
@@ -249,10 +251,121 @@ async function notifyBillStatus(billNo, statusLabel) {
   void notifyCustomerLine(billNo, statusLabel);
 }
 
+async function getActivityNotifications(session, limit = 30) {
+  const scope = getBranchScope(session);
+  const max = Math.min(Math.max(Number(limit) || 30, 1), 80);
+  return query(
+    `WITH activity AS (
+      SELECT
+        'job_created' AS type,
+        a.doc_no,
+        NULL::text AS bill_no,
+        'ສ້າງຖ້ຽວໃໝ່' AS title,
+        CONCAT('ຖ້ຽວ ', a.doc_no, ' · ', COALESCE(car.name_1, a.car, '-')) AS body,
+        a.create_date_time_now AS event_at,
+        '/jobs' AS href,
+        'blue' AS tone
+      FROM public.odg_tms a
+      LEFT JOIN public.odg_tms_car car ON car.code = a.car
+      WHERE a.create_date_time_now IS NOT NULL
+        AND ${getFixedYearSqlFilter("a.doc_date")}
+        ${branchFilterJob(scope, "a")}
+
+      UNION ALL
+
+      SELECT
+        'bill_pickup' AS type,
+        d.doc_no,
+        d.bill_no,
+        'ເບີກເຄື່ອງແລ້ວ' AS title,
+        CONCAT('ບິນ ', d.bill_no, ' · ', COALESCE(cu.name_1, d.cust_code, '-')) AS body,
+        d.recipt_job AS event_at,
+        CONCAT('/tracking?search=', d.bill_no) AS href,
+        'amber' AS tone
+      FROM public.odg_tms_detail d
+      LEFT JOIN public.odg_tms a ON a.doc_no = d.doc_no
+      LEFT JOIN public.ar_customer cu ON cu.code = d.cust_code
+      WHERE d.recipt_job IS NOT NULL
+        AND ${getFixedYearSqlFilter("d.doc_date")}
+        ${branchFilterJob(scope, "a")}
+
+      UNION ALL
+
+      SELECT
+        'bill_dispatch' AS type,
+        d.doc_no,
+        d.bill_no,
+        CASE WHEN d.sent_end IS NULL THEN 'ເລີ່ມຈັດສົ່ງ' ELSE 'ມີການເຄື່ອນໄຫວຈັດສົ່ງ' END AS title,
+        CONCAT('ບິນ ', d.bill_no, ' · ', COALESCE(cu.name_1, d.cust_code, '-')) AS body,
+        d.sent_start AS event_at,
+        CONCAT('/tracking?search=', d.bill_no) AS href,
+        'sky' AS tone
+      FROM public.odg_tms_detail d
+      LEFT JOIN public.odg_tms a ON a.doc_no = d.doc_no
+      LEFT JOIN public.ar_customer cu ON cu.code = d.cust_code
+      WHERE d.sent_start IS NOT NULL
+        AND ${getFixedYearSqlFilter("d.doc_date")}
+        ${branchFilterJob(scope, "a")}
+
+      UNION ALL
+
+      SELECT
+        CASE WHEN COALESCE(d.status, 0) = 2 THEN 'bill_cancelled' ELSE 'bill_completed' END AS type,
+        d.doc_no,
+        d.bill_no,
+        CASE WHEN COALESCE(d.status, 0) = 2 THEN 'ຍົກເລີກຈັດສົ່ງ' ELSE 'ຈັດສົ່ງສຳເລັດ' END AS title,
+        CONCAT('ບິນ ', d.bill_no, ' · ', COALESCE(cu.name_1, d.cust_code, '-')) AS body,
+        d.sent_end AS event_at,
+        CONCAT('/tracking?search=', d.bill_no) AS href,
+        CASE WHEN COALESCE(d.status, 0) = 2 THEN 'rose' ELSE 'emerald' END AS tone
+      FROM public.odg_tms_detail d
+      LEFT JOIN public.odg_tms a ON a.doc_no = d.doc_no
+      LEFT JOIN public.ar_customer cu ON cu.code = d.cust_code
+      WHERE d.sent_end IS NOT NULL
+        AND COALESCE(d.status, 0) IN (1, 2)
+        AND ${getFixedYearSqlFilter("d.doc_date")}
+        ${branchFilterJob(scope, "a")}
+
+      UNION ALL
+
+      SELECT
+        'job_closed' AS type,
+        a.doc_no,
+        NULL::text AS bill_no,
+        'ປິດຖ້ຽວແລ້ວ' AS title,
+        CONCAT('ຖ້ຽວ ', a.doc_no, ' · ', COALESCE(car.name_1, a.car, '-')) AS body,
+        COALESCE(a.admin_close_at, a.job_close) AS event_at,
+        '/jobs/closed' AS href,
+        'slate' AS tone
+      FROM public.odg_tms a
+      LEFT JOIN public.odg_tms_car car ON car.code = a.car
+      WHERE COALESCE(a.admin_close_at, a.job_close) IS NOT NULL
+        AND ${getFixedYearSqlFilter("a.doc_date")}
+        ${branchFilterJob(scope, "a")}
+    )
+    SELECT
+      type,
+      doc_no,
+      bill_no,
+      title,
+      body,
+      href,
+      tone,
+      to_char(event_at, 'DD-MM-YYYY HH24:MI') AS event_time,
+      EXTRACT(EPOCH FROM (now() - event_at))::int AS age_seconds
+    FROM activity
+    WHERE event_at IS NOT NULL
+    ORDER BY event_at DESC
+    LIMIT $1`,
+    [max]
+  );
+}
+
 module.exports = {
   notifyJobCreated,
   notifyBillStatus,
   notifyCustomerLine,
   notifySalesLine,
+  getActivityNotifications,
   trackingLink,
 };

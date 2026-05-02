@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { useRouter, usePathname } from "next/navigation";
 import {
@@ -12,9 +12,11 @@ import {
   FaMoon,
   FaSun,
   FaDownload,
+  FaSpinner,
 } from "react-icons/fa";
 import { useTheme } from "@/hooks/use-theme";
 import { useSession } from "@/providers/session-provider";
+import { Actions } from "@/lib/api";
 
 const pageTitles: Record<string, string> = {
   "/": "Dashboard",
@@ -47,14 +49,70 @@ const pageTitles: Record<string, string> = {
   "/location": "ຕໍາແໜ່ງລົດ",
 };
 
+interface ActivityNotification {
+  type: string;
+  doc_no: string;
+  bill_no: string | null;
+  title: string;
+  body: string;
+  href: string;
+  tone: string;
+  event_time: string;
+  age_seconds: number;
+}
+
+const toneClasses: Record<string, string> = {
+  amber: "bg-amber-500",
+  blue: "bg-blue-500",
+  emerald: "bg-emerald-500",
+  rose: "bg-rose-500",
+  sky: "bg-sky-500",
+  slate: "bg-slate-500",
+};
+
+function formatActivityAge(seconds: number) {
+  if (!Number.isFinite(seconds) || seconds < 60) return "ຕອນນີ້";
+  const minutes = Math.floor(seconds / 60);
+  if (minutes < 60) return `${minutes} ນາທີ`;
+  const hours = Math.floor(minutes / 60);
+  if (hours < 24) return `${hours} ຊົ່ວໂມງ`;
+  return `${Math.floor(hours / 24)} ມື້`;
+}
+
 export default function Topbar() {
   const router = useRouter();
   const pathname = usePathname() ?? "";
   const [searchText, setSearchText] = useState("");
   const [showDropdown, setShowDropdown] = useState(false);
+  const [showNotifications, setShowNotifications] = useState(false);
+  const [notifications, setNotifications] = useState<ActivityNotification[]>([]);
+  const [notificationsLoading, setNotificationsLoading] = useState(false);
   const { isDarkMode, toggleTheme } = useTheme();
   const { session, logout } = useSession();
   const username = session?.username ?? "";
+
+  const loadNotifications = useCallback(async () => {
+    try {
+      setNotificationsLoading(true);
+      const rows = await Actions.getActivityNotifications(30);
+      setNotifications(rows ?? []);
+    } catch (error) {
+      console.error("Failed to load notifications", error);
+    } finally {
+      setNotificationsLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    void loadNotifications();
+    const timer = window.setInterval(() => void loadNotifications(), 30000);
+    return () => window.clearInterval(timer);
+  }, [loadNotifications]);
+
+  const recentCount = useMemo(
+    () => notifications.filter((item) => Number(item.age_seconds) <= 600).length,
+    [notifications]
+  );
 
   const handleSearch = (e: React.FormEvent) => {
     e.preventDefault();
@@ -153,15 +211,88 @@ export default function Topbar() {
           </form>
 
           {/* Notifications */}
-          <button className="relative rounded-lg p-2 text-slate-400 transition-colors hover:bg-slate-100 dark:text-slate-500 dark:hover:bg-white/8">
-            <FaBell size={15} />
-            <span className="absolute right-1.5 top-1.5 h-2 w-2 rounded-full bg-rose-500 ring-2 ring-white/80 dark:ring-gray-900/80" />
-          </button>
+          <div className="relative">
+            <button
+              onClick={() => {
+                setShowNotifications((open) => !open);
+                setShowDropdown(false);
+                void loadNotifications();
+              }}
+              className="relative rounded-lg p-2 text-slate-400 transition-colors hover:bg-slate-100 dark:text-slate-500 dark:hover:bg-white/8"
+              aria-label="Notifications"
+            >
+              <FaBell size={15} />
+              {recentCount > 0 && (
+                <span className="absolute -right-0.5 -top-0.5 flex h-4 min-w-4 items-center justify-center rounded-full bg-rose-500 px-1 text-[9px] font-bold leading-none text-white ring-2 ring-white/80 dark:ring-gray-900/80">
+                  {recentCount > 9 ? "9+" : recentCount}
+                </span>
+              )}
+            </button>
+
+            {showNotifications && (
+              <>
+                <div
+                  className="fixed inset-0 z-10"
+                  onClick={() => setShowNotifications(false)}
+                />
+                <div className="animate-fadeIn absolute right-0 z-20 mt-2 w-[min(22rem,calc(100vw-2rem))] overflow-hidden rounded-lg border border-slate-200 bg-white shadow-2xl dark:border-slate-800 dark:bg-slate-900">
+                  <div className="flex items-center justify-between border-b border-slate-200/60 px-4 py-3 dark:border-white/5">
+                    <div>
+                      <p className="text-sm font-semibold text-slate-800 dark:text-white">
+                        ການເຄື່ອນໄຫວ
+                      </p>
+                      <p className="mt-0.5 text-[11px] text-slate-400 dark:text-slate-500">
+                        ແຈ້ງເຕືອນທຸກສະຖານະຈັດສົ່ງ
+                      </p>
+                    </div>
+                    {notificationsLoading && (
+                      <FaSpinner className="animate-spin text-xs text-slate-400" />
+                    )}
+                  </div>
+
+                  <div className="max-h-[26rem] overflow-y-auto py-1">
+                    {notifications.length === 0 && !notificationsLoading ? (
+                      <div className="px-4 py-8 text-center text-sm text-slate-400 dark:text-slate-500">
+                        ຍັງບໍ່ມີແຈ້ງເຕືອນ
+                      </div>
+                    ) : (
+                      notifications.map((item, index) => (
+                        <Link
+                          key={`${item.type}-${item.doc_no}-${item.bill_no ?? ""}-${item.event_time}-${index}`}
+                          href={item.href}
+                          onClick={() => setShowNotifications(false)}
+                          className="flex gap-3 px-4 py-3 transition-colors hover:bg-slate-50 dark:hover:bg-white/5"
+                        >
+                          <span
+                            className={`mt-1.5 h-2.5 w-2.5 shrink-0 rounded-full ${toneClasses[item.tone] ?? "bg-teal-500"}`}
+                          />
+                          <span className="min-w-0 flex-1">
+                            <span className="block truncate text-sm font-semibold text-slate-700 dark:text-slate-100">
+                              {item.title}
+                            </span>
+                            <span className="mt-0.5 block truncate text-xs text-slate-500 dark:text-slate-400">
+                              {item.body}
+                            </span>
+                            <span className="mt-1 block text-[11px] text-slate-400 dark:text-slate-500">
+                              {formatActivityAge(Number(item.age_seconds))} · {item.event_time}
+                            </span>
+                          </span>
+                        </Link>
+                      ))
+                    )}
+                  </div>
+                </div>
+              </>
+            )}
+          </div>
 
           {/* User */}
           <div className="relative">
             <button
-              onClick={() => setShowDropdown(!showDropdown)}
+              onClick={() => {
+                setShowDropdown(!showDropdown);
+                setShowNotifications(false);
+              }}
               className="flex items-center gap-2 rounded-lg py-1 pl-1 pr-2.5 transition-all duration-200 hover:bg-slate-100 dark:hover:bg-white/8"
             >
               <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-teal-700 text-xs font-bold text-white shadow-sm dark:bg-teal-400 dark:text-slate-950">
