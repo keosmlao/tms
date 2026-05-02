@@ -88,12 +88,12 @@ async function getBillContext(billNo) {
   // sub-select casts only the text fields we need.
   const base = await queryOne(
     `SELECT d.bill_no::text, d.doc_no::text,
-            COALESCE(d.cust_code, '')::text as cust_code,
-            COALESCE(d.telephone, '')::text as bill_phone,
-            COALESCE(j.car, '')::text as car_code,
-            COALESCE(j.driver, '')::text as driver_code,
-            COALESCE(car.name_1, j.car, '')::text as car_name,
-            COALESCE(drv.name_1, j.driver, '')::text as driver_name
+            COALESCE(d.cust_code::text, '') as cust_code,
+            COALESCE(d.telephone::text, '') as bill_phone,
+            COALESCE(j.car::text, '') as car_code,
+            COALESCE(j.driver::text, '') as driver_code,
+            COALESCE(car.name_1::text, j.car::text, '') as car_name,
+            COALESCE(drv.name_1::text, j.driver::text, '') as driver_name
      FROM public.odg_tms_detail d
      LEFT JOIN public.odg_tms j ON j.doc_no = d.doc_no
      LEFT JOIN public.odg_tms_car car ON car.code = j.car
@@ -105,14 +105,15 @@ async function getBillContext(billNo) {
   );
   if (!base) return null;
 
-  // Customer details (cast to text to dodge legacy date-parsing errors).
+  // Customer details — cast each column to text BEFORE COALESCE so legacy
+  // date-typed columns with empty values don't fail the implicit '' coercion.
   let cust = { cust_name: "", cust_phone: "", cust_line_id: "" };
   if (base.cust_code) {
     try {
       const c = await queryOne(
-        `SELECT COALESCE(name_1, '')::text as cust_name,
-                COALESCE(telephone, '')::text as cust_phone,
-                COALESCE(register_line_id, '')::text as cust_line_id
+        `SELECT COALESCE(name_1::text, '') as cust_name,
+                COALESCE(telephone::text, '') as cust_phone,
+                COALESCE(register_line_id::text, '') as cust_line_id
          FROM public.ar_customer WHERE code = $1 LIMIT 1`,
         [base.cust_code]
       );
@@ -126,9 +127,9 @@ async function getBillContext(billNo) {
   let sale = { sale_code: "", sale_name: "", sale_line_id: "" };
   try {
     const s = await queryOne(
-      `SELECT COALESCE(b.sale_code, '')::text as sale_code,
-              COALESCE(u.name_1, '')::text as sale_name,
-              COALESCE(u.line_id, '')::text as sale_line_id
+      `SELECT COALESCE(b.sale_code::text, '') as sale_code,
+              COALESCE(u.name_1::text, '') as sale_name,
+              COALESCE(u.line_id::text, '') as sale_line_id
        FROM ic_trans b
        LEFT JOIN erp_user u ON u.code = b.sale_code
        WHERE b.doc_no = $1
