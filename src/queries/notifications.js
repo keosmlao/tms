@@ -4,6 +4,7 @@
 const { query, queryOne } = require("../lib/db");
 const { sendDeliveryFlex } = require("../lib/line");
 const { getSetting } = require("./settings");
+const { ensureDeliveryWorkflowSchema } = require("./delivery");
 const { getBranchScope, branchFilterJob } = require("./helpers");
 const { getFixedYearSqlFilter } = require("../lib/fixed-year");
 
@@ -260,6 +261,10 @@ const NOTIFICATION_KEY_SQL = `
 `;
 
 async function getActivityNotifications(session, limit = 30) {
+  // Ensures the per-user reads table exists before joining against it —
+  // first request after a fresh server boot would otherwise 500 with
+  // "relation does not exist".
+  await ensureDeliveryWorkflowSchema();
   const scope = getBranchScope(session);
   const max = Math.min(Math.max(Number(limit) || 30, 1), 80);
   const userCode = String(session?.usercode ?? "");
@@ -376,6 +381,7 @@ async function getActivityNotifications(session, limit = 30) {
 }
 
 async function markActivityNotificationRead(session, notificationKey) {
+  await ensureDeliveryWorkflowSchema();
   const userCode = String(session?.usercode ?? "");
   const key = String(notificationKey ?? "");
   if (!userCode || !key) return { success: false };
