@@ -158,6 +158,20 @@ function normalizeItems(value) {
   return Array.from(grouped.entries()).map(([item_code, qty]) => ({ item_code, qty }));
 }
 
+async function notifyJobDispatchStarted(docNo) {
+  try {
+    const dispatchBills = await query(
+      `SELECT bill_no FROM public.odg_tms_detail WHERE doc_no=$1 AND ${getFixedYearSqlFilter("doc_date")}`,
+      [docNo]
+    );
+    for (const b of dispatchBills) {
+      void notifyBillStatus(b.bill_no, "🚚 ເລີ່ມຈັດສົ່ງ");
+    }
+  } catch (err) {
+    console.warn("[mobile] dispatch notification failed:", err?.message ?? err);
+  }
+}
+
 async function mobileJobAction(body) {
   const client = await pool.connect();
   try {
@@ -256,7 +270,12 @@ async function mobileJobAction(body) {
         const currentJob = jobRow.rows[0];
         if (!currentJob) throw new Error("Job was not found");
         if (Number(currentJob.approve_status ?? 0) !== 1) throw new Error("ຖ້ຽວນີ້ຍັງບໍ່ຖືກອະນຸມັດ");
-        if (Number(currentJob.job_status ?? 0) !== 1) throw new Error("ກະລຸນາຮັບຖ້ຽວກ່ອນ");
+        const currentJobStatus = Number(currentJob.job_status ?? 0);
+        if (currentJobStatus === 2) {
+          await client.query("COMMIT");
+          return { success: true, already_started: true };
+        }
+        if (currentJobStatus !== 1) throw new Error("ກະລຸນາຮັບຖ້ຽວກ່ອນ");
         if (Number(currentJob.pending_pickup_count ?? 0) > 0) throw new Error("ກະລຸນາເບີກເຄື່ອງໃຫ້ຄົບກ່ອນເລີ່ມຈັດສົ່ງ");
 
         await client.query(
@@ -271,15 +290,7 @@ async function mobileJobAction(body) {
         );
 
         await client.query("COMMIT");
-
-        // Fan out a sales LINE per bill on this job — dispatch is job-level.
-        const dispatchBills = await query(
-          `SELECT bill_no FROM public.odg_tms_detail WHERE doc_no=$1 AND ${getFixedYearSqlFilter("doc_date")}`,
-          [docNo]
-        );
-        for (const b of dispatchBills) {
-          void notifyBillStatus(b.bill_no, "🚚 ເລີ່ມຈັດສົ່ງ");
-        }
+        void notifyJobDispatchStarted(docNo);
         return { success: true };
       }
 
