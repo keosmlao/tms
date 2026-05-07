@@ -26,6 +26,7 @@ async function ensurePendingBillSchemaInternal(db) {
       scheduled_date date,
       remark text,
       action_status character varying,
+      delivery_round_code character varying,
       updated_by character varying,
       updated_at timestamp without time zone DEFAULT LOCALTIMESTAMP(0)
     )
@@ -35,6 +36,10 @@ async function ensurePendingBillSchemaInternal(db) {
     ADD COLUMN IF NOT EXISTS action_status character varying
   `);
   await safeDdl(db, `
+    ALTER TABLE public.odg_tms_pending_bill
+    ADD COLUMN IF NOT EXISTS delivery_round_code character varying
+  `);
+  await safeDdl(db, `
     CREATE INDEX IF NOT EXISTS idx_odg_tms_pending_bill_scheduled
     ON public.odg_tms_pending_bill (scheduled_date)
   `);
@@ -42,21 +47,32 @@ async function ensurePendingBillSchemaInternal(db) {
     CREATE INDEX IF NOT EXISTS idx_odg_tms_pending_bill_status
     ON public.odg_tms_pending_bill (action_status) WHERE action_status IS NOT NULL
   `);
+  await safeDdl(db, `
+    CREATE INDEX IF NOT EXISTS idx_odg_tms_pending_bill_round
+    ON public.odg_tms_pending_bill (delivery_round_code) WHERE delivery_round_code IS NOT NULL
+  `);
 }
 
+// Bump the cache version whenever the DDL changes so existing dev/prod
+// processes re-run the ALTER TABLE migrations on next call (the global cache
+// otherwise persists across hot-reloads).
+const PENDING_BILL_SCHEMA_VERSION = "v2_round";
+
 async function ensurePendingBillSchema() {
-  if (pendingBillCache.__tmsPendingBillSchemaReady) return;
-  if (!pendingBillCache.__tmsPendingBillSchemaPromise) {
-    pendingBillCache.__tmsPendingBillSchemaPromise = ensurePendingBillSchemaInternal(pool)
+  const readyKey = `__tmsPendingBillSchemaReady_${PENDING_BILL_SCHEMA_VERSION}`;
+  const promiseKey = `__tmsPendingBillSchemaPromise_${PENDING_BILL_SCHEMA_VERSION}`;
+  if (pendingBillCache[readyKey]) return;
+  if (!pendingBillCache[promiseKey]) {
+    pendingBillCache[promiseKey] = ensurePendingBillSchemaInternal(pool)
       .then(() => {
-        pendingBillCache.__tmsPendingBillSchemaReady = true;
+        pendingBillCache[readyKey] = true;
       })
       .catch((err) => {
-        pendingBillCache.__tmsPendingBillSchemaPromise = null;
+        pendingBillCache[promiseKey] = null;
         throw err;
       });
   }
-  await pendingBillCache.__tmsPendingBillSchemaPromise;
+  await pendingBillCache[promiseKey];
 }
 
 async function getPendingBillScheduleMap(billNos) {
@@ -70,6 +86,7 @@ async function getPendingBillScheduleMap(billNos) {
             to_char(scheduled_date,'DD-MM-YYYY') as scheduled_date_display,
             COALESCE(remark, '') as remark,
             COALESCE(action_status, '') as action_status,
+            COALESCE(delivery_round_code, '') as delivery_round_code,
             COALESCE(updated_by, '') as updated_by,
             to_char(updated_at,'DD-MM-YYYY HH24:MI') as updated_at
      FROM public.odg_tms_pending_bill
@@ -79,7 +96,14 @@ async function getPendingBillScheduleMap(billNos) {
   return new Map(rows.map((r) => [r.bill_no, r]));
 }
 
-async function upsertPendingBillSchedule({ billNo, scheduledDate, remark, actionStatus, userCode }) {
+async function upsertPendingBillSchedule({
+  billNo,
+  scheduledDate,
+  remark,
+  actionStatus,
+  deliveryRoundCode,
+  userCode,
+}) {
   const code = String(billNo ?? "").trim();
   if (!code) throw new Error("bill_no is required");
   await ensurePendingBillSchema();
@@ -87,10 +111,11 @@ async function upsertPendingBillSchedule({ billNo, scheduledDate, remark, action
   const date = scheduledDate ? String(scheduledDate).trim() || null : null;
   const note = remark ? String(remark).trim() || null : null;
   const status = actionStatus ? String(actionStatus).trim() || null : null;
+  const round = deliveryRoundCode ? String(deliveryRoundCode).trim() || null : null;
   const user = userCode ? String(userCode).trim() || null : null;
 
   // If all fields are blank, drop the row instead of keeping an empty entry.
-  if (!date && !note && !status) {
+  if (!date && !note && !status && !round) {
     await pool.query(
       `DELETE FROM public.odg_tms_pending_bill WHERE bill_no = $1`,
       [code]
@@ -99,15 +124,16 @@ async function upsertPendingBillSchedule({ billNo, scheduledDate, remark, action
   }
 
   await pool.query(
-    `INSERT INTO public.odg_tms_pending_bill (bill_no, scheduled_date, remark, action_status, updated_by, updated_at)
-     VALUES ($1, $2::date, $3, $4, $5, LOCALTIMESTAMP(0))
+    `INSERT INTO public.odg_tms_pending_bill (bill_no, scheduled_date, remark, action_status, delivery_round_code, updated_by, updated_at)
+     VALUES ($1, $2::date, $3, $4, $5, $6, LOCALTIMESTAMP(0))
      ON CONFLICT (bill_no) DO UPDATE
        SET scheduled_date = EXCLUDED.scheduled_date,
            remark = EXCLUDED.remark,
            action_status = EXCLUDED.action_status,
+           delivery_round_code = EXCLUDED.delivery_round_code,
            updated_by = EXCLUDED.updated_by,
            updated_at = LOCALTIMESTAMP(0)`,
-    [code, date, note, status, user]
+    [code, date, note, status, round, user]
   );
   return { success: true };
 }
@@ -121,6 +147,7 @@ async function getPendingBillSchedule(billNo) {
             to_char(scheduled_date,'YYYY-MM-DD') as scheduled_date,
             COALESCE(remark, '') as remark,
             COALESCE(action_status, '') as action_status,
+            COALESCE(delivery_round_code, '') as delivery_round_code,
             COALESCE(updated_by, '') as updated_by,
             to_char(updated_at,'DD-MM-YYYY HH24:MI') as updated_at
      FROM public.odg_tms_pending_bill

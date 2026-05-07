@@ -21,6 +21,7 @@ import {
 } from "react-icons/fa";
 import { Actions } from "@/lib/api";
 import { useConfirm } from "@/components/confirm-dialog";
+import { Pagination } from "@/components/status-page-helpers";
 // Ported from server actions: addCarProfile, deleteCarProfile, getCarProfiles, getDispatchDrivers, getDispatchWorkers, updateCarProfile
 
 // ==================== Types ====================
@@ -303,6 +304,8 @@ export default function CarsManagePage() {
   const [form, setForm] = useState<CarForm>(emptyForm);
   const [searchText, setSearchText] = useState("");
   const [directoryFilter, setDirectoryFilter] = useState<DirectoryFilter>("all");
+  const [currentPage, setCurrentPage] = useState(1);
+  const perPage = 10;
 
   const refreshData = async () => {
     setLoading(true);
@@ -367,6 +370,10 @@ export default function CarsManagePage() {
       window.removeEventListener("keydown", handleKeyDown);
     };
   }, [showForm]);
+
+  useEffect(() => {
+    setCurrentPage(1);
+  }, [searchText, directoryFilter]);
 
   const handleDriverChange = (driverCodes: string[]) => {
     setForm((current) => ({
@@ -494,6 +501,12 @@ export default function CarsManagePage() {
       .toLowerCase();
     return pool.includes(keyword);
   });
+  const totalPages = Math.max(1, Math.ceil(visibleCars.length / perPage));
+  const pagedCars = visibleCars.slice((currentPage - 1) * perPage, currentPage * perPage);
+
+  useEffect(() => {
+    setCurrentPage((page) => Math.min(page, totalPages));
+  }, [totalPages]);
 
   const selectedDrivers = form.driverCodes
     .map((code) => driverOptions.find((item) => item.code === code))
@@ -634,7 +647,7 @@ export default function CarsManagePage() {
         <>
           {/* Mobile cards */}
           <div className="grid gap-3 lg:hidden">
-            {visibleCars.map((car) => {
+            {pagedCars.map((car) => {
               const status = getCarStatus(car);
               return (
                 <article
@@ -720,7 +733,7 @@ export default function CarsManagePage() {
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-200/30 dark:divide-white/5">
-                  {visibleCars.map((car) => {
+                  {pagedCars.map((car) => {
                     const status = getCarStatus(car);
                     return (
                       <tr key={car.code} className="align-top hover:bg-white/30 dark:hover:bg-white/5 transition-colors">
@@ -786,6 +799,13 @@ export default function CarsManagePage() {
               </table>
             </div>
           </div>
+          <Pagination
+            currentPage={currentPage}
+            totalPages={totalPages}
+            total={visibleCars.length}
+            perPage={perPage}
+            onChange={setCurrentPage}
+          />
         </>
       )}
 

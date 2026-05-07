@@ -114,7 +114,7 @@ export function PendingBillScheduleDialog({
             </div>
             <div>
               <h3 className="text-sm font-bold text-slate-800 dark:text-white">
-                ກຳນົດວັນຈັດສົ່ງ
+                ກຳນົດວັນລູກຄ້າພ້ອມຮັບ
               </h3>
               <p className="text-[11px] text-slate-500 dark:text-slate-400">
                 ບິນ {billNo}
@@ -134,7 +134,7 @@ export function PendingBillScheduleDialog({
           <div>
             <label className="block text-xs font-medium text-slate-600 dark:text-slate-300 mb-1.5">
               <FaCalendar className="inline mr-1.5 text-slate-400" size={11} />
-              ວັນທີຈັດສົ່ງ
+              ວັນທີ່ລູກຄ້າພ້ອມຮັບ
             </label>
             <input
               type="date"
@@ -160,7 +160,7 @@ export function PendingBillScheduleDialog({
               onChange={(e) => setRemark(e.target.value)}
               rows={3}
               disabled={loading || submitting}
-              placeholder="ເຫດຜົນທີ່ຍັງບໍ່ຈັດຖ້ຽວ..."
+              placeholder="ບັນທຶກຜົນການໂທ ຫຼືເຫດຜົນທີ່ຍັງບໍ່ຈັດຖ້ຽວ..."
               className="w-full glass-input rounded-lg px-3 py-2 text-xs text-slate-700 dark:text-slate-200 resize-none disabled:opacity-50"
             />
           </div>

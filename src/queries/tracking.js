@@ -25,6 +25,43 @@ const REALTIME_DB_FRESH_MS = Math.max(
 
 // ==================== Tracking ====================
 
+async function getBillAttempts(billNo, branchClause = "") {
+  return query(
+    `SELECT
+       d.doc_no,
+       to_char(MAX(d.doc_date), 'DD-MM-YYYY') AS doc_date,
+       COALESCE(
+         to_char(MAX(j.create_date_time_now), 'DD-MM-YYYY HH24:MI'),
+         to_char(MAX(d.create_date_time_now), 'DD-MM-YYYY HH24:MI'),
+         '-'
+       ) AS created_at,
+       COUNT(*)::int AS row_count,
+       COUNT(*) FILTER (WHERE COALESCE(d.status, 0) = 1)::int AS completed_count,
+       COUNT(*) FILTER (WHERE COALESCE(d.status, 0) = 2)::int AS cancelled_count,
+       COUNT(*) FILTER (
+         WHERE d.sent_start IS NOT NULL
+           AND d.sent_end IS NULL
+           AND COALESCE(d.status, 0) NOT IN (1, 2)
+       )::int AS active_count,
+       to_char(MAX(d.sent_end) FILTER (WHERE COALESCE(d.status, 0) = 2), 'DD-MM-YYYY HH24:MI') AS cancelled_at,
+       COALESCE(
+         (ARRAY_AGG(NULLIF(TRIM(d.remark), '') ORDER BY d.sent_end DESC NULLS LAST)
+           FILTER (WHERE COALESCE(d.status, 0) = 2)
+         )[1],
+         ''
+       ) AS cancel_remark,
+       MAX(COALESCE(j.create_date_time_now, d.create_date_time_now, d.doc_date::timestamp)) AS sort_at
+     FROM public.odg_tms_detail d
+     LEFT JOIN public.odg_tms j ON j.doc_no = d.doc_no
+     WHERE d.bill_no = $1
+       AND ${getFixedYearSqlFilter("d.doc_date")}
+       ${branchClause.replaceAll("a.", "d.")}
+     GROUP BY d.doc_no
+     ORDER BY sort_at DESC NULLS LAST, d.doc_no DESC`,
+    [billNo]
+  );
+}
+
 async function trackBill(session, search) {
   const scope = getBranchScope(session);
   const branchClause = scope.scoped
@@ -37,22 +74,31 @@ async function trackBill(session, search) {
       url_img, COALESCE(a.sight_img, '') as sight_img,
       a.lat, a.lng, a.lat_end, a.lng_end, a.remark,
       COALESCE(a.status, 0) as bill_status,
-      (SELECT json_agg(row) FROM (
-        SELECT to_char(create_date_time_now,'DD-MM-YYYY') as doc_date, to_char(create_date_time_now,'HH:MI') as doc_time, 'ຈັດຖ້ຽວແລ້ວ' as status, '' as remark FROM odg_tms_detail WHERE recipt_job IS NULL AND bill_no=a.bill_no
-        UNION ALL SELECT to_char(recipt_job,'DD-MM-YYYY'), to_char(recipt_job,'HH:MI'), 'ຮັບຖ້ຽວ / ເບີກເຄື່ອງ', '' FROM odg_tms_detail WHERE recipt_job IS NOT NULL AND bill_no=a.bill_no
-        UNION ALL SELECT to_char(sent_start,'DD-MM-YYYY'), to_char(sent_start,'HH:MI'), 'ເລີ່ມຈັດສົ່ງ', '' FROM odg_tms_detail WHERE sent_start IS NOT NULL AND bill_no=a.bill_no
-        UNION ALL SELECT to_char(sent_end,'DD-MM-YYYY'), to_char(sent_end,'HH:MI'), case when status=2 then 'ຍົກເລີກຈັດສົ່ງ' else 'ຈັດສົ່ງສຳເລັດ' end, remark FROM odg_tms_detail WHERE sent_end IS NOT NULL AND bill_no=a.bill_no
-      ) row) as list
+      (SELECT json_agg(json_build_object(
+        'doc_date', doc_date,
+        'doc_time', doc_time,
+        'status', status,
+        'remark', remark
+      ) ORDER BY event_at ASC NULLS LAST) FROM (
+        SELECT create_date_time_now AS event_at, to_char(create_date_time_now,'DD-MM-YYYY') as doc_date, to_char(create_date_time_now,'HH24:MI') as doc_time, 'ຈັດຖ້ຽວແລ້ວ' as status, '' as remark FROM odg_tms_detail WHERE bill_no=a.bill_no AND doc_no=a.doc_no
+        UNION ALL SELECT recipt_job, to_char(recipt_job,'DD-MM-YYYY'), to_char(recipt_job,'HH24:MI'), 'ຮັບຖ້ຽວ / ເບີກເຄື່ອງ', '' FROM odg_tms_detail WHERE recipt_job IS NOT NULL AND bill_no=a.bill_no AND doc_no=a.doc_no
+        UNION ALL SELECT sent_start, to_char(sent_start,'DD-MM-YYYY'), to_char(sent_start,'HH24:MI'), 'ເລີ່ມຈັດສົ່ງ', '' FROM odg_tms_detail WHERE sent_start IS NOT NULL AND bill_no=a.bill_no AND doc_no=a.doc_no
+        UNION ALL SELECT sent_end, to_char(sent_end,'DD-MM-YYYY'), to_char(sent_end,'HH24:MI'), case when status=2 then 'ຍົກເລີກຈັດສົ່ງ' else 'ຈັດສົ່ງສຳເລັດ' end, remark FROM odg_tms_detail WHERE sent_end IS NOT NULL AND bill_no=a.bill_no AND doc_no=a.doc_no
+        UNION ALL SELECT b.job_close, to_char(b.job_close,'DD-MM-YYYY'), to_char(b.job_close,'HH24:MI'), 'ຄົນຂັບປິດງານ', '' WHERE b.job_close IS NOT NULL
+        UNION ALL SELECT b.admin_close_at, to_char(b.admin_close_at,'DD-MM-YYYY'), to_char(b.admin_close_at,'HH24:MI'), 'admin ປິດຖ້ຽວ', '' WHERE b.admin_close_at IS NOT NULL
+      ) events) as list
     FROM odg_tms_detail a
     LEFT JOIN odg_tms b ON b.doc_no=a.doc_no
     LEFT JOIN odg_tms_car c ON c.code=a.car
     LEFT JOIN odg_tms_driver d ON d.code=b.driver
     LEFT JOIN biotime_employee b2 ON b2.code = b.driver
     WHERE bill_no LIKE $1 AND ${getFixedYearSqlFilter("a.doc_date")} ${branchClause}
-    ORDER BY a.create_date_time_now DESC NULLS LAST
+    ORDER BY COALESCE(b.create_date_time_now, a.create_date_time_now, a.doc_date::timestamp) DESC NULLS LAST,
+             a.doc_no DESC
     LIMIT 1`, [search.toUpperCase()]);
 
   if (!row) return null;
+  const attempts = await getBillAttempts(row.bill_no, branchClause);
 
   // Items selected for this dispatch (with delivered progress).
   const items = await query(
@@ -108,7 +154,7 @@ async function trackBill(session, search) {
     console.warn("[trackBill] gps lookup failed:", err?.message ?? err);
   }
 
-  return { ...row, items, car_position };
+  return { ...row, items, car_position, attempts };
 }
 
 // Public tracking — strips internal fields (driver, customer details) so a
@@ -128,23 +174,32 @@ async function trackBillPublic(billNo) {
             COALESCE(a.sight_img, '') as sight_img,
             COALESCE(a.remark, '') as bill_remark,
             COALESCE(a.status, 0) as bill_status,
-            (SELECT json_agg(row) FROM (
-              SELECT to_char(create_date_time_now,'DD-MM-YYYY') as doc_date, to_char(create_date_time_now,'HH:MI') as doc_time, 'ຈັດຖ້ຽວແລ້ວ' as status, '' as remark FROM odg_tms_detail WHERE recipt_job IS NULL AND bill_no=a.bill_no
-              UNION ALL SELECT to_char(recipt_job,'DD-MM-YYYY'), to_char(recipt_job,'HH:MI'), 'ຮັບຖ້ຽວ / ເບີກເຄື່ອງ', '' FROM odg_tms_detail WHERE recipt_job IS NOT NULL AND bill_no=a.bill_no
-              UNION ALL SELECT to_char(sent_start,'DD-MM-YYYY'), to_char(sent_start,'HH:MI'), 'ເລີ່ມຈັດສົ່ງ', '' FROM odg_tms_detail WHERE sent_start IS NOT NULL AND bill_no=a.bill_no
-              UNION ALL SELECT to_char(sent_end,'DD-MM-YYYY'), to_char(sent_end,'HH:MI'), case when status=2 then 'ຍົກເລີກຈັດສົ່ງ' else 'ຈັດສົ່ງສຳເລັດ' end, '' FROM odg_tms_detail WHERE sent_end IS NOT NULL AND bill_no=a.bill_no
-            ) row) as list
+            (SELECT json_agg(json_build_object(
+              'doc_date', doc_date,
+              'doc_time', doc_time,
+              'status', status,
+              'remark', remark
+            ) ORDER BY event_at ASC NULLS LAST) FROM (
+              SELECT create_date_time_now AS event_at, to_char(create_date_time_now,'DD-MM-YYYY') as doc_date, to_char(create_date_time_now,'HH24:MI') as doc_time, 'ຈັດຖ້ຽວແລ້ວ' as status, '' as remark FROM odg_tms_detail WHERE bill_no=a.bill_no AND doc_no=a.doc_no
+              UNION ALL SELECT recipt_job, to_char(recipt_job,'DD-MM-YYYY'), to_char(recipt_job,'HH24:MI'), 'ຮັບຖ້ຽວ / ເບີກເຄື່ອງ', '' FROM odg_tms_detail WHERE recipt_job IS NOT NULL AND bill_no=a.bill_no AND doc_no=a.doc_no
+              UNION ALL SELECT sent_start, to_char(sent_start,'DD-MM-YYYY'), to_char(sent_start,'HH24:MI'), 'ເລີ່ມຈັດສົ່ງ', '' FROM odg_tms_detail WHERE sent_start IS NOT NULL AND bill_no=a.bill_no AND doc_no=a.doc_no
+              UNION ALL SELECT sent_end, to_char(sent_end,'DD-MM-YYYY'), to_char(sent_end,'HH24:MI'), case when status=2 then 'ຍົກເລີກຈັດສົ່ງ' else 'ຈັດສົ່ງສຳເລັດ' end, remark FROM odg_tms_detail WHERE sent_end IS NOT NULL AND bill_no=a.bill_no AND doc_no=a.doc_no
+              UNION ALL SELECT j.job_close, to_char(j.job_close,'DD-MM-YYYY'), to_char(j.job_close,'HH24:MI'), 'ຄົນຂັບປິດງານ', '' WHERE j.job_close IS NOT NULL
+              UNION ALL SELECT j.admin_close_at, to_char(j.admin_close_at,'DD-MM-YYYY'), to_char(j.admin_close_at,'HH24:MI'), 'admin ປິດຖ້ຽວ', '' WHERE j.admin_close_at IS NOT NULL
+            ) events) as list
      FROM odg_tms_detail a
      LEFT JOIN odg_tms_car c ON c.code = a.car
      LEFT JOIN odg_tms j ON j.doc_no = a.doc_no
      LEFT JOIN odg_tms_driver d ON d.code = j.driver
      LEFT JOIN biotime_employee b2 ON b2.code = j.driver
      WHERE bill_no = $1 AND ${getFixedYearSqlFilter("a.doc_date")}
-     ORDER BY a.create_date_time_now DESC NULLS LAST
+     ORDER BY COALESCE(j.create_date_time_now, a.create_date_time_now, a.doc_date::timestamp) DESC NULLS LAST,
+              a.doc_no DESC
      LIMIT 1`,
     [text]
   );
   if (!row) return null;
+  const attempts = await getBillAttempts(row.bill_no);
 
   // Items at delivery progress (no internal codes leaked beyond what shows
   // on the customer's invoice anyway).
@@ -196,7 +251,7 @@ async function trackBillPublic(billNo) {
   const { car_imei: _imei, car_code: _code, ...safe } = row;
   void _imei;
   void _code;
-  return { ...safe, items, car_position };
+  return { ...safe, items, car_position, attempts };
 }
 
 // Bills currently in active delivery — used by the tracking search to power
@@ -372,7 +427,9 @@ function normalizeDbRealtimeRow(row) {
 function parseTimestampMs(value) {
   const raw = String(value ?? "").trim();
   if (!raw) return Number.NaN;
-  const ts = Date.parse(raw.includes("T") ? raw : raw.replace(" ", "T"));
+  const iso = raw.includes("T") ? raw : raw.replace(" ", "T");
+  const hasZone = /(?:Z|[+-]\d{2}:?\d{2})$/i.test(iso);
+  const ts = Date.parse(hasZone ? iso : `${iso}+07:00`);
   return Number.isFinite(ts) ? ts : Number.NaN;
 }
 
@@ -523,6 +580,19 @@ function normalizeRealtimeTimestamp(value) {
   return `${yyyy}-${mm}-${dd} ${hh}:${mi}:${ss}`;
 }
 
+function formatBangkokNow() {
+  return new Intl.DateTimeFormat("sv-SE", {
+    timeZone: "Asia/Bangkok",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+    second: "2-digit",
+    hour12: false,
+  }).format(new Date());
+}
+
 function parseRealtimeLatLng(row) {
   const latlng = String(row?.latlng ?? row?.latLng ?? row?.location ?? "").trim();
   if (latlng.includes(",")) {
@@ -632,7 +702,7 @@ async function fetchGpsForImei(imei, carCode, carName, config) {
     }
 
     const coords = parseRealtimeLatLng(row);
-    const providerSyncedAt = new Date().toISOString();
+    const providerSyncedAt = formatBangkokNow();
     const speedRaw =
       row.speed ??
       row.velocity ??

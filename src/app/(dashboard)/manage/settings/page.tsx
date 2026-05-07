@@ -23,6 +23,7 @@ interface NotifySettings {
   "line.customer.test_to": string;
   "whatsapp.test_enabled": string;
   "whatsapp.test_to": string;
+  "pending.not_yet_days": string;
 }
 
 const EMPTY: NotifySettings = {
@@ -32,6 +33,7 @@ const EMPTY: NotifySettings = {
   "line.customer.test_to": "",
   "whatsapp.test_enabled": "",
   "whatsapp.test_to": "",
+  "pending.not_yet_days": "3",
 };
 
 export default function SettingsPage() {
@@ -66,7 +68,11 @@ export default function SettingsPage() {
     setSaving(true);
     setError(null);
     try {
-      await Actions.saveNotifySettings(data);
+      const days = Number(data["pending.not_yet_days"] || "3");
+      await Actions.saveNotifySettings({
+        ...data,
+        "pending.not_yet_days": String(Number.isFinite(days) ? Math.max(0, Math.min(30, Math.trunc(days))) : 3),
+      });
       setSavedAt(Date.now());
     } catch (e) {
       console.error(e);
@@ -100,6 +106,22 @@ export default function SettingsPage() {
         </div>
       ) : (
         <>
+          <SectionCard
+            title="Pending ບິນ"
+            subtitle="ກຳນົດເກນວັນສຳລັບມຸມມອງ “ຍັງບໍ່ເຖິງເວລາ”"
+            icon={<FaCog className="text-sky-600" />}
+            tone="sky"
+          >
+            <Field
+              label="ຈຳນວນມື້ກ່ອນເຖິງເວລາ"
+              hint="ຖ້າຕັ້ງເປັນ 3: ບິນທີ່ send date ຫ່າງຈາກມື້ນີ້ເກີນ 3 ມື້ ຈະຢູ່ໃນກຸ່ມຍັງບໍ່ເຖິງເວລາ"
+              value={data["pending.not_yet_days"]}
+              onChange={(v) => update("pending.not_yet_days", v.replace(/\D/g, "").slice(0, 2))}
+              placeholder="3"
+              icon={<FaCog />}
+            />
+          </SectionCard>
+
           <SectionCard
             title="LINE — ພະນັກງານຂາຍ"
             subtitle="ຂໍ້ຄວາມສະຖານະການຈັດສົ່ງສົ່ງຫາ LINE OA ຂອງພະນັກງານຂາຍ"

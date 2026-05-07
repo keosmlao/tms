@@ -1,6 +1,8 @@
 const { query, queryOne } = require("../lib/db");
 const {
   getFixedTodayDate,
+  FIXED_YEAR_START,
+  FIXED_YEAR_NEXT_START,
   getFixedYearSqlFilter,
 } = require("../lib/fixed-year");
 const {
@@ -10,6 +12,7 @@ const {
   toDisplayMonth,
   getBranchScope,
   branchFilterJob,
+  getRemainingSummaryMap,
 } = require("./helpers");
 
 async function getDashboardData(session) {
@@ -41,18 +44,13 @@ async function getDashboardData(session) {
      FROM ic_trans_shipment
      WHERE ${getFixedYearSqlFilter("doc_date")} AND transport_code='${code}'`;
   const emptyTeam = { bill_count: 0, still: 0, complete: 0 };
-  const kl = !scoped || userBranch === "02-0001" ? await queryOne(teamSql("02-0001")) : emptyTeam;
-  const dt = !scoped || userBranch === "02-0002" ? await queryOne(teamSql("02-0002")) : emptyTeam;
-  const ps = !scoped || userBranch === "02-0003" ? await queryOne(teamSql("02-0003")) : emptyTeam;
-  const pendingSummary = await queryOne(
+  let kl = !scoped || userBranch === "02-0001" ? await queryOne(teamSql("02-0001")) : emptyTeam;
+  let dt = !scoped || userBranch === "02-0002" ? await queryOne(teamSql("02-0002")) : emptyTeam;
+  let ps = !scoped || userBranch === "02-0003" ? await queryOne(teamSql("02-0003")) : emptyTeam;
+  const completeSummary = await queryOne(
     `SELECT
-      count(*) FILTER (WHERE a.doc_date >= $1::date AND a.doc_date < $2::date AND a.check_status=0) AS month_count,
-      count(*) FILTER (WHERE a.doc_date = $3::date AND a.check_status=0) AS today_count,
-      count(*) FILTER (WHERE a.doc_date = $3::date AND a.check_status=0) AS today_pending,
       count(*) FILTER (WHERE a.doc_date = $3::date AND a.check_status=1) AS today_complete,
-      count(*) FILTER (WHERE a.doc_date >= $1::date AND a.doc_date < $2::date AND a.check_status=0) AS month_pending,
       count(*) FILTER (WHERE a.doc_date >= $1::date AND a.doc_date < $2::date AND a.check_status=1) AS month_complete,
-      count(*) FILTER (WHERE a.check_status=0) AS year_pending,
       count(*) FILTER (WHERE a.check_status=1) AS year_complete
     FROM ic_trans_shipment a
     WHERE a.transport_code NOT IN ('02-0004')
@@ -63,6 +61,8 @@ async function getDashboardData(session) {
 
   const pendingSelect = `
     SELECT a.doc_no, to_char(a.doc_date,'DD-MM-YYYY') AS doc_date, a.transport_name, c.name_1 AS sale, d.name_1 AS transport,
+      a.transport_code,
+      to_char(b.send_date::date,'YYYY-MM-DD') AS send_date,
       to_char(a.create_date_time_now,'DD-MM-YYYY HH24:MI:SS') AS time_open,
       now() - a.create_date_time_now AS time_use,
       greatest(floor(extract(epoch from now() - a.create_date_time_now)), 0)::bigint AS time_use_seconds
@@ -77,26 +77,43 @@ async function getDashboardData(session) {
       ${branchAnd("a")}
   `;
 
-  const trans = await query(
+  const allPendingCandidates = await query(
     `${pendingSelect} ${pendingBaseWhere}
-      AND ${getFixedYearSqlFilter("a.doc_date")}
-    ORDER BY a.create_date_time_now ASC, a.doc_date ASC
-    LIMIT 10`
+      AND b.send_date::date >= $1::date
+      AND b.send_date::date < $2::date
+    ORDER BY a.create_date_time_now ASC, a.doc_date ASC`,
+    [FIXED_YEAR_START, FIXED_YEAR_NEXT_START]
   );
-  const transMonth = await query(
-    `${pendingSelect} ${pendingBaseWhere}
-      AND a.doc_date >= $1::date AND a.doc_date < $2::date
-    ORDER BY a.create_date_time_now ASC, a.doc_date ASC
-    LIMIT 10`,
-    [monthStart, nextMonthStart]
+  const pendingSummaries = await getRemainingSummaryMap(
+    allPendingCandidates.map((bill) => bill.doc_no)
   );
-  const transToday = await query(
-    `${pendingSelect} ${pendingBaseWhere}
-      AND a.doc_date = $1::date
-    ORDER BY a.create_date_time_now ASC, a.doc_date ASC
-    LIMIT 10`,
-    [fixedToday]
+  const pendingWithRemaining = allPendingCandidates.filter(
+    (bill) => (pendingSummaries.get(bill.doc_no)?.remaining_count ?? 0) > 0
   );
+  const trans = pendingWithRemaining.slice(0, 10);
+  const transMonth = pendingWithRemaining
+    .filter((bill) => bill.send_date >= monthStart && bill.send_date < nextMonthStart)
+    .slice(0, 10);
+  const transToday = pendingWithRemaining
+    .filter((bill) => bill.send_date === fixedToday)
+    .slice(0, 10);
+  const branchPendingCount = (code) =>
+    pendingWithRemaining.filter((bill) => bill.transport_code === code).length;
+  kl = { ...kl, still: branchPendingCount("02-0001") };
+  dt = { ...dt, still: branchPendingCount("02-0002") };
+  ps = { ...ps, still: branchPendingCount("02-0003") };
+  const pendingSummary = {
+    ...completeSummary,
+    month_count: pendingWithRemaining.filter(
+      (bill) => bill.send_date >= monthStart && bill.send_date < nextMonthStart
+    ).length,
+    today_count: pendingWithRemaining.filter((bill) => bill.send_date === fixedToday).length,
+    today_pending: pendingWithRemaining.filter((bill) => bill.send_date === fixedToday).length,
+    month_pending: pendingWithRemaining.filter(
+      (bill) => bill.send_date >= monthStart && bill.send_date < nextMonthStart
+    ).length,
+    year_pending: pendingWithRemaining.length,
+  };
 
   const inProgressBranchClause = scope.scoped
     ? `AND EXISTS (SELECT 1 FROM ic_trans_shipment __ts WHERE __ts.doc_no = d.bill_no AND __ts.transport_code = '${scope.branch}')`

@@ -7,6 +7,7 @@ import {
   FaChevronDown,
   FaChevronRight,
   FaFlagCheckered,
+  FaPrint,
   FaSearch,
   FaSpinner,
   FaTimesCircle,
@@ -535,18 +536,29 @@ export default function BillCompleteClient({
                             </div>
                           </td>
                           <td className="px-4 py-3 text-center">
-                            <button
-                              onClick={() => void handleDelete(job.doc_no)}
-                              disabled={deletingDoc === job.doc_no}
-                              className="inline-flex items-center justify-center w-7 h-7 rounded-lg text-rose-500 hover:bg-rose-50 hover:text-rose-700 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
-                              title={`ລົບຖ້ຽວ ${job.doc_no}`}
-                            >
-                              {deletingDoc === job.doc_no ? (
-                                <FaSpinner className="animate-spin" size={12} />
-                              ) : (
-                                <FaTrash size={12} />
-                              )}
-                            </button>
+                            <div className="inline-flex items-center justify-center gap-1">
+                              <a
+                                href={`/jobs/print/${encodeURIComponent(job.doc_no)}`}
+                                target="_blank"
+                                rel="noopener noreferrer"
+                                className="inline-flex items-center justify-center w-7 h-7 rounded-lg text-slate-500 hover:bg-slate-100 hover:text-slate-800 dark:hover:bg-white/10 transition-colors"
+                                title={`ພິມໃບຈັດຖ້ຽວ ${job.doc_no}`}
+                              >
+                                <FaPrint size={12} />
+                              </a>
+                              <button
+                                onClick={() => void handleDelete(job.doc_no)}
+                                disabled={deletingDoc === job.doc_no}
+                                className="inline-flex items-center justify-center w-7 h-7 rounded-lg text-rose-500 hover:bg-rose-50 hover:text-rose-700 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+                                title={`ລົບຖ້ຽວ ${job.doc_no}`}
+                              >
+                                {deletingDoc === job.doc_no ? (
+                                  <FaSpinner className="animate-spin" size={12} />
+                                ) : (
+                                  <FaTrash size={12} />
+                                )}
+                              </button>
+                            </div>
                           </td>
                         </tr>
 

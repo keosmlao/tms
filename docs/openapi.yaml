@@ -1,0 +1,422 @@
+openapi: 3.1.0
+info:
+  title: ODG TMS Mobile API
+  version: "1.0.0"
+  summary: API consumed by the ODG TMS Flutter driver app + the public bill-tracking page.
+  description: |
+    All `/api/mobile/*` endpoints require a JWT Bearer token issued by `POST /api/mobile/login`.
+    The token expires after 8 hours; clients should re-authenticate before expiry.
+
+    Public tracking is unauthenticated but rate-limited.
+
+servers:
+  - url: https://your-deployment.example.com
+    description: Production
+  - url: http://localhost:3000
+    description: Local dev
+
+tags:
+  - name: auth
+  - name: jobs
+  - name: bills
+  - name: fuel
+  - name: notifications
+  - name: public
+
+security:
+  - bearerAuth: []
+
+paths:
+  /api/mobile/login:
+    post:
+      tags: [auth]
+      summary: Driver login — exchange username/password for a JWT.
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/LoginRequest' }
+      responses:
+        '200':
+          description: Authenticated session
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/LoginResponse' }
+        '400': { $ref: '#/components/responses/ValidationError' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '429': { $ref: '#/components/responses/RateLimited' }
+
+  /api/mobile/jobs:
+    get:
+      tags: [jobs]
+      summary: List the authenticated driver's jobs (optionally filtered by date).
+      parameters:
+        - in: query
+          name: date
+          schema: { type: string, format: date }
+      responses:
+        '200':
+          description: Jobs list
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '#/components/schemas/DeliveryJob' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+    post:
+      tags: [jobs]
+      summary: Perform a job action (state transition, image attach, fuel refill, etc.).
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/JobAction' }
+      responses:
+        '200':
+          description: Action accepted
+          content:
+            application/json:
+              schema: { type: object }
+        '400': { $ref: '#/components/responses/ValidationError' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+
+  /api/mobile/bills:
+    get:
+      tags: [bills]
+      summary: Fetch bills for a doc_no, a single bill_no, or product items for a bill.
+      parameters:
+        - in: query
+          name: doc_no
+          schema: { type: string }
+        - in: query
+          name: bill_no
+          schema: { type: string }
+        - in: query
+          name: type
+          schema: { type: string, enum: [products] }
+          description: When 'products', returns the line-items of the bill_no.
+      responses:
+        '200':
+          description: Bills or items
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { type: object }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+
+  /api/mobile/fuel:
+    get:
+      tags: [fuel]
+      summary: List the driver's fuel-refill history.
+      parameters:
+        - in: query
+          name: from
+          schema: { type: string, format: date }
+        - in: query
+          name: to
+          schema: { type: string, format: date }
+        - in: query
+          name: limit
+          schema: { type: string, pattern: '^\d+$' }
+      responses:
+        '200':
+          description: Fuel log summary
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  rows:
+                    type: array
+                    items: { type: object }
+                  totalLiters: { type: number }
+                  totalAmount: { type: number }
+                  count: { type: integer }
+        '400': { $ref: '#/components/responses/ValidationError' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+
+  /api/mobile/fcm-token:
+    post:
+      tags: [notifications]
+      summary: Register/update the device's Firebase Cloud Messaging token.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [token]
+              properties:
+                token: { type: string, maxLength: 4096 }
+                platform: { type: string }
+      responses:
+        '200': { description: Token saved }
+        '400': { $ref: '#/components/responses/ValidationError' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+    delete:
+      tags: [notifications]
+      summary: Remove a device's FCM token (logout, uninstall).
+      parameters:
+        - in: query
+          name: token
+          schema: { type: string }
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                token: { type: string }
+      responses:
+        '200': { description: Token removed }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+
+  /api/public/track:
+    get:
+      tags: [public]
+      summary: Public bill tracking — no auth, IP-rate-limited.
+      security: []
+      parameters:
+        - in: query
+          name: bill_no
+          required: true
+          schema: { type: string, minLength: 1 }
+      responses:
+        '200':
+          description: Bill snapshot or null
+          content:
+            application/json:
+              schema:
+                oneOf:
+                  - type: object
+                  - type: 'null'
+        '400': { $ref: '#/components/responses/ValidationError' }
+        '429': { $ref: '#/components/responses/RateLimited' }
+
+  /api/health:
+    get:
+      tags: [public]
+      summary: Liveness/health probe with DB connectivity check.
+      security: []
+      responses:
+        '200':
+          description: Service is healthy
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status: { type: string, example: ok }
+        '503':
+          description: One or more dependencies are unhealthy
+
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+
+  responses:
+    Unauthorized:
+      description: Missing/invalid JWT
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Error' }
+    ValidationError:
+      description: Body or query failed Zod validation; `issues` echoes the field errors.
+      content:
+        application/json:
+          schema:
+            allOf:
+              - $ref: '#/components/schemas/Error'
+              - type: object
+                properties:
+                  issues:
+                    type: array
+                    items: { type: object }
+    RateLimited:
+      description: Too many requests
+      headers:
+        Retry-After:
+          schema: { type: string }
+        X-RateLimit-Limit:
+          schema: { type: string }
+        X-RateLimit-Remaining:
+          schema: { type: string }
+        X-RateLimit-Reset:
+          schema: { type: string }
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Error' }
+
+  schemas:
+    Error:
+      type: object
+      required: [error]
+      properties:
+        error: { type: string }
+
+    LoginRequest:
+      type: object
+      required: [username, password]
+      properties:
+        username: { type: string, minLength: 1, maxLength: 64 }
+        password: { type: string, minLength: 1, maxLength: 256 }
+
+    LoginResponse:
+      type: object
+      required: [token]
+      properties:
+        token:
+          type: string
+          description: JWT, valid for 8 hours.
+        code: { type: string }
+        username: { type: string }
+        name_1: { type: string }
+        driver_id: { type: string }
+        logistic_code: { type: string }
+        title: { type: string }
+
+    DeliveryJob:
+      type: object
+      properties:
+        doc_date: { type: string }
+        doc_no: { type: string }
+        car: { type: string }
+        driver: { type: string }
+        item_bill: { type: integer }
+        approve_status: { type: integer }
+        job_status: { type: integer }
+        waiting_bill_count: { type: integer }
+        inprogress_bill_count: { type: integer }
+        completed_bill_count: { type: integer }
+        cancelled_bill_count: { type: integer }
+        miles_start: { type: string }
+        miles_end: { type: string }
+
+    JobAction:
+      oneOf:
+        - $ref: '#/components/schemas/ReceiveAction'
+        - $ref: '#/components/schemas/PickupBillAction'
+        - $ref: '#/components/schemas/StartDispatchAction'
+        - $ref: '#/components/schemas/CheckinBillAction'
+        - $ref: '#/components/schemas/CompleteBillAction'
+        - $ref: '#/components/schemas/CancelBillAction'
+        - $ref: '#/components/schemas/CompleteJobAction'
+        - $ref: '#/components/schemas/SaveTravelHistoryAction'
+        - $ref: '#/components/schemas/AttachJobImageAction'
+        - $ref: '#/components/schemas/AttachBillImageAction'
+        - $ref: '#/components/schemas/FuelRefillAction'
+      discriminator:
+        propertyName: action
+
+    ReceiveAction:
+      type: object
+      required: [action, doc_no]
+      properties:
+        action: { const: receive }
+        doc_no: { type: string }
+    PickupBillAction:
+      type: object
+      required: [action, bill_no]
+      properties:
+        action: { const: pickup_bill }
+        bill_no: { type: string }
+    StartDispatchAction:
+      type: object
+      required: [action, doc_no, miles_start]
+      properties:
+        action: { const: start_dispatch }
+        doc_no: { type: string }
+        miles_start: { type: string }
+        lat: { type: string }
+        lng: { type: string }
+    CheckinBillAction:
+      type: object
+      required: [action, bill_no]
+      properties:
+        action: { const: checkin_bill }
+        bill_no: { type: string }
+        lat: { type: string }
+        lng: { type: string }
+    CompleteBillAction:
+      type: object
+      required: [action, bill_no]
+      properties:
+        action: { const: complete_bill }
+        bill_no: { type: string }
+        items:
+          type: array
+          items: { type: object }
+        comment: { type: string }
+        lat: { type: string }
+        lng: { type: string }
+        lat_end: { type: string }
+        lng_end: { type: string }
+    CancelBillAction:
+      type: object
+      required: [action, bill_no]
+      properties:
+        action: { const: cancel_bill }
+        bill_no: { type: string }
+        comment: { type: string }
+        lat: { type: string }
+        lng: { type: string }
+        lat_end: { type: string }
+        lng_end: { type: string }
+    CompleteJobAction:
+      type: object
+      required: [action, doc_no, miles_end]
+      properties:
+        action: { const: complete_job }
+        doc_no: { type: string }
+        miles_end: { type: string }
+        lat: { type: string }
+        lng: { type: string }
+    SaveTravelHistoryAction:
+      type: object
+      required: [action, doc_no, lat, lng]
+      properties:
+        action: { const: save_travel_history }
+        doc_no: { type: string }
+        lat: { type: string }
+        lng: { type: string }
+    AttachJobImageAction:
+      type: object
+      required: [action, doc_no, kind]
+      properties:
+        action: { const: attach_job_image }
+        doc_no: { type: string }
+        kind: { type: string, enum: [start, end] }
+        image_data:
+          type: string
+          description: 'data:image/* URI, max 8MB.'
+    AttachBillImageAction:
+      type: object
+      required: [action, bill_no, kind]
+      properties:
+        action: { const: attach_bill_image }
+        bill_no: { type: string }
+        kind: { type: string, enum: [primary, delivery, signature] }
+        image_data: { type: string }
+    FuelRefillAction:
+      type: object
+      required: [action, user_code, liters, amount]
+      properties:
+        action: { const: fuel_refill }
+        user_code: { type: string }
+        driver_name: { type: string }
+        car: { type: string }
+        doc_no: { type: string }
+        liters: { type: number, minimum: 0, maximum: 10000 }
+        amount: { type: number, minimum: 0, maximum: 100000000 }
+        odometer: { type: number }
+        station: { type: string }
+        note: { type: string }
+        image_data: { type: string }
+        lat: { type: string }
+        lng: { type: string }

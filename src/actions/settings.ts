@@ -13,6 +13,7 @@ const NOTIFY_KEYS = [
   "line.customer.test_to",
   "whatsapp.test_enabled",
   "whatsapp.test_to",
+  "pending.not_yet_days",
 ] as const;
 
 export interface NotifySettings {
@@ -22,6 +23,7 @@ export interface NotifySettings {
   "line.customer.test_to": string;
   "whatsapp.test_enabled": string;
   "whatsapp.test_to": string;
+  "pending.not_yet_days": string;
 }
 
 export async function getNotifySettings(): Promise<NotifySettings> {

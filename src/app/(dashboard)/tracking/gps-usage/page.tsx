@@ -29,6 +29,7 @@ import {
   FaTruck,
 } from "react-icons/fa";
 import { Actions } from "@/lib/api";
+import { formatGpsRelative } from "@/lib/gps-time";
 import {
   FIXED_YEAR_END,
   FIXED_YEAR_START,
@@ -292,16 +293,7 @@ function realtimeStatus(r: GpsRealtime | undefined): RealtimeStatus {
 }
 
 function relativeTime(value: string): string {
-  if (!value) return "";
-  const ts = new Date(value).getTime();
-  if (Number.isNaN(ts)) return value;
-  const diff = Math.max(0, Math.floor((Date.now() - ts) / 1000));
-  if (diff < 60) return `${diff}s`;
-  const m = Math.floor(diff / 60);
-  if (m < 60) return `${m}m`;
-  const h = Math.floor(m / 60);
-  if (h < 24) return `${h}h`;
-  return `${Math.floor(h / 24)}d`;
+  return formatGpsRelative(value, true);
 }
 
 // ==================== Main Page ====================

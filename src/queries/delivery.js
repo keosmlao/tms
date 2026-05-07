@@ -93,6 +93,14 @@ async function ensureDeliveryWorkflowSchemaInternal(db) {
     ALTER TABLE public.odg_tms
     ADD COLUMN IF NOT EXISTS lng_start character varying
   `);
+  await safeDdl(db, `
+    ALTER TABLE public.odg_tms
+    ADD COLUMN IF NOT EXISTS lat_end character varying
+  `);
+  await safeDdl(db, `
+    ALTER TABLE public.odg_tms
+    ADD COLUMN IF NOT EXISTS lng_end character varying
+  `);
 
   await safeDdl(db, `
     CREATE TABLE IF NOT EXISTS public.odg_tms_delivery_images (
@@ -347,10 +355,10 @@ async function saveDeliveryImages(billNo, images, client) {
     if (imageData && imageData.length > 0) {
       await db.query(
         `INSERT INTO public.odg_tms_delivery_images (bill_no, doc_date, image_data)
-         SELECT $1, $2, $3
+         SELECT $1::varchar, $2::date, $3::text
          WHERE NOT EXISTS (
            SELECT 1 FROM public.odg_tms_delivery_images
-           WHERE bill_no = $1 AND image_data = $3
+           WHERE bill_no = $1::varchar AND image_data = $3::text
          )`,
         [billNo, docDate, imageData]
       );

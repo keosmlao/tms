@@ -1,4 +1,4 @@
-const { query } = require("../lib/db");
+const { query, queryOne, queryB } = require("../lib/db");
 const {
   coerceDateToFixedYear,
   getFixedTodayDate,
@@ -10,26 +10,177 @@ const {
   branchFilterJob,
   ensureJobListIndexes,
   ensureTmsDetailItemTable,
+  ensureForwardBranchColumn,
   getRemainingBillProducts,
   getRemainingSummaryMap,
 } = require("./helpers");
 
+// Only surface bills that the department head has scheduled — i.e. both
+// scheduled_date AND delivery_round_code must be set in odg_tms_pending_bill.
+// Bills not yet triaged are not addable to a job until they are scheduled.
+const SCHEDULED_BILL_JOIN = `
+  INNER JOIN public.odg_tms_pending_bill pb
+    ON pb.bill_no = a.doc_no
+    AND pb.scheduled_date IS NOT NULL
+    AND COALESCE(NULLIF(TRIM(pb.delivery_round_code), ''), NULL) IS NOT NULL
+  LEFT JOIN public.odg_tms_delivery_round dr ON dr.code = pb.delivery_round_code`;
+
+const SCHEDULED_BILL_FIELDS = `
+  to_char(pb.scheduled_date,'YYYY-MM-DD') as scheduled_date,
+  to_char(pb.scheduled_date,'DD-MM-YYYY') as scheduled_date_display,
+  pb.delivery_round_code,
+  COALESCE(dr.name, '') as delivery_round_name,
+  COALESCE(dr.time_label, '') as delivery_round_time_label`;
+
+const MANUAL_IC_TRANS_FLAGS = [56, 72];
+
+function manualFlagListSql() {
+  return MANUAL_IC_TRANS_FLAGS.join(",");
+}
+
+async function applyRemainingCounts(rows) {
+  const serviceRows = rows.filter((row) => row.source_type === "odservice.s_trans");
+  const normalRows = rows.filter((row) => row.source_type !== "odservice.s_trans");
+  const [normalSummaries, serviceSummaries] = await Promise.all([
+    getRemainingSummaryMap(normalRows.map((row) => row.doc_no)),
+    getServiceSummaryMap(serviceRows.map((row) => row.doc_no)),
+  ]);
+  return rows.map((row) => {
+    const summary =
+      row.source_type === "odservice.s_trans"
+        ? serviceSummaries.get(row.doc_no)
+        : normalSummaries.get(row.doc_no);
+    return {
+      ...row,
+      count_item: summary?.remaining_count ?? 0,
+      remaining_qty_total: summary?.remaining_qty_total ?? 0,
+    };
+  });
+}
+
+async function getServiceBillProducts(billNo) {
+  await ensureTmsDetailItemTable();
+  const billItems = await queryB(
+    `SELECT
+       d.item_code,
+       MAX(d.item_name) AS item_name,
+       SUM(COALESCE(d.qty, 0))::numeric AS total_qty,
+       MAX(d.unit_code) AS unit_code
+     FROM public.s_trans d
+     WHERE d.doc_no = $1
+     GROUP BY d.item_code
+     ORDER BY d.item_code`,
+    [billNo]
+  );
+  if (billItems.length === 0) return [];
+  const usageRows = await query(
+    `WITH active_locked AS (
+       SELECT item.item_code,
+              COALESCE(SUM(item.selected_qty), 0)::numeric AS locked_qty
+       FROM public.odg_tms_detail_item item
+       INNER JOIN public.odg_tms_detail det
+         ON det.bill_no = item.bill_no AND det.doc_no = item.doc_no
+       WHERE item.bill_no = $1
+         AND COALESCE(det.status, 0) NOT IN (1, 2)
+       GROUP BY item.item_code
+     ),
+     delivered AS (
+       SELECT item.item_code,
+              COALESCE(SUM(
+                CASE
+                  WHEN COALESCE(det.status, 0) = 1
+                   AND COALESCE(item.delivered_qty, 0) = 0
+                    THEN COALESCE(item.selected_qty, 0)
+                  ELSE COALESCE(item.delivered_qty, 0)
+                END
+              ), 0)::numeric AS delivered_qty
+       FROM public.odg_tms_detail_item item
+       INNER JOIN public.odg_tms_detail det
+         ON det.bill_no = item.bill_no AND det.doc_no = item.doc_no
+       WHERE item.bill_no = $1
+         AND COALESCE(det.status, 0) IN (1, 2)
+       GROUP BY item.item_code
+     )
+     SELECT COALESCE(al.item_code, dl.item_code) as item_code,
+            COALESCE(al.locked_qty, 0)::numeric as locked_qty,
+            COALESCE(dl.delivered_qty, 0)::numeric as delivered_qty
+     FROM active_locked al
+     FULL OUTER JOIN delivered dl ON dl.item_code = al.item_code`,
+    [billNo]
+  );
+  const usage = new Map(usageRows.map((row) => [row.item_code, row]));
+  return billItems
+    .map((row) => {
+      const used = usage.get(row.item_code);
+      const qty = Math.max(
+        Number(row.total_qty ?? 0) -
+          Number(used?.locked_qty ?? 0) -
+          Number(used?.delivered_qty ?? 0),
+        0
+      );
+      return {
+        item_code: row.item_code,
+        item_name: row.item_name,
+        qty,
+        unit_code: row.unit_code,
+      };
+    })
+    .filter((row) => row.qty > 0);
+}
+
+async function getServiceSummaryMap(billNos) {
+  if (!Array.isArray(billNos) || billNos.length === 0) return new Map();
+  const result = new Map(billNos.map((billNo) => [billNo, { remaining_count: 0, remaining_qty_total: 0 }]));
+  for (const billNo of billNos) {
+    const products = await getServiceBillProducts(billNo);
+    result.set(billNo, {
+      remaining_count: products.length,
+      remaining_qty_total: products.reduce((sum, product) => sum + Number(product.qty || 0), 0),
+    });
+  }
+  return result;
+}
+
 async function getAvailableBillsWithProducts(session) {
+  await ensurePendingBillSchema();
+  await ensureForwardBranchColumn();
   const scope = getBranchScope(session);
-  const bills = await query(
+  const [shipmentBills, manualBills] = await Promise.all([
+    query(
     `SELECT a.doc_no, to_char(a.doc_date,'DD-MM-YYYY') as doc_date, a.cust_code, b.name_1 as cust_name, b.telephone,
-      (SELECT count(item_code) FROM ic_trans_detail WHERE doc_no=a.doc_no AND item_code NOT LIKE '97%') as count_item
+      (SELECT count(item_code) FROM ic_trans_detail WHERE doc_no=a.doc_no AND item_code NOT LIKE '97%') as count_item,
+      ${SCHEDULED_BILL_FIELDS},
+      CASE WHEN fwd.bill_no IS NULL THEN false ELSE true END as incoming_forwarded,
+      COALESCE(fwd.origin_transport_code, '') as forward_from_transport_code,
+      COALESCE(fwd.origin_transport_name, '') as forward_from_transport_name,
+      COALESCE(fwd.forwarded_at, '') as forwarded_at
     FROM ic_trans_shipment a
     LEFT JOIN ar_customer b ON b.code=a.cust_code
-    WHERE trans_flag=44 AND check_status=0
+    ${SCHEDULED_BILL_JOIN}
+    LEFT JOIN LATERAL (
+      SELECT d.bill_no,
+             COALESCE(j.origin_transport_code, '') as origin_transport_code,
+             COALESCE(ott.name_1, '') as origin_transport_name,
+             to_char(COALESCE(d.sent_end, d.create_date_time_now), 'DD-MM-YYYY HH24:MI') as forwarded_at
+      FROM public.odg_tms_detail d
+      LEFT JOIN public.odg_tms j ON j.doc_no = d.doc_no
+      LEFT JOIN public.transport_type ott ON ott.code = j.origin_transport_code
+      WHERE d.bill_no = a.doc_no
+        AND COALESCE(d.status, 0) = 1
+        AND NULLIF(TRIM(d.forward_transport_code), '') = a.transport_code
+        AND ${getFixedYearSqlFilter("d.doc_date")}
+      ORDER BY COALESCE(d.sent_end, d.create_date_time_now) DESC
+      LIMIT 1
+    ) fwd ON true
+    WHERE a.trans_flag=44 AND a.check_status=0
       ${branchFilterShipment(scope, "a")}
       AND ${getFixedYearSqlFilter("a.doc_date")}
-    ORDER BY a.doc_date DESC`
-  );
-  const summaries = await getRemainingSummaryMap(bills.map((bill) => bill.doc_no));
-  const availableBills = bills
-    .map((bill) => ({ ...bill, count_item: summaries.get(bill.doc_no)?.remaining_count ?? 0 }))
-    .filter((bill) => bill.count_item > 0);
+    ORDER BY pb.scheduled_date ASC, a.doc_date DESC`
+    ),
+    getManualReadyBills(),
+  ]);
+  const bills = [...shipmentBills, ...manualBills];
+  const availableBills = (await applyRemainingCounts(bills)).filter((bill) => bill.count_item > 0);
 
   const result = [];
   for (const bill of availableBills) {
@@ -42,45 +193,381 @@ async function getAvailableBillsWithProducts(session) {
 }
 
 async function getAvailableBills(session) {
+  await ensurePendingBillSchema();
+  await ensureForwardBranchColumn();
   const scope = getBranchScope(session);
-  const bills = await query(
+  const [shipmentBills, manualBills] = await Promise.all([
+    query(
     `SELECT a.doc_no, to_char(a.doc_date,'DD-MM-YYYY') as doc_date, a.cust_code,
       b.name_1 as cust_name, b.telephone,
-      (SELECT count(item_code) FROM ic_trans_detail WHERE doc_no=a.doc_no AND item_code NOT LIKE '97%') as count_item
+      (SELECT count(item_code) FROM ic_trans_detail WHERE doc_no=a.doc_no AND item_code NOT LIKE '97%') as count_item,
+      ${SCHEDULED_BILL_FIELDS},
+      CASE WHEN fwd.bill_no IS NULL THEN false ELSE true END as incoming_forwarded,
+      COALESCE(fwd.origin_transport_code, '') as forward_from_transport_code,
+      COALESCE(fwd.origin_transport_name, '') as forward_from_transport_name,
+      COALESCE(fwd.forwarded_at, '') as forwarded_at
     FROM ic_trans_shipment a
     LEFT JOIN ar_customer b ON b.code=a.cust_code
-    WHERE trans_flag=44
+    ${SCHEDULED_BILL_JOIN}
+    LEFT JOIN LATERAL (
+      SELECT d.bill_no,
+             COALESCE(j.origin_transport_code, '') as origin_transport_code,
+             COALESCE(ott.name_1, '') as origin_transport_name,
+             to_char(COALESCE(d.sent_end, d.create_date_time_now), 'DD-MM-YYYY HH24:MI') as forwarded_at
+      FROM public.odg_tms_detail d
+      LEFT JOIN public.odg_tms j ON j.doc_no = d.doc_no
+      LEFT JOIN public.transport_type ott ON ott.code = j.origin_transport_code
+      WHERE d.bill_no = a.doc_no
+        AND COALESCE(d.status, 0) = 1
+        AND NULLIF(TRIM(d.forward_transport_code), '') = a.transport_code
+        AND ${getFixedYearSqlFilter("d.doc_date")}
+      ORDER BY COALESCE(d.sent_end, d.create_date_time_now) DESC
+      LIMIT 1
+    ) fwd ON true
+    WHERE a.trans_flag=44
       ${branchFilterShipment(scope, "a")}
       AND ${getFixedYearSqlFilter("a.doc_date")}
-    ORDER BY a.doc_date DESC`
-  );
-  const summaries = await getRemainingSummaryMap(bills.map((bill) => bill.doc_no));
-  return bills
-    .map((bill) => ({ ...bill, count_item: summaries.get(bill.doc_no)?.remaining_count ?? 0 }))
-    .filter((bill) => bill.count_item > 0);
+    ORDER BY pb.scheduled_date ASC, a.doc_date DESC`
+    ),
+    getManualReadyBills(),
+  ]);
+  const bills = [...shipmentBills, ...manualBills];
+  return (await applyRemainingCounts(bills)).filter((bill) => bill.count_item > 0);
 }
 
 async function getAvailableBillProducts(docNo) {
-  return getRemainingBillProducts(docNo);
+  const products = await getRemainingBillProducts(docNo);
+  if (products.length > 0) return products;
+  return getServiceBillProducts(docNo);
 }
 
-const { getPendingBillScheduleMap } = require("./pending-bill");
+async function searchManualPendingBills(q) {
+  await ensurePendingBillSchema();
+  const text = String(q ?? "").trim();
+  if (text.length < 2) return [];
+  const [icRows, serviceRows] = await Promise.all([
+    query(
+    `SELECT a.doc_no,
+            to_char(a.doc_date,'DD-MM-YYYY') as doc_date,
+            a.cust_code,
+            COALESCE(NULLIF(TRIM(b.name_1), ''), a.cust_code, '') as cust_name,
+            COALESCE(b.telephone, '') as telephone,
+            a.trans_flag as source_trans_flag,
+            to_char(pb.scheduled_date,'YYYY-MM-DD') as scheduled_date,
+            to_char(pb.scheduled_date,'DD-MM-YYYY') as scheduled_date_display,
+            COALESCE(pb.delivery_round_code, '') as delivery_round_code,
+            COALESCE(dr.name, '') as delivery_round_name,
+            COALESCE(dr.time_label, '') as delivery_round_time_label,
+            'ic_trans' as source_type
+     FROM ic_trans a
+     LEFT JOIN ar_customer b ON b.code = a.cust_code
+     LEFT JOIN public.odg_tms_pending_bill pb ON pb.bill_no = a.doc_no
+     LEFT JOIN public.odg_tms_delivery_round dr ON dr.code = pb.delivery_round_code
+     WHERE a.trans_flag IN (${manualFlagListSql()})
+       AND (
+         a.doc_no ILIKE $1
+         OR a.cust_code ILIKE $1
+         OR COALESCE(b.name_1, '') ILIKE $1
+       )
+     ORDER BY a.doc_date DESC
+     LIMIT 30`,
+    [`%${text}%`]
+    ),
+    queryB(
+      `SELECT s.doc_no,
+              to_char(MAX(s.doc_date),'DD-MM-YYYY') as doc_date,
+              COALESCE(MAX(NULLIF(TRIM(s.cust_code), '')), '') as cust_code,
+              COALESCE(MAX(NULLIF(TRIM(s.item_name), '')), MAX(NULLIF(TRIM(s.product_model), '')), s.doc_no) as cust_name,
+              '' as telephone,
+              MAX(s.trans_flag) as source_trans_flag,
+              'odservice.s_trans' as source_type
+       FROM public.s_trans s
+       WHERE (
+         s.doc_no ILIKE $1
+         OR COALESCE(s.cust_code, '') ILIKE $1
+         OR COALESCE(s.item_code, '') ILIKE $1
+         OR COALESCE(s.item_name, '') ILIKE $1
+         OR COALESCE(s.sn, '') ILIKE $1
+         OR COALESCE(s.product_model, '') ILIKE $1
+       )
+       GROUP BY s.doc_no
+       ORDER BY MAX(s.doc_date) DESC
+       LIMIT 30`,
+      [`%${text}%`]
+    ),
+  ]);
+  const serviceDocNos = serviceRows.map((row) => row.doc_no);
+  const serviceScheduleMap = await getPendingBillScheduleMap(serviceDocNos);
+  const serviceRowsWithSchedule = serviceRows.map((row) => {
+    const sched = serviceScheduleMap.get(row.doc_no);
+    return {
+      ...row,
+      scheduled_date: sched?.scheduled_date ?? null,
+      scheduled_date_display: sched?.scheduled_date_display ?? null,
+      delivery_round_code: sched?.delivery_round_code ?? "",
+      delivery_round_name: "",
+      delivery_round_time_label: "",
+    };
+  });
+  const icSummaries = await getRemainingSummaryMap(icRows.map((row) => row.doc_no));
+  const serviceSummaries = await getServiceSummaryMap(serviceRows.map((row) => row.doc_no));
+  const icResult = icRows
+    .map((row) => ({
+      ...row,
+      count_item: icSummaries.get(row.doc_no)?.remaining_count ?? 0,
+    }))
+    .filter((row) => row.count_item > 0);
+  const serviceResult = serviceRowsWithSchedule
+    .map((row) => ({
+      ...row,
+      count_item: serviceSummaries.get(row.doc_no)?.remaining_count ?? 0,
+    }))
+    .filter((row) => row.count_item > 0);
+  const seen = new Set();
+  return [...icResult, ...serviceResult].filter((row) => {
+    const key = `${row.source_type}:${row.doc_no}`;
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+}
+
+async function addManualPendingBill({ billNo, scheduledDate, deliveryRoundCode, remark, userCode, sourceType }) {
+  const code = String(billNo ?? "").trim();
+  const date = String(scheduledDate ?? "").trim();
+  const round = String(deliveryRoundCode ?? "").trim();
+  if (!code) throw new Error("bill_no is required");
+  if (!date) throw new Error("scheduled_date is required");
+  if (!round) throw new Error("delivery_round_code is required");
+  await ensurePendingBillSchema();
+  const requestedSource = String(sourceType ?? "").trim();
+  const icBill = requestedSource === "odservice.s_trans" ? null : await queryOne(
+    `SELECT doc_no FROM ic_trans
+     WHERE doc_no = $1
+       AND trans_flag IN (${manualFlagListSql()})`,
+    [code]
+  );
+  const serviceBill = icBill ? null : await queryB(
+    `SELECT doc_no FROM public.s_trans WHERE doc_no = $1 LIMIT 1`,
+    [code]
+  );
+  if (!icBill && serviceBill.length === 0) {
+    throw new Error("Bill not found in ic_trans trans_flag 56/72 or odservice.s_trans");
+  }
+  const { upsertPendingBillSchedule } = require("./pending-bill");
+  await upsertPendingBillSchedule({
+    billNo: code,
+    scheduledDate: date,
+    remark: remark ?? null,
+    actionStatus: "contacted_ready",
+    deliveryRoundCode: round,
+    userCode,
+  });
+  return { success: true };
+}
+
+async function removeManualPendingBill(billNo) {
+  const code = String(billNo ?? "").trim();
+  if (!code) throw new Error("bill_no is required");
+  await ensurePendingBillSchema();
+  const icBill = await queryOne(
+    `SELECT doc_no FROM ic_trans
+     WHERE doc_no = $1
+       AND trans_flag IN (${manualFlagListSql()})`,
+    [code]
+  );
+  const serviceBill = icBill ? [] : await queryB(
+    `SELECT doc_no FROM public.s_trans WHERE doc_no = $1 LIMIT 1`,
+    [code]
+  );
+  if (!icBill && serviceBill.length === 0) {
+    throw new Error("Bill not found in ic_trans trans_flag 56/72 or odservice.s_trans");
+  }
+  await query(
+    `DELETE FROM public.odg_tms_pending_bill WHERE bill_no = $1`,
+    [code]
+  );
+  return { success: true };
+}
+
+async function getManualReadyBills() {
+  await ensurePendingBillSchema();
+  const icRows = await query(
+    `SELECT a.doc_no,
+            to_char(a.doc_date,'DD-MM-YYYY') as doc_date,
+            a.cust_code,
+            COALESCE(NULLIF(TRIM(b.name_1), ''), a.cust_code, '') as cust_name,
+            COALESCE(b.telephone, '') as telephone,
+            (SELECT count(item_code) FROM ic_trans_detail WHERE doc_no=a.doc_no AND item_code NOT LIKE '97%') as count_item,
+            ${SCHEDULED_BILL_FIELDS},
+            false as incoming_forwarded,
+            '' as forward_from_transport_code,
+            '' as forward_from_transport_name,
+            '' as forwarded_at,
+            true as manual_pending_bill,
+            a.trans_flag as source_trans_flag,
+            'ic_trans' as source_type
+     FROM ic_trans a
+     LEFT JOIN ar_customer b ON b.code = a.cust_code
+     ${SCHEDULED_BILL_JOIN}
+     WHERE a.trans_flag IN (${manualFlagListSql()})
+       AND COALESCE(pb.action_status, '') = 'contacted_ready'
+     ORDER BY pb.scheduled_date ASC, a.doc_date DESC`
+  );
+  const readySchedules = await query(
+    `SELECT pb.bill_no,
+            to_char(pb.scheduled_date,'YYYY-MM-DD') as scheduled_date,
+            to_char(pb.scheduled_date,'DD-MM-YYYY') as scheduled_date_display,
+            pb.delivery_round_code,
+            COALESCE(dr.name, '') as delivery_round_name,
+            COALESCE(dr.time_label, '') as delivery_round_time_label
+     FROM public.odg_tms_pending_bill pb
+     LEFT JOIN public.odg_tms_delivery_round dr ON dr.code = pb.delivery_round_code
+     WHERE pb.scheduled_date IS NOT NULL
+       AND COALESCE(NULLIF(TRIM(pb.delivery_round_code), ''), NULL) IS NOT NULL
+       AND COALESCE(pb.action_status, '') = 'contacted_ready'`
+  );
+  const scheduledDocNos = readySchedules.map((row) => row.bill_no);
+  const existingIc = new Set(icRows.map((row) => row.doc_no));
+  const serviceBaseRows = scheduledDocNos.length === 0
+    ? []
+    : await queryB(
+        `SELECT s.doc_no,
+                to_char(MAX(s.doc_date),'DD-MM-YYYY') as doc_date,
+                COALESCE(MAX(NULLIF(TRIM(s.cust_code), '')), '') as cust_code,
+                COALESCE(MAX(NULLIF(TRIM(s.item_name), '')), MAX(NULLIF(TRIM(s.product_model), '')), s.doc_no) as cust_name,
+                '' as telephone,
+                MAX(s.trans_flag) as source_trans_flag
+         FROM public.s_trans s
+         WHERE s.doc_no = ANY($1::varchar[])
+         GROUP BY s.doc_no`,
+        [scheduledDocNos.filter((docNo) => !existingIc.has(docNo))]
+      );
+  const scheduleMap = new Map(readySchedules.map((row) => [row.bill_no, row]));
+  const serviceRows = serviceBaseRows.map((row) => {
+    const sched = scheduleMap.get(row.doc_no);
+    return {
+      ...row,
+      count_item: 0,
+      scheduled_date: sched?.scheduled_date ?? null,
+      scheduled_date_display: sched?.scheduled_date_display ?? null,
+      delivery_round_code: sched?.delivery_round_code ?? "",
+      delivery_round_name: sched?.delivery_round_name ?? "",
+      delivery_round_time_label: sched?.delivery_round_time_label ?? "",
+      incoming_forwarded: false,
+      forward_from_transport_code: "",
+      forward_from_transport_name: "",
+      forwarded_at: "",
+      manual_pending_bill: true,
+      source_type: "odservice.s_trans",
+    };
+  });
+  return [...icRows, ...serviceRows];
+}
+
+const {
+  getPendingBillScheduleMap,
+  ensurePendingBillSchema,
+} = require("./pending-bill");
 const { getBillTodoSummaryMap } = require("./bill-todo");
+
+async function getManualPendingRowsForPending(fromDate, toDate) {
+  const icRows = await query(
+    `SELECT
+      a.doc_no,
+      to_char(a.doc_date,'DD-MM-YYYY') as doc_date,
+      COALESCE(NULLIF(TRIM(cust.name_1), ''), a.cust_code, '') as transport_name,
+      to_char(COALESCE(a.send_date, pb.scheduled_date, a.doc_date),'YYYY-MM-DD') as send_date,
+      to_char(COALESCE(a.send_date, pb.scheduled_date, a.doc_date),'DD-MM-YYYY') as send_date_display,
+      COALESCE(sale.name_1, '') as sale,
+      COALESCE(dep.name_1::text, sale.department::text, '') as department,
+      'ic_trans ' || a.trans_flag::text as transport,
+      to_char(COALESCE(pb.updated_at, a.create_date_time_now),'DD-MM-YYYY HH24:MI') as time_open,
+      now() - COALESCE(pb.updated_at, a.create_date_time_now) as time_use,
+      true as manual_pending_bill,
+      a.trans_flag as source_trans_flag,
+      'ic_trans' as source_type
+    FROM ic_trans a
+    INNER JOIN public.odg_tms_pending_bill pb
+      ON pb.bill_no = a.doc_no
+      AND pb.scheduled_date IS NOT NULL
+      AND COALESCE(NULLIF(TRIM(pb.delivery_round_code), ''), NULL) IS NOT NULL
+    LEFT JOIN ar_customer cust ON cust.code = a.cust_code
+    LEFT JOIN erp_user sale ON sale.code = a.sale_code
+    LEFT JOIN erp_department_list dep ON dep.code = sale.department
+    WHERE a.trans_flag IN (${manualFlagListSql()})
+      AND pb.scheduled_date::date BETWEEN $1::date AND $2::date
+    ORDER BY pb.scheduled_date ASC, a.doc_date ASC`,
+    [fromDate, toDate]
+  );
+  const readySchedules = await query(
+    `SELECT pb.bill_no,
+            pb.scheduled_date,
+            to_char(pb.scheduled_date,'YYYY-MM-DD') as send_date,
+            to_char(pb.scheduled_date,'DD-MM-YYYY') as send_date_display,
+            to_char(COALESCE(pb.updated_at, LOCALTIMESTAMP(0)),'DD-MM-YYYY HH24:MI') as time_open,
+            now() - COALESCE(pb.updated_at, LOCALTIMESTAMP(0)) as time_use
+     FROM public.odg_tms_pending_bill pb
+     WHERE pb.scheduled_date IS NOT NULL
+       AND COALESCE(NULLIF(TRIM(pb.delivery_round_code), ''), NULL) IS NOT NULL
+       AND COALESCE(pb.action_status, '') = 'contacted_ready'
+       AND pb.scheduled_date::date BETWEEN $1::date AND $2::date`,
+    [fromDate, toDate]
+  );
+  const existingIc = new Set(icRows.map((row) => row.doc_no));
+  const serviceDocNos = readySchedules
+    .map((row) => row.bill_no)
+    .filter((docNo) => !existingIc.has(docNo));
+  const serviceBaseRows = serviceDocNos.length === 0
+    ? []
+    : await queryB(
+        `SELECT s.doc_no,
+                to_char(MAX(s.doc_date),'DD-MM-YYYY') as doc_date,
+                COALESCE(MAX(NULLIF(TRIM(s.cust_code), '')), '') as cust_code,
+                COALESCE(MAX(NULLIF(TRIM(s.item_name), '')), MAX(NULLIF(TRIM(s.product_model), '')), s.doc_no) as transport_name,
+                MAX(s.trans_flag) as source_trans_flag
+         FROM public.s_trans s
+         WHERE s.doc_no = ANY($1::varchar[])
+         GROUP BY s.doc_no`,
+        [serviceDocNos]
+      );
+  const scheduleMap = new Map(readySchedules.map((row) => [row.bill_no, row]));
+  const serviceRows = serviceBaseRows.map((row) => {
+    const sched = scheduleMap.get(row.doc_no);
+    return {
+      doc_no: row.doc_no,
+      doc_date: row.doc_date,
+      transport_name: row.transport_name,
+      send_date: sched?.send_date ?? null,
+      send_date_display: sched?.send_date_display ?? null,
+      sale: "",
+      department: "ສູນບໍລິການ",
+      transport: "odservice.s_trans",
+      time_open: sched?.time_open ?? "",
+      time_use: sched?.time_use ?? null,
+      manual_pending_bill: true,
+      source_trans_flag: row.source_trans_flag,
+      source_type: "odservice.s_trans",
+    };
+  });
+  return [...icRows, ...serviceRows];
+}
 
 async function getBillsPending(session, fromDate, toDate, transportCode) {
   await ensureTmsDetailItemTable();
+  await ensurePendingBillSchema();
   const scope = getBranchScope(session);
   const effectiveCode = scope.scoped ? scope.branch : transportCode;
   const params = effectiveCode === "all" ? [fromDate, toDate] : [fromDate, toDate, effectiveCode];
   const where = effectiveCode === "all" ? "a.transport_code NOT IN ('02-0004')" : "a.transport_code=$3";
-  const [transRaw, listtrans] = await Promise.all([
+  const [shipmentRaw, manualRaw, listtrans] = await Promise.all([
     query(
       `SELECT
-        a.doc_no, to_char(a.doc_date,'DD-MM-YYYY') as doc_date, a.transport_name,
+        a.doc_no, to_char(b.doc_date,'DD-MM-YYYY') as doc_date, a.transport_name,
         to_char(b.send_date,'YYYY-MM-DD') as send_date,
         to_char(b.send_date,'DD-MM-YYYY') as send_date_display,
         c.name_1 as sale, COALESCE(dep.name_1::text, c.department::text, '') as department,
-        d.name_1 as transport, to_char(a.create_date_time_now,'DD-MM-YYYY HH:MI') as time_open,
+        d.name_1 as transport, to_char(a.create_date_time_now,'DD-MM-YYYY HH24:MI') as time_open,
         now() - a.create_date_time_now as time_use
       FROM ic_trans_shipment a
       LEFT JOIN ic_trans b ON b.doc_no=a.doc_no
@@ -88,21 +575,32 @@ async function getBillsPending(session, fromDate, toDate, transportCode) {
       LEFT JOIN erp_department_list dep ON dep.code=c.department
       LEFT JOIN transport_type d ON d.code=a.transport_code
       WHERE check_status=0 AND b.send_date::date BETWEEN $1::date AND $2::date AND ${where}
-      ORDER BY b.send_date ASC, a.doc_date ASC`,
+      ORDER BY b.send_date ASC, b.doc_date ASC`,
       params
     ),
+    getManualPendingRowsForPending(fromDate, toDate),
     scope.scoped
       ? query("SELECT code, name_1 FROM transport_type WHERE code=$1", [scope.branch])
       : query("SELECT code, name_1 FROM transport_type WHERE code NOT LIKE '01-%' ORDER BY code ASC"),
   ]);
 
+  const transRaw = [...shipmentRaw, ...manualRaw];
   if (transRaw.length === 0) return { trans: [], listtrans };
 
   const billNos = transRaw.map((bill) => bill.doc_no);
   // Use the shared summary helper so this list always agrees with the
   // "ຕົວທີ່ເພີ່ມ" (available bills) list — both reflect the same
   // re-dispatchable amount (cancelled bills + partial delivery leftovers).
-  const summaries = await getRemainingSummaryMap(billNos);
+  const countedRows = await applyRemainingCounts(transRaw);
+  const summaries = new Map(
+    countedRows.map((row) => [
+      row.doc_no,
+      {
+        remaining_count: Number(row.count_item ?? 0),
+        remaining_qty_total: Number(row.remaining_qty_total ?? 0),
+      },
+    ])
+  );
 
   // Detect which bills have a partial-delivery history (had detail_item rows)
   // so the UI can flag them. Cheap because billNos is bounded.
@@ -111,6 +609,20 @@ async function getBillsPending(session, fromDate, toDate, transportCode) {
     [billNos]
   );
   const detailItemBills = new Set(detailItemRows.map((row) => row.bill_no));
+
+  const cancelledRows = await query(
+    `SELECT DISTINCT ON (bill_no)
+        bill_no,
+        doc_no as cancelled_delivery_job,
+        COALESCE(remark, '') as cancelled_delivery_remark,
+        to_char(COALESCE(sent_end, create_date_time_now), 'DD-MM-YYYY HH24:MI') as cancelled_delivery_at
+      FROM public.odg_tms_detail
+      WHERE bill_no = ANY($1::varchar[])
+        AND COALESCE(status, 0) = 2
+      ORDER BY bill_no, COALESCE(sent_end, create_date_time_now) DESC`,
+    [billNos]
+  );
+  const cancelledMap = new Map(cancelledRows.map((row) => [row.bill_no, row]));
 
   // Schedule + remark stamps for bills the admin has flagged as overdue.
   const scheduleMap = await getPendingBillScheduleMap(billNos);
@@ -127,11 +639,27 @@ async function getBillsPending(session, fromDate, toDate, transportCode) {
       };
       const sched = scheduleMap.get(bill.doc_no) ?? null;
       const todo = todoMap.get(bill.doc_no) ?? null;
+      const cancelled = cancelledMap.get(bill.doc_no) ?? null;
       // Default delivery date is the bill's send_date from ic_trans; admins can
       // override it via odg_tms_pending_bill when reschedule is needed.
       const effectiveDate = sched?.scheduled_date ?? bill.send_date ?? null;
       const effectiveDisplay =
         sched?.scheduled_date_display ?? bill.send_date_display ?? null;
+      // Normalise action_status to the flat reason+contact-state model.
+      //   contact_failed       — ຕິດຕໍ່ບໍ່ໄດ້
+      //   customer_postponed   — ລູກຄ້າເລື່ອນວັນຮັບ
+      //   customer_cancelled   — ລູກຄ້າປະຕິເສດ/ຍົກເລີກ
+      //   contacted_ready      — ພ້ອມຮັບ
+      // Anything else (legacy values like contacted_waiting/contacted_dispatched)
+      // is cleared so the bill falls back to "ບໍ່ຕິດຕໍ່" until admin retags.
+      const allowedStatuses = [
+        "contact_failed",
+        "customer_postponed",
+        "customer_cancelled",
+        "contacted_ready",
+      ];
+      const rawStatus = sched?.action_status ?? "";
+      const actionStatus = allowedStatuses.includes(rawStatus) ? rawStatus : "";
       return {
         ...bill,
         remaining_count: summary.remaining_count,
@@ -142,9 +670,14 @@ async function getBillsPending(session, fromDate, toDate, transportCode) {
         scheduled_date_display: effectiveDisplay,
         scheduled_date_overridden: Boolean(sched?.scheduled_date),
         schedule_remark: sched?.remark ?? "",
-        action_status: sched?.action_status ?? "",
+        action_status: actionStatus,
+        delivery_round_code: sched?.delivery_round_code ?? "",
         schedule_updated_at: sched?.updated_at ?? null,
         schedule_updated_by: sched?.updated_by ?? "",
+        cancelled_delivery: Boolean(cancelled),
+        cancelled_delivery_job: cancelled?.cancelled_delivery_job ?? "",
+        cancelled_delivery_at: cancelled?.cancelled_delivery_at ?? "",
+        cancelled_delivery_remark: cancelled?.cancelled_delivery_remark ?? "",
         todo_pending_count: Number(todo?.pending_count ?? 0),
         todo_done_count: Number(todo?.done_count ?? 0),
         todo_earliest_deadline: todo?.earliest_deadline ?? null,
@@ -527,6 +1060,9 @@ module.exports = {
   getAvailableBillsWithProducts,
   getAvailableBills,
   getAvailableBillProducts,
+  searchManualPendingBills,
+  addManualPendingBill,
+  removeManualPendingBill,
   getBillsPending,
   updateBillTransport,
   getBillProducts,

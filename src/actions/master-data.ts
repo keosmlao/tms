@@ -19,6 +19,7 @@ import {
   getDispatchWorkers as svcGetDispatchWorkers,
   getDispatchWorkersWithBranch as svcGetDispatchWorkersWithBranch,
   setWorkerBranch as svcSetWorkerBranch,
+  setWorkerProfile as svcSetWorkerProfile,
   getTransportBranches as svcGetTransportBranches,
   getWarehouseWorkers as svcGetWarehouseWorkers,
   addWarehouseWorker as svcAddWarehouseWorker,
@@ -99,6 +100,14 @@ export async function setWorkerBranch(
 ) {
   const s = await requireSession();
   return svcSetWorkerBranch(s, workerCode, transportCode);
+}
+export async function setWorkerProfile(
+  workerCode: string,
+  transportCode: string | null,
+  positionCode: string | null
+) {
+  const s = await requireSession();
+  return svcSetWorkerProfile(s, workerCode, transportCode, positionCode);
 }
 export async function getTransportBranches() {
   await requireSession();

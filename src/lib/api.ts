@@ -26,11 +26,14 @@ export const Actions = {
   // Jobs
   getJobs: jobs.getJobs,
   createJob: jobs.createJob,
+  updateJob: jobs.updateJob,
+  getJobForEdit: jobs.getJobForEdit,
   deleteJob: jobs.deleteJob,
   closeJob: jobs.closeJob,
   getJobInit: jobs.getJobInit,
   getJobAddPageData: jobs.getJobAddPageData,
   getJobBillsWithProducts: jobs.getJobBillsWithProducts,
+  getJobPrintData: jobs.getJobPrintData,
   addBillToDraft: jobs.addBillToDraft,
   removeBillFromDraft: jobs.removeBillFromDraft,
   searchBills: jobs.searchBills,
@@ -45,6 +48,9 @@ export const Actions = {
   getAvailableBills: bills.getAvailableBills,
   getAvailableBillsWithProducts: bills.getAvailableBillsWithProducts,
   getAvailableBillProducts: bills.getAvailableBillProducts,
+  searchManualPendingBills: bills.searchManualPendingBills,
+  addManualPendingBill: bills.addManualPendingBill,
+  removeManualPendingBill: bills.removeManualPendingBill,
   getBillsPending: bills.getBillsPending,
   updateBillTransport: bills.updateBillTransport,
   getBillProducts: bills.getBillProducts,
@@ -89,6 +95,7 @@ export const Actions = {
   getDispatchWorkers: masterData.getDispatchWorkers,
   getDispatchWorkersWithBranch: masterData.getDispatchWorkersWithBranch,
   setWorkerBranch: masterData.setWorkerBranch,
+  setWorkerProfile: masterData.setWorkerProfile,
   getTransportBranches: masterData.getTransportBranches,
 
   // Warehouse workers

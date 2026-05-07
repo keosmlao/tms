@@ -1,14 +1,18 @@
 import { NextRequest, NextResponse } from "next/server";
 import { jwtVerify } from "jose";
 
-const secret = new TextEncoder().encode(
-  process.env.JWT_SECRET || "default-secret-change-me"
-);
+function getJwtSecret(): Uint8Array {
+  const value = process.env.JWT_SECRET;
+  if (!value || value === "default-secret-change-me") {
+    throw new Error("JWT_SECRET is required");
+  }
+  return new TextEncoder().encode(value);
+}
 
 async function isValidToken(token: string | undefined): Promise<boolean> {
   if (!token) return false;
   try {
-    await jwtVerify(token, secret);
+    await jwtVerify(token, getJwtSecret());
     return true;
   } catch {
     return false;

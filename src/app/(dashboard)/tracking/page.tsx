@@ -41,6 +41,18 @@ interface TrackingItem {
   unit_code: string;
 }
 
+interface TrackingAttempt {
+  doc_no: string;
+  doc_date: string;
+  created_at: string;
+  row_count: number;
+  completed_count: number;
+  cancelled_count: number;
+  active_count: number;
+  cancelled_at?: string;
+  cancel_remark?: string;
+}
+
 interface CarPosition {
   lat: number;
   lng: number;
@@ -70,6 +82,7 @@ interface TrackingResult {
   bill_status?: number;
   list: TrackingStep[];
   items?: TrackingItem[];
+  attempts?: TrackingAttempt[];
   car_position?: CarPosition | null;
 }
 
@@ -217,6 +230,81 @@ function InfoStrip({ result }: { result: TrackingResult }) {
             </div>
           </div>
         ))}
+      </div>
+    </div>
+  );
+}
+
+function AttemptsCard({ attempts, currentDocNo }: { attempts?: TrackingAttempt[]; currentDocNo: string }) {
+  if (!attempts || attempts.length <= 1) return null;
+  return (
+    <div className="glass rounded-lg overflow-hidden">
+      <div className="px-5 py-3.5 border-b border-slate-200/30 dark:border-white/5 flex items-center justify-between">
+        <div className="flex items-center gap-2">
+          <div className="w-7 h-7 rounded-lg bg-sky-500/10 flex items-center justify-center">
+            <FaRoute className="text-sky-500" size={12} />
+          </div>
+          <h2 className="text-sm font-bold text-slate-800 dark:text-white">
+            ປະຫວັດຖ້ຽວຂອງບິນນີ້
+          </h2>
+        </div>
+        <span className="text-[10px] text-slate-400 font-medium">
+          {attempts.length} ຖ້ຽວ
+        </span>
+      </div>
+      <div className="divide-y divide-slate-200/30 dark:divide-white/5">
+        {attempts.map((attempt, index) => {
+          const current = attempt.doc_no === currentDocNo;
+          const status =
+            Number(attempt.active_count) > 0
+              ? "ກຳລັງຈັດສົ່ງ"
+              : Number(attempt.cancelled_count) > 0 && Number(attempt.completed_count) === 0
+              ? "ຍົກເລີກ"
+              : Number(attempt.completed_count) > 0
+              ? "ສຳເລັດ"
+              : "ລໍຖ້າ";
+          const tone =
+            status === "ກຳລັງຈັດສົ່ງ"
+              ? "bg-sky-500/10 text-sky-600 dark:text-sky-400"
+              : status === "ຍົກເລີກ"
+              ? "bg-rose-500/10 text-rose-600 dark:text-rose-400"
+              : status === "ສຳເລັດ"
+              ? "bg-emerald-500/10 text-emerald-600 dark:text-emerald-400"
+              : "bg-slate-500/10 text-slate-600 dark:text-slate-400";
+          return (
+            <div
+              key={attempt.doc_no}
+              className={`px-5 py-3 flex items-center gap-3 ${
+                current ? "bg-sky-500/5" : "bg-transparent"
+              }`}
+            >
+              <div className="w-7 h-7 rounded-full bg-slate-900 text-white text-[11px] font-bold flex items-center justify-center">
+                {index + 1}
+              </div>
+              <div className="min-w-0 flex-1">
+                <p className="text-xs font-bold text-slate-800 dark:text-white">
+                  {attempt.doc_no}
+                  {current && (
+                    <span className="ml-2 text-[10px] font-bold text-sky-600 dark:text-sky-400">
+                      ຖ້ຽວລ່າສຸດ
+                    </span>
+                  )}
+                </p>
+                <p className="text-[10px] text-slate-400">
+                  {attempt.cancelled_at || attempt.created_at || attempt.doc_date || "-"}
+                </p>
+                {attempt.cancel_remark && (
+                  <p className="mt-0.5 text-[10px] text-rose-500 truncate">
+                    {attempt.cancel_remark}
+                  </p>
+                )}
+              </div>
+              <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${tone}`}>
+                {status}
+              </span>
+            </div>
+          );
+        })}
       </div>
     </div>
   );
@@ -889,6 +977,7 @@ function TrackingPageInner() {
         <div className="space-y-4">
           <HorizontalProgress steps={result.list} />
           <InfoStrip result={result} />
+          <AttemptsCard attempts={result.attempts} currentDocNo={result.doc_no} />
 
           {(result.driver || result.driver_photo) && (
             <DriverCard name={result.driver} photoFile={result.driver_photo ?? ""} car={result.car} />

@@ -43,7 +43,7 @@ function trackingLink(billNo) {
 // Timeline of delivery checkpoints for a bill — used by the LINE Flex bubble
 // to show progress at a glance. The "active" step is the one matching the
 // label that triggered the notification (passed in by the caller).
-async function getBillTimeline(billNo, activeLabel) {
+async function getBillTimeline(billNo, activeLabel, overrides = {}) {
   try {
     const row = await queryOne(
       `SELECT to_char(create_date_time_now,'DD-MM HH24:MI') as created_at,
@@ -63,7 +63,12 @@ async function getBillTimeline(billNo, activeLabel) {
     const steps = [
       { key: "created", label: "📋 ສ້າງຖ້ຽວ", time: row.created_at, done: true },
       { key: "picked", label: "📦 ເບີກເຄື່ອງ", time: row.picked_at, done: Boolean(row.picked_at) },
-      { key: "dispatch", label: "🚚 ກຳລັງສົ່ງ", time: row.dispatch_at, done: Boolean(row.dispatch_at) },
+      {
+        key: "dispatch",
+        label: "🚚 ເລີ່ມຈັດສົ່ງ",
+        time: overrides.dispatchAt || row.dispatch_at,
+        done: Boolean(overrides.dispatchAt || row.dispatch_at),
+      },
       {
         key: "finished",
         label: finalLabel,
@@ -167,7 +172,7 @@ async function getBillContext(billNo) {
 // (uses ar_customer.register_line_id — the userId saved when the customer
 // added the OA as a friend). The customer flex includes the public tracking
 // link so they can open the live map directly from chat.
-async function notifyCustomerLine(billNo, statusLabel) {
+async function notifyCustomerLine(billNo, statusLabel, options = {}) {
   try {
     const [ctx, customerTestTo] = await Promise.all([
       getBillContext(billNo),
@@ -176,7 +181,9 @@ async function notifyCustomerLine(billNo, statusLabel) {
     if (!ctx) return;
     const recipient = ctx.cust_line_id || (customerTestTo ? "customer-line-missing" : "");
     if (!recipient) return; // customer hasn't linked LINE — silently skip
-    const timeline = await getBillTimeline(billNo, statusLabel);
+    const timeline = await getBillTimeline(billNo, statusLabel, {
+      dispatchAt: options.dispatchAt,
+    });
     await sendDeliveryFlex({
       to: recipient,
       statusLabel,
@@ -186,6 +193,7 @@ async function notifyCustomerLine(billNo, statusLabel) {
       customerName: ctx.cust_name,
       carName: ctx.car_name,
       driverName: ctx.driver_name,
+      statusNote: options.note,
       trackingUrl: trackingLink(billNo),
       testTo: customerTestTo,
       timeline,
@@ -195,7 +203,7 @@ async function notifyCustomerLine(billNo, statusLabel) {
   }
 }
 
-async function notifySalesLine(billNo, statusLabel) {
+async function notifySalesLine(billNo, statusLabel, options = {}) {
   try {
     const ctx = await getBillContext(billNo);
     if (!ctx) return;
@@ -208,7 +216,9 @@ async function notifySalesLine(billNo, statusLabel) {
       return;
     }
 
-    const timeline = await getBillTimeline(billNo, statusLabel);
+    const timeline = await getBillTimeline(billNo, statusLabel, {
+      dispatchAt: options.dispatchAt,
+    });
     await sendDeliveryFlex({
       to: recipient,
       statusLabel,
@@ -218,6 +228,7 @@ async function notifySalesLine(billNo, statusLabel) {
       customerName: ctx.cust_name,
       carName: ctx.car_name,
       driverName: ctx.driver_name,
+      statusNote: options.note,
       trackingUrl: trackingLink(billNo),
       timeline,
     });
@@ -247,9 +258,9 @@ async function notifyJobCreated(docNo) {
 
 // Fan-out a status update to both the sales OA and the customer LINE in one
 // call so mobile.js doesn't have to remember both.
-async function notifyBillStatus(billNo, statusLabel) {
-  void notifySalesLine(billNo, statusLabel);
-  void notifyCustomerLine(billNo, statusLabel);
+async function notifyBillStatus(billNo, statusLabel, options = {}) {
+  void notifySalesLine(billNo, statusLabel, options);
+  void notifyCustomerLine(billNo, statusLabel, options);
 }
 
 // Composite key used to identify a single activity event across the union

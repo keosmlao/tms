@@ -110,7 +110,7 @@ const navSections: NavSection[] = [
     key: "manage",
     items: [
       { label: "ຂໍ້ມູນລົດ", href: "/manage/cars", icon: <FaTruck size={13} /> },
-      { label: "ຄົນຂັບລົດ", href: "/manage/drivers", icon: <FaUserTie size={13} /> },
+      // { label: "ຄົນຂັບລົດ", href: "/manage/drivers", icon: <FaUserTie size={13} /> },
       { label: "ພະນັກງານຂົນສົ່ງ", href: "/manage/warehouse-workers", icon: <FaTruck size={13} /> },
       { label: "ຮອບການຈັດສົ່ງ", href: "/manage/delivery-rounds", icon: <FaClock size={13} /> },
       { label: "ຕັ້ງຄ່າ", href: "/manage/settings", icon: <FaCog size={13} /> },
@@ -169,7 +169,7 @@ export default function Sidebar() {
     <>
       {/* Mobile toggle */}
       <button
-        className="fixed left-4 top-4 z-50 rounded-lg bg-[#0b1b18] p-2.5 text-white shadow-xl transition-all active:scale-95 md:hidden"
+        className="fixed left-4 top-4 z-50 rounded-lg bg-[#0b1b18] p-2.5 text-white shadow-xl transition-all active:scale-95 md:hidden print:hidden"
         onClick={() => setMobileOpen(!mobileOpen)}
         aria-label="Toggle sidebar"
       >
@@ -179,14 +179,14 @@ export default function Sidebar() {
       {/* Mobile backdrop */}
       {mobileOpen && (
         <div
-          className="md:hidden fixed inset-0 bg-black/40 backdrop-blur-md z-30 transition-opacity duration-300"
+          className="md:hidden fixed inset-0 bg-black/40 backdrop-blur-md z-30 transition-opacity duration-300 print:hidden"
           onClick={() => setMobileOpen(false)}
         />
       )}
 
       {/* Sidebar */}
       <aside
-        className={`fixed top-0 z-40 flex h-screen flex-col bg-[#0a1514] text-slate-100 shadow-[0_24px_70px_rgba(2,8,13,0.28)] transition-all duration-300 ease-in-out md:sticky ${sidebarWidth}
+        className={`fixed top-0 z-40 flex h-screen flex-col bg-[#0a1514] text-slate-100 shadow-[0_24px_70px_rgba(2,8,13,0.28)] transition-all duration-300 ease-in-out md:sticky print:hidden ${sidebarWidth}
           border-r border-white/10
           ${mobileOpen ? "translate-x-0" : "-translate-x-full md:translate-x-0"}`}
       >

@@ -11,20 +11,24 @@ export interface Session {
 const COOKIE_NAME = "token";
 const MAX_AGE_SECONDS = 8 * 60 * 60;
 
-const secret = new TextEncoder().encode(
-  process.env.JWT_SECRET || "default-secret-change-me"
-);
+function getJwtSecret(): Uint8Array {
+  const value = process.env.JWT_SECRET;
+  if (!value || value === "default-secret-change-me") {
+    throw new Error("JWT_SECRET is required");
+  }
+  return new TextEncoder().encode(value);
+}
 
 export async function createToken(payload: JWTPayload): Promise<string> {
   return new SignJWT({ ...payload })
     .setProtectedHeader({ alg: "HS256" })
     .setExpirationTime("8h")
-    .sign(secret);
+    .sign(getJwtSecret());
 }
 
 export async function verifyToken(token: string): Promise<JWTPayload | null> {
   try {
-    const { payload } = await jwtVerify(token, secret);
+    const { payload } = await jwtVerify(token, getJwtSecret());
     return payload;
   } catch {
     return null;

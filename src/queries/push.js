@@ -11,24 +11,47 @@ const SERVICE_ACCOUNT_PATH = path.join(
 let firebaseReady = false;
 let firebaseInitError = null;
 
+// Resolution order:
+//   1. FIREBASE_SERVICE_ACCOUNT_JSON  — full JSON string (preferred for prod)
+//   2. FIREBASE_SERVICE_ACCOUNT_BASE64 — base64-encoded JSON (Vercel/CI safer)
+//   3. firebase-service-account.json on disk (legacy / local dev)
+// Lets us deploy without ever writing the secret to the filesystem.
+function loadServiceAccount() {
+  const inline = process.env.FIREBASE_SERVICE_ACCOUNT_JSON;
+  if (inline) {
+    return { source: "FIREBASE_SERVICE_ACCOUNT_JSON env", value: JSON.parse(inline) };
+  }
+  const b64 = process.env.FIREBASE_SERVICE_ACCOUNT_BASE64;
+  if (b64) {
+    const decoded = Buffer.from(b64, "base64").toString("utf8");
+    return { source: "FIREBASE_SERVICE_ACCOUNT_BASE64 env", value: JSON.parse(decoded) };
+  }
+  if (fs.existsSync(SERVICE_ACCOUNT_PATH)) {
+    return {
+      source: SERVICE_ACCOUNT_PATH,
+      value: JSON.parse(fs.readFileSync(SERVICE_ACCOUNT_PATH, "utf8")),
+    };
+  }
+  return null;
+}
+
 function initFirebaseIfNeeded() {
   if (firebaseReady || firebaseInitError) return firebaseReady;
 
   try {
-    if (!fs.existsSync(SERVICE_ACCOUNT_PATH)) {
-      firebaseInitError = `firebase-service-account.json not found at ${SERVICE_ACCOUNT_PATH}`;
+    const loaded = loadServiceAccount();
+    if (!loaded) {
+      firebaseInitError =
+        "Firebase service account not configured (set FIREBASE_SERVICE_ACCOUNT_JSON or place firebase-service-account.json)";
       console.warn(`[push] ${firebaseInitError} — push notifications disabled`);
       return false;
     }
 
-    const serviceAccount = JSON.parse(
-      fs.readFileSync(SERVICE_ACCOUNT_PATH, "utf8")
-    );
     admin.initializeApp({
-      credential: admin.credential.cert(serviceAccount),
+      credential: admin.credential.cert(loaded.value),
     });
     firebaseReady = true;
-    console.log("[push] firebase-admin initialized");
+    console.log(`[push] firebase-admin initialized (source: ${loaded.source})`);
     return true;
   } catch (err) {
     firebaseInitError = err;

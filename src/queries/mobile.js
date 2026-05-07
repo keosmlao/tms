@@ -109,7 +109,7 @@ async function mobileJobsList(driverId, date) {
     SELECT
       to_char(a.doc_date,'DD-MM-YYYY') as doc_date, a.doc_no,
       to_char(a.date_logistic,'DD-MM-YYYY') as date_logistic,
-      b.name_1 as car, c.name_1 as driver,
+      a.car as car_code, b.name_1 as car, c.name_1 as driver,
       COALESCE(bs.total_bills, 0) as item_bill, d.name_1 as user_created,
       a.approve_status::text, a.job_status,
       COALESCE(bs.waiting_bill_count, 0) as waiting_bill_count,
@@ -166,11 +166,15 @@ function normalizeItems(value) {
 async function notifyJobDispatchStarted(docNo) {
   try {
     const dispatchBills = await query(
-      `SELECT bill_no FROM public.odg_tms_detail WHERE doc_no=$1 AND ${getFixedYearSqlFilter("doc_date")}`,
+      `SELECT bill_no, to_char(LOCALTIMESTAMP(0), 'DD-MM HH24:MI') AS dispatch_at
+       FROM public.odg_tms_detail
+       WHERE doc_no=$1 AND ${getFixedYearSqlFilter("doc_date")}`,
       [docNo]
     );
     for (const b of dispatchBills) {
-      void notifyBillStatus(b.bill_no, "🚚 ເລີ່ມຈັດສົ່ງ");
+      void notifyBillStatus(b.bill_no, "🚚 ເລີ່ມຈັດສົ່ງ", {
+        dispatchAt: b.dispatch_at,
+      });
     }
   } catch (err) {
     console.warn("[mobile] dispatch notification failed:", err?.message ?? err);
@@ -183,6 +187,8 @@ async function mobileJobAction(body) {
     const action = asText(body.action);
     const docNo = asText(body.doc_no);
     const billNo = asText(body.bill_no);
+    const driverId = asText(body.driver_id);
+    const carCode = asText(body.car_code ?? body.car);
     const milesStart = asNullableText(body.miles_start);
     const milesEnd = asNullableText(body.miles_end);
     const startImage = asNullableText(body.img_start ?? body.start_image);
@@ -202,6 +208,43 @@ async function mobileJobAction(body) {
 
     await client.query("BEGIN");
     await ensureDeliveryWorkflowSchema(client);
+    if (!driverId) {
+      const err = new Error("Unauthorized");
+      err.status = 401;
+      throw err;
+    }
+    if (docNo) {
+      const carClause = carCode ? "AND car = $3" : "";
+      const allowedParams = carCode ? [docNo, driverId, carCode] : [docNo, driverId];
+      const allowedJob = await client.query(
+        `SELECT 1 FROM odg_tms
+         WHERE doc_no = $1 AND driver = $2 ${carClause} AND ${getFixedYearSqlFilter("doc_date")}
+         LIMIT 1`,
+        allowedParams
+      );
+      if (allowedJob.rowCount === 0) {
+        const err = new Error("Forbidden");
+        err.status = 403;
+        throw err;
+      }
+    }
+    if (billNo) {
+      const allowedBill = await client.query(
+        `SELECT 1
+         FROM public.odg_tms_detail d
+         INNER JOIN odg_tms t ON t.doc_no = d.doc_no
+         WHERE d.bill_no = $1
+           AND t.driver = $2
+           AND ${getFixedYearSqlFilter("d.doc_date")}
+         LIMIT 1`,
+        [billNo, driverId]
+      );
+      if (allowedBill.rowCount === 0) {
+        const err = new Error("Forbidden");
+        err.status = 403;
+        throw err;
+      }
+    }
 
     switch (action) {
       case "receive": {
@@ -674,19 +717,20 @@ async function mobileJobAction(body) {
 
         await client.query(
           `UPDATE public.odg_tms_detail
-           SET sent_start = COALESCE(sent_start, LOCALTIMESTAMP(0)),
-               status = 2, sent_end = COALESCE(sent_end, LOCALTIMESTAMP(0)),
+           SET status = 2, sent_end = COALESCE(sent_end, LOCALTIMESTAMP(0)),
                lat = COALESCE($2, lat), lng = COALESCE($3, lng),
                lat_end = COALESCE($4, lat_end), lng_end = COALESCE($5, lng_end),
                url_img = COALESCE($6, url_img), remark = COALESCE($7, remark)
-           WHERE bill_no = $1 AND ${getFixedYearSqlFilter("doc_date")}`,
-          [billNo, lat, lng, latEnd, lngEnd, deliveryImage, comment]
+           WHERE bill_no = $1 AND doc_no = $8 AND ${getFixedYearSqlFilter("doc_date")}`,
+          [billNo, lat, lng, latEnd, lngEnd, deliveryImage, comment, currentDocNo]
         );
 
         const openBillCount = await getOpenBillCount(currentDocNo, client);
 
         await client.query("COMMIT");
-        void notifyBillStatus(billNo, "❌ ຍົກເລີກຈັດສົ່ງ");
+        void notifyBillStatus(billNo, "❌ ຍົກເລີກຈັດສົ່ງ", {
+          note: comment,
+        });
         return {
           success: true,
           doc_no: currentDocNo,
@@ -697,13 +741,16 @@ async function mobileJobAction(body) {
 
       case "complete_job": {
         if (!docNo) throw new Error("doc_no is required");
+        const jobCarClause = carCode ? "AND car = $2" : "";
+        const jobParams = carCode ? [docNo, carCode] : [docNo];
         const jobRow = await client.query(
           `SELECT COALESCE(job_status, 0) AS job_status
            FROM odg_tms
-           WHERE doc_no = $1 AND ${getFixedYearSqlFilter("doc_date")}
+           WHERE doc_no = $1 ${jobCarClause} AND ${getFixedYearSqlFilter("doc_date")}
            LIMIT 1`,
-          [docNo]
+          jobParams
         );
+        if (jobRow.rowCount === 0) throw new Error("Job not found for this car");
         if (Number(jobRow.rows[0]?.job_status ?? 0) >= 3) {
           await client.query("COMMIT");
           return { success: true, already_closed: true };
@@ -715,9 +762,13 @@ async function mobileJobAction(body) {
           `UPDATE odg_tms
            SET job_status = 3, job_close = LOCALTIMESTAMP(0),
                miles_end = COALESCE($2, miles_end),
-               img_end = COALESCE($3, img_end)
-           WHERE doc_no = $1 AND ${getFixedYearSqlFilter("doc_date")}`,
-          [docNo, milesEnd, endImage]
+               img_end = COALESCE($3, img_end),
+               lat_end = COALESCE($4, lat_end),
+               lng_end = COALESCE($5, lng_end)
+           WHERE doc_no = $1
+             AND ($6::varchar IS NULL OR car = $6::varchar)
+             AND ${getFixedYearSqlFilter("doc_date")}`,
+          [docNo, milesEnd, endImage, latEnd ?? lat, lngEnd ?? lng, carCode || null]
         );
 
         await client.query("COMMIT");
@@ -773,7 +824,43 @@ async function mobileJobAction(body) {
   }
 }
 
-async function mobileBills({ docNo, billNo, type }) {
+async function mobileBills({ docNo, billNo, type, driverId }) {
+  const cleanDriver = asText(driverId);
+  if (!cleanDriver) {
+    const err = new Error("Unauthorized");
+    err.status = 401;
+    throw err;
+  }
+  if (docNo) {
+    const allowedJob = await queryOne(
+      `SELECT 1 FROM odg_tms
+       WHERE doc_no = $1 AND driver = $2 AND ${getFixedYearSqlFilter("doc_date")}
+       LIMIT 1`,
+      [docNo, cleanDriver]
+    );
+    if (!allowedJob) {
+      const err = new Error("Forbidden");
+      err.status = 403;
+      throw err;
+    }
+  }
+  if (billNo) {
+    const allowedBill = await queryOne(
+      `SELECT 1
+       FROM public.odg_tms_detail d
+       INNER JOIN odg_tms t ON t.doc_no = d.doc_no
+       WHERE d.bill_no = $1
+         AND t.driver = $2
+         AND ${getFixedYearSqlFilter("d.doc_date")}
+       LIMIT 1`,
+      [billNo, cleanDriver]
+    );
+    if (!allowedBill) {
+      const err = new Error("Forbidden");
+      err.status = 403;
+      throw err;
+    }
+  }
   if (type === "products" && docNo) {
     return await getBillDeliveryItems({ docNo });
   }

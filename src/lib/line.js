@@ -98,6 +98,7 @@ const STATUS_COLORS = {
  * @param {string} [input.customerName]
  * @param {string} [input.carName]
  * @param {string} [input.driverName]
+ * @param {string} [input.statusNote]      optional note shown under details
  * @param {string} [input.trackingUrl]     adds an "ຕິດຕາມ" CTA button
  * @param {string} [input.testTo]          optional per-message test redirect
  * @param {Array<{label:string,time?:string,done:boolean,active?:boolean}>} [input.timeline]
@@ -115,6 +116,7 @@ async function sendDeliveryFlex(input) {
     customerName,
     carName,
     driverName,
+    statusNote,
     trackingUrl,
     testTo,
     timeline,
@@ -139,6 +141,7 @@ async function sendDeliveryFlex(input) {
   addRow("ລູກຄ້າ", customerName);
   addRow("ລົດ", carName);
   addRow("ຄົນຂັບ", driverName);
+  addRow("ໝາຍເຫດ", statusNote);
 
   const bodyContents = [
     {

@@ -1,26 +1,21 @@
 import type { NextRequest } from "next/server";
 import { mobileFuelLogs } from "@/queries/mobile.js";
+import { mobileErrorResponse, requireMobileSession } from "@/lib/mobile-auth";
+import { parseSearchParams } from "@/lib/validation";
+import { FuelListQuerySchema } from "@/lib/mobile-schemas";
 
 export async function GET(request: NextRequest) {
   try {
-    const sp = request.nextUrl.searchParams;
+    const session = await requireMobileSession(request);
+    const params = parseSearchParams(request.nextUrl.searchParams, FuelListQuerySchema);
     const data = await mobileFuelLogs({
-      userCode: sp.get("user_code") ?? "",
-      fromDate: sp.get("from") ?? undefined,
-      toDate: sp.get("to") ?? undefined,
-      limit: sp.get("limit") ?? undefined,
+      userCode: session.usercode,
+      fromDate: params.from,
+      toDate: params.to,
+      limit: params.limit,
     });
     return Response.json(data);
   } catch (error: unknown) {
-    console.error("Mobile fuel list error:", error);
-    const message =
-      error instanceof Error && error.message
-        ? error.message
-        : "Internal server error";
-    const status =
-      typeof (error as { status?: number })?.status === "number"
-        ? (error as { status: number }).status
-        : 500;
-    return Response.json({ error: message }, { status });
+    return mobileErrorResponse(error);
   }
 }

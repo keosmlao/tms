@@ -20,6 +20,9 @@ interface AvailableBill {
   cust_name?: string | null;
   telephone?: string | null;
   count_item: number;
+  scheduled_date_display?: string | null;
+  delivery_round_name?: string | null;
+  delivery_round_time_label?: string | null;
 }
 
 interface Product {
@@ -365,6 +368,23 @@ export function AddBillsToJobDialog({
                           {b.cust_code}
                           {b.cust_name ? ` · ${b.cust_name}` : ""}
                         </p>
+                        {(b.scheduled_date_display || b.delivery_round_name) && (
+                          <div className="mt-0.5 flex flex-wrap items-center gap-1">
+                            {b.scheduled_date_display && (
+                              <span className="inline-flex items-center gap-1 rounded-full bg-sky-500/10 px-1.5 py-0.5 text-[9px] font-semibold text-sky-700 dark:text-sky-400">
+                                📅 {b.scheduled_date_display}
+                              </span>
+                            )}
+                            {b.delivery_round_name && (
+                              <span
+                                className="inline-flex items-center gap-1 rounded-full bg-amber-500/10 px-1.5 py-0.5 text-[9px] font-semibold text-amber-700 dark:text-amber-400"
+                                title={b.delivery_round_time_label || ""}
+                              >
+                                🕐 {b.delivery_round_name}
+                              </span>
+                            )}
+                          </div>
+                        )}
                       </div>
                       <div className="text-center">
                         <p

@@ -1,32 +1,28 @@
 import type { NextRequest } from "next/server";
 import { fcmTokenSave, fcmTokenDelete } from "@/queries/mobile.js";
+import { mobileErrorResponse, requireMobileSession } from "@/lib/mobile-auth";
+import { parseJsonBody } from "@/lib/validation";
+import { FcmTokenDeleteSchema, FcmTokenSaveSchema } from "@/lib/mobile-schemas";
 
 export async function POST(request: Request) {
   try {
-    const body = await request.json().catch(() => ({}));
-    const data = await fcmTokenSave(body);
+    const session = await requireMobileSession(request);
+    const body = await parseJsonBody(request, FcmTokenSaveSchema);
+    const data = await fcmTokenSave({ ...body, user_code: session.usercode });
     return Response.json(data);
-  } catch (error: any) {
-    const status = error?.status ?? 500;
-    const message = error?.message ?? "Internal server error";
-    if (status === 500) console.error("fcm-token save error:", error);
-    return Response.json({ error: message }, { status });
+  } catch (error) {
+    return mobileErrorResponse(error);
   }
 }
 
 export async function DELETE(request: NextRequest) {
   try {
-    const body = await request
-      .json()
-      .catch(() => ({}));
-    const tokenFromBody = body?.token;
+    await requireMobileSession(request);
+    const body = await parseJsonBody(request, FcmTokenDeleteSchema);
     const tokenFromQuery = request.nextUrl.searchParams.get("token");
-    const data = await fcmTokenDelete(tokenFromBody ?? tokenFromQuery);
+    const data = await fcmTokenDelete(body.token ?? tokenFromQuery);
     return Response.json(data);
-  } catch (error: any) {
-    const status = error?.status ?? 500;
-    const message = error?.message ?? "Internal server error";
-    if (status === 500) console.error("fcm-token delete error:", error);
-    return Response.json({ error: message }, { status });
+  } catch (error) {
+    return mobileErrorResponse(error);
   }
 }

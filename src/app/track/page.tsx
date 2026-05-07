@@ -33,6 +33,18 @@ interface TrackingItem {
   unit_code: string;
 }
 
+interface TrackingAttempt {
+  doc_no: string;
+  doc_date: string;
+  created_at: string;
+  row_count: number;
+  completed_count: number;
+  cancelled_count: number;
+  active_count: number;
+  cancelled_at?: string;
+  cancel_remark?: string;
+}
+
 interface CarPosition {
   lat: number;
   lng: number;
@@ -59,6 +71,7 @@ interface PublicTrackingResult {
   bill_status: number;
   list: TrackingStep[];
   items: TrackingItem[];
+  attempts?: TrackingAttempt[];
   car_position: CarPosition | null;
 }
 
@@ -199,6 +212,7 @@ function TrackPageInner() {
             )}
 
             <BillInfoCard result={result} />
+            <AttemptsCard attempts={result.attempts} currentDocNo={result.doc_no} />
 
             <TrackingLiveMap
               billNo={result.bill_no}
@@ -385,6 +399,70 @@ function BillInfoCard({ result }: { result: PublicTrackingResult }) {
       <Info icon={<FaCalendar />} label="ວັນທີບິນ" value={result.bill_date} />
       <Info icon={<FaTruck />} label="ລົດ" value={result.car || "-"} />
       <Info icon={<FaRoute />} label="ຖ້ຽວ" value={result.doc_no} />
+    </div>
+  );
+}
+
+function AttemptsCard({ attempts, currentDocNo }: { attempts?: TrackingAttempt[]; currentDocNo: string }) {
+  if (!attempts || attempts.length <= 1) return null;
+  return (
+    <div className="bg-white dark:bg-slate-900 rounded-xl border border-slate-200 dark:border-slate-800 overflow-hidden">
+      <div className="px-4 py-3 border-b border-slate-100 dark:border-slate-800 flex items-center justify-between">
+        <p className="text-sm font-bold text-slate-800 dark:text-slate-200">
+          ປະຫວັດຖ້ຽວຂອງບິນນີ້
+        </p>
+        <span className="text-[10px] text-slate-400">{attempts.length} ຖ້ຽວ</span>
+      </div>
+      <div className="divide-y divide-slate-100 dark:divide-slate-800">
+        {attempts.map((attempt, index) => {
+          const current = attempt.doc_no === currentDocNo;
+          const status =
+            Number(attempt.active_count) > 0
+              ? "ກຳລັງຈັດສົ່ງ"
+              : Number(attempt.cancelled_count) > 0 && Number(attempt.completed_count) === 0
+              ? "ຍົກເລີກ"
+              : Number(attempt.completed_count) > 0
+              ? "ສຳເລັດ"
+              : "ລໍຖ້າ";
+          const tone =
+            status === "ກຳລັງຈັດສົ່ງ"
+              ? "bg-sky-50 text-sky-600"
+              : status === "ຍົກເລີກ"
+              ? "bg-rose-50 text-rose-600"
+              : status === "ສຳເລັດ"
+              ? "bg-emerald-50 text-emerald-600"
+              : "bg-slate-100 text-slate-600";
+          return (
+            <div
+              key={attempt.doc_no}
+              className={`px-4 py-3 flex items-center gap-3 ${
+                current ? "bg-sky-50/70 dark:bg-sky-950/20" : ""
+              }`}
+            >
+              <div className="w-7 h-7 rounded-full bg-slate-900 text-white text-[11px] font-bold flex items-center justify-center">
+                {index + 1}
+              </div>
+              <div className="min-w-0 flex-1">
+                <p className="text-xs font-bold text-slate-800 dark:text-slate-200">
+                  {attempt.doc_no}
+                  {current && <span className="ml-2 text-[10px] text-sky-600">ຖ້ຽວລ່າສຸດ</span>}
+                </p>
+                <p className="text-[10px] text-slate-400">
+                  {attempt.cancelled_at || attempt.created_at || attempt.doc_date || "-"}
+                </p>
+                {attempt.cancel_remark && (
+                  <p className="mt-0.5 text-[10px] text-rose-500 truncate">
+                    {attempt.cancel_remark}
+                  </p>
+                )}
+              </div>
+              <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${tone}`}>
+                {status}
+              </span>
+            </div>
+          );
+        })}
+      </div>
     </div>
   );
 }

@@ -24,6 +24,12 @@ import {
   FaTruck,
 } from "react-icons/fa";
 import { Actions } from "@/lib/api";
+import {
+  formatGpsRelative,
+  formatGpsTime,
+  formatGpsWallTime,
+  parseGpsTimestampMs,
+} from "@/lib/gps-time";
 
 interface GpsRealtime {
   imei: string;
@@ -76,8 +82,7 @@ function formatMileage(value: string | undefined): string {
 
 function formatDuration(fromIso: string | undefined): string {
   if (!fromIso) return "";
-  const iso = fromIso.includes("T") ? fromIso : fromIso.replace(" ", "T");
-  const t = new Date(iso).getTime();
+  const t = parseGpsTimestampMs(fromIso);
   if (!Number.isFinite(t)) return "";
   const diffSec = Math.max(0, Math.floor((Date.now() - t) / 1000));
   if (diffSec < 60) return `${diffSec} ວິ`;
@@ -233,44 +238,15 @@ function buildOpenUrl(lat: string, lng: string) {
 }
 
 function formatUpdatedAt(value: string) {
-  if (!value) return "-";
-  const asDate = new Date(value);
-  if (!Number.isNaN(asDate.getTime())) {
-    return asDate.toLocaleString("lo-LA", { hour12: false });
-  }
-  return value;
-}
-
-function parseRecordedDate(value: string) {
-  if (!value) return null;
-  // Provider format "YYYY-MM-DD HH:MM:SS" — Safari needs ISO; replace space with T.
-  const iso = value.includes("T") ? value : value.replace(" ", "T");
-  const d = new Date(iso);
-  return Number.isNaN(d.getTime()) ? null : d;
+  return formatGpsWallTime(value);
 }
 
 function formatTime(value: string) {
-  const d = parseRecordedDate(value);
-  if (!d) return value;
-  return d.toLocaleTimeString("lo-LA", {
-    hour12: false,
-    hour: "2-digit",
-    minute: "2-digit",
-    second: "2-digit",
-  });
+  return formatGpsTime(value);
 }
 
 function formatRelative(value: string) {
-  const d = parseRecordedDate(value);
-  if (!d) return value;
-  const diffSec = Math.max(0, Math.floor((Date.now() - d.getTime()) / 1000));
-  if (diffSec < 60) return `${diffSec}s ago`;
-  const diffMin = Math.floor(diffSec / 60);
-  if (diffMin < 60) return `${diffMin}m ago`;
-  const diffH = Math.floor(diffMin / 60);
-  if (diffH < 24) return `${diffH}h ago`;
-  const diffD = Math.floor(diffH / 24);
-  return `${diffD}d ago`;
+  return formatGpsRelative(value);
 }
 
 function buildMarkerIcon(heading: number, status: FleetStatus, active: boolean) {

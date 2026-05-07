@@ -14,6 +14,7 @@ import {
   FaEdit,
   FaIdCard,
   FaPlus,
+  FaPrint,
   FaSearch,
   FaSpinner,
   FaSyncAlt,
@@ -305,15 +306,26 @@ function JobRow({
                 {rowPending ? <FaSpinner className="animate-spin" size={12} /> : <FaCheckCircle size={12} />}
               </button>
             )}
-            <button
-              type="button"
-              onClick={onEdit}
-              disabled={rowPending}
-              className="w-7 h-7 rounded-md flex items-center justify-center text-slate-400 hover:text-teal-600 hover:bg-teal-50 transition-colors disabled:opacity-40"
-              title="ແກ້ໄຂ"
+            {job.job_status === 0 && (
+              <button
+                type="button"
+                onClick={onEdit}
+                disabled={rowPending}
+                className="w-7 h-7 rounded-md flex items-center justify-center text-slate-400 hover:text-teal-600 hover:bg-teal-50 transition-colors disabled:opacity-40"
+                title="ແກ້ໄຂ"
+              >
+                <FaEdit size={12} />
+              </button>
+            )}
+            <a
+              href={`/jobs/print/${encodeURIComponent(job.doc_no)}`}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="w-7 h-7 rounded-md flex items-center justify-center text-slate-400 hover:text-slate-800 hover:bg-slate-100 transition-colors"
+              title="ພິມໃບຈັດຖ້ຽວ"
             >
-              <FaEdit size={12} />
-            </button>
+              <FaPrint size={12} />
+            </a>
             <button
               type="button"
               onClick={onDelete}

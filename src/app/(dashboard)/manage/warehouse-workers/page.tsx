@@ -3,22 +3,38 @@
 import { useEffect, useMemo, useState, useTransition } from "react";
 import {
   FaSearch, FaSyncAlt, FaSpinner, FaHardHat, FaIdBadge,
-  FaThLarge, FaList, FaExclamationTriangle, FaUsers, FaBuilding,
-  FaCheckCircle,
+  FaExclamationTriangle, FaUsers, FaBuilding,
+  FaCheckCircle, FaUserTag,
 } from "react-icons/fa";
 import { Actions } from "@/lib/api";
-// Ported from server actions: getDispatchWorkersWithBranch, getTransportBranches, setWorkerBranch
+// Ported from server actions: getDispatchWorkersWithBranch, getTransportBranches, setWorkerProfile
 
 interface Worker {
   code: string;
   name_1: string;
   branch_code: string | null;
   branch_name: string | null;
+  position_code: PositionCode | null;
+  position_name: string | null;
 }
 
 interface Branch { code: string; name_1: string; }
 
-type ViewMode = "grid" | "list";
+type PositionCode =
+  | "driver"
+  | "worker"
+  | "both"
+  | "team_lead"
+  | "manager"
+  | "admin";
+
+const positionOptions: { code: PositionCode; name: string }[] = [
+  { code: "driver", name: "ຄົນຂັບ" },
+  { code: "worker", name: "ກຳມະກອນ" },
+  { code: "team_lead", name: "ຫົວໜ້າໜ່ວຍງານ" },
+  { code: "manager", name: "ຜູ້ຈັດການສາງແລະຂົນສົ່ງ" },
+  { code: "admin", name: "ແອັດມິນ (ຈັດຖ້ຽວ/ປິດຖ້ຽວ/ລາຍງານ)" },
+];
 
 const palette = [
   "from-teal-500 to-sky-600",
@@ -54,13 +70,31 @@ function chipClass(code: string | null | undefined) {
   return branchChipColor[code] ?? "bg-teal-100 dark:bg-teal-950/50 text-teal-700 dark:text-teal-300 ring-teal-200 dark:ring-teal-800";
 }
 
+function positionClass(code: PositionCode | null | undefined) {
+  if (code === "driver") return "bg-sky-100 dark:bg-sky-950/50 text-sky-700 dark:text-sky-300 ring-sky-200 dark:ring-sky-800";
+  if (code === "worker") return "bg-emerald-100 dark:bg-emerald-950/50 text-emerald-700 dark:text-emerald-300 ring-emerald-200 dark:ring-emerald-800";
+  if (code === "both") return "bg-amber-100 dark:bg-amber-950/50 text-amber-700 dark:text-amber-300 ring-amber-200 dark:ring-amber-800";
+  if (code === "team_lead") return "bg-fuchsia-100 dark:bg-fuchsia-950/50 text-fuchsia-700 dark:text-fuchsia-300 ring-fuchsia-200 dark:ring-fuchsia-800";
+  if (code === "manager") return "bg-rose-100 dark:bg-rose-950/50 text-rose-700 dark:text-rose-300 ring-rose-200 dark:ring-rose-800";
+  if (code === "admin") return "bg-indigo-100 dark:bg-indigo-950/50 text-indigo-700 dark:text-indigo-300 ring-indigo-200 dark:ring-indigo-800";
+  return "bg-gray-100 dark:bg-gray-800 text-gray-500 dark:text-gray-400 ring-gray-200 dark:ring-gray-700";
+}
+
+function positionName(code: PositionCode | null | undefined) {
+  return positionOptions.find((item) => item.code === code)?.name ?? null;
+}
+
+type BranchFilter = "all" | "none" | string; // string = branch code
+type PositionFilter = "all" | "none" | PositionCode;
+
 export default function TransportWorkersPage() {
   const [workers, setWorkers] = useState<Worker[]>([]);
   const [branches, setBranches] = useState<Branch[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [search, setSearch] = useState("");
-  const [view, setView] = useState<ViewMode>("grid");
+  const [branchFilter, setBranchFilter] = useState<BranchFilter>("all");
+  const [positionFilter, setPositionFilter] = useState<PositionFilter>("all");
   const [savingCode, setSavingCode] = useState<string | null>(null);
   const [savedCode, setSavedCode] = useState<string | null>(null);
   const [, startTransition] = useTransition();
@@ -79,19 +113,24 @@ export default function TransportWorkersPage() {
 
   useEffect(() => { fetchAll(); }, []);
 
-  const handleAssign = (code: string, transportCode: string) => {
-    const next = transportCode || null;
+  const handleAssign = (code: string, nextBranch: string | null, nextPosition: PositionCode | null) => {
     setSavingCode(code);
     setWorkers((prev) =>
       prev.map((w) =>
         w.code === code
-          ? { ...w, branch_code: next, branch_name: next ? branches.find((b) => b.code === next)?.name_1 ?? null : null }
+          ? {
+              ...w,
+              branch_code: nextBranch,
+              branch_name: nextBranch ? branches.find((b) => b.code === nextBranch)?.name_1 ?? null : null,
+              position_code: nextPosition,
+              position_name: positionName(nextPosition),
+            }
           : w
       )
     );
     startTransition(async () => {
       try {
-        await Actions.setWorkerBranch(code, next);
+        await Actions.setWorkerProfile(code, nextBranch, nextPosition);
         setSavedCode(code);
         setTimeout(() => setSavedCode((c) => (c === code ? null : c)), 1500);
       } catch (e) {
@@ -106,19 +145,58 @@ export default function TransportWorkersPage() {
 
   const filtered = useMemo(() => {
     const q = search.trim().toLowerCase();
-    if (!q) return workers;
-    return workers.filter((w) =>
-      w.code.toLowerCase().includes(q) ||
-      w.name_1.toLowerCase().includes(q) ||
-      (w.branch_name ?? "").toLowerCase().includes(q)
-    );
-  }, [workers, search]);
+    return workers.filter((w) => {
+      // Branch tab
+      if (branchFilter === "none") {
+        if (w.branch_code) return false;
+      } else if (branchFilter !== "all") {
+        if (w.branch_code !== branchFilter) return false;
+      }
+      // Position tab
+      if (positionFilter === "none") {
+        if (w.position_code) return false;
+      } else if (positionFilter !== "all") {
+        if (w.position_code !== positionFilter) return false;
+      }
+      // Search
+      if (!q) return true;
+      return (
+        w.code.toLowerCase().includes(q) ||
+        w.name_1.toLowerCase().includes(q) ||
+        (w.branch_name ?? "").toLowerCase().includes(q) ||
+        (w.position_name ?? "").toLowerCase().includes(q)
+      );
+    });
+  }, [workers, search, branchFilter, positionFilter]);
+
+  // Counts for tab badges (against the full worker list, not the filtered one,
+  // so user can see how many will appear when they switch tabs).
+  const branchCounts = useMemo(() => {
+    const map = new Map<string, number>();
+    let none = 0;
+    for (const w of workers) {
+      if (w.branch_code) map.set(w.branch_code, (map.get(w.branch_code) ?? 0) + 1);
+      else none += 1;
+    }
+    return { byCode: map, none, total: workers.length };
+  }, [workers]);
+
+  const positionCounts = useMemo(() => {
+    const map = new Map<PositionCode, number>();
+    let none = 0;
+    for (const w of workers) {
+      if (w.position_code) map.set(w.position_code, (map.get(w.position_code) ?? 0) + 1);
+      else none += 1;
+    }
+    return { byCode: map, none, total: workers.length };
+  }, [workers]);
 
   const assignedCount = workers.filter((w) => w.branch_code).length;
+  const positionedCount = workers.filter((w) => w.position_code).length;
 
   return (
     <div className="min-h-screen pb-8">
-      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6 space-y-6">
+      <div className="mx-auto px-2 sm:px-4 lg:px-4 py-2 space-y-6">
         {/* Header */}
         <div className="flex flex-wrap items-center justify-between gap-3">
           <div className="flex items-center gap-3">
@@ -127,9 +205,9 @@ export default function TransportWorkersPage() {
             </div>
             <div>
               <h1 className="text-xl font-bold bg-gradient-to-r from-gray-900 to-gray-600 dark:from-white dark:to-gray-400 bg-clip-text text-transparent">
-                ພະນັກງານຂົນສົ່ງ
+                ພະນັກງານສາງ ແລະ ຂົນສົ່ງ
               </h1>
-              <p className="text-xs text-gray-500 dark:text-gray-400">ສະເພາະພະນັກງານພະແນກຂົນສົ່ງ · ກຳນົດສາຂາໄດ້</p>
+              <p className="text-xs text-gray-500 dark:text-gray-400">ພະນັກງານພະແນກສາງ ແລະ ຂົນສົ່ງ · ກຳນົດສາຂາ ແລະ ຕຳແໜ່ງໄດ້</p>
             </div>
           </div>
           <button
@@ -150,7 +228,7 @@ export default function TransportWorkersPage() {
                 type="text"
                 value={search}
                 onChange={(e) => setSearch(e.target.value)}
-                placeholder="ຄົ້ນຫາລະຫັດ ຊື່ ຫຼື ສາຂາ..."
+                placeholder="ຄົ້ນຫາລະຫັດ ຊື່ ສາຂາ ຫຼື ຕຳແໜ່ງ..."
                 className="glass-input w-full pl-9 pr-4 py-2 text-sm rounded-lg"
               />
             </div>
@@ -166,21 +244,92 @@ export default function TransportWorkersPage() {
                 ມີສາຂາ {assignedCount}
               </span>
             </div>
-            <div className="flex items-center rounded-lg glass p-1">
-              <button
-                onClick={() => setView("grid")}
-                className={`p-2 rounded-lg transition-all ${view === "grid" ? "glass-heavy text-teal-600 dark:text-teal-400" : "text-gray-500 dark:text-gray-400"}`}
-                aria-label="Grid view"
+            <div className="flex items-center gap-2 px-3 py-2 rounded-lg bg-sky-500/10 ring-1 ring-sky-500/20">
+              <FaUserTag className="text-sky-500 dark:text-sky-400 text-sm" />
+              <span className="text-xs font-semibold text-sky-700 dark:text-sky-300">
+                ມີຕຳແໜ່ງ {positionedCount}
+              </span>
+            </div>
+          </div>
+        </div>
+
+        {/* Filter tabs */}
+        <div className="space-y-3">
+          {/* Branch tabs */}
+          <div className="glass rounded-lg p-3">
+            <div className="flex items-center gap-2 mb-2">
+              <FaBuilding className="text-emerald-500 dark:text-emerald-400 text-xs" />
+              <p className="text-[10px] font-semibold uppercase tracking-wider text-gray-500 dark:text-gray-400">
+                ສາຂາ
+              </p>
+            </div>
+            <div className="flex flex-wrap gap-1.5">
+              <FilterChip
+                active={branchFilter === "all"}
+                onClick={() => setBranchFilter("all")}
+                count={branchCounts.total}
+                tone="emerald"
               >
-                <FaThLarge size={12} />
-              </button>
-              <button
-                onClick={() => setView("list")}
-                className={`p-2 rounded-lg transition-all ${view === "list" ? "glass-heavy text-teal-600 dark:text-teal-400" : "text-gray-500 dark:text-gray-400"}`}
-                aria-label="List view"
+                ທັງໝົດ
+              </FilterChip>
+              {branches.map((b) => (
+                <FilterChip
+                  key={b.code}
+                  active={branchFilter === b.code}
+                  onClick={() => setBranchFilter(b.code)}
+                  count={branchCounts.byCode.get(b.code) ?? 0}
+                  tone="emerald"
+                >
+                  {b.name_1}
+                </FilterChip>
+              ))}
+              <FilterChip
+                active={branchFilter === "none"}
+                onClick={() => setBranchFilter("none")}
+                count={branchCounts.none}
+                tone="slate"
               >
-                <FaList size={12} />
-              </button>
+                ບໍ່ໄດ້ກຳນົດ
+              </FilterChip>
+            </div>
+          </div>
+
+          {/* Position tabs */}
+          <div className="glass rounded-lg p-3">
+            <div className="flex items-center gap-2 mb-2">
+              <FaUserTag className="text-sky-500 dark:text-sky-400 text-xs" />
+              <p className="text-[10px] font-semibold uppercase tracking-wider text-gray-500 dark:text-gray-400">
+                ຕຳແໜ່ງ
+              </p>
+            </div>
+            <div className="flex flex-wrap gap-1.5">
+              <FilterChip
+                active={positionFilter === "all"}
+                onClick={() => setPositionFilter("all")}
+                count={positionCounts.total}
+                tone="sky"
+              >
+                ທັງໝົດ
+              </FilterChip>
+              {positionOptions.map((opt) => (
+                <FilterChip
+                  key={opt.code}
+                  active={positionFilter === opt.code}
+                  onClick={() => setPositionFilter(opt.code)}
+                  count={positionCounts.byCode.get(opt.code) ?? 0}
+                  tone="sky"
+                >
+                  {opt.name}
+                </FilterChip>
+              ))}
+              <FilterChip
+                active={positionFilter === "none"}
+                onClick={() => setPositionFilter("none")}
+                count={positionCounts.none}
+                tone="slate"
+              >
+                ບໍ່ໄດ້ກຳນົດ
+              </FilterChip>
             </div>
           </div>
         </div>
@@ -210,52 +359,6 @@ export default function TransportWorkersPage() {
               {search ? "ບໍ່ພົບຜົນການຄົ້ນຫາ" : "ບໍ່ມີຂໍ້ມູນ"}
             </p>
           </div>
-        ) : view === "grid" ? (
-          <div className="grid gap-3 grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
-            {filtered.map((w) => (
-              <div
-                key={w.code}
-                className="group relative overflow-hidden rounded-lg glass p-4 hover:shadow-md transition-all duration-300"
-              >
-                <div className="absolute inset-0 bg-gradient-to-br from-teal-500/5 to-sky-500/5 opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none" />
-                <div className="relative flex items-center gap-3">
-                  <div className={`flex h-12 w-12 flex-shrink-0 items-center justify-center rounded-lg bg-gradient-to-br ${avatarGradient(w.code)} text-white text-sm font-bold shadow-lg`}>
-                    {initials(w.name_1)}
-                  </div>
-                  <div className="min-w-0 flex-1">
-                    <p className="text-sm font-semibold text-gray-900 dark:text-white truncate">{w.name_1}</p>
-                    <div className="flex items-center gap-1.5 mt-0.5">
-                      <FaIdBadge className="text-gray-400 dark:text-gray-500 text-[10px]" />
-                      <span className="text-xs text-gray-500 dark:text-gray-400 font-mono truncate">{w.code}</span>
-                    </div>
-                  </div>
-                </div>
-                <div className="relative mt-3 pt-3 border-t border-slate-200/30 dark:border-white/5">
-                  <div className="flex items-center justify-between mb-1.5">
-                    <label className="text-[10px] font-semibold uppercase tracking-wider text-gray-500 dark:text-gray-400 flex items-center gap-1">
-                      <FaBuilding size={9} /> ສາຂາຮັບຜິດຊອບ
-                    </label>
-                    {savingCode === w.code ? (
-                      <FaSpinner className="text-teal-500 animate-spin" size={10} />
-                    ) : savedCode === w.code ? (
-                      <FaCheckCircle className="text-emerald-500" size={10} />
-                    ) : null}
-                  </div>
-                  <select
-                    value={w.branch_code ?? ""}
-                    onChange={(e) => handleAssign(w.code, e.target.value)}
-                    disabled={savingCode === w.code}
-                    className={`w-full text-xs px-2.5 py-1.5 rounded-lg ring-1 cursor-pointer focus:outline-none focus:ring-2 focus:ring-teal-500/40 transition-all ${chipClass(w.branch_code)} disabled:opacity-60`}
-                  >
-                    <option value="">— ບໍ່ໄດ້ກຳນົດ —</option>
-                    {branches.map((b) => (
-                      <option key={b.code} value={b.code}>{b.name_1}</option>
-                    ))}
-                  </select>
-                </div>
-              </div>
-            ))}
-          </div>
         ) : (
           <div className="glass rounded-lg overflow-hidden">
             <table className="w-full text-sm">
@@ -264,6 +367,7 @@ export default function TransportWorkersPage() {
                   <th className="px-5 py-3 text-left text-xs font-medium uppercase tracking-wider">ພະນັກງານ</th>
                   <th className="px-5 py-3 text-left text-xs font-medium uppercase tracking-wider">ລະຫັດ</th>
                   <th className="px-5 py-3 text-left text-xs font-medium uppercase tracking-wider">ສາຂາຮັບຜິດຊອບ</th>
+                  <th className="px-5 py-3 text-left text-xs font-medium uppercase tracking-wider">ຕຳແໜ່ງ</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-200/30 dark:divide-white/5">
@@ -287,7 +391,7 @@ export default function TransportWorkersPage() {
                       <div className="flex items-center gap-2">
                         <select
                           value={w.branch_code ?? ""}
-                          onChange={(e) => handleAssign(w.code, e.target.value)}
+                          onChange={(e) => handleAssign(w.code, e.target.value || null, w.position_code)}
                           disabled={savingCode === w.code}
                           className={`text-xs px-2.5 py-1.5 rounded-lg ring-1 cursor-pointer focus:outline-none focus:ring-2 focus:ring-teal-500/40 transition-all ${chipClass(w.branch_code)} disabled:opacity-60`}
                         >
@@ -303,6 +407,19 @@ export default function TransportWorkersPage() {
                         ) : null}
                       </div>
                     </td>
+                    <td className="px-5 py-3">
+                      <select
+                        value={w.position_code ?? ""}
+                        onChange={(e) => handleAssign(w.code, w.branch_code, (e.target.value || null) as PositionCode | null)}
+                        disabled={savingCode === w.code}
+                        className={`text-xs px-2.5 py-1.5 rounded-lg ring-1 cursor-pointer focus:outline-none focus:ring-2 focus:ring-teal-500/40 transition-all ${positionClass(w.position_code)} disabled:opacity-60`}
+                      >
+                        <option value="">— ບໍ່ໄດ້ກຳນົດ —</option>
+                        {positionOptions.map((item) => (
+                          <option key={item.code} value={item.code}>{item.name}</option>
+                        ))}
+                      </select>
+                    </td>
                   </tr>
                 ))}
               </tbody>
@@ -311,5 +428,52 @@ export default function TransportWorkersPage() {
         )}
       </div>
     </div>
+  );
+}
+
+function FilterChip({
+  active,
+  onClick,
+  count,
+  tone,
+  children,
+}: {
+  active: boolean;
+  onClick: () => void;
+  count: number;
+  tone: "emerald" | "sky" | "slate";
+  children: React.ReactNode;
+}) {
+  const activeStyle =
+    tone === "emerald"
+      ? "bg-emerald-500 text-white shadow-md shadow-emerald-500/30"
+      : tone === "sky"
+        ? "bg-sky-500 text-white shadow-md shadow-sky-500/30"
+        : "bg-slate-500 text-white shadow-md shadow-slate-500/30";
+  const inactiveStyle =
+    tone === "emerald"
+      ? "bg-emerald-500/10 text-emerald-700 dark:text-emerald-300 hover:bg-emerald-500/20 ring-1 ring-emerald-500/20"
+      : tone === "sky"
+        ? "bg-sky-500/10 text-sky-700 dark:text-sky-300 hover:bg-sky-500/20 ring-1 ring-sky-500/20"
+        : "bg-slate-500/10 text-slate-600 dark:text-slate-300 hover:bg-slate-500/20 ring-1 ring-slate-500/20";
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      className={`inline-flex items-center gap-1.5 rounded-full px-3 py-1.5 text-xs font-semibold transition-all ${
+        active ? activeStyle : inactiveStyle
+      }`}
+    >
+      <span>{children}</span>
+      <span
+        className={`inline-flex min-w-[1.25rem] items-center justify-center rounded-full px-1.5 text-[10px] font-bold ${
+          active
+            ? "bg-white/25 text-white"
+            : "bg-white/60 dark:bg-white/10 text-current"
+        }`}
+      >
+        {count}
+      </span>
+    </button>
   );
 }

@@ -4,11 +4,14 @@ import { requireSession } from "./_helpers";
 import {
   getJobs as svcGetJobs,
   createJob as svcCreateJob,
+  updateJob as svcUpdateJob,
+  getJobForEdit as svcGetJobForEdit,
   deleteJob as svcDeleteJob,
   closeJob as svcCloseJob,
   getJobInit as svcGetJobInit,
   getJobAddPageData as svcGetJobAddPageData,
   getJobBillsWithProducts as svcGetJobBillsWithProducts,
+  getJobPrintData as svcGetJobPrintData,
   addBillToDraft as svcAddBillToDraft,
   removeBillFromDraft as svcRemoveBillFromDraft,
   searchBills as svcSearchBills,
@@ -28,6 +31,16 @@ export async function getJobs() {
 export async function createJob(data: unknown) {
   const s = await requireSession();
   return svcCreateJob(s, data);
+}
+
+export async function updateJob(docNo: string, data: unknown) {
+  const s = await requireSession();
+  return svcUpdateJob(s, docNo, data);
+}
+
+export async function getJobForEdit(docNo: string) {
+  await requireSession();
+  return svcGetJobForEdit(docNo);
 }
 
 export async function deleteJob(docNo: string) {
@@ -53,6 +66,11 @@ export async function getJobAddPageData() {
 export async function getJobBillsWithProducts(docNo: string) {
   await requireSession();
   return svcGetJobBillsWithProducts(docNo);
+}
+
+export async function getJobPrintData(docNo: string) {
+  await requireSession();
+  return svcGetJobPrintData(docNo);
 }
 
 // Draft / search bills (logically part of job creation flow)

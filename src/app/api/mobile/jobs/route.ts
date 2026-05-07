@@ -1,38 +1,47 @@
 import type { NextRequest } from "next/server";
 import { mobileJobsList, mobileJobAction } from "@/queries/mobile.js";
+import { mobileErrorResponse, requireMobileSession } from "@/lib/mobile-auth";
+import { parseJsonBody, parseSearchParams } from "@/lib/validation";
+import { JobActionSchema, JobsListQuerySchema } from "@/lib/mobile-schemas";
 
 export async function GET(request: NextRequest) {
   try {
-    const driverId = request.nextUrl.searchParams.get("driver_id") ?? "";
-    const date = request.nextUrl.searchParams.get("date") ?? "";
-    const data = await mobileJobsList(driverId, date);
+    const session = await requireMobileSession(request);
+    const { date } = parseSearchParams(request.nextUrl.searchParams, JobsListQuerySchema);
+    const data = await mobileJobsList(session.driver_id, date ?? "");
     return Response.json(data);
   } catch (error) {
-    console.error("Mobile jobs error:", error);
-    return Response.json({ error: "Internal server error" }, { status: 500 });
+    return mobileErrorResponse(error);
   }
 }
 
 export async function POST(request: Request) {
   try {
-    const body = await request.json().catch(() => ({}));
-    const data = await mobileJobAction(body);
+    const session = await requireMobileSession(request);
+    const body = await parseJsonBody(request, JobActionSchema);
+    const data = await mobileJobAction({
+      ...body,
+      driver_id: session.driver_id,
+      user_code: session.usercode,
+    });
     return Response.json(data);
-  } catch (error: any) {
-    console.error("Mobile job action error:", error);
-    const message =
-      error instanceof Error && error.message
-        ? error.message
-        : "Internal server error";
-    const status =
-      message === "Invalid action" ||
-      message.includes("required") ||
-      message.includes("remaining only") ||
-      message.includes("Still has pending") ||
-      message.includes("must be") ||
-      message.startsWith("ກະລຸນາ") // Lao "please" — workflow validation prompts
-        ? 400
-        : 500;
-    return Response.json({ error: message }, { status });
+  } catch (error: unknown) {
+    // Workflow rejections from the query layer are 400s, not 500s. We can't
+    // tell ahead of time, so map known phrases to 400 here.
+    const err = error as { status?: number; message?: string };
+    if (!err?.status && typeof err?.message === "string") {
+      const m = err.message;
+      if (
+        m === "Invalid action" ||
+        m.includes("required") ||
+        m.includes("remaining only") ||
+        m.includes("Still has pending") ||
+        m.includes("must be") ||
+        m.startsWith("ກະລຸນາ")
+      ) {
+        (err as { status?: number }).status = 400;
+      }
+    }
+    return mobileErrorResponse(error);
   }
 }

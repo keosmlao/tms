@@ -1,6 +1,11 @@
 import { query } from "@/lib/db.js";
+import { getSession } from "@/lib/auth";
 
 export async function GET() {
+  const session = await getSession();
+  if (!session) {
+    return Response.json({ error: "Unauthorized" }, { status: 401 });
+  }
   const env = {
     PG_HOST: !!process.env.PG_HOST,
     PG_PORT: !!process.env.PG_PORT,

@@ -5,6 +5,9 @@ import {
   getAvailableBills as svcGetAvailableBills,
   getAvailableBillsWithProducts as svcGetAvailableBillsWithProducts,
   getAvailableBillProducts as svcGetAvailableBillProducts,
+  searchManualPendingBills as svcSearchManualPendingBills,
+  addManualPendingBill as svcAddManualPendingBill,
+  removeManualPendingBill as svcRemoveManualPendingBill,
   getBillsPending as svcGetBillsPending,
   updateBillTransport as svcUpdateBillTransport,
   getBillProducts as svcGetBillProducts,
@@ -39,6 +42,34 @@ export async function getAvailableBillsWithProducts() {
 export async function getAvailableBillProducts(docNo: string) {
   await requireSession();
   return svcGetAvailableBillProducts(docNo);
+}
+
+export async function searchManualPendingBills(q: string) {
+  await requireSession();
+  return svcSearchManualPendingBills(q);
+}
+
+export async function addManualPendingBill(input: {
+  bill_no: string;
+  scheduled_date: string;
+  delivery_round_code: string;
+  remark?: string | null;
+  source_type?: string | null;
+}) {
+  const s = await requireSession();
+  return svcAddManualPendingBill({
+    billNo: input.bill_no,
+    scheduledDate: input.scheduled_date,
+    deliveryRoundCode: input.delivery_round_code,
+    remark: input.remark ?? null,
+    sourceType: input.source_type ?? null,
+    userCode: (s as { code?: string; usercode?: string })?.code ?? (s as { usercode?: string })?.usercode,
+  });
+}
+
+export async function removeManualPendingBill(billNo: string) {
+  await requireSession();
+  return svcRemoveManualPendingBill(billNo);
 }
 
 export async function getBillsPending(
@@ -100,6 +131,7 @@ export async function upsertPendingBillSchedule(input: {
   scheduled_date?: string | null;
   remark?: string | null;
   action_status?: string | null;
+  delivery_round_code?: string | null;
 }) {
   const s = await requireSession();
   return svcUpsertPendingBillSchedule({
@@ -107,6 +139,7 @@ export async function upsertPendingBillSchedule(input: {
     scheduledDate: input.scheduled_date ?? null,
     remark: input.remark ?? null,
     actionStatus: input.action_status ?? null,
+    deliveryRoundCode: input.delivery_round_code ?? null,
     userCode: (s as { code?: string })?.code,
   });
 }

@@ -175,10 +175,16 @@ async function getDispatchDriverByCode(code) {
   );
 }
 
-async function getTransportDepartmentEmployees(session) {
+async function getTransportDepartmentEmployees(session, role = null) {
   await ensureWorkerBranchTable();
   const branch = session?.logistic_code?.trim() ?? "";
   const scoped = !!branch && branch !== "02-0004";
+  const roleFilter =
+    role === "driver"
+      ? "AND (wb.position_code IS NULL OR wb.position_code = '' OR wb.position_code IN ('driver', 'both'))"
+      : role === "worker"
+        ? "AND (wb.position_code IS NULL OR wb.position_code = '' OR wb.position_code IN ('worker', 'both'))"
+        : "";
 
   if (!scoped) {
     return query(
@@ -186,8 +192,10 @@ async function getTransportDepartmentEmployees(session) {
         COALESCE(NULLIF(TRIM(e.fullname_lo), ''), NULLIF(TRIM(e.nickname), ''), e.employee_code) AS name_1
       FROM public.odg_employee e
       LEFT JOIN public.odg_department d ON d.department_code = e.department_code
+      LEFT JOIN public.odg_tms_worker_branch wb ON wb.worker_code = e.employee_code
       WHERE e.employment_status = 'ACTIVE'
         AND d.department_name_lo ILIKE '%ຂົນສົ່ງ%'
+        ${roleFilter}
       ORDER BY name_1 ASC, e.employee_code ASC`
     );
   }
@@ -202,23 +210,27 @@ async function getTransportDepartmentEmployees(session) {
     WHERE e.employment_status = 'ACTIVE'
       AND d.department_name_lo ILIKE '%ຂົນສົ່ງ%'
       AND wb.transport_code = $1
+      ${roleFilter}
     ORDER BY name_1 ASC, e.employee_code ASC`,
     [branch]
   );
 }
 
-async function getDispatchDrivers(session) { return getTransportDepartmentEmployees(session); }
-async function getDispatchWorkers(session) { return getTransportDepartmentEmployees(session); }
+async function getDispatchDrivers(session) { return getTransportDepartmentEmployees(session, "driver"); }
+async function getDispatchWorkers(session) { return getTransportDepartmentEmployees(session, "worker"); }
 
 async function ensureWorkerBranchTable() {
   await query(`
     CREATE TABLE IF NOT EXISTS public.odg_tms_worker_branch (
       worker_code character varying PRIMARY KEY,
       transport_code character varying NOT NULL,
+      position_code character varying,
       updated_at timestamp without time zone DEFAULT LOCALTIMESTAMP(0),
       updated_by character varying
     )
   `);
+  await query(`ALTER TABLE public.odg_tms_worker_branch ADD COLUMN IF NOT EXISTS position_code character varying`);
+  await query(`ALTER TABLE public.odg_tms_worker_branch ALTER COLUMN transport_code DROP NOT NULL`);
 }
 
 async function getTransportBranches() {
@@ -230,32 +242,53 @@ async function getDispatchWorkersWithBranch() {
   return query(
     `SELECT e.employee_code AS code,
       COALESCE(NULLIF(TRIM(e.fullname_lo), ''), NULLIF(TRIM(e.nickname), ''), e.employee_code) AS name_1,
-      wb.transport_code AS branch_code, tt.name_1 AS branch_name
+      wb.transport_code AS branch_code,
+      tt.name_1 AS branch_name,
+      wb.position_code AS position_code,
+      CASE wb.position_code
+        WHEN 'driver' THEN 'ຄົນຂັບ'
+        WHEN 'worker' THEN 'ກຳມະກອນ'
+        WHEN 'team_lead' THEN 'ຫົວໜ້າໜ່ວຍງານ'
+        WHEN 'manager' THEN 'ຜູ້ຈັດການສາງແລະຂົນສົ່ງ'
+        WHEN 'admin' THEN 'ແອັດມິນ (ຈັດຖ້ຽວ/ປິດຖ້ຽວ/ລາຍງານ)'
+        ELSE NULL
+      END AS position_name
     FROM public.odg_employee e
     LEFT JOIN public.odg_department d ON d.department_code = e.department_code
     LEFT JOIN public.odg_tms_worker_branch wb ON wb.worker_code = e.employee_code
     LEFT JOIN public.transport_type tt ON tt.code = wb.transport_code
     WHERE e.employment_status = 'ACTIVE'
-      AND d.department_name_lo ILIKE '%ຂົນສົ່ງ%'
+      AND (d.department_name_lo ILIKE '%ຂົນສົ່ງ%' OR d.department_name_lo ILIKE '%ສາງ%')
     ORDER BY name_1 ASC, e.employee_code ASC`
+  );
+}
+
+async function setWorkerProfile(session, workerCode, transportCode, positionCode) {
+  await ensureWorkerBranchTable();
+  const normalizedPosition = ["driver", "worker", "both", "team_lead", "manager", "admin"].includes(positionCode) ? positionCode : null;
+  if (!transportCode && !normalizedPosition) {
+    await queryOne("DELETE FROM public.odg_tms_worker_branch WHERE worker_code=$1", [workerCode]);
+    return;
+  }
+  await queryOne(
+    `INSERT INTO public.odg_tms_worker_branch(worker_code, transport_code, position_code, updated_at, updated_by)
+     VALUES ($1, $2, $3, LOCALTIMESTAMP(0), $4)
+     ON CONFLICT (worker_code) DO UPDATE
+     SET transport_code = EXCLUDED.transport_code,
+         position_code = EXCLUDED.position_code,
+         updated_at = LOCALTIMESTAMP(0),
+         updated_by = EXCLUDED.updated_by`,
+    [workerCode, transportCode || null, normalizedPosition, session?.usercode ?? null]
   );
 }
 
 async function setWorkerBranch(session, workerCode, transportCode) {
   await ensureWorkerBranchTable();
-  if (!transportCode) {
-    await queryOne("DELETE FROM public.odg_tms_worker_branch WHERE worker_code=$1", [workerCode]);
-    return;
-  }
-  await queryOne(
-    `INSERT INTO public.odg_tms_worker_branch(worker_code, transport_code, updated_at, updated_by)
-     VALUES ($1, $2, LOCALTIMESTAMP(0), $3)
-     ON CONFLICT (worker_code) DO UPDATE
-     SET transport_code = EXCLUDED.transport_code,
-         updated_at = LOCALTIMESTAMP(0),
-         updated_by = EXCLUDED.updated_by`,
-    [workerCode, transportCode, session?.usercode ?? null]
+  const current = await queryOne(
+    "SELECT position_code FROM public.odg_tms_worker_branch WHERE worker_code=$1",
+    [workerCode]
   );
+  return setWorkerProfile(session, workerCode, transportCode, current?.position_code ?? null);
 }
 
 async function getDrivers() { return query("SELECT code, name_1 FROM public.odg_tms_driver"); }
@@ -284,6 +317,7 @@ module.exports = {
   getDispatchWorkers,
   getDispatchWorkersWithBranch,
   setWorkerBranch,
+  setWorkerProfile,
   getTransportBranches,
   getDrivers,
   addDriver,

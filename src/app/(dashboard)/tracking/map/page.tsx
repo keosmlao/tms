@@ -14,6 +14,7 @@ import {
   FaTruck,
 } from "react-icons/fa";
 import { Actions } from "@/lib/api";
+import { formatGpsWallTime } from "@/lib/gps-time";
 
 interface GpsRealtime {
   imei: string;
@@ -38,12 +39,7 @@ function buildOpenUrl(lat: string, lng: string) {
 }
 
 function formatUpdatedAt(value: string) {
-  if (!value) return "-";
-  const asDate = new Date(value);
-  if (!Number.isNaN(asDate.getTime())) {
-    return asDate.toLocaleString("lo-LA", { hour12: false });
-  }
-  return value;
+  return formatGpsWallTime(value);
 }
 
 function TrackingMapInner() {

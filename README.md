@@ -1,36 +1,69 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# ODG TMS Web
 
-## Getting Started
+Next.js web dashboard and API server for ODG transport management.
 
-First, run the development server:
+## Main Modules
+
+- Web dashboard: dispatch planning, approval, bill status, reports, GPS tracking, fuel logs, settings.
+- Public tracking: `/track` and `/api/public/track`.
+- Mobile driver APIs: `/api/mobile/login`, `/api/mobile/jobs`, `/api/mobile/bills`, `/api/mobile/fuel`, `/api/mobile/fcm-token`.
+- GPS integrations: Thai GPS realtime, daily usage, backfill.
+
+## Environment
+
+Copy `.env.example` and fill every required value.
+
+`JWT_SECRET` is required. The app intentionally fails without it so sessions and mobile tokens cannot be signed with a default secret.
+
+For production, set:
 
 ```bash
-npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
+JWT_SECRET="$(openssl rand -base64 32)"
+SECURE_COOKIE=true
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+## Development
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+```bash
+npm install
+npm run dev
+```
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+Open `http://localhost:3000`.
 
-## Learn More
+## Checks
 
-To learn more about Next.js, take a look at the following resources:
+```bash
+npm run typecheck   # tsc --noEmit
+npm run lint
+npm test            # vitest run
+npm run test:watch  # vitest --watch
+```
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+`npm run lint` is configured as a practical baseline for the current codebase. It still reports warnings for cleanup work such as unused imports and raw `<img>` tags.
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
+## API Reference
 
-## Deploy on Vercel
+The mobile + public API contract lives in [`docs/openapi.yaml`](docs/openapi.yaml) (OpenAPI 3.1). Render it with any spec viewer (`npx redocly preview-docs docs/openapi.yaml`).
 
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
+## Validation & Rate Limiting
 
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+- All `/api/mobile/*` routes validate inputs with Zod schemas in [`src/lib/mobile-schemas.ts`](src/lib/mobile-schemas.ts).
+- `POST /api/mobile/login` and `/api/public/track` are rate-limited per IP via the in-memory limiter in [`src/lib/rate-limit.ts`](src/lib/rate-limit.ts) (login: 10/min, track: 60/min). For multi-replica deployments, swap the in-memory store for Redis.
+
+## Firebase Credentials
+
+The push service resolves the FCM service account in this order:
+
+1. `FIREBASE_SERVICE_ACCOUNT_JSON` env (inline JSON)
+2. `FIREBASE_SERVICE_ACCOUNT_BASE64` env (base64-encoded JSON)
+3. `firebase-service-account.json` at the project root (local dev only — gitignored)
+
+Use 1 or 2 in production so the secret never lands on the filesystem.
+
+## Security Notes
+
+- Dashboard pages require a signed cookie session.
+- Mobile APIs require `Authorization: Bearer <token>` after login.
+- `/api/health` requires a valid dashboard session.
+- Existing ERP passwords are still validated against the current database columns; migrating to password hashes requires a coordinated DB/user migration.
