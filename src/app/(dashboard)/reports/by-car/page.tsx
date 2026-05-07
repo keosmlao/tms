@@ -33,6 +33,9 @@ interface ReportItem {
   status: string;
   job_code: string;
   job_status?: number;
+  miles_start?: string;
+  miles_end?: string;
+  distance_km?: number | string | null;
 }
 
 // ==================== Helpers ====================
@@ -124,8 +127,19 @@ export default function ByCarReportPage() {
       (i) => (typeof i.job_status === "number" && (i.job_status === 1 || i.job_status === 2)) ||
         i.status.includes("ກຳລັງ") || i.status.includes("ຮັບ")
     ).length;
-    return { total, totalBills, completed, inProgress };
+    const totalKm = items.reduce((sum, i) => {
+      const km = Number(i.distance_km);
+      return sum + (Number.isFinite(km) ? km : 0);
+    }, 0);
+    return { total, totalBills, completed, inProgress, totalKm };
   }, [items]);
+
+  const formatKm = (value: number | string | null | undefined) => {
+    if (value === null || value === undefined || value === "") return "-";
+    const km = Number(value);
+    if (!Number.isFinite(km)) return "-";
+    return km.toLocaleString("en-US", { maximumFractionDigits: 2 });
+  };
 
   const filteredItems = useMemo(() => {
     const q = searchText.trim().toLowerCase();
@@ -172,6 +186,7 @@ export default function ByCarReportPage() {
               <StatBadge label="ບິນ" value={stats.totalBills} color="sky" />
               <StatBadge label="ກຳລັງສົ່ງ" value={stats.inProgress} color="amber" />
               <StatBadge label="ສຳເລັດ" value={stats.completed} color="emerald" />
+              <StatBadge label="ກມ. ລວມ" value={formatKm(stats.totalKm)} color="teal" />
             </div>
           )}
         </div>
@@ -313,6 +328,12 @@ export default function ByCarReportPage() {
               icon={<FaCheckCircle size={12} />}
               color="emerald"
             />
+            <SummaryCard
+              label="ກມ. ທີ່ແລ່ນ"
+              value={formatKm(stats.totalKm)}
+              icon={<FaRoute size={12} />}
+              color="teal"
+            />
           </div>
 
           {/* Sub-search */}
@@ -358,6 +379,7 @@ export default function ByCarReportPage() {
                     <th className="px-3 py-2.5 text-left">ລົດ</th>
                     <th className="px-3 py-2.5 text-left">ຄົນຂັບ</th>
                     <th className="px-3 py-2.5 text-center">ບິນ</th>
+                    <th className="px-3 py-2.5 text-right">ກມ.</th>
                     <th className="px-3 py-2.5 text-left">ສະຖານະ</th>
                     <th className="px-3 py-2.5 text-left">ວັນທີປິດ</th>
                   </tr>
@@ -365,7 +387,7 @@ export default function ByCarReportPage() {
                 <tbody className="divide-y divide-slate-200/30 dark:divide-white/5">
                   {filteredItems.length === 0 ? (
                     <tr>
-                      <td colSpan={8} className="px-4 py-10 text-center text-xs text-slate-400">
+                      <td colSpan={9} className="px-4 py-10 text-center text-xs text-slate-400">
                         ບໍ່ພົບຜົນທີ່ກົງກັບການຄົ້ນຫາ
                       </td>
                     </tr>
@@ -398,6 +420,9 @@ export default function ByCarReportPage() {
                               {item.item_bill}
                             </span>
                           </td>
+                          <td className="px-3 py-3 text-right text-xs tabular-nums text-slate-700 dark:text-slate-300" title={item.miles_start && item.miles_end ? `${item.miles_start} → ${item.miles_end}` : ""}>
+                            {formatKm(item.distance_km)}
+                          </td>
                           <td className="px-3 py-3">
                             <span className={`inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-[10px] font-semibold ${tone.bg}`}>
                               <span className={`h-1.5 w-1.5 rounded-full ${tone.dot}`} />
@@ -426,7 +451,7 @@ function SummaryCard({
   color,
 }: {
   label: string;
-  value: number;
+  value: number | string;
   icon: React.ReactNode;
   color: "teal" | "sky" | "amber" | "emerald";
 }) {
@@ -436,11 +461,12 @@ function SummaryCard({
     amber: { bg: "bg-amber-500/10", text: "text-amber-600 dark:text-amber-400" },
     emerald: { bg: "bg-emerald-500/10", text: "text-emerald-600 dark:text-emerald-400" },
   }[color];
+  const display = typeof value === "number" ? value.toLocaleString("en-US") : value;
   return (
     <div className="rounded-lg bg-white border border-slate-100 p-4 shadow-sm flex items-center justify-between gap-3">
       <div className="min-w-0">
         <p className="text-[10px] font-semibold uppercase tracking-wider text-slate-400">{label}</p>
-        <p className={`mt-1 text-xl font-bold tabular-nums ${palette.text}`}>{value.toLocaleString("en-US")}</p>
+        <p className={`mt-1 text-xl font-bold tabular-nums ${palette.text}`}>{display}</p>
       </div>
       <div className={`w-10 h-10 rounded-lg ${palette.bg} ${palette.text} flex items-center justify-center shrink-0`}>
         {icon}

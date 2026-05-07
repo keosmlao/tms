@@ -29,8 +29,16 @@ interface MonthlyItem {
   car_code: string;
   imei: string;
   qty: number;
+  total_km?: number | string | null;
   month: string;
   year: string;
+}
+
+function formatKm(value: number | string | null | undefined) {
+  if (value === null || value === undefined || value === "") return "-";
+  const km = Number(value);
+  if (!Number.isFinite(km) || km <= 0) return "-";
+  return km.toLocaleString("en-US", { maximumFractionDigits: 2 });
 }
 
 type GpsFilter = "all" | "with-gps" | "without-gps";
@@ -181,7 +189,7 @@ export default function MonthlyCarPage() {
     return [...items].sort((a, b) => {
       const diff = Number(b.qty || 0) - Number(a.qty || 0);
       if (diff !== 0) return diff;
-      return a.car.localeCompare(b.car);
+      return (a.car ?? "").localeCompare(b.car ?? "");
     });
   }, [items]);
 
@@ -195,6 +203,10 @@ export default function MonthlyCarPage() {
     const gpsTrips = gpsItems.reduce((sum, item) => sum + Number(item.qty || 0), 0);
     const nonGpsCars = totalCars - gpsCars;
     const gpsCoverage = totalTrips > 0 ? (gpsTrips / totalTrips) * 100 : 0;
+    const totalKm = items.reduce((sum, item) => {
+      const km = Number(item.total_km);
+      return sum + (Number.isFinite(km) ? km : 0);
+    }, 0);
     return {
       totalCars,
       totalTrips,
@@ -204,6 +216,7 @@ export default function MonthlyCarPage() {
       gpsTrips,
       nonGpsCars,
       gpsCoverage,
+      totalKm,
     };
   }, [items]);
 
@@ -271,6 +284,7 @@ export default function MonthlyCarPage() {
               <StatBadge label="ຖ້ຽວ" value={stats.totalTrips} color="emerald" />
               <StatBadge label="GPS" value={stats.gpsCars} color="sky" />
               <StatBadge label="Coverage" value={`${stats.gpsCoverage.toFixed(1)}%`} color="amber" />
+              <StatBadge label="ກມ. ລວມ" value={formatKm(stats.totalKm)} color="teal" />
             </div>
           )}
         </div>
@@ -503,13 +517,14 @@ export default function MonthlyCarPage() {
                     <th className="px-4 py-2.5 text-left w-44">GPS / IMEI</th>
                     <th className="px-4 py-2.5 text-left">ການນຳໃຊ້</th>
                     <th className="px-4 py-2.5 text-right w-28">ຖ້ຽວ</th>
+                    <th className="px-4 py-2.5 text-right w-28">ກມ.</th>
                     <th className="px-4 py-2.5 text-right w-20">%</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-200/30 dark:divide-white/5">
                   {filteredItems.length === 0 ? (
                     <tr>
-                      <td colSpan={6} className="px-4 py-10 text-center text-xs text-slate-400">
+                      <td colSpan={7} className="px-4 py-10 text-center text-xs text-slate-400">
                         ບໍ່ພົບຜົນທີ່ກົງກັບການຄົ້ນຫາ ຫຼື filter
                       </td>
                     </tr>
@@ -589,6 +604,9 @@ export default function MonthlyCarPage() {
                             }`}>
                               {qty}
                             </span>
+                          </td>
+                          <td className="px-4 py-3 text-right text-xs font-semibold text-slate-700 dark:text-slate-200 tabular-nums">
+                            {formatKm(item.total_km)}
                           </td>
                           <td className="px-4 py-3 text-right text-xs font-semibold text-slate-500 tabular-nums">
                             {pctOfTotal.toFixed(1)}%
