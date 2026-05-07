@@ -193,8 +193,12 @@ export default function Sidebar() {
         {/* Logo */}
         <div className="relative flex items-center justify-between border-b border-white/10 px-4 py-4">
           <Link href="/" className="flex items-center gap-3 overflow-hidden">
-            <div className="flex h-10 w-10 flex-shrink-0 items-center justify-center rounded-lg bg-teal-400 shadow-lg shadow-teal-500/10">
-              <span className="text-sm font-black text-slate-950">ODG</span>
+            <div className="flex h-10 w-10 flex-shrink-0 items-center justify-center overflow-hidden rounded-lg bg-white shadow-lg shadow-teal-500/10">
+              <img
+                src="/odg.png"
+                alt="ODG"
+                className="h-full w-full object-contain"
+              />
             </div>
             {!isCollapsed && (
               <div className="animate-fadeIn">

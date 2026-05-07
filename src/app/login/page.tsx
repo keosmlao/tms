@@ -82,8 +82,8 @@ function Login() {
           <div className="pointer-events-none absolute bottom-0 left-1/3 h-64 w-64 rounded-full bg-emerald-400/15 blur-3xl" />
 
           <div className="relative flex items-center gap-3">
-            <div className="flex h-11 w-11 items-center justify-center rounded-xl bg-white/10 ring-1 ring-white/20 backdrop-blur">
-              <FaTruck className="text-lg text-teal-200" />
+            <div className="flex h-11 w-11 items-center justify-center overflow-hidden rounded-xl bg-white/10 ring-1 ring-white/20 backdrop-blur">
+              <img src="/odg.png" alt="ODG" className="h-full w-full object-contain" />
             </div>
             <div className="leading-tight">
               <p className="text-base font-bold tracking-wide">ODIEN GROUP</p>
@@ -128,8 +128,8 @@ function Login() {
           <div className="w-full max-w-md">
             {/* Mobile-only brand header */}
             <div className="mb-8 flex items-center gap-3 lg:hidden">
-              <div className="flex h-12 w-12 items-center justify-center rounded-xl bg-[#0b1b18] shadow-lg">
-                <FaTruck className="text-lg text-teal-200" />
+              <div className="flex h-12 w-12 items-center justify-center overflow-hidden rounded-xl bg-white shadow-lg">
+                <img src="/odg.png" alt="ODG" className="h-full w-full object-contain" />
               </div>
               <div className="leading-tight">
                 <p className="text-base font-bold text-slate-800 dark:text-white">
