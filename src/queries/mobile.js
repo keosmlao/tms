@@ -713,11 +713,10 @@ async function mobileJobAction(body) {
         if (Number(currentBill.approve_status ?? 0) !== 1) throw new Error("ຖ້ຽວນີ້ຍັງບໍ່ຖືກອະນຸມັດ");
         if (!currentBill.recipt_job) throw new Error("ກະລຸນາເບີກເຄື່ອງກ່ອນ");
 
-        // Undo-pickup mode: bill was picked up but dispatch hasn't started.
-        // Roll back recipt_job so the driver can pick up again later — this
-        // is not a permanent cancel, so we keep status=0 and do not require
-        // a remark/photo.
-        if (!currentBill.sent_start) {
+        // Undo-pickup mode: bill was picked up but the driver hasn't pressed
+        // "ເລີ່ມຈັດສົ່ງ" yet (job_status < 2). Roll back recipt_job so the
+        // driver can pick up again later — not a permanent cancel.
+        if (Number(currentBill.job_status ?? 0) < 2) {
           await client.query(
             `UPDATE public.odg_tms_detail
              SET recipt_job = NULL
@@ -755,10 +754,9 @@ async function mobileJobAction(body) {
           };
         }
 
-        // Full cancel mode: dispatch already started, so a remark is required
-        // and the bill is marked as cancelled (status=2).
+        // Full cancel mode: dispatch already started (job_status=2), so a
+        // remark is required and the bill is marked as cancelled (status=2).
         if (!comment) throw new Error("ກະລຸນາໃສ່ໝາຍເຫດການຍົກເລີກ");
-        if (Number(currentBill.job_status ?? 0) !== 2) throw new Error("ກະລຸນາເລີ່ມຈັດສົ່ງກ່ອນ");
 
         await client.query(
           `UPDATE public.odg_tms_detail
