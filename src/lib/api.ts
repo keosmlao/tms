@@ -43,6 +43,8 @@ export const Actions = {
   getJobsClosed: jobs.getJobsClosed,
   getJobsWaitingReceive: jobs.getJobsWaitingReceive,
   getJobsWaitingPickup: jobs.getJobsWaitingPickup,
+  listPickupReadyJobs: jobs.listPickupReadyJobs,
+  moveBillToJob: jobs.moveBillToJob,
 
   // Bills
   getAvailableBills: bills.getAvailableBills,

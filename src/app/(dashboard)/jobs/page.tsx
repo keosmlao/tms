@@ -72,6 +72,16 @@ interface BillDetail {
   count_item: number;
   telephone: string;
   products: Product[];
+  picked_up?: boolean;
+}
+
+interface PickupReadyJob {
+  doc_no: string;
+  doc_date: string;
+  date_logistic: string;
+  car: string;
+  driver: string;
+  bill_count: number;
 }
 
 type StatusFilter = "all" | "pending_approve" | "in_progress" | "done";
@@ -167,6 +177,7 @@ function JobRow({
   onApprove,
   onDelete,
   onClose,
+  onMoveBill,
   actingDoc,
   billDetails,
   loadingBills,
@@ -179,11 +190,13 @@ function JobRow({
   onApprove: () => void;
   onDelete: () => void;
   onClose: () => void;
+  onMoveBill: (bill: BillDetail) => void;
   actingDoc: string | null;
   billDetails: BillDetail[] | undefined;
   loadingBills: boolean;
   now: number;
 }) {
+  const canMoveBills = job.job_status === 0;
   const status = getStatusConfig(job.approve_status, job.job_status);
   const rowPending = actingDoc === job.doc_no;
 
@@ -379,9 +392,27 @@ function JobRow({
                             </p>
                           </div>
                         </div>
-                        <span className="shrink-0 rounded-full bg-teal-500/10 px-2 py-0.5 text-[10px] font-bold text-teal-600 dark:text-teal-400">
-                          {bill.count_item} ລາຍການ
-                        </span>
+                        <div className="flex items-center gap-1.5 shrink-0">
+                          <span className="rounded-full bg-teal-500/10 px-2 py-0.5 text-[10px] font-bold text-teal-600 dark:text-teal-400">
+                            {bill.count_item} ລາຍການ
+                          </span>
+                          {canMoveBills && !bill.picked_up && (
+                            <button
+                              type="button"
+                              onClick={() => onMoveBill(bill)}
+                              className="inline-flex items-center gap-1 rounded-md border border-sky-500/30 bg-sky-500/10 px-2 py-0.5 text-[10px] font-semibold text-sky-700 hover:bg-sky-500/20 dark:text-sky-300"
+                              title="ຍ້າຍບິນນີ້ໄປຖ້ຽວອື່ນ"
+                            >
+                              <FaTruck size={9} />
+                              ຍ້າຍ
+                            </button>
+                          )}
+                          {bill.picked_up && (
+                            <span className="rounded-full bg-amber-500/10 px-2 py-0.5 text-[10px] font-semibold text-amber-700 dark:text-amber-400">
+                              ຮັບແລ້ວ
+                            </span>
+                          )}
+                        </div>
                       </div>
                       {bill.products.length > 0 && (
                         <div className="p-2">
@@ -431,6 +462,11 @@ export default function JobsClient({ initialJobs = [] as Job[] }: { initialJobs?
   const [billDetailsByDoc, setBillDetailsByDoc] = useState<Record<string, BillDetail[]>>({});
   const [loadingDoc, setLoadingDoc] = useState<string | null>(null);
   const [actingDoc, setActingDoc] = useState<string | null>(null);
+  const [moveTarget, setMoveTarget] = useState<{ sourceDocNo: string; bill: BillDetail } | null>(null);
+  const [moveOptions, setMoveOptions] = useState<PickupReadyJob[]>([]);
+  const [movePickedDocNo, setMovePickedDocNo] = useState<string>("");
+  const [moveLoading, setMoveLoading] = useState(false);
+  const [moveSaving, setMoveSaving] = useState(false);
   const [isRefreshing, startRefreshTransition] = useTransition();
   const [searchText, setSearchText] = useState("");
   const [filter, setFilter] = useState<StatusFilter>("all");
@@ -474,6 +510,70 @@ export default function JobsClient({ initialJobs = [] as Job[] }: { initialJobs?
       setBillDetailsByDoc((current) => ({ ...current, [docNo]: [] }));
     } finally {
       setLoadingDoc(null);
+    }
+  };
+
+  const openMoveBill = async (sourceDocNo: string, bill: BillDetail) => {
+    setMoveTarget({ sourceDocNo, bill });
+    setMovePickedDocNo("");
+    setMoveLoading(true);
+    try {
+      const data = await Actions.listPickupReadyJobs(sourceDocNo);
+      setMoveOptions((data ?? []) as PickupReadyJob[]);
+    } catch (error) {
+      console.error(error);
+      setMoveOptions([]);
+    } finally {
+      setMoveLoading(false);
+    }
+  };
+
+  const closeMoveBill = () => {
+    setMoveTarget(null);
+    setMoveOptions([]);
+    setMovePickedDocNo("");
+  };
+
+  const handleConfirmMoveBill = async () => {
+    if (!moveTarget || !movePickedDocNo) return;
+    setMoveSaving(true);
+    try {
+      await Actions.moveBillToJob(
+        moveTarget.sourceDocNo,
+        moveTarget.bill.bill_no,
+        movePickedDocNo
+      );
+      // Invalidate cached bills for both jobs so the UI reflects the move.
+      setBillDetailsByDoc((current) => {
+        const next = { ...current };
+        delete next[moveTarget.sourceDocNo];
+        delete next[movePickedDocNo];
+        return next;
+      });
+      // If the source job is currently expanded, refresh its bills now.
+      if (expandedDoc === moveTarget.sourceDocNo) {
+        try {
+          const data = await Actions.getJobBillsWithProducts(moveTarget.sourceDocNo);
+          setBillDetailsByDoc((current) => ({
+            ...current,
+            [moveTarget.sourceDocNo]: data as BillDetail[],
+          }));
+        } catch {
+          // ignore — refresh button still available
+        }
+      }
+      closeMoveBill();
+      refreshJobs();
+    } catch (error) {
+      console.error(error);
+      void confirm({
+        title: "ຍ້າຍບໍ່ສຳເລັດ",
+        message: error instanceof Error ? error.message : String(error),
+        tone: "danger",
+        single: true,
+      });
+    } finally {
+      setMoveSaving(false);
     }
   };
 
@@ -714,6 +814,7 @@ export default function JobsClient({ initialJobs = [] as Job[] }: { initialJobs?
                     onApprove={() => void handleApprove(job.doc_no)}
                     onDelete={() => void handleDelete(job.doc_no)}
                     onClose={() => void handleClose(job.doc_no)}
+                    onMoveBill={(bill) => void openMoveBill(job.doc_no, bill)}
                     actingDoc={actingDoc}
                     billDetails={billDetailsByDoc[job.doc_no]}
                     loadingBills={loadingDoc === job.doc_no}
@@ -725,6 +826,88 @@ export default function JobsClient({ initialJobs = [] as Job[] }: { initialJobs?
           </div>
         )}
       </StatusTableShell>
+
+      {moveTarget && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4"
+          onClick={(e) => { if (e.target === e.currentTarget) closeMoveBill(); }}
+        >
+          <div className="w-full max-w-lg rounded-lg bg-white shadow-2xl dark:bg-slate-900">
+            <div className="flex items-center justify-between border-b border-slate-200 px-4 py-3 dark:border-slate-800">
+              <div className="min-w-0">
+                <h3 className="text-sm font-bold text-slate-900 dark:text-white">ຍ້າຍບິນໄປຖ້ຽວອື່ນ</h3>
+                <p className="text-[11px] text-slate-500 truncate">
+                  ບິນ {moveTarget.bill.bill_no} · ຈາກຖ້ຽວ {moveTarget.sourceDocNo}
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={closeMoveBill}
+                className="rounded-md p-1.5 text-slate-400 hover:bg-slate-100 hover:text-slate-700 dark:hover:bg-slate-800"
+              >
+                <FaTimes size={12} />
+              </button>
+            </div>
+            <div className="max-h-[60vh] overflow-y-auto px-4 py-3">
+              {moveLoading ? (
+                <div className="flex items-center justify-center gap-2 py-8">
+                  <FaSpinner className="animate-spin text-teal-500" size={13} />
+                  <span className="text-xs text-slate-500">ກຳລັງໂຫຼດ...</span>
+                </div>
+              ) : moveOptions.length === 0 ? (
+                <p className="py-8 text-center text-xs text-slate-400">ບໍ່ມີຖ້ຽວປາຍທາງທີ່ຍັງບໍ່ຮັບ</p>
+              ) : (
+                <div className="space-y-1.5">
+                  {moveOptions.map((opt) => {
+                    const active = movePickedDocNo === opt.doc_no;
+                    return (
+                      <button
+                        key={opt.doc_no}
+                        type="button"
+                        onClick={() => setMovePickedDocNo(opt.doc_no)}
+                        className={`w-full rounded-lg border px-3 py-2 text-left transition-colors ${
+                          active
+                            ? "border-teal-500 bg-teal-500/10"
+                            : "border-slate-200 hover:bg-slate-50 dark:border-slate-700 dark:hover:bg-slate-800"
+                        }`}
+                      >
+                        <div className="flex items-center justify-between gap-2">
+                          <p className="text-sm font-bold text-slate-900 dark:text-white">{opt.doc_no}</p>
+                          <span className="rounded-full bg-slate-100 px-2 py-0.5 text-[10px] font-bold text-slate-600 dark:bg-slate-800 dark:text-slate-300">
+                            {opt.bill_count} ບິນ
+                          </span>
+                        </div>
+                        <p className="mt-1 text-[11px] text-slate-500 dark:text-slate-400">
+                          ຈັດສົ່ງ {opt.date_logistic} · {opt.car} / {opt.driver}
+                        </p>
+                      </button>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
+            <div className="flex items-center justify-end gap-2 border-t border-slate-200 px-4 py-3 dark:border-slate-800">
+              <button
+                type="button"
+                onClick={closeMoveBill}
+                disabled={moveSaving}
+                className="rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-xs font-semibold text-slate-700 hover:bg-slate-50 disabled:opacity-50 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-300"
+              >
+                ຍົກເລີກ
+              </button>
+              <button
+                type="button"
+                onClick={() => void handleConfirmMoveBill()}
+                disabled={!movePickedDocNo || moveSaving}
+                className="inline-flex items-center gap-1.5 rounded-lg bg-teal-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-teal-700 disabled:cursor-not-allowed disabled:opacity-50"
+              >
+                {moveSaving ? <FaSpinner className="animate-spin" size={11} /> : <FaTruck size={11} />}
+                ຍ້າຍບິນ
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

@@ -8,6 +8,7 @@ const {
 const {
   getBranchScope,
   branchFilterShipment,
+  branchFilterJob,
   ensureForwardBranchColumn,
   ensureTmsWorkerTable,
   ensurePendingJobListIndex,
@@ -1096,7 +1097,8 @@ async function getJobPrintData(docNo) {
 
 async function getJobBillsWithProducts(docNo) {
   const bills = await query(
-    `SELECT a.bill_no, to_char(a.bill_date,'DD-MM-YYYY') as bill_date, a.cust_code, b.name_1 as cust_name, a.count_item, a.telephone
+    `SELECT a.bill_no, to_char(a.bill_date,'DD-MM-YYYY') as bill_date, a.cust_code, b.name_1 as cust_name, a.count_item, a.telephone,
+            CASE WHEN a.recipt_job IS NULL THEN false ELSE true END AS picked_up
      FROM public.odg_tms_detail a
      LEFT JOIN ar_customer b ON b.code=a.cust_code
      WHERE a.doc_no=$1 ORDER BY a.roworder`,
@@ -1391,6 +1393,105 @@ async function getJobsWaitingPickup(session, fromDate, toDate) {
   );
 }
 
+// Jobs that haven't started pickup yet — valid destinations for moveBillToJob.
+async function listPickupReadyJobs(session, excludeDocNo) {
+  const scope = getBranchScope(session);
+  const params = [];
+  let exclude = "";
+  if (excludeDocNo) {
+    params.push(String(excludeDocNo));
+    exclude = `AND a.doc_no <> $${params.length}`;
+  }
+  return query(
+    `SELECT a.doc_no,
+            to_char(a.doc_date,'DD-MM-YYYY') as doc_date,
+            to_char(a.date_logistic,'DD-MM-YYYY') as date_logistic,
+            COALESCE(NULLIF(TRIM(c.name_1), ''), a.car, '-') as car,
+            COALESCE(NULLIF(TRIM(d.name_1), ''), a.driver, '-') as driver,
+            (SELECT COUNT(*)::int FROM public.odg_tms_detail dd WHERE dd.doc_no = a.doc_no) as bill_count
+     FROM public.odg_tms a
+     LEFT JOIN public.odg_tms_car c ON c.code = a.car
+     LEFT JOIN public.odg_tms_driver d ON d.code = a.driver
+     WHERE COALESCE(a.approve_status, 0) = 1
+       AND COALESCE(a.job_status, 0) = 0
+       AND ${getFixedYearSqlFilter("a.doc_date")}
+       ${exclude}
+       ${branchFilterJob(scope, "a")}
+     ORDER BY a.date_logistic ASC, a.doc_no ASC`,
+    params
+  );
+}
+
+// Move a single bill from one pre-pickup job to another. Both jobs must
+// have job_status=0 and the bill must not yet have been picked up.
+async function moveBillToJob(sourceDocNo, billNo, destDocNo) {
+  const source = String(sourceDocNo ?? "").trim();
+  const dest = String(destDocNo ?? "").trim();
+  const bill = String(billNo ?? "").trim();
+  if (!source || !dest || !bill) {
+    throw new Error("Missing source/destination doc_no or bill_no");
+  }
+  if (source === dest) {
+    throw new Error("Source and destination jobs must differ");
+  }
+  const client = await pool.connect();
+  try {
+    await client.query("BEGIN");
+    const lockSource = await client.query(
+      `SELECT job_status, doc_date, date_logistic, car FROM public.odg_tms WHERE doc_no = $1 FOR UPDATE`,
+      [source]
+    );
+    const lockDest = await client.query(
+      `SELECT job_status, doc_date, date_logistic, car FROM public.odg_tms WHERE doc_no = $1 FOR UPDATE`,
+      [dest]
+    );
+    if (lockSource.rows.length === 0) throw new Error("ບໍ່ພົບຖ້ຽວຕົ້ນທາງ");
+    if (lockDest.rows.length === 0) throw new Error("ບໍ່ພົບຖ້ຽວປາຍທາງ");
+    if (Number(lockSource.rows[0].job_status ?? 0) !== 0) {
+      throw new Error("ຖ້ຽວຕົ້ນທາງເລີ່ມຮັບແລ້ວ — ຍ້າຍບໍ່ໄດ້");
+    }
+    if (Number(lockDest.rows[0].job_status ?? 0) !== 0) {
+      throw new Error("ຖ້ຽວປາຍທາງເລີ່ມຮັບແລ້ວ — ຍ້າຍບໍ່ໄດ້");
+    }
+    const billLock = await client.query(
+      `SELECT recipt_job, status FROM public.odg_tms_detail WHERE doc_no = $1 AND bill_no = $2 FOR UPDATE`,
+      [source, bill]
+    );
+    if (billLock.rows.length === 0) {
+      throw new Error("ບໍ່ພົບບິນໃນຖ້ຽວຕົ້ນທາງ");
+    }
+    if (billLock.rows[0].recipt_job != null) {
+      throw new Error("ບິນຮັບແລ້ວ — ຍ້າຍບໍ່ໄດ້");
+    }
+    if ([1, 2].includes(Number(billLock.rows[0].status ?? 0))) {
+      throw new Error("ບິນສະຖານະປິດແລ້ວ — ຍ້າຍບໍ່ໄດ້");
+    }
+    const { doc_date: destDocDate, date_logistic: destDateLog, car: destCar } = lockDest.rows[0];
+    await client.query(
+      `UPDATE public.odg_tms_detail
+         SET doc_no = $1,
+             doc_date = $2,
+             date_logistic = $3,
+             car = $4
+       WHERE doc_no = $5 AND bill_no = $6`,
+      [dest, destDocDate, destDateLog, destCar, source, bill]
+    );
+    await client.query(
+      `UPDATE public.odg_tms_detail_item
+         SET doc_no = $1
+       WHERE doc_no = $2 AND bill_no = $3`,
+      [dest, source, bill]
+    );
+    await client.query("COMMIT");
+    return { success: true };
+  } catch (err) {
+    await client.query("ROLLBACK").catch(() => {});
+    throw err;
+  } finally {
+    client.release();
+  }
+}
+
 module.exports = {
   getJobs,
   createJob,
@@ -1411,4 +1512,6 @@ module.exports = {
   getJobsClosed,
   getJobsWaitingReceive,
   getJobsWaitingPickup,
+  listPickupReadyJobs,
+  moveBillToJob,
 };

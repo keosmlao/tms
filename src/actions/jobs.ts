@@ -21,6 +21,8 @@ import {
   getJobsClosed as svcGetJobsClosed,
   getJobsWaitingReceive as svcGetJobsWaitingReceive,
   getJobsWaitingPickup as svcGetJobsWaitingPickup,
+  listPickupReadyJobs as svcListPickupReadyJobs,
+  moveBillToJob as svcMoveBillToJob,
 } from "@/queries/jobs.js";
 
 export async function getJobs() {
@@ -132,4 +134,18 @@ export async function getJobsWaitingReceive(fromDate?: string, toDate?: string) 
 export async function getJobsWaitingPickup(fromDate?: string, toDate?: string) {
   const s = await requireSession();
   return svcGetJobsWaitingPickup(s, fromDate, toDate);
+}
+
+export async function listPickupReadyJobs(excludeDocNo?: string) {
+  const s = await requireSession();
+  return svcListPickupReadyJobs(s, excludeDocNo);
+}
+
+export async function moveBillToJob(
+  sourceDocNo: string,
+  billNo: string,
+  destDocNo: string
+) {
+  await requireSession();
+  return svcMoveBillToJob(sourceDocNo, billNo, destDocNo);
 }
