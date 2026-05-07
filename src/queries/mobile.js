@@ -685,9 +685,8 @@ async function mobileJobAction(body) {
 
       case "cancel_bill": {
         if (!billNo) throw new Error("bill_no is required");
-        if (!comment) throw new Error("ກະລຸນາໃສ່ໝາຍເຫດການຍົກເລີກ");
         const billRow = await client.query(
-          `SELECT d.doc_no, t.approve_status, t.job_status, d.recipt_job,
+          `SELECT d.doc_no, t.approve_status, t.job_status, d.recipt_job, d.sent_start,
                   COALESCE(d.status, 0) AS status
            FROM public.odg_tms_detail d
            INNER JOIN odg_tms t ON t.doc_no = d.doc_no
@@ -712,8 +711,54 @@ async function mobileJobAction(body) {
           };
         }
         if (Number(currentBill.approve_status ?? 0) !== 1) throw new Error("ຖ້ຽວນີ້ຍັງບໍ່ຖືກອະນຸມັດ");
-        if (Number(currentBill.job_status ?? 0) !== 2) throw new Error("ກະລຸນາເລີ່ມຈັດສົ່ງກ່ອນ");
         if (!currentBill.recipt_job) throw new Error("ກະລຸນາເບີກເຄື່ອງກ່ອນ");
+
+        // Undo-pickup mode: bill was picked up but dispatch hasn't started.
+        // Roll back recipt_job so the driver can pick up again later — this
+        // is not a permanent cancel, so we keep status=0 and do not require
+        // a remark/photo.
+        if (!currentBill.sent_start) {
+          await client.query(
+            `UPDATE public.odg_tms_detail
+             SET recipt_job = NULL
+             WHERE bill_no = $1 AND doc_no = $2 AND ${getFixedYearSqlFilter("doc_date")}`,
+            [billNo, currentDocNo]
+          );
+          // Reset job_status to 0 if no other bills in this job are still received.
+          const stillPicked = await client.query(
+            `SELECT 1 FROM public.odg_tms_detail
+             WHERE doc_no = $1 AND recipt_job IS NOT NULL
+               AND ${getFixedYearSqlFilter("doc_date")}
+             LIMIT 1`,
+            [currentDocNo]
+          );
+          if (stillPicked.rowCount === 0) {
+            await client.query(
+              `UPDATE odg_tms
+               SET job_status = 0
+               WHERE doc_no = $1 AND COALESCE(job_status, 0) = 1
+                 AND ${getFixedYearSqlFilter("doc_date")}`,
+              [currentDocNo]
+            );
+          }
+          const openBillCount = await getOpenBillCount(currentDocNo, client);
+          await client.query("COMMIT");
+          void notifyBillStatus(billNo, "↩️ ຍົກເລີກເບີກເຄື່ອງ", {
+            note: comment ?? undefined,
+          });
+          return {
+            success: true,
+            doc_no: currentDocNo,
+            bill_no: billNo,
+            unpickup: true,
+            open_bill_count: openBillCount,
+          };
+        }
+
+        // Full cancel mode: dispatch already started, so a remark is required
+        // and the bill is marked as cancelled (status=2).
+        if (!comment) throw new Error("ກະລຸນາໃສ່ໝາຍເຫດການຍົກເລີກ");
+        if (Number(currentBill.job_status ?? 0) !== 2) throw new Error("ກະລຸນາເລີ່ມຈັດສົ່ງກ່ອນ");
 
         await client.query(
           `UPDATE public.odg_tms_detail
