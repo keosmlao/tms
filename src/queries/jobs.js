@@ -1466,7 +1466,20 @@ async function moveBillToJob(sourceDocNo, billNo, destDocNo) {
     if ([1, 2].includes(Number(billLock.rows[0].status ?? 0))) {
       throw new Error("ບິນສະຖານະປິດແລ້ວ — ຍ້າຍບໍ່ໄດ້");
     }
+    const conflict = await client.query(
+      `SELECT 1 FROM public.odg_tms_detail WHERE doc_no = $1 AND bill_no = $2 LIMIT 1`,
+      [dest, bill]
+    );
+    if (conflict.rowCount > 0) {
+      throw new Error("ບິນນີ້ຢູ່ຖ້ຽວປາຍທາງແລ້ວ — ຍ້າຍບໍ່ໄດ້");
+    }
     const { doc_date: destDocDate, date_logistic: destDateLog, car: destCar } = lockDest.rows[0];
+    // Defensive: drop any orphan items lingering on dest for this bill_no
+    // (would otherwise duplicate after the UPDATE pulls source's items in).
+    await client.query(
+      `DELETE FROM public.odg_tms_detail_item WHERE doc_no = $1 AND bill_no = $2`,
+      [dest, bill]
+    );
     await client.query(
       `UPDATE public.odg_tms_detail
          SET doc_no = $1,

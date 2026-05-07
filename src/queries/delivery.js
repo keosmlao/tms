@@ -240,7 +240,14 @@ async function getBillDeliveryItemSummary(billNo, client) {
         0
       )::numeric AS remaining_qty_total
     FROM public.odg_tms_detail_item
-    WHERE bill_no = $1`,
+    WHERE bill_no = $1
+      AND doc_no = (
+        SELECT d.doc_no FROM public.odg_tms_detail d
+        WHERE d.bill_no = $1 AND ${getFixedYearSqlFilter("d.doc_date")}
+        ORDER BY (CASE WHEN COALESCE(d.status, 0) NOT IN (1, 2) THEN 0 ELSE 1 END),
+                 d.create_date_time_now DESC NULLS LAST
+        LIMIT 1
+      )`,
     [billNo]
   );
 }
@@ -270,7 +277,13 @@ async function getBillDeliveryItems(params, client) {
       ? "i.doc_no = $1 AND i.bill_no = $2"
       : params.docNo
       ? "i.doc_no = $1"
-      : "i.bill_no = $1";
+      : `i.bill_no = $1 AND i.doc_no = (
+          SELECT d.doc_no FROM public.odg_tms_detail d
+          WHERE d.bill_no = $1 AND ${getFixedYearSqlFilter("d.doc_date")}
+          ORDER BY (CASE WHEN COALESCE(d.status, 0) NOT IN (1, 2) THEN 0 ELSE 1 END),
+                   d.create_date_time_now DESC NULLS LAST
+          LIMIT 1
+        )`;
   const values =
     params.docNo && params.billNo
       ? [params.docNo, params.billNo]
