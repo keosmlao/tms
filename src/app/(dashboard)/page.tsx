@@ -100,6 +100,7 @@ interface PendingSummary {
 interface DashboardData {
   data: SummaryData; kl: TeamData; dt: TeamData; ps: TeamData;
   user_branch: string | null;
+  branch_names?: Record<string, string>;
   trans: PendingShipment[]; trans_month: PendingShipment[]; trans_today: PendingShipment[];
   in_progress?: InProgressShipment[];
   in_progress_count?: CountValue;
@@ -746,10 +747,14 @@ export default function DashboardPage() {
     const dtLogistic = toNumber(summary.logistic_dt);
     const psLogistic = toNumber(summary.logistic_ps);
 
+    const branchNames = data.branch_names ?? {};
+    const nameFor = (code: string, fallback: string) =>
+      branchNames[code]?.trim() || fallback;
+
     const allTeams = [
-      { code: "KL", branch: "02-0001", name: "KL Transport", stats: data.kl, color: "sky" as const },
-      { code: "DT", branch: "02-0002", name: "DT Transport", stats: data.dt, color: "emerald" as const },
-      { code: "PS", branch: "02-0003", name: "PS Transport", stats: data.ps, color: "amber" as const },
+      { code: "KL", branch: "02-0001", name: nameFor("02-0001", "KL"), stats: data.kl, color: "sky" as const },
+      { code: "DT", branch: "02-0002", name: nameFor("02-0002", "DT"), stats: data.dt, color: "emerald" as const },
+      { code: "PS", branch: "02-0003", name: nameFor("02-0003", "PS"), stats: data.ps, color: "amber" as const },
     ];
     const teams = data.user_branch ? allTeams.filter((t) => t.branch === data.user_branch) : allTeams;
 
@@ -759,9 +764,9 @@ export default function DashboardPage() {
     const logisticRate = getPercent(logistic, totalBills);
 
     const allCarrierMix = [
-      { branch: "02-0001", label: "OD Logistic", value: odLogistic, bar: "bg-gradient-to-r from-sky-400 to-sky-600" },
-      { branch: "02-0002", label: "DT Logistic", value: dtLogistic, bar: "bg-gradient-to-r from-emerald-400 to-emerald-600" },
-      { branch: "02-0003", label: "PS Logistic", value: psLogistic, bar: "bg-gradient-to-r from-amber-400 to-amber-600" },
+      { branch: "02-0001", label: nameFor("02-0001", "OD Logistic"), value: odLogistic, bar: "bg-gradient-to-r from-sky-400 to-sky-600" },
+      { branch: "02-0002", label: nameFor("02-0002", "DT Logistic"), value: dtLogistic, bar: "bg-gradient-to-r from-emerald-400 to-emerald-600" },
+      { branch: "02-0003", label: nameFor("02-0003", "PS Logistic"), value: psLogistic, bar: "bg-gradient-to-r from-amber-400 to-amber-600" },
     ];
     const carrierMix = data.user_branch ? allCarrierMix.filter((c) => c.branch === data.user_branch) : allCarrierMix;
 

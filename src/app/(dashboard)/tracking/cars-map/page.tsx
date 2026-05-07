@@ -207,7 +207,7 @@ function translateStateDetail(value: string): string {
   return out;
 }
 
-const AUTO_REFRESH_MS = 30_000;
+const AUTO_REFRESH_MS = 5_000;
 const DEFAULT_CENTER: [number, number] = [17.9757, 102.6331]; // Vientiane
 
 type FleetStatus = "moving" | "stopped" | "offline";
@@ -431,7 +431,7 @@ function SelectedCarCard({ car, onClose }: { car: GpsRealtime; onClose: () => vo
   const hasFix = status !== "offline";
   const currentBills = getCurrentBills(car);
   return (
-    <div className="absolute top-4 left-4 z-[400] w-[280px] rounded-lg glass-heavy shadow-xl overflow-hidden">
+    <div className="absolute top-4 left-4 z-[400] flex w-[280px] max-h-[calc(100vh-2rem)] flex-col rounded-lg glass-heavy shadow-xl overflow-hidden">
       <div
         className="px-4 py-2.5 flex items-center gap-2 text-white"
         style={{ background: `linear-gradient(135deg, ${c.solid}, ${c.solid}dd)` }}
@@ -450,7 +450,7 @@ function SelectedCarCard({ car, onClose }: { car: GpsRealtime; onClose: () => vo
           <FaTimes size={10} />
         </button>
       </div>
-      <div className="p-3 space-y-2">
+      <div className="p-3 space-y-2 overflow-y-auto">
         {(car.current_doc_no || car.current_driver) && (
           <div className="grid grid-cols-2 gap-2">
             <div className="rounded-lg bg-teal-500/10 px-2.5 py-1.5">
@@ -748,6 +748,7 @@ function CarsMapInner() {
   const [fetchedAt, setFetchedAt] = useState<Date | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [autoRefresh, setAutoRefresh] = useState(true);
+  const [countdown, setCountdown] = useState(Math.floor(AUTO_REFRESH_MS / 1000));
   const [selected, setSelected] = useState<string | null>(null);
   const [searchText, setSearchText] = useState("");
   const [filter, setFilter] = useState<Filter>("all");
@@ -802,6 +803,20 @@ function CarsMapInner() {
     const id = window.setInterval(() => void load("refresh"), AUTO_REFRESH_MS);
     return () => window.clearInterval(id);
   }, [autoRefresh, load]);
+
+  // Reset countdown after each successful fetch
+  useEffect(() => {
+    setCountdown(Math.floor(AUTO_REFRESH_MS / 1000));
+  }, [fetchedAt]);
+
+  // Tick countdown each second while auto-refresh is on
+  useEffect(() => {
+    if (!autoRefresh) return;
+    const id = window.setInterval(() => {
+      setCountdown((c) => (c > 0 ? c - 1 : 0));
+    }, 1000);
+    return () => window.clearInterval(id);
+  }, [autoRefresh]);
 
   // Initialize map (StrictMode-safe: cleanup fully tears down before re-mount)
   useEffect(() => {
@@ -1020,7 +1035,12 @@ function CarsMapInner() {
                   onChange={(event) => setAutoRefresh(event.target.checked)}
                   className="h-3 w-3 accent-sky-400"
                 />
-                Auto 30s
+                Auto {Math.floor(AUTO_REFRESH_MS / 1000)}s
+                {autoRefresh && (
+                  <span className="rounded-full bg-sky-500/20 px-1.5 py-0.5 text-[10px] font-bold text-sky-200 tabular-nums">
+                    {countdown}s
+                  </span>
+                )}
               </label>
               <button
                 type="button"

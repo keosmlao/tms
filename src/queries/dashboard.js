@@ -115,6 +115,13 @@ async function getDashboardData(session) {
     year_pending: pendingWithRemaining.length,
   };
 
+  const branchNameRows = await query(
+    `SELECT code, COALESCE(NULLIF(TRIM(name_1), ''), code) AS name
+     FROM transport_type
+     WHERE code IN ('02-0001','02-0002','02-0003')`
+  );
+  const branchNames = Object.fromEntries(branchNameRows.map((r) => [r.code, r.name]));
+
   const inProgressBranchClause = scope.scoped
     ? `AND EXISTS (SELECT 1 FROM ic_trans_shipment __ts WHERE __ts.doc_no = d.bill_no AND __ts.transport_code = '${scope.branch}')`
     : "";
@@ -245,6 +252,7 @@ async function getDashboardData(session) {
     dt,
     ps,
     user_branch: scoped ? userBranch : null,
+    branch_names: branchNames,
     trans: normalizePendingShipments(trans),
     trans_month: normalizePendingShipments(transMonth),
     trans_today: normalizePendingShipments(transToday),

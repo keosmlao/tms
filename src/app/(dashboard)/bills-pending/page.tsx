@@ -775,7 +775,7 @@ export default function BillsPendingClient() {
                       const chipBase = "inline-flex items-center gap-1.5 rounded-md border px-2 py-1 text-[10px] font-semibold transition-colors";
                       const chipDone = "border-emerald-500/30 bg-emerald-500/10 text-emerald-700 dark:text-emerald-400 hover:bg-emerald-500/15";
                       const chipTodo = "border-slate-300/50 bg-white/40 text-slate-600 hover:bg-slate-500/10 dark:border-white/10 dark:bg-white/5 dark:text-slate-300";
-                      const canPlanDelivery = bill.action_status === "contacted_ready";
+                      const canPlanDelivery = true;
                       return (
                         <article
                           key={bill.doc_no}
@@ -1544,11 +1544,6 @@ function StatusMenu({
   const ref = useRef<HTMLDivElement>(null);
   const open = billNo !== null && anchorEl !== null;
   const todayForPlan = getFixedTodayDate();
-  const tomorrowForPlan = (() => {
-    const d = new Date(todayForPlan + "T00:00:00");
-    d.setDate(d.getDate() + 1);
-    return d.toISOString().slice(0, 10);
-  })();
 
   useEffect(() => {
     if (!open) return;
@@ -1561,8 +1556,8 @@ function StatusMenu({
 
   useEffect(() => {
     if (!open || pickedStatus !== "contacted_ready") return;
-    setPickedDate((v) => v || tomorrowForPlan);
-  }, [open, pickedStatus, tomorrowForPlan]);
+    setPickedDate((v) => v || todayForPlan);
+  }, [open, pickedStatus, todayForPlan]);
 
   useEffect(() => {
     if (!open || !anchorEl) return;
@@ -1700,7 +1695,7 @@ function StatusMenu({
         {pickedStatus === "contacted_ready" && (
           <div className="mb-2 rounded-lg border border-emerald-500/20 bg-emerald-500/10 p-2 space-y-2">
             <p className="text-[10px] font-semibold text-emerald-700 dark:text-emerald-400">
-              ວາງແຜນສົ່ງລ່ວງໜ້າ 1 ມື້
+              ວາງແຜນສົ່ງ
             </p>
             <div className="grid grid-cols-1 gap-2">
               <label className="block">
@@ -1710,8 +1705,8 @@ function StatusMenu({
                 <input
                   type="date"
                   value={pickedDate}
-                  min={todayForPlan}
-                  max={tomorrowForPlan}
+                  min={FIXED_YEAR_START}
+                  max={FIXED_YEAR_END}
                   onChange={(e) => setPickedDate(e.target.value)}
                   disabled={saving}
                   className="w-full glass-input rounded-md px-2 py-1.5 text-[11px] text-slate-700 dark:text-slate-200"
