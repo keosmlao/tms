@@ -4,6 +4,7 @@ import * as billShipment from "@/actions/bill-shipment";
 import * as bills from "@/actions/bills";
 import * as dashboard from "@/actions/dashboard";
 import * as deliveryRound from "@/actions/delivery-round";
+import * as deliveryRoute from "@/actions/delivery-route";
 import * as fuel from "@/actions/fuel";
 import * as gps from "@/actions/gps";
 import * as jobs from "@/actions/jobs";
@@ -150,6 +151,12 @@ export const Actions = {
   getDeliveryRound: deliveryRound.getDeliveryRound,
   upsertDeliveryRound: deliveryRound.upsertDeliveryRound,
   deleteDeliveryRound: deliveryRound.deleteDeliveryRound,
+
+  // Delivery route master
+  listDeliveryRoutes: deliveryRoute.listDeliveryRoutes,
+  getDeliveryRoute: deliveryRoute.getDeliveryRoute,
+  upsertDeliveryRoute: deliveryRoute.upsertDeliveryRoute,
+  deleteDeliveryRoute: deliveryRoute.deleteDeliveryRoute,
 };
 
 export const Auth = {

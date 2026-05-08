@@ -52,6 +52,8 @@ async function getJobs(session) {
   await ensureTmsWorkerTable();
   await ensurePendingJobListIndex();
   await ensureForwardBranchColumn();
+  const { ensureDeliveryRouteSchema } = require("./delivery-route");
+  await ensureDeliveryRouteSchema();
   return query(
     `WITH worker_summary AS (
       SELECT doc_no, COUNT(*)::int AS worker_count,
@@ -92,6 +94,8 @@ async function getJobs(session) {
       COALESCE(fs.forward_transport_code, '') as forward_transport_code,
       COALESCE(ftt.name_1, '') as forward_transport_name,
       COALESCE(bs.bill_nos, '') as bill_nos,
+      COALESCE(a.delivery_route_code, '') as delivery_route_code,
+      COALESCE(rt.name, '') as delivery_route_name,
       COALESCE(a.delivery_round_code, '') as delivery_round_code,
       COALESCE(dr.name, '') as delivery_round_name,
       COALESCE(dr.time_label, '') as delivery_round_time_label
@@ -103,6 +107,7 @@ async function getJobs(session) {
     LEFT JOIN forward_summary fs ON fs.doc_no = a.doc_no
     LEFT JOIN public.transport_type ftt ON ftt.code = fs.forward_transport_code
     LEFT JOIN bill_summary bs ON bs.doc_no = a.doc_no
+    LEFT JOIN public.odg_tms_delivery_route rt ON rt.code = a.delivery_route_code
     LEFT JOIN public.odg_tms_delivery_round dr ON dr.code = a.delivery_round_code
     WHERE a.user_created=$1
       AND (a.approve_status = 0 OR a.approve_status IS NULL)
@@ -193,9 +198,14 @@ async function createJob(session, data) {
   );
 
   const originBranch = (session.logistic_code ?? "").trim() || null;
-  // Optional delivery round; auto-DDL creates the column on first run.
+  // Optional route/round; auto-DDL creates the columns on first run.
+  const { ensureDeliveryRouteSchema } = require("./delivery-route");
   const { ensureDeliveryRoundSchema } = require("./delivery-round");
+  await ensureDeliveryRouteSchema();
   await ensureDeliveryRoundSchema();
+  const deliveryRouteCode = data.delivery_route_code
+    ? String(data.delivery_route_code).trim() || null
+    : null;
   const deliveryRoundCode = data.delivery_round_code
     ? String(data.delivery_round_code).trim() || null
     : null;
@@ -206,9 +216,9 @@ async function createJob(session, data) {
     docNo = await getNextJobDocNo(client, fixedDocDate);
 
     await client.query(
-      `INSERT INTO public.odg_tms(doc_no, doc_date, date_logistic, car, driver, item_bill, user_created, create_date_time_now, approve_status, job_status, origin_transport_code, delivery_round_code)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,LOCALTIMESTAMP(0),0,0,$8,$9)`,
-      [docNo, fixedDocDate, fixedDateLog, data.car, data.driver, normalizedBills.length, session.usercode, originBranch, deliveryRoundCode]
+      `INSERT INTO public.odg_tms(doc_no, doc_date, date_logistic, car, driver, item_bill, user_created, create_date_time_now, approve_status, job_status, origin_transport_code, delivery_route_code, delivery_round_code)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,LOCALTIMESTAMP(0),0,0,$8,$9,$10)`,
+      [docNo, fixedDocDate, fixedDateLog, data.car, data.driver, normalizedBills.length, session.usercode, originBranch, deliveryRouteCode, deliveryRoundCode]
     );
 
     for (const bill of normalizedBills) {
@@ -515,6 +525,8 @@ async function getJobForEdit(docNo) {
   await ensureTmsWorkerTable();
   await ensureTmsDetailItemTable();
   await ensureForwardBranchColumn();
+  const { ensureDeliveryRouteSchema } = require("./delivery-route");
+  await ensureDeliveryRouteSchema();
 
   const job = await queryOne(
     `SELECT
@@ -522,6 +534,7 @@ async function getJobForEdit(docNo) {
        to_char(doc_date,'YYYY-MM-DD') as doc_date,
        to_char(date_logistic,'YYYY-MM-DD') as date_logistic,
        car, driver,
+       COALESCE(delivery_route_code, '') as delivery_route_code,
        delivery_round_code,
        COALESCE(approve_status,0) AS approve_status,
        COALESCE(job_status,0) AS job_status,
@@ -625,6 +638,7 @@ async function getJobForEdit(docNo) {
     date_logistic: job.date_logistic,
     car: job.car || "",
     driver: job.driver || "",
+    delivery_route_code: job.delivery_route_code || "",
     delivery_round_code: job.delivery_round_code || "",
     forward_transport_code,
     approve_status: Number(job.approve_status),
@@ -740,8 +754,13 @@ async function updateJob(session, docNo, data) {
     );
   }
 
+  const { ensureDeliveryRouteSchema } = require("./delivery-route");
   const { ensureDeliveryRoundSchema } = require("./delivery-round");
+  await ensureDeliveryRouteSchema();
   await ensureDeliveryRoundSchema();
+  const deliveryRouteCode = data.delivery_route_code
+    ? String(data.delivery_route_code).trim() || null
+    : null;
   const deliveryRoundCode = data.delivery_round_code
     ? String(data.delivery_round_code).trim() || null
     : null;
@@ -843,7 +862,8 @@ async function updateJob(session, docNo, data) {
            car=$4,
            driver=$5,
            item_bill=$6,
-           delivery_round_code=$7
+           delivery_route_code=$7,
+           delivery_round_code=$8
        WHERE doc_no=$1 AND ${getFixedYearSqlFilter("doc_date")}`,
       [
         docNo,
@@ -852,6 +872,7 @@ async function updateJob(session, docNo, data) {
         data.car,
         data.driver,
         normalizedBills.length,
+        deliveryRouteCode,
         deliveryRoundCode,
       ]
     );
@@ -1021,6 +1042,8 @@ async function getJobAddPageData(session) {
 }
 
 async function getJobPrintData(docNo) {
+  const { ensureDeliveryRouteSchema } = require("./delivery-route");
+  await ensureDeliveryRouteSchema();
   const header = await queryOne(
     `SELECT
        a.doc_no,
@@ -1029,9 +1052,11 @@ async function getJobPrintData(docNo) {
        to_char(a.create_date_time_now,'DD-MM-YYYY HH24:MI') as created_at,
        COALESCE(NULLIF(TRIM(b.name_1), ''), a.car, '-') as car,
        COALESCE(NULLIF(TRIM(c.name_1), ''), a.driver, '-') as driver,
-       COALESCE(NULLIF(TRIM(u.name_1), ''), a.user_created, '-') as user_created,
-       COALESCE(NULLIF(TRIM(ap.name_1), ''), a.approve_user, '-') as approve_user,
-       COALESCE(a.delivery_round_code, '') as delivery_round_code,
+      COALESCE(NULLIF(TRIM(u.name_1), ''), a.user_created, '-') as user_created,
+      COALESCE(NULLIF(TRIM(ap.name_1), ''), a.approve_user, '-') as approve_user,
+       COALESCE(a.delivery_route_code, '') as delivery_route_code,
+       COALESCE(rt.name, '') as delivery_route_name,
+      COALESCE(a.delivery_round_code, '') as delivery_round_code,
        COALESCE(dr.name, '') as delivery_round_name,
        COALESCE(dr.time_label, '') as delivery_round_time_label,
        COALESCE(a.job_status, 0) as job_status
@@ -1040,6 +1065,7 @@ async function getJobPrintData(docNo) {
      LEFT JOIN public.odg_tms_driver c ON c.code = a.driver
      LEFT JOIN erp_user u ON u.code = a.user_created
      LEFT JOIN erp_user ap ON ap.code = a.approve_user
+     LEFT JOIN public.odg_tms_delivery_route rt ON rt.code = a.delivery_route_code
      LEFT JOIN public.odg_tms_delivery_round dr ON dr.code = a.delivery_round_code
      WHERE a.doc_no = $1 AND ${getFixedYearSqlFilter("a.doc_date")}`,
     [docNo]

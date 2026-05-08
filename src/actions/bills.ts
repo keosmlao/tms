@@ -131,15 +131,23 @@ export async function upsertPendingBillSchedule(input: {
   scheduled_date?: string | null;
   remark?: string | null;
   action_status?: string | null;
+  delivery_route_code?: string | null;
   delivery_round_code?: string | null;
 }) {
   const s = await requireSession();
+  const current = await svcGetPendingBillSchedule(input.bill_no);
+  const has = (key: keyof typeof input) => Object.prototype.hasOwnProperty.call(input, key);
   return svcUpsertPendingBillSchedule({
     billNo: input.bill_no,
-    scheduledDate: input.scheduled_date ?? null,
-    remark: input.remark ?? null,
-    actionStatus: input.action_status ?? null,
-    deliveryRoundCode: input.delivery_round_code ?? null,
+    scheduledDate: has("scheduled_date") ? input.scheduled_date ?? null : current?.scheduled_date ?? null,
+    remark: has("remark") ? input.remark ?? null : current?.remark ?? null,
+    actionStatus: has("action_status") ? input.action_status ?? null : current?.action_status ?? null,
+    deliveryRouteCode: has("delivery_route_code")
+      ? input.delivery_route_code ?? null
+      : current?.delivery_route_code ?? null,
+    deliveryRoundCode: has("delivery_round_code")
+      ? input.delivery_round_code ?? null
+      : current?.delivery_round_code ?? null,
     userCode: (s as { code?: string })?.code,
   });
 }

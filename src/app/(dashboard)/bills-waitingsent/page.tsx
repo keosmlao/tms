@@ -88,6 +88,11 @@ export interface WaitingSentJob {
   completed_bill_count: number;
   cancelled_bill_count: number;
   transport_name: string;
+  delivery_route_code?: string;
+  delivery_route_name?: string;
+  delivery_round_code?: string;
+  delivery_round_name?: string;
+  delivery_round_time_label?: string;
 }
 
 export interface WaitingSentBillDetail {

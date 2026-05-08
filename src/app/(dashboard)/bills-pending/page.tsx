@@ -15,6 +15,7 @@ import {
   FaFileInvoice,
   FaPhone,
   FaPlus,
+  FaRoute,
   FaSearch,
   FaSortAmountDown,
   FaSortAmountUp,
@@ -59,6 +60,7 @@ export interface Bill {
   scheduled_date_overridden?: boolean;
   schedule_remark?: string;
   action_status?: string;
+  delivery_route_code?: string;
   delivery_round_code?: string;
   schedule_updated_at?: string | null;
   schedule_updated_by?: string;
@@ -81,6 +83,15 @@ interface DeliveryRound {
   time_label?: string;
 }
 
+interface DeliveryRoute {
+  code: string;
+  name: string;
+  origin?: string;
+  destination?: string;
+  waypoints?: Array<string | { name?: string; lat?: number | null; lng?: number | null }>;
+  distance_km?: number;
+}
+
 interface ManualPendingBill {
   doc_no: string;
   doc_date: string;
@@ -92,6 +103,7 @@ interface ManualPendingBill {
   source_type?: string;
   scheduled_date?: string | null;
   scheduled_date_display?: string | null;
+  delivery_route_code?: string;
   delivery_round_code?: string;
   delivery_round_name?: string;
   delivery_round_time_label?: string;
@@ -119,11 +131,20 @@ const ACTION_STATUS_MAP: Record<string, { label: string; color: string }> = {
   contacted_ready: { label: "ພ້ອມຮັບ", color: "emerald" },
 };
 
+function formatRoutePath(route: DeliveryRoute) {
+  return [route.origin, ...(route.waypoints ?? []), route.destination]
+    .map((item) =>
+      String(item && typeof item === "object" ? item.name ?? "" : item ?? "").trim()
+    )
+    .filter(Boolean)
+    .join(" → ");
+}
+
 const CONTACT_KEYS = ["contact_failed", "customer_postponed", "customer_cancelled", "contacted_ready"] as const;
 type ContactKey = (typeof CONTACT_KEYS)[number];
 
 type QueueFilter = "call" | "uncontacted" | "ready" | "problem" | "future" | "all";
-type WorkflowKey = "ready" | "missing_date" | "missing_round" | "missing_contact" | "not_ready";
+type WorkflowKey = "ready" | "missing_date" | "missing_route" | "missing_round" | "missing_contact" | "not_ready";
 
 export interface Transport {
   code: string;
@@ -171,7 +192,9 @@ export default function BillsPendingClient() {
   const [todoOpen, setTodoOpen] = useState<{ billNo: string; anchor: HTMLElement } | null>(null);
   const [queueFilter, setQueueFilter] = useState<QueueFilter>("call");
   const [statusMenu, setStatusMenu] = useState<{ billNo: string; anchor: HTMLElement } | null>(null);
+  const [routeMenu, setRouteMenu] = useState<{ billNo: string; anchor: HTMLElement } | null>(null);
   const [roundMenu, setRoundMenu] = useState<{ billNo: string; anchor: HTMLElement } | null>(null);
+  const [deliveryRoutes, setDeliveryRoutes] = useState<DeliveryRoute[]>([]);
   const [deliveryRounds, setDeliveryRounds] = useState<DeliveryRound[]>([]);
   const [notYetDays, setNotYetDays] = useState(3);
   const [manualModalOpen, setManualModalOpen] = useState(false);
@@ -204,6 +227,9 @@ export default function BillsPendingClient() {
     void Actions.listDeliveryRounds(true)
       .then((data) => setDeliveryRounds((data ?? []) as DeliveryRound[]))
       .catch(() => setDeliveryRounds([]));
+    void Actions.listDeliveryRoutes(true)
+      .then((data) => setDeliveryRoutes((data ?? []) as DeliveryRoute[]))
+      .catch(() => setDeliveryRoutes([]));
   }, []);
 
   useEffect(() => {
@@ -262,6 +288,7 @@ export default function BillsPendingClient() {
   // backend uses to surface bills in /jobs/add.
   const isDispatchReady = (b: Bill): boolean => {
     if (!b.scheduled_date_overridden) return false;
+    if (!b.delivery_route_code?.trim()) return false;
     if (!b.delivery_round_code?.trim()) return false;
     return b.action_status === "contacted_ready";
   };
@@ -285,6 +312,7 @@ export default function BillsPendingClient() {
       return b.action_status ? "not_ready" : "missing_contact";
     }
     if (!b.scheduled_date_display) return "missing_date";
+    if (!b.delivery_route_code?.trim()) return "missing_route";
     if (!b.delivery_round_code?.trim()) return "missing_round";
     return "not_ready";
   };
@@ -300,9 +328,14 @@ export default function BillsPendingClient() {
       detail: "ກຳນົດວັນຮັບຫຼັງຈາກສະຖານະເປັນ “ພ້ອມຮັບ” ແລ້ວ",
       tone: "amber",
     },
+    missing_route: {
+      title: "ພ້ອມຮັບແລ້ວ: ຕ້ອງເລືອກເສັ້ນທາງ",
+      detail: "ເລືອກເສັ້ນທາງກ່ອນ ເພື່ອໃຫ້ບິນນີ້ໄປສະແດງໃນຖ້ຽວຈັດສົ່ງ",
+      tone: "sky",
+    },
     missing_round: {
       title: "ພ້ອມຮັບແລ້ວ: ຕ້ອງເລືອກຮອບສົ່ງ",
-      detail: "ກຳນົດຮອບສົ່ງຫຼັງຈາກມີວັນຮັບແລ້ວ",
+      detail: "ກຳນົດຮອບສົ່ງຫຼັງຈາກມີວັນຮັບ ແລະເສັ້ນທາງແລ້ວ",
       tone: "sky",
     },
     missing_contact: {
@@ -345,11 +378,18 @@ export default function BillsPendingClient() {
       contacted_ready: 0,
     } as Record<"uncontacted" | ContactKey, number>
   );
-  const problemCount = dueBills.filter((b) =>
-    b.action_status === "contact_failed" ||
-    b.action_status === "customer_postponed" ||
-    b.action_status === "customer_cancelled"
-  ).length;
+  const needsFollowUp = (b: Bill): boolean => {
+    if (!isContactWindow(b)) return false;
+    if (
+      b.action_status === "contact_failed" ||
+      b.action_status === "customer_postponed" ||
+      b.action_status === "customer_cancelled"
+    ) {
+      return true;
+    }
+    return b.action_status === "contacted_ready" && !isDispatchReady(b);
+  };
+  const problemCount = bills.filter(needsFollowUp).length;
 
   const kw = searchText.trim().toLowerCase();
   const filtered = bills.filter((b) => {
@@ -359,10 +399,7 @@ export default function BillsPendingClient() {
     if (queueFilter === "call" && !inWindow) return false;
     if (queueFilter === "uncontacted" && (!inWindow || (CONTACT_KEYS as readonly string[]).includes(b.action_status ?? ""))) return false;
     if (queueFilter === "ready" && !isDispatchReady(b)) return false;
-    if (queueFilter === "problem" && (
-      !inWindow ||
-      !["contact_failed", "customer_postponed", "customer_cancelled"].includes(b.action_status ?? "")
-    )) {
+    if (queueFilter === "problem" && !needsFollowUp(b)) {
       return false;
     }
     if (queueFilter === "future" && !isNotYetTime(b)) return false;
@@ -765,6 +802,9 @@ export default function BillsPendingClient() {
                       const roundName = bill.delivery_round_code
                         ? deliveryRounds.find((r) => r.code === bill.delivery_round_code)?.name ?? bill.delivery_round_code
                         : "";
+                      const routeName = bill.delivery_route_code
+                        ? deliveryRoutes.find((r) => r.code === bill.delivery_route_code)?.name ?? bill.delivery_route_code
+                        : "";
                       const workflowTone: Record<string, string> = {
                         emerald: "border-emerald-500/25 bg-emerald-500/10 text-emerald-700 dark:text-emerald-400",
                         amber: "border-amber-500/25 bg-amber-500/10 text-amber-700 dark:text-amber-400",
@@ -977,6 +1017,22 @@ export default function BillsPendingClient() {
                                   : "ວັນຮັບ: ລໍຖ້າພ້ອມຮັບ"}
                                 {bill.scheduled_date_overridden && <span className="text-amber-600 dark:text-amber-400">(ແກ້)</span>}
                                 {canPlanDelivery && <FaChevronDown size={7} className="opacity-60" />}
+                              </button>
+                              <button
+                                type="button"
+                                onClick={(e) => {
+                                  setRouteMenu({ billNo: bill.doc_no, anchor: e.currentTarget });
+                                }}
+                                className={`${chipBase} ${
+                                  bill.delivery_route_code
+                                    ? chipDone
+                                    : chipTodo
+                                }`}
+                                title="ກຳນົດ ຫຼືແກ້ເສັ້ນທາງຂົນສົ່ງ"
+                              >
+                                <FaRoute size={9} />
+                                {routeName || "ເລືອກເສັ້ນທາງ"}
+                                <FaChevronDown size={7} className="opacity-60" />
                               </button>
                               <button
                                 type="button"
@@ -1349,6 +1405,11 @@ export default function BillsPendingClient() {
             ? bills.find((b) => b.doc_no === statusMenu.billNo)?.scheduled_date ?? null
             : null
         }
+        currentRoute={
+          statusMenu
+            ? bills.find((b) => b.doc_no === statusMenu.billNo)?.delivery_route_code ?? ""
+            : ""
+        }
         currentRound={
           statusMenu
             ? bills.find((b) => b.doc_no === statusMenu.billNo)?.delivery_round_code ?? ""
@@ -1359,6 +1420,7 @@ export default function BillsPendingClient() {
             ? bills.find((b) => b.doc_no === statusMenu.billNo)?.schedule_remark ?? ""
             : ""
         }
+        routes={deliveryRoutes}
         rounds={deliveryRounds}
         anchorEl={statusMenu?.anchor ?? null}
         onClose={() => setStatusMenu(null)}
@@ -1378,6 +1440,158 @@ export default function BillsPendingClient() {
         onSaved={() => void fetchBills()}
       />
 
+      <RouteMenu
+        billNo={routeMenu?.billNo ?? null}
+        currentRoute={
+          routeMenu
+            ? bills.find((b) => b.doc_no === routeMenu.billNo)?.delivery_route_code ?? ""
+            : ""
+        }
+        routes={deliveryRoutes}
+        anchorEl={routeMenu?.anchor ?? null}
+        onClose={() => setRouteMenu(null)}
+        onSaved={() => void fetchBills()}
+      />
+
+    </div>
+  );
+}
+
+function RouteMenu({
+  billNo,
+  currentRoute,
+  routes,
+  anchorEl,
+  onClose,
+  onSaved,
+}: {
+  billNo: string | null;
+  currentRoute: string;
+  routes: DeliveryRoute[];
+  anchorEl: HTMLElement | null;
+  onClose: () => void;
+  onSaved: () => void;
+}) {
+  const [pos, setPos] = useState<{ top: number; left: number } | null>(null);
+  const [saving, setSaving] = useState(false);
+  const ref = useRef<HTMLDivElement>(null);
+  const open = billNo !== null && anchorEl !== null;
+
+  useEffect(() => {
+    if (!open || !anchorEl) return;
+    const update = () => {
+      const rect = anchorEl.getBoundingClientRect();
+      const w = 340;
+      const left = Math.max(8, Math.min(window.innerWidth - w - 8, rect.left));
+      setPos({ top: rect.bottom + 4, left });
+    };
+    update();
+    window.addEventListener("resize", update);
+    window.addEventListener("scroll", update, true);
+    return () => {
+      window.removeEventListener("resize", update);
+      window.removeEventListener("scroll", update, true);
+    };
+  }, [open, anchorEl]);
+
+  useEffect(() => {
+    if (!open) return;
+    const onClick = (e: MouseEvent) => {
+      const t = e.target as Node;
+      if (ref.current?.contains(t)) return;
+      if (anchorEl?.contains(t)) return;
+      onClose();
+    };
+    document.addEventListener("mousedown", onClick);
+    return () => document.removeEventListener("mousedown", onClick);
+  }, [open, anchorEl, onClose]);
+
+  const apply = async (routeCode: string | null) => {
+    if (!billNo) return;
+    setSaving(true);
+    try {
+      await Actions.upsertPendingBillSchedule({
+        bill_no: billNo,
+        delivery_route_code: routeCode,
+      });
+      onSaved();
+      onClose();
+    } catch (e) {
+      console.error(e);
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  if (!open || !pos) return null;
+
+  return (
+    <div
+      ref={ref}
+      className="fixed z-[80] w-[min(340px,calc(100vw-16px))] overflow-hidden rounded-lg border border-slate-200/40 bg-white shadow-xl dark:border-white/10 dark:bg-[#0d1822]"
+      style={{ top: pos.top, left: pos.left }}
+    >
+      <div className="flex items-center justify-between border-b border-slate-200/30 bg-white/70 px-3 py-2 dark:border-white/5 dark:bg-white/5">
+        <p className="text-[11px] font-bold text-slate-700 dark:text-slate-200">
+          ກຳນົດເສັ້ນທາງຂົນສົ່ງ
+        </p>
+        <button
+          type="button"
+          onClick={onClose}
+          className="flex h-5 w-5 items-center justify-center rounded text-slate-400 hover:bg-slate-100 dark:hover:bg-white/5"
+        >
+          <FaTimes size={9} />
+        </button>
+      </div>
+      <div className="max-h-[320px] space-y-1 overflow-y-auto p-2">
+        {routes.length === 0 ? (
+          <p className="px-2 py-3 text-center text-[11px] text-slate-400">
+            ບໍ່ມີເສັ້ນທາງ ກະລຸນາຕັ້ງຄ່າທີ່ /manage/delivery-routes
+          </p>
+        ) : (
+          routes.map((r) => {
+            const active = currentRoute === r.code;
+            const path = formatRoutePath(r);
+            return (
+              <button
+                key={r.code}
+                type="button"
+                disabled={saving}
+                onClick={() => apply(r.code)}
+                className={`w-full rounded px-2.5 py-2 text-left text-[11px] transition-colors ${
+                  active
+                    ? "bg-emerald-500/15 text-emerald-700 ring-1 ring-emerald-500/40 dark:text-emerald-400"
+                    : "text-slate-700 hover:bg-slate-100 dark:text-slate-200 dark:hover:bg-white/5"
+                }`}
+              >
+                <span className="flex items-center gap-2">
+                  <FaRoute size={10} className="shrink-0 text-teal-600 dark:text-teal-400" />
+                  <span className="min-w-0 flex-1 truncate font-semibold">{r.name}</span>
+                  {active && <FaCheck size={9} className="shrink-0" />}
+                </span>
+                {path && (
+                  <span className="mt-1 block truncate pl-5 text-[10px] text-slate-400">
+                    {path}
+                  </span>
+                )}
+              </button>
+            );
+          })
+        )}
+      </div>
+      {currentRoute && (
+        <div className="border-t border-slate-200/30 bg-white/50 px-3 py-2 dark:border-white/5 dark:bg-white/5">
+          <button
+            type="button"
+            disabled={saving}
+            onClick={() => apply(null)}
+            className="w-full rounded px-2 py-1.5 text-[11px] text-rose-600 transition-colors hover:bg-rose-500/10 disabled:opacity-50 dark:text-rose-400"
+          >
+            <FaTrash className="mr-1.5 inline" size={9} />
+            ລ້າງເສັ້ນທາງ
+          </button>
+        </div>
+      )}
     </div>
   );
 }
@@ -1517,8 +1731,10 @@ function StatusMenu({
   billNo,
   currentStatus,
   currentDate,
+  currentRoute,
   currentRound,
   currentRemark,
+  routes,
   rounds,
   anchorEl,
   onClose,
@@ -1527,21 +1743,22 @@ function StatusMenu({
   billNo: string | null;
   currentStatus: string;
   currentDate: string | null;
+  currentRoute: string;
   currentRound: string;
   currentRemark: string;
+  routes: DeliveryRoute[];
   rounds: DeliveryRound[];
   anchorEl: HTMLElement | null;
   onClose: () => void;
   onSaved: () => void;
 }) {
-  const [pos, setPos] = useState<{ top: number; left: number } | null>(null);
   const [saving, setSaving] = useState(false);
   const [pickedStatus, setPickedStatus] = useState<string>("");
   const [pickedDate, setPickedDate] = useState<string>("");
+  const [pickedRoute, setPickedRoute] = useState<string>("");
   const [pickedRound, setPickedRound] = useState<string>("");
   const [remark, setRemark] = useState("");
   const [error, setError] = useState<string | null>(null);
-  const ref = useRef<HTMLDivElement>(null);
   const open = billNo !== null && anchorEl !== null;
   const todayForPlan = getFixedTodayDate();
 
@@ -1549,10 +1766,11 @@ function StatusMenu({
     if (!open) return;
     setPickedStatus(currentStatus ?? "");
     setPickedDate(currentDate ?? "");
+    setPickedRoute(currentRoute ?? "");
     setPickedRound(currentRound ?? "");
     setRemark(currentRemark ?? "");
     setError(null);
-  }, [open, currentStatus, currentDate, currentRound, currentRemark]);
+  }, [open, currentStatus, currentDate, currentRoute, currentRound, currentRemark]);
 
   useEffect(() => {
     if (!open || pickedStatus !== "contacted_ready") return;
@@ -1560,39 +1778,28 @@ function StatusMenu({
   }, [open, pickedStatus, todayForPlan]);
 
   useEffect(() => {
-    if (!open || !anchorEl) return;
-    const update = () => {
-      const rect = anchorEl.getBoundingClientRect();
-      const w = 280;
-      const left = Math.max(8, Math.min(window.innerWidth - w - 8, rect.left));
-      setPos({ top: rect.bottom + 4, left });
-    };
-    update();
-    window.addEventListener("resize", update);
-    window.addEventListener("scroll", update, true);
-    return () => {
-      window.removeEventListener("resize", update);
-      window.removeEventListener("scroll", update, true);
-    };
-  }, [open, anchorEl]);
-
-  useEffect(() => {
     if (!open) return;
-    const onClick = (e: MouseEvent) => {
-      const t = e.target as Node;
-      if (ref.current?.contains(t)) return;
-      if (anchorEl?.contains(t)) return;
-      onClose();
+    const previousOverflow = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") onClose();
     };
-    document.addEventListener("mousedown", onClick);
-    return () => document.removeEventListener("mousedown", onClick);
-  }, [open, anchorEl, onClose]);
+    document.addEventListener("keydown", onKeyDown);
+    return () => {
+      document.body.style.overflow = previousOverflow;
+      document.removeEventListener("keydown", onKeyDown);
+    };
+  }, [open, onClose]);
 
   const save = async (clear = false) => {
     if (!billNo) return;
     if (!clear && pickedStatus === "contacted_ready") {
       if (!pickedDate) {
         setError("ກະລຸນາເລືອກວັນຮັບ");
+        return;
+      }
+      if (!pickedRoute) {
+        setError("ກະລຸນາເລືອກເສັ້ນທາງ");
         return;
       }
       if (!pickedRound) {
@@ -1607,6 +1814,7 @@ function StatusMenu({
         bill_no: billNo,
         action_status: clear ? null : pickedStatus || null,
         scheduled_date: !clear && pickedStatus === "contacted_ready" ? pickedDate : undefined,
+        delivery_route_code: !clear && pickedStatus === "contacted_ready" ? pickedRoute : undefined,
         delivery_round_code: !clear && pickedStatus === "contacted_ready" ? pickedRound : undefined,
         remark: clear ? null : remark.trim() || null,
       });
@@ -1619,27 +1827,40 @@ function StatusMenu({
     }
   };
 
-  if (!open || !pos) return null;
+  if (!open) return null;
 
   return (
-    <div
-      ref={ref}
-      className="fixed z-50 w-[280px] glass rounded-lg shadow-xl border border-slate-200/40 dark:border-white/10 overflow-hidden"
-      style={{ top: pos.top, left: pos.left }}
-    >
-      <div className="px-3 py-2 bg-white/40 dark:bg-white/5 border-b border-slate-200/30 dark:border-white/5 flex items-center justify-between">
-        <p className="text-[11px] font-bold text-slate-700 dark:text-slate-200">
-          ສະຖານະບິນ
-        </p>
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+      <button
+        type="button"
+        aria-label="Close status modal"
+        onClick={onClose}
+        className="absolute inset-0 bg-slate-950/45 backdrop-blur-sm"
+      />
+      <section
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="status-modal-title"
+        className="relative flex max-h-[90vh] w-full max-w-lg flex-col overflow-hidden rounded-lg border border-slate-200/60 bg-white shadow-2xl dark:border-white/10 dark:bg-[#0d1822]"
+      >
+      <div className="px-4 py-3 bg-white/80 dark:bg-white/5 border-b border-slate-200/60 dark:border-white/5 flex items-center justify-between">
+        <div>
+          <p className="text-[10px] font-semibold uppercase tracking-[0.18em] text-slate-400">
+            ບັນທຶກຜົນຕິດຕໍ່
+          </p>
+          <p id="status-modal-title" className="text-sm font-bold text-slate-800 dark:text-slate-100">
+            ສະຖານະບິນ {billNo}
+          </p>
+        </div>
         <button
           onClick={onClose}
-          className="w-5 h-5 rounded text-slate-400 hover:bg-slate-100 dark:hover:bg-white/5 flex items-center justify-center"
+          className="h-8 w-8 rounded-lg text-slate-400 hover:bg-slate-100 hover:text-slate-700 dark:hover:bg-white/5 dark:hover:text-slate-100 flex items-center justify-center"
         >
-          <FaTimes size={9} />
+          <FaTimes size={12} />
         </button>
       </div>
 
-      <div className="p-2 space-y-1">
+      <div className="flex-1 overflow-y-auto p-3 space-y-1">
         <p className="px-2 pt-1 pb-1 text-[10px] font-semibold uppercase tracking-wider text-slate-400">
           ສະຖານະການຕິດຕໍ່ / ເຫດຜົນ
         </p>
@@ -1691,7 +1912,7 @@ function StatusMenu({
         })}
       </div>
 
-      <div className="px-3 pt-1 pb-2 border-t border-slate-200/30 dark:border-white/5">
+      <div className="px-4 pt-3 pb-3 border-t border-slate-200/60 dark:border-white/5">
         {pickedStatus === "contacted_ready" && (
           <div className="mb-2 rounded-lg border border-emerald-500/20 bg-emerald-500/10 p-2 space-y-2">
             <p className="text-[10px] font-semibold text-emerald-700 dark:text-emerald-400">
@@ -1711,6 +1932,25 @@ function StatusMenu({
                   disabled={saving}
                   className="w-full glass-input rounded-md px-2 py-1.5 text-[11px] text-slate-700 dark:text-slate-200"
                 />
+              </label>
+              <label className="block">
+                <span className="block text-[10px] font-semibold text-slate-500 uppercase tracking-wider mb-1">
+                  <FaRoute className="inline mr-1" size={9} /> ເສັ້ນທາງ
+                </span>
+                <select
+                  value={pickedRoute}
+                  onChange={(e) => setPickedRoute(e.target.value)}
+                  disabled={saving}
+                  className="w-full glass-input rounded-md px-2 py-1.5 text-[11px] text-slate-700 dark:text-slate-200"
+                >
+                  <option value="">— ເລືອກເສັ້ນທາງ —</option>
+                  {routes.map((r) => (
+                    <option key={r.code} value={r.code}>
+                      {r.name}
+                      {formatRoutePath(r) ? ` · ${formatRoutePath(r)}` : ""}
+                    </option>
+                  ))}
+                </select>
               </label>
               <label className="block">
                 <span className="block text-[10px] font-semibold text-slate-500 uppercase tracking-wider mb-1">
@@ -1749,12 +1989,12 @@ function StatusMenu({
         )}
       </div>
 
-      <div className="px-3 py-2 border-t border-slate-200/30 dark:border-white/5 bg-white/30 dark:bg-white/5 flex items-center justify-between gap-2">
+      <div className="px-4 py-3 border-t border-slate-200/60 dark:border-white/5 bg-slate-50/80 dark:bg-white/5 flex items-center justify-between gap-2">
         <button
           type="button"
           disabled={saving || (!currentStatus && !currentRemark)}
           onClick={() => void save(true)}
-          className="px-2 py-1 text-[11px] font-semibold rounded text-rose-600 hover:bg-rose-500/10 disabled:opacity-40 inline-flex items-center gap-1"
+          className="px-3 py-2 text-xs font-semibold rounded-lg text-rose-600 hover:bg-rose-500/10 disabled:opacity-40 inline-flex items-center gap-1"
           title="ລ້າງສະຖານະ + ໝາຍເຫດ"
         >
           <FaTrash size={8} /> ລ້າງ
@@ -1763,12 +2003,13 @@ function StatusMenu({
           type="button"
           disabled={saving}
           onClick={() => void save(false)}
-          className="px-3 py-1 text-[11px] font-semibold rounded bg-emerald-600 hover:bg-emerald-700 text-white disabled:opacity-50 inline-flex items-center gap-1"
+          className="px-4 py-2 text-xs font-semibold rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white disabled:opacity-50 inline-flex items-center gap-1.5"
         >
           {saving ? <FaSpinner className="animate-spin" size={9} /> : <FaCheck size={9} />}
           ບັນທຶກ
         </button>
       </div>
+      </section>
     </div>
   );
 }

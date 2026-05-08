@@ -31,6 +31,7 @@ const pageTitles: Record<string, string> = {
   "/jobs/closed": "ປິດສຳເລັດແລ້ວ",
   "/bills-pending": "ລາຍການລໍຖ້າຈັດຖ້ຽວ",
   "/bills-waitingsent": "ລາຍການລໍຖ້າຈັດສົ່ງ",
+  "/bills-waiting-routes": "ບິນລໍຖ້າຈັດຖ້ຽວຕາມເສັ້ນທາງ",
   "/bills-inprogress": "ກຳລັງຈັດສົ່ງ",
   "/bills-partial": "ບິນສົ່ງບໍ່ຄົບ",
   "/bill-complete": "ຈັດສົ່ງສຳເລັດ",
@@ -44,6 +45,8 @@ const pageTitles: Record<string, string> = {
   "/manage/cars": "ຂໍ້ມູນລົດ",
   "/manage/drivers": "ຄົນຂັບລົດ",
   "/manage/warehouse-workers": "ພະນັກງານຂົນສົ່ງ",
+  "/manage/delivery-routes": "ເສັ້ນທາງຂົນສົ່ງ",
+  "/manage/delivery-rounds": "ຮອບການຈັດສົ່ງ",
   "/tracking": "ຕິດຕາມ",
   "/tracking/cars-map": "ແຜນທີ່ລົດ",
   "/location": "ຕໍາແໜ່ງລົດ",
@@ -173,7 +176,7 @@ export default function Topbar() {
       : [];
 
   return (
-    <header className="sticky top-0 z-30 border-b border-slate-200/80 bg-white/90 backdrop-blur-md transition-all duration-300 dark:border-slate-800 dark:bg-[#0b151b]/92 print:hidden">
+    <header className="sticky top-0 z-[70] border-b border-slate-200/80 bg-white/90 backdrop-blur-md transition-all duration-300 dark:border-slate-800 dark:bg-[#0b151b]/92 print:hidden">
       <div className="flex h-16 items-center justify-between gap-4 px-4 md:px-6">
         {/* Left: Title + Breadcrumb */}
         <div className="flex flex-col justify-center min-w-0">
@@ -263,10 +266,10 @@ export default function Topbar() {
             {showNotifications && (
               <>
                 <div
-                  className="fixed inset-0 z-10"
+                  className="fixed inset-0 z-[71]"
                   onClick={() => setShowNotifications(false)}
                 />
-                <div className="animate-fadeIn absolute right-0 z-20 mt-2 w-[min(22rem,calc(100vw-2rem))] overflow-hidden rounded-lg border border-slate-200 bg-white shadow-2xl dark:border-slate-800 dark:bg-slate-900">
+                <div className="animate-fadeIn absolute right-0 z-[72] mt-2 w-[min(22rem,calc(100vw-2rem))] overflow-hidden rounded-lg border border-slate-200 bg-white shadow-2xl dark:border-slate-800 dark:bg-slate-900">
                   <div className="flex items-center justify-between border-b border-slate-200/60 px-4 py-3 dark:border-white/5">
                     <div>
                       <p className="text-sm font-semibold text-slate-800 dark:text-white">
@@ -374,10 +377,10 @@ export default function Topbar() {
             {showDropdown && (
               <>
                 <div
-                  className="fixed inset-0 z-10"
+                  className="fixed inset-0 z-[71]"
                   onClick={() => setShowDropdown(false)}
                 />
-                <div className="animate-fadeIn absolute right-0 z-20 mt-2 w-56 overflow-hidden rounded-lg border border-slate-200 bg-white py-1 shadow-2xl dark:border-slate-800 dark:bg-slate-900">
+                <div className="animate-fadeIn absolute right-0 z-[72] mt-2 w-56 overflow-hidden rounded-lg border border-slate-200 bg-white py-1 shadow-2xl dark:border-slate-800 dark:bg-slate-900">
                   <div className="px-4 py-3 border-b border-slate-200/30 dark:border-white/5">
                     <p className="text-sm font-semibold text-slate-800 dark:text-white">
                       {username}

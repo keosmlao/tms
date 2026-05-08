@@ -4,6 +4,9 @@ const {
   getBranchScope,
   branchFilterShipment,
 } = require("./helpers");
+const { ensurePendingBillSchema } = require("./pending-bill");
+const { ensureDeliveryRouteSchema } = require("./delivery-route");
+const { ensureDeliveryRoundSchema } = require("./delivery-round");
 
 const trackingCache = globalThis;
 const REALTIME_PROVIDER_MIN_GAP_MS = Math.max(
@@ -24,6 +27,123 @@ const REALTIME_DB_FRESH_MS = Math.max(
 );
 
 // ==================== Tracking ====================
+
+function contactStatusLabel(status) {
+  switch (status) {
+    case "contacted_ready":
+      return "ພ້ອມຮັບ";
+    case "contact_failed":
+      return "ຕິດຕໍ່ບໍ່ໄດ້";
+    case "customer_postponed":
+      return "ລູກຄ້າເລື່ອນວັນຮັບ";
+    case "customer_cancelled":
+      return "ລູກຄ້າປະຕິເສດ/ຍົກເລີກ";
+    default:
+      return "";
+  }
+}
+
+function pendingStepsFromRow(row) {
+  if (!row) return [];
+  const date = row.pending_updated_date || row.scheduled_date_display || row.bill_date || row.doc_date || "-";
+  const time = row.pending_updated_time || "";
+  const steps = [];
+  const contact = contactStatusLabel(row.action_status);
+  if (contact) {
+    steps.push({ doc_date: date, doc_time: time, status: contact, remark: row.pending_remark || "" });
+  }
+  if (row.scheduled_date_display) {
+    steps.push({ doc_date: row.scheduled_date_display, doc_time: "", status: "ກຳນົດວັນຮັບ", remark: "" });
+  }
+  if (row.delivery_route_code) {
+    steps.push({
+      doc_date: row.scheduled_date_display || date,
+      doc_time: "",
+      status: "ເລືອກເສັ້ນທາງ",
+      remark: row.delivery_route_name || row.delivery_route_code,
+    });
+  }
+  if (row.delivery_round_code) {
+    steps.push({
+      doc_date: row.scheduled_date_display || date,
+      doc_time: row.delivery_round_time_label || "",
+      status: "ເລືອກຮອບ",
+      remark: row.delivery_round_name || row.delivery_round_code,
+    });
+  }
+  return steps;
+}
+
+async function getPendingTrackingRow(session, search) {
+  await ensurePendingBillSchema();
+  await ensureDeliveryRouteSchema();
+  await ensureDeliveryRoundSchema();
+  const scope = getBranchScope(session);
+  const branchClause = scope.scoped ? `AND s.transport_code = '${scope.branch}'` : "";
+  const serviceBranchClause = scope.scoped ? "AND false" : "";
+  const text = String(search ?? "").trim().toUpperCase();
+  const [shipmentRow, serviceRow] = await Promise.all([
+    queryOne(
+      `SELECT
+         COALESCE(t.doc_no, s.doc_no, pb.bill_no) as bill_no,
+         to_char(COALESCE(t.doc_date, s.doc_date),'DD-MM-YYYY') as bill_date,
+         to_char(COALESCE(t.doc_date, s.doc_date),'DD-MM-YYYY') as doc_date,
+         COALESCE(NULLIF(TRIM(c.name_1), ''), COALESCE(t.cust_code, s.cust_code), '-') as customer_name,
+         COALESCE(pb.action_status, '') as action_status,
+         COALESCE(pb.remark, '') as pending_remark,
+         to_char(pb.updated_at,'DD-MM-YYYY') as pending_updated_date,
+         to_char(pb.updated_at,'HH24:MI') as pending_updated_time,
+         to_char(pb.scheduled_date,'YYYY-MM-DD') as scheduled_date,
+         to_char(pb.scheduled_date,'DD-MM-YYYY') as scheduled_date_display,
+         COALESCE(pb.delivery_route_code, '') as delivery_route_code,
+         COALESCE(rt.name, '') as delivery_route_name,
+         COALESCE(pb.delivery_round_code, '') as delivery_round_code,
+         COALESCE(dr.name, '') as delivery_round_name,
+         COALESCE(dr.time_label, '') as delivery_round_time_label
+       FROM public.odg_tms_pending_bill pb
+       LEFT JOIN public.ic_trans_shipment s ON s.doc_no = pb.bill_no
+       LEFT JOIN public.ic_trans t ON t.doc_no = pb.bill_no
+       LEFT JOIN public.ar_customer c ON c.code = COALESCE(t.cust_code, s.cust_code)
+       LEFT JOIN public.odg_tms_delivery_route rt ON rt.code = pb.delivery_route_code
+       LEFT JOIN public.odg_tms_delivery_round dr ON dr.code = pb.delivery_round_code
+       WHERE UPPER(pb.bill_no) LIKE $1
+         ${branchClause}
+       ORDER BY pb.updated_at DESC NULLS LAST
+       LIMIT 1`,
+      [`%${text}%`]
+    ),
+    queryOne(
+      `SELECT
+         pb.bill_no,
+         to_char(MAX(COALESCE(p.time_register, p.create_date_time_now)),'DD-MM-YYYY') as bill_date,
+         to_char(MAX(COALESCE(p.time_register, p.create_date_time_now)),'DD-MM-YYYY') as doc_date,
+         COALESCE(MAX(NULLIF(TRIM(p.name_1), '')), MAX(NULLIF(TRIM(p.p_model), '')), pb.bill_no) as customer_name,
+         COALESCE(pb.action_status, '') as action_status,
+         COALESCE(pb.remark, '') as pending_remark,
+         to_char(pb.updated_at,'DD-MM-YYYY') as pending_updated_date,
+         to_char(pb.updated_at,'HH24:MI') as pending_updated_time,
+         to_char(pb.scheduled_date,'YYYY-MM-DD') as scheduled_date,
+         to_char(pb.scheduled_date,'DD-MM-YYYY') as scheduled_date_display,
+         COALESCE(pb.delivery_route_code, '') as delivery_route_code,
+         COALESCE(rt.name, '') as delivery_route_name,
+         COALESCE(pb.delivery_round_code, '') as delivery_round_code,
+         COALESCE(dr.name, '') as delivery_round_name,
+         COALESCE(dr.time_label, '') as delivery_round_time_label
+       FROM public.odg_tms_pending_bill pb
+       INNER JOIN public.tb_product p ON p.code = pb.bill_no
+       LEFT JOIN public.odg_tms_delivery_route rt ON rt.code = pb.delivery_route_code
+       LEFT JOIN public.odg_tms_delivery_round dr ON dr.code = pb.delivery_round_code
+       WHERE UPPER(pb.bill_no) LIKE $1
+         ${serviceBranchClause}
+       GROUP BY pb.bill_no, pb.action_status, pb.remark, pb.updated_at, pb.scheduled_date,
+                pb.delivery_route_code, rt.name, pb.delivery_round_code, dr.name, dr.time_label
+       ORDER BY pb.updated_at DESC NULLS LAST
+       LIMIT 1`,
+      [`%${text}%`]
+    ),
+  ]);
+  return shipmentRow || serviceRow || null;
+}
 
 async function getBillAttempts(billNo, branchClause = "") {
   return query(
@@ -103,8 +223,44 @@ async function trackBill(session, search) {
              a.doc_no DESC
     LIMIT 1`, [search.toUpperCase()]);
 
-  if (!row) return null;
+  if (!row) {
+    const pending = await getPendingTrackingRow(session, search);
+    if (!pending) return null;
+    return {
+      doc_no: "",
+      doc_date: pending.doc_date || "-",
+      bill_no: pending.bill_no,
+      bill_date: pending.bill_date || "-",
+      car: "",
+      driver: "",
+      url_img: "",
+      sight_img: "",
+      delivery_images: [],
+      lat: "",
+      lng: "",
+      lat_end: "",
+      lng_end: "",
+      remark: pending.pending_remark || "",
+      bill_status: 0,
+      list: pendingStepsFromRow(pending),
+      items: [],
+      attempts: [],
+      car_position: null,
+      tracking_stage: "pending",
+      customer_name: pending.customer_name || "",
+      scheduled_date: pending.scheduled_date || "",
+      scheduled_date_display: pending.scheduled_date_display || "",
+      delivery_route_code: pending.delivery_route_code || "",
+      delivery_route_name: pending.delivery_route_name || "",
+      delivery_round_code: pending.delivery_round_code || "",
+      delivery_round_name: pending.delivery_round_name || "",
+      delivery_round_time_label: pending.delivery_round_time_label || "",
+      action_status: pending.action_status || "",
+    };
+  }
   const attempts = await getBillAttempts(row.bill_no, branchClause);
+  const pending = await getPendingTrackingRow(session, row.bill_no);
+  const pendingSteps = pendingStepsFromRow(pending);
 
   // Items selected for this dispatch (with delivered progress).
   const items = await query(
@@ -160,7 +316,22 @@ async function trackBill(session, search) {
     console.warn("[trackBill] gps lookup failed:", err?.message ?? err);
   }
 
-  return { ...row, items, car_position, attempts };
+  return {
+    ...row,
+    list: [...pendingSteps, ...((row.list || []).filter(Boolean))],
+    items,
+    car_position,
+    attempts,
+    tracking_stage: "dispatch",
+    scheduled_date: pending?.scheduled_date || "",
+    scheduled_date_display: pending?.scheduled_date_display || "",
+    delivery_route_code: pending?.delivery_route_code || "",
+    delivery_route_name: pending?.delivery_route_name || "",
+    delivery_round_code: pending?.delivery_round_code || "",
+    delivery_round_name: pending?.delivery_round_name || "",
+    delivery_round_time_label: pending?.delivery_round_time_label || "",
+    action_status: pending?.action_status || "",
+  };
 }
 
 // Public tracking — strips internal fields (driver, customer details) so a
@@ -271,6 +442,9 @@ async function trackBillPublic(billNo) {
 // at the bill level.
 async function searchActiveDeliveryBills(session, q) {
   const scope = getBranchScope(session);
+  await ensurePendingBillSchema();
+  await ensureDeliveryRouteSchema();
+  await ensureDeliveryRoundSchema();
   const text = String(q ?? "").trim();
   const params = [];
   let searchClause = "";
@@ -281,7 +455,7 @@ async function searchActiveDeliveryBills(session, q) {
   const branchClause = scope.scoped
     ? `AND EXISTS (SELECT 1 FROM public.ic_trans_shipment __ts WHERE __ts.doc_no = d.bill_no AND __ts.transport_code = '${scope.branch}')`
     : "";
-  return query(
+  const activeRows = await query(
     `SELECT
        d.bill_no, d.doc_no,
        to_char(d.bill_date,'DD-MM-YYYY') as bill_date,
@@ -311,6 +485,55 @@ async function searchActiveDeliveryBills(session, q) {
      LIMIT 30`,
     params
   );
+  const pendingParams = [];
+  let pendingSearchClause = "";
+  if (text) {
+    pendingParams.push(`%${text.toUpperCase()}%`);
+    pendingSearchClause = `AND (UPPER(pb.bill_no) LIKE $${pendingParams.length} OR UPPER(COALESCE(cu.name_1,'')) LIKE $${pendingParams.length})`;
+  }
+  const pendingRows = await query(
+    `SELECT
+       pb.bill_no,
+       '' as doc_no,
+       COALESCE(to_char(t.doc_date,'DD-MM-YYYY'), to_char(s.doc_date,'DD-MM-YYYY'), '-') as bill_date,
+       COALESCE(t.cust_code, s.cust_code, '') as cust_code,
+       COALESCE(NULLIF(TRIM(cu.name_1), ''), COALESCE(t.cust_code, s.cust_code), pb.bill_no) as cust_name,
+       COALESCE(rt.name, pb.delivery_route_code, '-') as car,
+       COALESCE(dr.name, pb.delivery_round_code, '-') as driver,
+       CASE
+         WHEN COALESCE(pb.action_status, '') = 'contacted_ready'
+          AND pb.scheduled_date IS NOT NULL
+          AND COALESCE(NULLIF(TRIM(pb.delivery_route_code), ''), NULL) IS NOT NULL
+          AND COALESCE(NULLIF(TRIM(pb.delivery_round_code), ''), NULL) IS NOT NULL
+           THEN 'ລໍຖ້າຈັດຖ້ຽວ'
+         WHEN COALESCE(pb.action_status, '') = 'contacted_ready'
+           THEN 'ພ້ອມຮັບ/ກຳລັງວາງແຜນ'
+         ELSE 'ຕ້ອງຕິດຕາມ'
+       END as phase
+     FROM public.odg_tms_pending_bill pb
+     LEFT JOIN public.ic_trans_shipment s ON s.doc_no = pb.bill_no
+     LEFT JOIN public.ic_trans t ON t.doc_no = pb.bill_no
+     LEFT JOIN public.ar_customer cu ON cu.code = COALESCE(t.cust_code, s.cust_code)
+     LEFT JOIN public.odg_tms_delivery_route rt ON rt.code = pb.delivery_route_code
+     LEFT JOIN public.odg_tms_delivery_round dr ON dr.code = pb.delivery_round_code
+     WHERE NOT EXISTS (
+       SELECT 1 FROM public.odg_tms_detail d
+       WHERE d.bill_no = pb.bill_no
+         AND COALESCE(d.status, 0) NOT IN (1, 2)
+         AND ${getFixedYearSqlFilter("d.doc_date")}
+     )
+       ${scope.scoped ? `AND s.transport_code = '${scope.branch}'` : ""}
+       ${pendingSearchClause}
+     ORDER BY pb.updated_at DESC NULLS LAST
+     LIMIT 30`,
+    pendingParams
+  );
+  const seen = new Set();
+  return [...activeRows, ...pendingRows].filter((row) => {
+    if (seen.has(row.bill_no)) return false;
+    seen.add(row.bill_no);
+    return true;
+  }).slice(0, 30);
 }
 
 // ==================== GPS ====================

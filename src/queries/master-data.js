@@ -4,6 +4,9 @@ const { query, queryOne } = require("../lib/db");
 
 async function ensureTmsCarAssignmentTables() {
   await query(`ALTER TABLE public.odg_tms_car ADD COLUMN IF NOT EXISTS imei character varying`);
+  await query(`ALTER TABLE public.odg_tms_car ADD COLUMN IF NOT EXISTS plate_no character varying`);
+  await query(`ALTER TABLE public.odg_tms_car ADD COLUMN IF NOT EXISTS tank_no character varying`);
+  await query(`ALTER TABLE public.odg_tms_car ADD COLUMN IF NOT EXISTS car_type character varying`);
   await query(`
     CREATE TABLE IF NOT EXISTS public.odg_tms_car_driver (
       roworder BIGSERIAL PRIMARY KEY,
@@ -99,7 +102,7 @@ async function getCarDefaults(carCode) {
 async function getCarProfiles() {
   await ensureTmsCarAssignmentTables();
   const [cars, carDrivers, carWorkers] = await Promise.all([
-    query("SELECT code, name_1, COALESCE(imei,'') AS imei FROM public.odg_tms_car ORDER BY name_1 ASC, code ASC"),
+    query("SELECT code, name_1, COALESCE(imei,'') AS imei, COALESCE(plate_no,'') AS plate_no, COALESCE(tank_no,'') AS tank_no, COALESCE(car_type,'') AS car_type FROM public.odg_tms_car ORDER BY name_1 ASC, code ASC"),
     query(`SELECT car_code, driver_code AS code, driver_name AS name_1 FROM public.odg_tms_car_driver ORDER BY car_code ASC, driver_name ASC, driver_code ASC`),
     query(`SELECT car_code, worker_code AS code, worker_name AS name_1 FROM public.odg_tms_car_worker ORDER BY car_code ASC, worker_name ASC, worker_code ASC`),
   ]);
@@ -133,10 +136,13 @@ async function addCarProfile(session, data) {
   const userCreate = session?.usercode ?? null;
   const driverCodes = Array.from(new Set(data.driverCodes.filter(Boolean)));
   const imei = data.imei?.trim() ?? "";
+  const plateNo = data.plate_no?.trim() ?? "";
+  const tankNo = data.tank_no?.trim() ?? "";
+  const carType = data.car_type?.trim() ?? "";
 
   await queryOne(
-    "INSERT INTO public.odg_tms_car(code, name_1, imei, create_date_time_now) VALUES ($1, $2, $3, LOCALTIMESTAMP(0))",
-    [data.code, data.name_1, imei]
+    "INSERT INTO public.odg_tms_car(code, name_1, imei, plate_no, tank_no, car_type, create_date_time_now) VALUES ($1, $2, $3, $4, $5, $6, LOCALTIMESTAMP(0))",
+    [data.code, data.name_1, imei, plateNo, tankNo, carType]
   );
   await replaceCarDriverAssignments(data.code, driverCodes, userCreate);
   await replaceCarWorkerAssignments(data.code, data.workerCodes, driverCodes, userCreate);
@@ -147,8 +153,11 @@ async function updateCarProfile(session, data) {
   const userCreate = session?.usercode ?? null;
   const driverCodes = Array.from(new Set(data.driverCodes.filter(Boolean)));
   const imei = data.imei?.trim() ?? "";
+  const plateNo = data.plate_no?.trim() ?? "";
+  const tankNo = data.tank_no?.trim() ?? "";
+  const carType = data.car_type?.trim() ?? "";
 
-  await queryOne("UPDATE public.odg_tms_car SET name_1=$1, imei=$2 WHERE code=$3", [data.name_1, imei, data.code]);
+  await queryOne("UPDATE public.odg_tms_car SET name_1=$1, imei=$2, plate_no=$3, tank_no=$4, car_type=$5 WHERE code=$6", [data.name_1, imei, plateNo, tankNo, carType, data.code]);
   await replaceCarDriverAssignments(data.code, driverCodes, userCreate);
   await replaceCarWorkerAssignments(data.code, data.workerCodes, driverCodes, userCreate);
 }

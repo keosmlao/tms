@@ -19,7 +19,6 @@ import {
   FaCalendarDay,
   FaChartLine,
   FaChartArea,
-  FaCloudDownloadAlt,
   FaMoon,
   FaSun,
   FaAngleDoubleLeft,
@@ -30,6 +29,7 @@ import {
   FaFileInvoice,
   FaBroadcastTower,
   FaGasPump,
+  FaRoute,
 } from "react-icons/fa";
 
 interface NavItem {
@@ -72,6 +72,7 @@ const navSections: NavSection[] = [
     key: "route",
     items: [
       { label: "ລໍຖ້າຈັດຖ້ຽວ", href: "/bills-pending", icon: <FaBox size={13} /> },
+      { label: "ບິນລໍຕາມເສັ້ນທາງ", href: "/bills-waiting-routes", icon: <FaRoute size={13} /> },
       { label: "ໃບງານ/ລໍຖ້າອະນຸມັດ", href: "/jobs", icon: <FaClipboardCheck size={13} /> },
       { label: "ລໍຖ້າຮັບຖ້ຽວ", href: "/jobs/waiting-receive", icon: <FaClock size={13} /> },
       { label: "ລໍຖ້າເບີກເຄື່ອງ", href: "/jobs/waiting-pickup", icon: <FaBox size={13} /> },
@@ -112,13 +113,20 @@ const navSections: NavSection[] = [
       { label: "ຂໍ້ມູນລົດ", href: "/manage/cars", icon: <FaTruck size={13} /> },
       // { label: "ຄົນຂັບລົດ", href: "/manage/drivers", icon: <FaUserTie size={13} /> },
       { label: "ພະນັກງານຂົນສົ່ງ", href: "/manage/warehouse-workers", icon: <FaTruck size={13} /> },
+      { label: "ເສັ້ນທາງຂົນສົ່ງ", href: "/manage/delivery-routes", icon: <FaRoute size={13} /> },
       { label: "ຮອບການຈັດສົ່ງ", href: "/manage/delivery-rounds", icon: <FaClock size={13} /> },
       { label: "ຕັ້ງຄ່າ", href: "/manage/settings", icon: <FaCog size={13} /> },
     ],
   },
 ];
 
-export default function Sidebar() {
+export default function Sidebar({
+  onCollapsedChange,
+  onMobileOpenChange,
+}: {
+  onCollapsedChange?: (collapsed: boolean) => void;
+  onMobileOpenChange?: (open: boolean) => void;
+}) {
   const pathname = usePathname() ?? "";
   const { isDarkMode, toggleTheme } = useTheme();
   const [isCollapsed, setIsCollapsed] = useState(false);
@@ -138,19 +146,31 @@ export default function Sidebar() {
 
   useEffect(() => {
     const saved = localStorage.getItem("sidebar_collapsed");
-    if (saved !== null) setIsCollapsed(saved === "true");
-  }, []);
+    if (saved !== null) {
+      const collapsed = saved === "true";
+      setIsCollapsed(collapsed);
+      onCollapsedChange?.(collapsed);
+    } else {
+      onCollapsedChange?.(false);
+    }
+  }, [onCollapsedChange]);
+
+  useEffect(() => {
+    onMobileOpenChange?.(mobileOpen);
+  }, [mobileOpen, onMobileOpenChange]);
 
   // When the route changes, snap open to the matching section so deep links
   // (e.g. via Cmd-click) reveal the right group on first render.
   useEffect(() => {
     const k = sectionForPath(pathname);
     if (k) setOpenSection(k);
+    setMobileOpen(false);
   }, [pathname]);
 
   const toggleCollapse = () => {
     const newState = !isCollapsed;
     setIsCollapsed(newState);
+    onCollapsedChange?.(newState);
     localStorage.setItem("sidebar_collapsed", String(newState));
   };
 
@@ -163,7 +183,9 @@ export default function Sidebar() {
   const isSectionActive = (section: NavSection) =>
     section.items.some((item) => pathname.startsWith(item.href));
 
-  const sidebarWidth = isCollapsed ? "w-[84px]" : "w-[288px]";
+  const sidebarWidth = isCollapsed
+    ? "w-[min(288px,86vw)] md:w-[84px]"
+    : "w-[min(288px,86vw)] md:w-[288px]";
 
   return (
     <>
@@ -186,7 +208,7 @@ export default function Sidebar() {
 
       {/* Sidebar */}
       <aside
-        className={`fixed top-0 z-40 flex h-screen flex-col bg-[#0a1514] text-slate-100 shadow-[0_24px_70px_rgba(2,8,13,0.28)] transition-all duration-300 ease-in-out md:sticky print:hidden ${sidebarWidth}
+        className={`fixed top-0 z-40 flex h-screen shrink-0 flex-col bg-[#0a1514] text-slate-100 shadow-[0_24px_70px_rgba(2,8,13,0.28)] transition-all duration-300 ease-in-out print:hidden ${sidebarWidth}
           border-r border-white/10
           ${mobileOpen ? "translate-x-0" : "-translate-x-full md:translate-x-0"}`}
       >

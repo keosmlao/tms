@@ -21,9 +21,33 @@ export interface ActivityNotification {
   read: boolean;
 }
 
+function isTransientDbError(error: unknown) {
+  if (!error || typeof error !== "object") return false;
+  const err = error as { code?: string; message?: string; cause?: unknown };
+  const message = String(err.message ?? "");
+  const causeMessage =
+    err.cause && typeof err.cause === "object"
+      ? String((err.cause as { message?: string }).message ?? "")
+      : "";
+  return (
+    err.code === "ETIMEDOUT" ||
+    message.includes("ETIMEDOUT") ||
+    message.includes("read ETIMEDOUT") ||
+    causeMessage.includes("ETIMEDOUT")
+  );
+}
+
 export async function getActivityNotifications(limit = 30): Promise<ActivityNotification[]> {
   const s = await requireSession();
-  return svcGetActivityNotifications(s, limit) as Promise<ActivityNotification[]>;
+  try {
+    return (await svcGetActivityNotifications(s, limit)) as ActivityNotification[];
+  } catch (error) {
+    if (isTransientDbError(error)) {
+      console.warn("[notifications] skipped activity fetch after database timeout");
+      return [];
+    }
+    throw error;
+  }
 }
 
 export async function markActivityNotificationRead(notificationKey: string) {

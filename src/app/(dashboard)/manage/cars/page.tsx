@@ -3,10 +3,12 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import {
   FaBroadcastTower,
+  FaCarSide,
   FaCheckCircle,
   FaChevronDown,
   FaEdit,
   FaExclamationTriangle,
+  FaHashtag,
   FaIdCard,
   FaPlus,
   FaSatelliteDish,
@@ -18,6 +20,7 @@ import {
   FaTruck,
   FaUser,
   FaUsers,
+  FaWarehouse,
 } from "react-icons/fa";
 import { Actions } from "@/lib/api";
 import { useConfirm } from "@/components/confirm-dialog";
@@ -35,6 +38,9 @@ interface CarProfile {
   code: string;
   name_1: string;
   imei: string;
+  plate_no: string;
+  tank_no: string;
+  car_type: string;
   drivers: Option[];
   workers: Option[];
 }
@@ -43,6 +49,9 @@ interface CarForm {
   code: string;
   name_1: string;
   imei: string;
+  plate_no: string;
+  tank_no: string;
+  car_type: string;
   driverCodes: string[];
   workerCodes: string[];
 }
@@ -53,9 +62,23 @@ const emptyForm: CarForm = {
   code: "",
   name_1: "",
   imei: "",
+  plate_no: "",
+  tank_no: "",
+  car_type: "",
   driverCodes: [],
   workerCodes: [],
 };
+
+const CAR_TYPE_OPTIONS = [
+  "ລົດກະບະ",
+  "ລົດຕູ້",
+  "ລົດ 4 ລໍ້",
+  "ລົດ 6 ລໍ້",
+  "ລົດ 10 ລໍ້",
+  "ລົດແຊ່ເຢັນ",
+  "ລົດພ່ວງ",
+  "ລົດຈັກ",
+];
 
 // ==================== Helpers ====================
 
@@ -399,6 +422,9 @@ export default function CarsManagePage() {
       code: car.code,
       name_1: car.name_1,
       imei: car.imei ?? "",
+      plate_no: car.plate_no ?? "",
+      tank_no: car.tank_no ?? "",
+      car_type: car.car_type ?? "",
       driverCodes: car.drivers.map((item) => item.code),
       workerCodes: car.workers
         .map((item) => item.code)
@@ -419,6 +445,9 @@ export default function CarsManagePage() {
           code: form.code.trim(),
           name_1: form.name_1.trim(),
           imei: form.imei.trim(),
+          plate_no: form.plate_no.trim(),
+          tank_no: form.tank_no.trim(),
+          car_type: form.car_type.trim(),
           driverCodes: form.driverCodes,
           workerCodes: form.workerCodes,
         });
@@ -427,6 +456,9 @@ export default function CarsManagePage() {
           code: form.code.trim(),
           name_1: form.name_1.trim(),
           imei: form.imei.trim(),
+          plate_no: form.plate_no.trim(),
+          tank_no: form.tank_no.trim(),
+          car_type: form.car_type.trim(),
           driverCodes: form.driverCodes,
           workerCodes: form.workerCodes,
         });
@@ -492,6 +524,9 @@ export default function CarsManagePage() {
       car.code,
       car.name_1,
       car.imei,
+      car.plate_no,
+      car.tank_no,
+      car.car_type,
       ...car.drivers.map((d) => d.name_1),
       ...car.drivers.map((d) => d.code),
       ...car.workers.map((w) => w.name_1),
@@ -660,6 +695,26 @@ export default function CarsManagePage() {
                         {car.code}
                       </p>
                       <h3 className="mt-0.5 text-sm font-bold text-slate-900 dark:text-white truncate">{car.name_1}</h3>
+                      <div className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-0.5 text-[10px]">
+                        {car.plate_no && (
+                          <span className="inline-flex items-center gap-1 text-slate-600 dark:text-slate-300">
+                            <FaHashtag size={8} className="text-slate-400" />
+                            {car.plate_no}
+                          </span>
+                        )}
+                        {car.car_type && (
+                          <span className="inline-flex items-center gap-1 rounded-full bg-violet-500/10 px-1.5 py-0.5 font-medium text-violet-600 dark:text-violet-400">
+                            <FaCarSide size={8} />
+                            {car.car_type}
+                          </span>
+                        )}
+                        {car.tank_no && (
+                          <span className="inline-flex items-center gap-1 text-slate-500">
+                            <FaWarehouse size={8} className="text-slate-400" />
+                            {car.tank_no}
+                          </span>
+                        )}
+                      </div>
                       {car.imei && (
                         <p className="mt-1 inline-flex items-center gap-1 font-mono text-[10px] text-sky-700">
                           <FaSatelliteDish size={9} />
@@ -750,6 +805,26 @@ export default function CarsManagePage() {
                             <div className="min-w-0">
                               <p className="font-semibold text-slate-900 dark:text-white truncate">{car.name_1}</p>
                               <p className="text-[10px] text-slate-400 font-mono">{car.code}</p>
+                              <div className="mt-1 flex flex-wrap items-center gap-1.5 text-[10px]">
+                                {car.plate_no && (
+                                  <span className="inline-flex items-center gap-1 text-slate-600 dark:text-slate-300">
+                                    <FaHashtag size={8} className="text-slate-400" />
+                                    {car.plate_no}
+                                  </span>
+                                )}
+                                {car.car_type && (
+                                  <span className="inline-flex items-center gap-1 rounded-full bg-violet-500/10 px-1.5 py-0.5 font-medium text-violet-600 dark:text-violet-400">
+                                    <FaCarSide size={8} />
+                                    {car.car_type}
+                                  </span>
+                                )}
+                                {car.tank_no && (
+                                  <span className="inline-flex items-center gap-1 text-slate-500">
+                                    <FaWarehouse size={8} className="text-slate-400" />
+                                    {car.tank_no}
+                                  </span>
+                                )}
+                              </div>
                             </div>
                           </div>
                         </td>
@@ -867,61 +942,134 @@ export default function CarsManagePage() {
             {/* Modal body */}
             <div className="overflow-y-auto">
               <div className="grid gap-4 p-5 lg:grid-cols-[minmax(0,1.35fr)_minmax(280px,0.9fr)]">
-                <div className="space-y-3">
-                  <div className="grid gap-3 md:grid-cols-2">
-                    <div className="glass rounded-lg p-3.5">
-                      <label className="flex items-center gap-2 text-xs font-semibold text-slate-700 dark:text-slate-200">
-                        <span className="w-6 h-6 rounded-lg bg-slate-500/10 text-slate-600 dark:text-slate-400 flex items-center justify-center">
-                          <FaTruck size={10} />
+                <div className="space-y-4">
+                  {/* ===== Section 01 — Identity ===== */}
+                  <section className="glass rounded-lg p-4">
+                    <header className="flex items-center justify-between gap-2 mb-3 pb-2.5 border-b border-slate-200/40 dark:border-white/5">
+                      <div className="flex items-center gap-2.5">
+                        <span className="w-8 h-8 rounded-lg bg-sky-500/10 text-sky-600 dark:text-sky-400 flex items-center justify-center">
+                          <FaTruck size={12} />
                         </span>
-                        ລະຫັດລົດ
-                      </label>
-                      <input
-                        type="text"
-                        value={form.code}
-                        readOnly={Boolean(editingCode)}
-                        onChange={(event) =>
-                          setForm((current) => ({ ...current, code: event.target.value }))
-                        }
-                        className="glass-input mt-2.5 h-10 w-full rounded-lg px-3 text-sm read-only:cursor-not-allowed read-only:opacity-60"
-                      />
-                    </div>
-                    <div className="glass rounded-lg p-3.5">
-                      <label className="flex items-center gap-2 text-xs font-semibold text-slate-700 dark:text-slate-200">
-                        <span className="w-6 h-6 rounded-lg bg-slate-500/10 text-slate-600 dark:text-slate-400 flex items-center justify-center">
-                          <FaIdCard size={10} />
-                        </span>
-                        ຊື່ / ທະບຽນລົດ
-                      </label>
-                      <input
-                        type="text"
-                        value={form.name_1}
-                        onChange={(event) =>
-                          setForm((current) => ({ ...current, name_1: event.target.value }))
-                        }
-                        className="glass-input mt-2.5 h-10 w-full rounded-lg px-3 text-sm"
-                      />
-                    </div>
-                  </div>
+                        <div>
+                          <p className="text-[9px] font-semibold uppercase tracking-[0.18em] text-slate-400">Section 01</p>
+                          <h3 className="text-sm font-bold text-slate-800 dark:text-white">ຂໍ້ມູນລົດ</h3>
+                        </div>
+                      </div>
+                    </header>
 
-                  <div className="glass rounded-lg p-3.5">
-                    <div className="flex flex-wrap items-center justify-between gap-2">
-                      <label className="flex items-center gap-2 text-xs font-semibold text-slate-700 dark:text-slate-200">
-                        <span className="w-6 h-6 rounded-lg bg-sky-500/10 text-sky-600 dark:text-sky-400 flex items-center justify-center">
-                          <FaBroadcastTower size={10} />
+                    <div className="grid gap-3 md:grid-cols-2">
+                      <div>
+                        <label className="flex items-center gap-1.5 text-[11px] font-semibold text-slate-600 dark:text-slate-300">
+                          <FaTruck size={9} className="text-slate-400" />
+                          ລະຫັດລົດ
+                        </label>
+                        <input
+                          type="text"
+                          value={form.code}
+                          readOnly={Boolean(editingCode)}
+                          onChange={(event) =>
+                            setForm((current) => ({ ...current, code: event.target.value }))
+                          }
+                          className="glass-input mt-1.5 h-10 w-full rounded-lg px-3 text-sm read-only:cursor-not-allowed read-only:opacity-60"
+                        />
+                      </div>
+                      <div>
+                        <label className="flex items-center gap-1.5 text-[11px] font-semibold text-slate-600 dark:text-slate-300">
+                          <FaIdCard size={9} className="text-slate-400" />
+                          ຊື່ / ທະບຽນລົດ
+                        </label>
+                        <input
+                          type="text"
+                          value={form.name_1}
+                          onChange={(event) =>
+                            setForm((current) => ({ ...current, name_1: event.target.value }))
+                          }
+                          className="glass-input mt-1.5 h-10 w-full rounded-lg px-3 text-sm"
+                        />
+                      </div>
+                      <div>
+                        <label className="flex items-center gap-1.5 text-[11px] font-semibold text-slate-600 dark:text-slate-300">
+                          <FaHashtag size={9} className="text-slate-400" />
+                          ເລກທະບຽນ
+                        </label>
+                        <input
+                          type="text"
+                          value={form.plate_no}
+                          onChange={(event) =>
+                            setForm((current) => ({ ...current, plate_no: event.target.value }))
+                          }
+                          placeholder="ເຊັ່ນ ກຂ 1234"
+                          className="glass-input mt-1.5 h-10 w-full rounded-lg px-3 text-sm"
+                        />
+                      </div>
+                      <div>
+                        <label className="flex items-center gap-1.5 text-[11px] font-semibold text-slate-600 dark:text-slate-300">
+                          <FaCarSide size={9} className="text-violet-400" />
+                          ປະເພດລົດ
+                        </label>
+                        <div className="relative mt-1.5">
+                          <select
+                            value={form.car_type}
+                            onChange={(event) =>
+                              setForm((current) => ({ ...current, car_type: event.target.value }))
+                            }
+                            className="glass-input h-10 w-full appearance-none rounded-lg pl-3 pr-9 text-sm"
+                          >
+                            <option value="">— ບໍ່ລະບຸ —</option>
+                            {CAR_TYPE_OPTIONS.map((option) => (
+                              <option key={option} value={option}>
+                                {option}
+                              </option>
+                            ))}
+                          </select>
+                          <FaChevronDown className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-xs text-slate-400" />
+                        </div>
+                      </div>
+                      <div className="md:col-span-2">
+                        <label className="flex items-center gap-1.5 text-[11px] font-semibold text-slate-600 dark:text-slate-300">
+                          <FaWarehouse size={9} className="text-slate-400" />
+                          ເລກຖັງ
+                        </label>
+                        <input
+                          type="text"
+                          value={form.tank_no}
+                          onChange={(event) =>
+                            setForm((current) => ({ ...current, tank_no: event.target.value }))
+                          }
+                          placeholder="ເລກປະຈຳຖັງ/ຕູ້"
+                          className="glass-input mt-1.5 h-10 w-full rounded-lg px-3 text-sm"
+                        />
+                      </div>
+                    </div>
+                  </section>
+
+                  {/* ===== Section 02 — GPS ===== */}
+                  <section className="glass rounded-lg p-4">
+                    <header className="flex items-center justify-between gap-2 mb-3 pb-2.5 border-b border-slate-200/40 dark:border-white/5">
+                      <div className="flex items-center gap-2.5">
+                        <span className="w-8 h-8 rounded-lg bg-sky-500/10 text-sky-600 dark:text-sky-400 flex items-center justify-center">
+                          <FaBroadcastTower size={12} />
                         </span>
-                        IMEI / GPS Tracker
-                      </label>
+                        <div>
+                          <p className="text-[9px] font-semibold uppercase tracking-[0.18em] text-slate-400">Section 02</p>
+                          <h3 className="text-sm font-bold text-slate-800 dark:text-white">GPS Tracker</h3>
+                        </div>
+                      </div>
                       <span
-                        className={`rounded-full px-2 py-0.5 text-[10px] font-semibold ${
+                        className={`inline-flex items-center gap-1 rounded-full px-2.5 py-1 text-[10px] font-semibold ${
                           form.imei.trim()
                             ? "bg-sky-500/10 text-sky-600 dark:text-sky-400"
                             : "bg-slate-500/10 text-slate-500 dark:text-slate-400"
                         }`}
                       >
+                        <FaSatelliteDish size={9} />
                         {form.imei.trim() ? "ມີ GPS" : "ຍັງບໍ່ມີ GPS"}
                       </span>
-                    </div>
+                    </header>
+
+                    <label className="flex items-center gap-1.5 text-[11px] font-semibold text-slate-600 dark:text-slate-300">
+                      IMEI
+                    </label>
                     <input
                       type="text"
                       value={form.imei}
@@ -930,36 +1078,50 @@ export default function CarsManagePage() {
                       }
                       placeholder="ເຊັ່ນ 860123456789012"
                       inputMode="numeric"
-                      className="glass-input mt-2.5 h-10 w-full rounded-lg px-3 font-mono text-sm"
+                      className="glass-input mt-1.5 h-10 w-full rounded-lg px-3 font-mono text-sm"
                     />
                     <p className="mt-2 text-[11px] text-slate-400">ປ່ອຍວ່າງຖ້າລົດຄັນນີ້ຍັງບໍ່ຕິດ GPS</p>
-                  </div>
+                  </section>
 
-                  <SearchableMultiSelectField
-                    label="ຄົນຂັບປະຈຳລົດ"
-                    icon={<FaUser size={10} />}
-                    placeholder="ຄົ້ນຫາຄົນຂັບ..."
-                    allOptions={driverOptions}
-                    availableOptions={filteredDriverOptions}
-                    selectedCodes={form.driverCodes}
-                    onChange={handleDriverChange}
-                    emptyText="ບໍ່ພົບຂໍ້ມູນຄົນຂັບ"
-                    helperText="ເລືອກໄດ້ຫຼາຍຄົນ"
-                    accent="sky"
-                  />
+                  {/* ===== Section 03 — Crew ===== */}
+                  <section>
+                    <header className="px-1 mb-2 flex items-center gap-2.5">
+                      <span className="w-8 h-8 rounded-lg bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 flex items-center justify-center">
+                        <FaUsers size={12} />
+                      </span>
+                      <div>
+                        <p className="text-[9px] font-semibold uppercase tracking-[0.18em] text-slate-400">Section 03</p>
+                        <h3 className="text-sm font-bold text-slate-800 dark:text-white">ທີມງານປະຈຳລົດ</h3>
+                      </div>
+                    </header>
+                    <div className="space-y-3">
+                      <SearchableMultiSelectField
+                        label="ຄົນຂັບປະຈຳລົດ"
+                        icon={<FaUser size={10} />}
+                        placeholder="ຄົ້ນຫາຄົນຂັບ..."
+                        allOptions={driverOptions}
+                        availableOptions={filteredDriverOptions}
+                        selectedCodes={form.driverCodes}
+                        onChange={handleDriverChange}
+                        emptyText="ບໍ່ພົບຂໍ້ມູນຄົນຂັບ"
+                        helperText="ເລືອກໄດ້ຫຼາຍຄົນ"
+                        accent="sky"
+                      />
 
-                  <SearchableMultiSelectField
-                    label="ກຳມະກອນຕິດລົດ"
-                    icon={<FaUsers size={10} />}
-                    placeholder="ຄົ້ນຫາກຳມະກອນ..."
-                    allOptions={workerOptions}
-                    availableOptions={filteredWorkerOptions}
-                    selectedCodes={form.workerCodes}
-                    onChange={handleWorkerChange}
-                    emptyText="ບໍ່ພົບຂໍ້ມູນກຳມະກອນ"
-                    helperText="ຖ້າເລືອກເປັນຄົນຂັບແລ້ວ ຈະບໍ່ສະແດງໃນລາຍການນີ້"
-                    accent="emerald"
-                  />
+                      <SearchableMultiSelectField
+                        label="ກຳມະກອນຕິດລົດ"
+                        icon={<FaUsers size={10} />}
+                        placeholder="ຄົ້ນຫາກຳມະກອນ..."
+                        allOptions={workerOptions}
+                        availableOptions={filteredWorkerOptions}
+                        selectedCodes={form.workerCodes}
+                        onChange={handleWorkerChange}
+                        emptyText="ບໍ່ພົບຂໍ້ມູນກຳມະກອນ"
+                        helperText="ຖ້າເລືອກເປັນຄົນຂັບແລ້ວ ຈະບໍ່ສະແດງໃນລາຍການນີ້"
+                        accent="emerald"
+                      />
+                    </div>
+                  </section>
                 </div>
 
                 {/* Summary panel */}

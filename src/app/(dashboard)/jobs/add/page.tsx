@@ -14,6 +14,7 @@ import {
   FaClock,
   FaInfoCircle,
   FaPlus,
+  FaRoute,
   FaSave,
   FaSearch,
   FaSpinner,
@@ -43,6 +44,7 @@ export interface AvailableBill {
   count_item: number;
   scheduled_date?: string | null;
   scheduled_date_display?: string | null;
+  delivery_route_code?: string | null;
   delivery_round_code?: string | null;
   delivery_round_name?: string | null;
   delivery_round_time_label?: string | null;
@@ -78,6 +80,7 @@ export interface JobForEdit {
   date_logistic: string;
   car: string;
   driver: string;
+  delivery_route_code: string;
   delivery_round_code: string;
   forward_transport_code: string | null;
   approve_status: number;
@@ -217,6 +220,12 @@ export default function AddJobClient({
   const [deliveryRoundCode, setDeliveryRoundCode] = useState<string>(
     isEdit ? initialJob.delivery_round_code || "" : ""
   );
+  const [deliveryRouteCode, setDeliveryRouteCode] = useState<string>(
+    isEdit ? initialJob.delivery_route_code || "" : ""
+  );
+  const [deliveryRoutes, setDeliveryRoutes] = useState<
+    Array<{ code: string; name: string; origin?: string; destination?: string; waypoints?: Array<string | { name?: string }> }>
+  >([]);
   const [deliveryRounds, setDeliveryRounds] = useState<
     Array<{ code: string; name: string; time_label?: string }>
   >([]);
@@ -251,6 +260,13 @@ export default function AddJobClient({
   const ownBranch = (session?.logistic_code ?? "").trim();
 
   useEffect(() => {
+    void Actions.listDeliveryRoutes(true)
+      .then((data) =>
+        setDeliveryRoutes(
+          (data ?? []) as Array<{ code: string; name: string; origin?: string; destination?: string; waypoints?: Array<string | { name?: string }> }>
+        )
+      )
+      .catch(() => setDeliveryRoutes([]));
     void Actions.listDeliveryRounds(true)
       .then((data) =>
         setDeliveryRounds(
@@ -664,6 +680,7 @@ export default function AddJobClient({
         date_log: dateLog,
         car,
         driver,
+        delivery_route_code: deliveryRouteCode || null,
         delivery_round_code: deliveryRoundCode || null,
         workers: selectedWorkers,
         bills,
@@ -695,12 +712,14 @@ export default function AddJobClient({
   const totalAddedItems = Object.values(addedByBill).reduce((s, g) => s + g.items.length, 0);
   const totalAddedBills = Object.keys(addedByBill).length;
 
-  const step1Valid = Boolean(car && driver && docDate && dateLog);
+  const step1Valid = Boolean(car && driver && docDate && dateLog && deliveryRouteCode && deliveryRoundCode);
   const canSave = step1Valid && totalAddedBills > 0 && Boolean(docNo);
 
   const validationHints: string[] = [];
   if (!car) validationHints.push("ເລືອກລົດ");
   if (!driver) validationHints.push("ເລືອກຄົນຂັບ");
+  if (!deliveryRouteCode) validationHints.push("ເລືອກເສັ້ນທາງ");
+  if (!deliveryRoundCode) validationHints.push("ເລືອກຮອບ");
   if (totalAddedBills === 0) validationHints.push("ເພີ່ມບິນ");
 
   const filteredCars = cars.filter(
@@ -724,10 +743,15 @@ export default function AddJobClient({
 
   // Available column = bills NOT yet in addedByBill (or partially with remaining items)
   const availableColumnBills = useMemo(() => {
-    if (!dateLog || !deliveryRoundCode) return [];
+    if (!dateLog || !deliveryRouteCode || !deliveryRoundCode) return [];
     return availableBills
       .filter((b) => !addedByBill[b.doc_no]) // exclude already-added (kanban-style)
-      .filter((b) => b.scheduled_date === dateLog && b.delivery_round_code === deliveryRoundCode)
+      .filter(
+        (b) =>
+          b.scheduled_date === dateLog &&
+          b.delivery_route_code === deliveryRouteCode &&
+          b.delivery_round_code === deliveryRoundCode
+      )
       .filter(
         (b) =>
           !normalizedSearchText ||
@@ -735,13 +759,13 @@ export default function AddJobClient({
           (b.cust_name || "").toLowerCase().includes(normalizedSearchText) ||
           b.cust_code.toLowerCase().includes(normalizedSearchText)
       );
-  }, [availableBills, addedByBill, normalizedSearchText, dateLog, deliveryRoundCode]);
+  }, [availableBills, addedByBill, normalizedSearchText, dateLog, deliveryRouteCode, deliveryRoundCode]);
 
-  const availableEmptyText = !dateLog || !deliveryRoundCode
-    ? "ເລືອກວັນຈັດສົ່ງ ແລະ ຮອບກ່ອນ"
+  const availableEmptyText = !dateLog || !deliveryRouteCode || !deliveryRoundCode
+    ? "ເລືອກວັນຈັດສົ່ງ, ເສັ້ນທາງ ແລະ ຮອບກ່ອນ"
     : normalizedSearchText
       ? "ລອງຄົ້ນຫາຄຳອື່ນ"
-      : "ບໍ່ມີບິນທີ່ກົງກັບວັນ ແລະ ຮອບນີ້";
+      : "ບໍ່ມີບິນທີ່ກົງກັບວັນ, ເສັ້ນທາງ ແລະ ຮອບນີ້";
 
   const addedColumnEntries = useMemo(
     () => Object.entries(addedByBill),
@@ -828,6 +852,9 @@ export default function AddJobClient({
               setDocDate={setDocDate}
               dateLog={dateLog}
               setDateLog={setDateLog}
+              deliveryRouteCode={deliveryRouteCode}
+              setDeliveryRouteCode={setDeliveryRouteCode}
+              deliveryRoutes={deliveryRoutes}
               deliveryRoundCode={deliveryRoundCode}
               setDeliveryRoundCode={setDeliveryRoundCode}
               deliveryRounds={deliveryRounds}
@@ -1415,6 +1442,9 @@ function JobInfoStrip(props: {
   setDocDate: (v: string) => void;
   dateLog: string;
   setDateLog: (v: string) => void;
+  deliveryRouteCode: string;
+  setDeliveryRouteCode: (v: string) => void;
+  deliveryRoutes: Array<{ code: string; name: string; origin?: string; destination?: string; waypoints?: Array<string | { name?: string }> }>;
   deliveryRoundCode: string;
   setDeliveryRoundCode: (v: string) => void;
   deliveryRounds: Array<{ code: string; name: string; time_label?: string }>;
@@ -1444,137 +1474,187 @@ function JobInfoStrip(props: {
   selectedWorkers: string[];
   setSelectedWorkers: React.Dispatch<React.SetStateAction<string[]>>;
 }) {
+  const routePath = (route: {
+    origin?: string;
+    destination?: string;
+    waypoints?: Array<string | { name?: string }>;
+  }) =>
+    [route.origin, ...(route.waypoints ?? []), route.destination]
+      .map((item) => String(item && typeof item === "object" ? item.name ?? "" : item ?? "").trim())
+      .filter(Boolean)
+      .join(" - ");
+
   return (
-    <div className="grid gap-3 md:grid-cols-2 lg:grid-cols-4 xl:grid-cols-6">
-      <Field label="ວັນທີເອກະສານ" icon={<FaCalendarAlt size={10} />}>
-        <input
-          type="date"
-          value={props.docDate}
-          min={FIXED_YEAR_START}
-          max={FIXED_YEAR_END}
-          onChange={(e) => props.setDocDate(e.target.value)}
-          className="h-9 w-full rounded-xl border border-slate-200 bg-white px-3 text-xs outline-none transition-all focus:border-teal-400 focus:ring-2 focus:ring-teal-500/20 dark:border-slate-800 dark:bg-slate-900"
-        />
-      </Field>
-      <Field label="ວັນທີຈັດສົ່ງ" icon={<FaCalendarAlt size={10} />}>
-        <input
-          type="date"
-          value={props.dateLog}
-          min={FIXED_YEAR_START}
-          max={FIXED_YEAR_END}
-          onChange={(e) => props.setDateLog(e.target.value)}
-          className="h-9 w-full rounded-xl border border-slate-200 bg-white px-3 text-xs outline-none transition-all focus:border-teal-400 focus:ring-2 focus:ring-teal-500/20 dark:border-slate-800 dark:bg-slate-900"
-        />
-      </Field>
-      <Field label="ຮອບການຈັດສົ່ງ" icon={<FaClock size={10} />}>
-        <select
-          value={props.deliveryRoundCode}
-          onChange={(e) => props.setDeliveryRoundCode(e.target.value)}
-          className="h-9 w-full rounded-xl border border-slate-200 bg-white px-3 text-xs outline-none transition-all focus:border-teal-400 focus:ring-2 focus:ring-teal-500/20 dark:border-slate-800 dark:bg-slate-900"
-        >
-          <option value="">— ບໍ່ກຳນົດ —</option>
-          {props.deliveryRounds.map((r) => (
-            <option key={r.code} value={r.code}>
-              {r.name}
-              {r.time_label ? ` (${r.time_label})` : ""}
-            </option>
-          ))}
-        </select>
-      </Field>
-
-      <Field label="ລົດ" required icon={<FaTruck size={10} />}>
-        <SearchDropdown
-          refEl={props.carRef}
-          show={props.showCarDrop}
-          setShow={props.setShowCarDrop}
-          search={props.carSearch}
-          setSearch={(v) => {
-            props.setCarSearch(v);
-            props.setCar("");
-          }}
-          items={props.filteredCars}
-          value={props.car}
-          onSelect={(code, name) => {
-            props.setCar(code);
-            props.setCarSearch(name);
-          }}
-          placeholder="ຄົ້ນຫາລົດ..."
-          icon={<FaTruck className="text-xs" />}
-          compact
-        />
-      </Field>
-
-      <Field label="ຄົນຂັບ" required icon={<FaUser size={10} />}>
-        <SearchDropdown
-          refEl={props.driverRef}
-          show={props.showDriverDrop}
-          setShow={props.setShowDriverDrop}
-          search={props.driverSearch}
-          setSearch={(v) => {
-            props.setDriverSearch(v);
-            props.setDriver("");
-          }}
-          items={props.filteredDrivers}
-          value={props.driver}
-          onSelect={(code, name) => {
-            props.setDriver(code);
-            props.setDriverSearch(name);
-          }}
-          placeholder="ຄົ້ນຫາຄົນຂັບ..."
-          icon={<FaUser className="text-xs" />}
-          compact
-        />
-      </Field>
-
-      <Field label="ກຳມະກອນ" icon={<FaUsers size={10} />}>
-        <SearchDropdown
-          refEl={props.workerRef}
-          show={props.showWorkerDrop}
-          setShow={props.setShowWorkerDrop}
-          search={props.workerSearch}
-          setSearch={props.setWorkerSearch}
-          items={props.filteredWorkers}
-          value=""
-          onSelect={(code) => {
-            props.setSelectedWorkers((cur) => [...cur, code]);
-            props.setWorkerSearch("");
-            props.setShowWorkerDrop(true);
-          }}
-          placeholder="ເລືອກກຳມະກອນ..."
-          icon={<FaUsers className="text-xs" />}
-          compact
-        />
-      </Field>
-
-      {/* Workers chips row */}
-      {props.selectedWorkers.length > 0 && (
-        <div className="md:col-span-2 lg:col-span-4 xl:col-span-6">
-          <div className="flex flex-wrap gap-1.5">
-            {props.selectedWorkers.map((wc) => {
-              const w = props.workers.find((i) => i.code === wc);
-              return (
-                <span
-                  key={wc}
-                  className="inline-flex items-center gap-1.5 rounded-full bg-teal-50 px-2.5 py-1 text-[11px] font-medium text-teal-700 dark:bg-teal-950/50 dark:text-teal-300"
-                >
-                  {w?.name_1 || wc}
-                  <button
-                    type="button"
-                    onClick={() =>
-                      props.setSelectedWorkers((cur) => cur.filter((c) => c !== wc))
-                    }
-                    className="text-teal-400 transition-colors hover:text-red-500"
-                  >
-                    <FaTimes size={8} />
-                  </button>
-                </span>
-              );
-            })}
-          </div>
+    <section className="overflow-visible rounded-2xl border border-slate-200 bg-white shadow-sm dark:border-slate-800 dark:bg-slate-900">
+      <div className="flex flex-col gap-1 border-b border-slate-100 px-4 py-3 dark:border-slate-800 sm:flex-row sm:items-center sm:justify-between">
+        <div>
+          <p className="text-[10px] font-bold uppercase tracking-[0.18em] text-teal-600 dark:text-teal-400">
+            ຕັ້ງຄ່າການຈັດສົ່ງ
+          </p>
+          <h2 className="text-sm font-bold text-slate-800 dark:text-white">ຂໍ້ມູນຖ້ຽວຈັດສົ່ງ</h2>
         </div>
-      )}
+        <p className="text-[11px] text-slate-400">ເລືອກໃຫ້ຄົບເພື່ອດຶງບິນຕາມແຜນ</p>
+      </div>
 
-    </div>
+      <div className="grid gap-4 p-4 xl:grid-cols-[minmax(0,1.35fr)_minmax(0,1fr)_minmax(260px,0.8fr)]">
+        <InfoGroup title="ແຜນສົ່ງ" icon={<FaCalendarAlt size={12} />}>
+          <div className="grid gap-3 sm:grid-cols-2">
+            <Field label="ວັນທີເອກະສານ" icon={<FaCalendarAlt size={10} />}>
+              <input
+                type="date"
+                value={props.docDate}
+                min={FIXED_YEAR_START}
+                max={FIXED_YEAR_END}
+                onChange={(e) => props.setDocDate(e.target.value)}
+                className="h-10 w-full rounded-xl border border-slate-200 bg-white px-3 text-sm outline-none transition-all focus:border-teal-400 focus:ring-2 focus:ring-teal-500/20 dark:border-slate-800 dark:bg-slate-950"
+              />
+            </Field>
+            <Field label="ວັນທີຈັດສົ່ງ" icon={<FaCalendarAlt size={10} />}>
+              <input
+                type="date"
+                value={props.dateLog}
+                min={FIXED_YEAR_START}
+                max={FIXED_YEAR_END}
+                onChange={(e) => props.setDateLog(e.target.value)}
+                className="h-10 w-full rounded-xl border border-slate-200 bg-white px-3 text-sm outline-none transition-all focus:border-teal-400 focus:ring-2 focus:ring-teal-500/20 dark:border-slate-800 dark:bg-slate-950"
+              />
+            </Field>
+          </div>
+          <Field label="ເສັ້ນທາງ" required icon={<FaRoute size={10} />}>
+            <select
+              value={props.deliveryRouteCode}
+              onChange={(e) => props.setDeliveryRouteCode(e.target.value)}
+              className="h-10 w-full rounded-xl border border-slate-200 bg-white px-3 text-sm outline-none transition-all focus:border-teal-400 focus:ring-2 focus:ring-teal-500/20 dark:border-slate-800 dark:bg-slate-950"
+            >
+              <option value="">- ເລືອກເສັ້ນທາງ -</option>
+              {props.deliveryRoutes.map((r) => {
+                const path = routePath(r);
+                return (
+                  <option key={r.code} value={r.code}>
+                    {r.name}
+                    {path ? ` (${path})` : ""}
+                  </option>
+                );
+              })}
+            </select>
+          </Field>
+          <Field label="ຮອບການຈັດສົ່ງ" icon={<FaClock size={10} />}>
+            <select
+              value={props.deliveryRoundCode}
+              onChange={(e) => props.setDeliveryRoundCode(e.target.value)}
+              className="h-10 w-full rounded-xl border border-slate-200 bg-white px-3 text-sm outline-none transition-all focus:border-teal-400 focus:ring-2 focus:ring-teal-500/20 dark:border-slate-800 dark:bg-slate-950"
+            >
+              <option value="">- ບໍ່ກຳນົດ -</option>
+              {props.deliveryRounds.map((r) => (
+                <option key={r.code} value={r.code}>
+                  {r.name}
+                  {r.time_label ? ` (${r.time_label})` : ""}
+                </option>
+              ))}
+            </select>
+          </Field>
+        </InfoGroup>
+
+        <InfoGroup title="ພາຫະນະ" icon={<FaTruck size={12} />}>
+          <Field label="ລົດ" required icon={<FaTruck size={10} />}>
+            <SearchDropdown
+              refEl={props.carRef}
+              show={props.showCarDrop}
+              setShow={props.setShowCarDrop}
+              search={props.carSearch}
+              setSearch={(v) => {
+                props.setCarSearch(v);
+                props.setCar("");
+              }}
+              items={props.filteredCars}
+              value={props.car}
+              onSelect={(code, name) => {
+                props.setCar(code);
+                props.setCarSearch(name);
+              }}
+              placeholder="ຄົ້ນຫາລົດ..."
+              icon={<FaTruck className="text-xs" />}
+              compact
+            />
+          </Field>
+
+          <Field label="ຄົນຂັບ" required icon={<FaUser size={10} />}>
+            <SearchDropdown
+              refEl={props.driverRef}
+              show={props.showDriverDrop}
+              setShow={props.setShowDriverDrop}
+              search={props.driverSearch}
+              setSearch={(v) => {
+                props.setDriverSearch(v);
+                props.setDriver("");
+              }}
+              items={props.filteredDrivers}
+              value={props.driver}
+              onSelect={(code, name) => {
+                props.setDriver(code);
+                props.setDriverSearch(name);
+              }}
+              placeholder="ຄົ້ນຫາຄົນຂັບ..."
+              icon={<FaUser className="text-xs" />}
+              compact
+            />
+          </Field>
+        </InfoGroup>
+
+        <InfoGroup title="ທີມງານ" icon={<FaUsers size={12} />}>
+          <Field label="ກຳມະກອນ" icon={<FaUsers size={10} />}>
+            <SearchDropdown
+              refEl={props.workerRef}
+              show={props.showWorkerDrop}
+              setShow={props.setShowWorkerDrop}
+              search={props.workerSearch}
+              setSearch={props.setWorkerSearch}
+              items={props.filteredWorkers}
+              value=""
+              onSelect={(code) => {
+                props.setSelectedWorkers((cur) => [...cur, code]);
+                props.setWorkerSearch("");
+                props.setShowWorkerDrop(true);
+              }}
+              placeholder="ເລືອກກຳມະກອນ..."
+              icon={<FaUsers className="text-xs" />}
+              compact
+            />
+          </Field>
+
+          <div className="min-h-10 rounded-xl border border-dashed border-slate-200 bg-slate-50/60 p-2 dark:border-slate-800 dark:bg-slate-950/40">
+            {props.selectedWorkers.length > 0 ? (
+              <div className="flex flex-wrap gap-1.5">
+                {props.selectedWorkers.map((wc) => {
+                  const w = props.workers.find((i) => i.code === wc);
+                  return (
+                    <span
+                      key={wc}
+                      className="inline-flex items-center gap-1.5 rounded-full bg-teal-50 px-2.5 py-1 text-[11px] font-medium text-teal-700 dark:bg-teal-950/50 dark:text-teal-300"
+                    >
+                      {w?.name_1 || wc}
+                      <button
+                        type="button"
+                        onClick={() =>
+                          props.setSelectedWorkers((cur) => cur.filter((c) => c !== wc))
+                        }
+                        className="text-teal-400 transition-colors hover:text-red-500"
+                      >
+                        <FaTimes size={8} />
+                      </button>
+                    </span>
+                  );
+                })}
+              </div>
+            ) : (
+              <p className="px-1 py-1 text-[11px] text-slate-400">
+                ຍັງບໍ່ໄດ້ເລືອກກຳມະກອນ
+              </p>
+            )}
+          </div>
+        </InfoGroup>
+      </div>
+    </section>
   );
 }
 
@@ -1599,6 +1679,28 @@ function Field({
         {required && <span className="text-red-500">*</span>}
       </label>
       {children}
+    </div>
+  );
+}
+
+function InfoGroup({
+  title,
+  icon,
+  children,
+}: {
+  title: string;
+  icon: React.ReactNode;
+  children: React.ReactNode;
+}) {
+  return (
+    <div className="rounded-xl border border-slate-200/70 bg-slate-50/70 p-3 dark:border-slate-800 dark:bg-slate-950/40">
+      <div className="mb-3 flex items-center gap-2">
+        <span className="flex h-8 w-8 items-center justify-center rounded-lg bg-teal-50 text-teal-700 dark:bg-teal-950/50 dark:text-teal-300">
+          {icon}
+        </span>
+        <h3 className="text-xs font-bold text-slate-700 dark:text-slate-200">{title}</h3>
+      </div>
+      <div className="space-y-3">{children}</div>
     </div>
   );
 }

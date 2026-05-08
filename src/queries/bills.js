@@ -29,6 +29,7 @@ const SCHEDULED_BILL_FIELDS = `
   to_char(pb.scheduled_date,'YYYY-MM-DD') as scheduled_date,
   to_char(pb.scheduled_date,'DD-MM-YYYY') as scheduled_date_display,
   pb.delivery_round_code,
+  pb.delivery_route_code,
   COALESCE(dr.name, '') as delivery_round_name,
   COALESCE(dr.time_label, '') as delivery_round_time_label`;
 
@@ -256,6 +257,7 @@ async function searchManualPendingBills(q) {
             a.trans_flag as source_trans_flag,
             to_char(pb.scheduled_date,'YYYY-MM-DD') as scheduled_date,
             to_char(pb.scheduled_date,'DD-MM-YYYY') as scheduled_date_display,
+            COALESCE(pb.delivery_route_code, '') as delivery_route_code,
             COALESCE(pb.delivery_round_code, '') as delivery_round_code,
             COALESCE(dr.name, '') as delivery_round_name,
             COALESCE(dr.time_label, '') as delivery_round_time_label,
@@ -305,6 +307,7 @@ async function searchManualPendingBills(q) {
       ...row,
       scheduled_date: sched?.scheduled_date ?? null,
       scheduled_date_display: sched?.scheduled_date_display ?? null,
+      delivery_route_code: sched?.delivery_route_code ?? "",
       delivery_round_code: sched?.delivery_round_code ?? "",
       delivery_round_name: "",
       delivery_round_time_label: "",
@@ -452,6 +455,7 @@ async function getManualReadyBills() {
       count_item: 0,
       scheduled_date: sched?.scheduled_date ?? null,
       scheduled_date_display: sched?.scheduled_date_display ?? null,
+      delivery_route_code: sched?.delivery_route_code ?? "",
       delivery_round_code: sched?.delivery_round_code ?? "",
       delivery_round_name: sched?.delivery_round_name ?? "",
       delivery_round_time_label: sched?.delivery_round_time_label ?? "",
@@ -672,6 +676,7 @@ async function getBillsPending(session, fromDate, toDate, transportCode) {
         scheduled_date_overridden: Boolean(sched?.scheduled_date),
         schedule_remark: sched?.remark ?? "",
         action_status: actionStatus,
+        delivery_route_code: sched?.delivery_route_code ?? "",
         delivery_round_code: sched?.delivery_round_code ?? "",
         schedule_updated_at: sched?.updated_at ?? null,
         schedule_updated_by: sched?.updated_by ?? "",
@@ -702,6 +707,10 @@ async function getBillProducts(docNo) {
 async function getBillsWaitingSent(session) {
   const scope = getBranchScope(session);
   await ensureJobListIndexes();
+  const { ensureDeliveryRouteSchema } = require("./delivery-route");
+  const { ensureDeliveryRoundSchema } = require("./delivery-round");
+  await ensureDeliveryRouteSchema();
+  await ensureDeliveryRoundSchema();
   return query(
     `WITH candidate_jobs AS (
       SELECT doc_no FROM public.odg_tms
@@ -741,7 +750,12 @@ async function getBillsWaitingSent(session) {
       bs.total_bills as item_bill,
       bs.waiting_bill_count, bs.inprogress_bill_count,
       bs.completed_bill_count, bs.cancelled_bill_count,
-      COALESCE(jt.transport_name, '-') as transport_name
+      COALESCE(jt.transport_name, '-') as transport_name,
+      COALESCE(a.delivery_route_code, '') as delivery_route_code,
+      COALESCE(rt.name, '') as delivery_route_name,
+      COALESCE(a.delivery_round_code, '') as delivery_round_code,
+      COALESCE(dr.name, '') as delivery_round_name,
+      COALESCE(dr.time_label, '') as delivery_round_time_label
     FROM odg_tms a
     INNER JOIN bill_summary bs ON bs.doc_no = a.doc_no
     LEFT JOIN public.odg_tms_car b ON b.code = a.car
@@ -749,6 +763,8 @@ async function getBillsWaitingSent(session) {
     LEFT JOIN erp_user u ON u.code = a.user_created
     LEFT JOIN erp_user ap ON ap.code = a.approve_user
     LEFT JOIN job_transport jt ON jt.doc_no = a.doc_no
+    LEFT JOIN public.odg_tms_delivery_route rt ON rt.code = a.delivery_route_code
+    LEFT JOIN public.odg_tms_delivery_round dr ON dr.code = a.delivery_round_code
     WHERE COALESCE(a.approve_status, 0) = 1
       AND COALESCE(a.job_status, 0) in (1,0)
       AND ${getFixedYearSqlFilter("a.doc_date")}

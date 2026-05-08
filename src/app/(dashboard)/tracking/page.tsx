@@ -1,6 +1,6 @@
 "use client";
 
-import { Suspense, useEffect, useMemo, useRef, useState } from "react";
+import { Suspense, useEffect, useRef, useState } from "react";
 import { useSearchParams } from "next/navigation";
 import {
   FaSearch,
@@ -86,12 +86,26 @@ interface TrackingResult {
   items?: TrackingItem[];
   attempts?: TrackingAttempt[];
   car_position?: CarPosition | null;
+  tracking_stage?: string;
+  customer_name?: string;
+  scheduled_date?: string;
+  scheduled_date_display?: string;
+  delivery_route_code?: string;
+  delivery_route_name?: string;
+  delivery_round_code?: string;
+  delivery_round_name?: string;
+  delivery_round_time_label?: string;
+  action_status?: string;
 }
 
 // ==================== Status Config ====================
 type ColorKey = "slate" | "amber" | "sky" | "emerald" | "rose";
 
 const allStatuses: { key: string; icon: React.ReactNode; label: string; color: ColorKey }[] = [
+  { key: "ພ້ອມຮັບ", icon: <FaCheckCircle size={14} />, label: "ພ້ອມຮັບ", color: "emerald" },
+  { key: "ກຳນົດວັນຮັບ", icon: <FaCalendarAlt size={14} />, label: "ວັນຮັບ", color: "amber" },
+  { key: "ເລືອກເສັ້ນທາງ", icon: <FaRoute size={14} />, label: "ເສັ້ນທາງ", color: "sky" },
+  { key: "ເລືອກຮອບ", icon: <FaClock size={14} />, label: "ຮອບ", color: "amber" },
   { key: "ຈັດຖ້ຽວແລ້ວ", icon: <FaBox size={14} />, label: "ຈັດຖ້ຽວ", color: "slate" },
   { key: "ຮັບຖ້ຽວ / ເບີກເຄື່ອງ", icon: <FaCheckCircle size={14} />, label: "ຮັບເຄື່ອງ", color: "amber" },
   { key: "ເລີ່ມຈັດສົ່ງ", icon: <FaPlay size={14} />, label: "ກຳລັງສົ່ງ", color: "sky" },
@@ -212,10 +226,10 @@ function InfoStrip({ result }: { result: TrackingResult }) {
   const items = [
     { icon: <FaFileInvoice size={11} />, label: "ບິນ", value: result.bill_no, color: "text-teal-600 dark:text-teal-400 bg-teal-500/10" },
     { icon: <FaCalendarAlt size={11} />, label: "ວັນທີບິນ", value: result.bill_date, color: "text-sky-600 dark:text-sky-400 bg-sky-500/10" },
-    { icon: <FaRoute size={11} />, label: "ຖ້ຽວ", value: result.doc_no, color: "text-sky-600 dark:text-sky-400 bg-sky-500/10" },
+    { icon: <FaRoute size={11} />, label: "ຖ້ຽວ", value: result.doc_no || "ຍັງບໍ່ຈັດຖ້ຽວ", color: "text-sky-600 dark:text-sky-400 bg-sky-500/10" },
     { icon: <FaClock size={11} />, label: "ວັນທີຖ້ຽວ", value: result.doc_date, color: "text-amber-600 dark:text-amber-400 bg-amber-500/10" },
-    { icon: <FaTruck size={11} />, label: "ລົດ", value: result.car || "-", color: "text-teal-600 dark:text-teal-400 bg-teal-500/10" },
-    { icon: <FaUser size={11} />, label: "ຄົນຂັບ", value: result.driver || "-", color: "text-emerald-600 dark:text-emerald-400 bg-emerald-500/10" },
+    { icon: <FaTruck size={11} />, label: result.tracking_stage === "pending" ? "ເສັ້ນທາງ" : "ລົດ", value: result.tracking_stage === "pending" ? result.delivery_route_name || result.delivery_route_code || "-" : result.car || "-", color: "text-teal-600 dark:text-teal-400 bg-teal-500/10" },
+    { icon: <FaUser size={11} />, label: result.tracking_stage === "pending" ? "ຮອບ" : "ຄົນຂັບ", value: result.tracking_stage === "pending" ? result.delivery_round_name || result.delivery_round_code || "-" : result.driver || "-", color: "text-emerald-600 dark:text-emerald-400 bg-emerald-500/10" },
   ];
 
   return (
