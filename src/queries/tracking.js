@@ -190,6 +190,8 @@ async function trackBill(session, search) {
   const row = await queryOne(`SELECT a.doc_no, to_char(a.doc_date,'DD-MM-YYYY') as doc_date, bill_no, to_char(bill_date,'DD-MM-YYYY') as bill_date,
       a.car as car_code, c.name_1 as car, d.name_1 as driver, b2.code as driver_code,
       COALESCE(b2.employee_photo, '') as driver_photo,
+      COALESCE(b.origin_transport_code, '') as origin_transport_code,
+      COALESCE(ott.name_1, '') as origin_transport_name,
       c.imei as car_imei,
       url_img, COALESCE(a.sight_img, '') as sight_img,
       COALESCE(img.delivery_images, ARRAY[]::text[]) as delivery_images,
@@ -202,7 +204,7 @@ async function trackBill(session, search) {
         'remark', remark
       ) ORDER BY event_at ASC NULLS LAST) FROM (
         SELECT create_date_time_now AS event_at, to_char(create_date_time_now,'DD-MM-YYYY') as doc_date, to_char(create_date_time_now,'HH24:MI') as doc_time, 'ຈັດຖ້ຽວແລ້ວ' as status, '' as remark FROM odg_tms_detail WHERE bill_no=a.bill_no AND doc_no=a.doc_no
-        UNION ALL SELECT recipt_job, to_char(recipt_job,'DD-MM-YYYY'), to_char(recipt_job,'HH24:MI'), 'ຮັບຖ້ຽວ / ເບີກເຄື່ອງ', '' FROM odg_tms_detail WHERE recipt_job IS NOT NULL AND bill_no=a.bill_no AND doc_no=a.doc_no
+        UNION ALL SELECT recipt_job, to_char(recipt_job,'DD-MM-YYYY'), to_char(recipt_job,'HH24:MI'), 'ຮັບຖ້ຽວ / ເບີກເຄື່ອງ', COALESCE(NULLIF(TRIM(ott.name_1), ''), NULLIF(TRIM(b.origin_transport_code), ''), '') FROM odg_tms_detail WHERE recipt_job IS NOT NULL AND bill_no=a.bill_no AND doc_no=a.doc_no
         UNION ALL SELECT sent_start, to_char(sent_start,'DD-MM-YYYY'), to_char(sent_start,'HH24:MI'), 'ເລີ່ມຈັດສົ່ງ', '' FROM odg_tms_detail WHERE sent_start IS NOT NULL AND bill_no=a.bill_no AND doc_no=a.doc_no
         UNION ALL SELECT sent_end, to_char(sent_end,'DD-MM-YYYY'), to_char(sent_end,'HH24:MI'), case when status=2 then 'ຍົກເລີກຈັດສົ່ງ' else 'ຈັດສົ່ງສຳເລັດ' end, remark FROM odg_tms_detail WHERE sent_end IS NOT NULL AND bill_no=a.bill_no AND doc_no=a.doc_no
         UNION ALL SELECT b.job_close, to_char(b.job_close,'DD-MM-YYYY'), to_char(b.job_close,'HH24:MI'), 'ຄົນຂັບປິດງານ', '' WHERE b.job_close IS NOT NULL
@@ -213,6 +215,7 @@ async function trackBill(session, search) {
     LEFT JOIN odg_tms_car c ON c.code=a.car
     LEFT JOIN odg_tms_driver d ON d.code=b.driver
     LEFT JOIN biotime_employee b2 ON b2.code = b.driver
+    LEFT JOIN transport_type ott ON ott.code = b.origin_transport_code
     LEFT JOIN LATERAL (
       SELECT array_agg(di.image_data ORDER BY di.created_at ASC, di.roworder ASC) as delivery_images
       FROM public.odg_tms_delivery_images di
@@ -346,6 +349,8 @@ async function trackBillPublic(billNo) {
             a.bill_no, to_char(a.bill_date,'DD-MM-YYYY') as bill_date,
             a.car as car_code, c.name_1 as car, c.imei as car_imei,
             d.name_1 as driver, COALESCE(b2.employee_photo, '') as driver_photo,
+            COALESCE(j.origin_transport_code, '') as origin_transport_code,
+            COALESCE(ott.name_1, '') as origin_transport_name,
             a.lat, a.lng, a.lat_end, a.lng_end,
             COALESCE(a.url_img, '') as url_img,
             COALESCE(a.sight_img, '') as sight_img,
@@ -359,7 +364,7 @@ async function trackBillPublic(billNo) {
               'remark', remark
             ) ORDER BY event_at ASC NULLS LAST) FROM (
               SELECT create_date_time_now AS event_at, to_char(create_date_time_now,'DD-MM-YYYY') as doc_date, to_char(create_date_time_now,'HH24:MI') as doc_time, 'ຈັດຖ້ຽວແລ້ວ' as status, '' as remark FROM odg_tms_detail WHERE bill_no=a.bill_no AND doc_no=a.doc_no
-              UNION ALL SELECT recipt_job, to_char(recipt_job,'DD-MM-YYYY'), to_char(recipt_job,'HH24:MI'), 'ຮັບຖ້ຽວ / ເບີກເຄື່ອງ', '' FROM odg_tms_detail WHERE recipt_job IS NOT NULL AND bill_no=a.bill_no AND doc_no=a.doc_no
+              UNION ALL SELECT recipt_job, to_char(recipt_job,'DD-MM-YYYY'), to_char(recipt_job,'HH24:MI'), 'ຮັບຖ້ຽວ / ເບີກເຄື່ອງ', COALESCE(NULLIF(TRIM(ott.name_1), ''), NULLIF(TRIM(j.origin_transport_code), ''), '') FROM odg_tms_detail WHERE recipt_job IS NOT NULL AND bill_no=a.bill_no AND doc_no=a.doc_no
               UNION ALL SELECT sent_start, to_char(sent_start,'DD-MM-YYYY'), to_char(sent_start,'HH24:MI'), 'ເລີ່ມຈັດສົ່ງ', '' FROM odg_tms_detail WHERE sent_start IS NOT NULL AND bill_no=a.bill_no AND doc_no=a.doc_no
               UNION ALL SELECT sent_end, to_char(sent_end,'DD-MM-YYYY'), to_char(sent_end,'HH24:MI'), case when status=2 then 'ຍົກເລີກຈັດສົ່ງ' else 'ຈັດສົ່ງສຳເລັດ' end, remark FROM odg_tms_detail WHERE sent_end IS NOT NULL AND bill_no=a.bill_no AND doc_no=a.doc_no
               UNION ALL SELECT j.job_close, to_char(j.job_close,'DD-MM-YYYY'), to_char(j.job_close,'HH24:MI'), 'ຄົນຂັບປິດງານ', '' WHERE j.job_close IS NOT NULL
@@ -370,6 +375,7 @@ async function trackBillPublic(billNo) {
      LEFT JOIN odg_tms j ON j.doc_no = a.doc_no
      LEFT JOIN odg_tms_driver d ON d.code = j.driver
      LEFT JOIN biotime_employee b2 ON b2.code = j.driver
+     LEFT JOIN transport_type ott ON ott.code = j.origin_transport_code
      LEFT JOIN LATERAL (
        SELECT array_agg(di.image_data ORDER BY di.created_at ASC, di.roworder ASC) as delivery_images
        FROM public.odg_tms_delivery_images di

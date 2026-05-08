@@ -73,6 +73,8 @@ interface TrackingResult {
   car_code?: string;
   driver: string;
   driver_photo?: string;
+  origin_transport_code?: string;
+  origin_transport_name?: string;
   url_img: string;
   sight_img?: string;
   delivery_images?: string[];
@@ -230,6 +232,9 @@ function InfoStrip({ result }: { result: TrackingResult }) {
     { icon: <FaClock size={11} />, label: "ວັນທີຖ້ຽວ", value: result.doc_date, color: "text-amber-600 dark:text-amber-400 bg-amber-500/10" },
     { icon: <FaTruck size={11} />, label: result.tracking_stage === "pending" ? "ເສັ້ນທາງ" : "ລົດ", value: result.tracking_stage === "pending" ? result.delivery_route_name || result.delivery_route_code || "-" : result.car || "-", color: "text-teal-600 dark:text-teal-400 bg-teal-500/10" },
     { icon: <FaUser size={11} />, label: result.tracking_stage === "pending" ? "ຮອບ" : "ຄົນຂັບ", value: result.tracking_stage === "pending" ? result.delivery_round_name || result.delivery_round_code || "-" : result.driver || "-", color: "text-emerald-600 dark:text-emerald-400 bg-emerald-500/10" },
+    ...(result.tracking_stage !== "pending" && (result.origin_transport_name || result.origin_transport_code)
+      ? [{ icon: <FaBox size={11} />, label: "ສາງຮັບເຄື່ອງ", value: result.origin_transport_name || result.origin_transport_code || "-", color: "text-amber-600 dark:text-amber-400 bg-amber-500/10" }]
+      : []),
   ];
 
   return (
@@ -386,7 +391,11 @@ function Timeline({ steps }: { steps: TrackingStep[] }) {
                   {step.remark && (
                     <div className="mt-2 flex items-start gap-1.5 p-2.5 bg-white/30 dark:bg-white/5 rounded-lg border border-slate-200/30 dark:border-white/5">
                       <FaCommentDots className="text-slate-300 dark:text-slate-500 shrink-0 mt-0.5" size={10} />
-                      <p className="text-xs text-slate-600 dark:text-slate-300 leading-relaxed">{step.remark}</p>
+                      <p className="text-xs text-slate-600 dark:text-slate-300 leading-relaxed">
+                        {step.status === "ຮັບຖ້ຽວ / ເບີກເຄື່ອງ"
+                          ? `ຮັບເຄື່ອງຈາກສາງ: ${step.remark}`
+                          : step.remark}
+                      </p>
                     </div>
                   )}
                 </div>
