@@ -86,6 +86,8 @@ interface DeliveredPendingCloseShipment {
   job_status_text: string;
   url_img?: string;
   sight_img?: string;
+  delivery_images?: string[];
+  image_count?: CountValue;
   remark?: string;
 }
 
@@ -637,6 +639,20 @@ function DeliveredPendingCloseList({ items, total, agingTick }: {
         {items.map((item) => {
           const liveSeconds = item.pending_close_seconds == null ? null : toNumber(item.pending_close_seconds) + agingTick;
           const isDriverClosed = toNumber(item.job_status) === 3;
+          const deliveryImages = Array.isArray(item.delivery_images)
+            ? item.delivery_images.filter(Boolean)
+            : [];
+          const allImagesRaw = [
+            ...deliveryImages.map((src, index) => ({ src, label: `ຮູບ ${index + 1}` })),
+            ...(item.url_img ? [{ src: item.url_img, label: "ຮູບຫຼັກ" }] : []),
+            ...(item.sight_img ? [{ src: item.sight_img, label: "ລາຍເຊັນ" }] : []),
+          ];
+          const seenImages = new Set<string>();
+          const allImages = allImagesRaw.filter((image) => {
+            if (seenImages.has(image.src)) return false;
+            seenImages.add(image.src);
+            return true;
+          });
           return (
             <div key={`${item.doc_no}-${item.bill_no}`} className="px-4 py-3 hover:bg-white/30 dark:hover:bg-white/5 transition-colors">
               <div className="flex flex-wrap items-center gap-3">
@@ -665,10 +681,11 @@ function DeliveredPendingCloseList({ items, total, agingTick }: {
                     {item.transport_name || "-"} · {item.car || "-"} / {item.driver || "-"}
                   </p>
                 </div>
-                {(item.url_img || item.sight_img) && (
-                  <div className="flex items-center gap-1.5 shrink-0">
-                    {item.url_img && <ImageThumb src={item.url_img} label="ຮູບ" />}
-                    {item.sight_img && <ImageThumb src={item.sight_img} label="ລາຍເຊັນ" />}
+                {allImages.length > 0 && (
+                  <div className="flex max-w-[240px] flex-wrap items-center justify-end gap-1.5 shrink-0">
+                    {allImages.map((image, index) => (
+                      <ImageThumb key={`${item.doc_no}-${item.bill_no}-${index}`} src={image.src} label={image.label} />
+                    ))}
                   </div>
                 )}
                 <div className="shrink-0 text-right">

@@ -49,6 +49,27 @@ function ImageThumb({ src, label }: { src: string; label: string }) {
   );
 }
 
+function collectDeliveryImages(detail: {
+  url_img?: string;
+  sight_img?: string;
+  delivery_images?: string[];
+}): Array<{ src: string; label: string }> {
+  const out: Array<{ src: string; label: string }> = [];
+  const seen = new Set<string>();
+  const push = (src: string | undefined | null, label: string) => {
+    if (!src) return;
+    if (seen.has(src)) return;
+    seen.add(src);
+    out.push({ src, label });
+  };
+  if (Array.isArray(detail.delivery_images)) {
+    detail.delivery_images.forEach((src, i) => push(src, `ຮູບ ${i + 1}`));
+  }
+  push(detail.url_img, "ຮູບຫຼັກ");
+  push(detail.sight_img, "ລາຍເຊັນ");
+  return out;
+}
+
 export interface CompletedJob {
   doc_date: string;
   doc_no: string;
@@ -86,6 +107,7 @@ export interface CompletedBillDetail {
   remaining_item_count?: number | string;
   url_img?: string;
   sight_img?: string;
+  delivery_images?: string[];
   duration_seconds?: number | string | null;
   distance_km?: number | string | null;
   forward_transport_code?: string;
@@ -658,14 +680,18 @@ export default function BillCompleteClient({
                                                 </div>
                                               </td>
                                               <td className="py-2 pr-3">
-                                                {detail.url_img || detail.sight_img ? (
-                                                  <div className="flex items-center gap-1.5">
-                                                    {detail.url_img && <ImageThumb src={detail.url_img} label="ຮູບ" />}
-                                                    {detail.sight_img && <ImageThumb src={detail.sight_img} label="ລາຍເຊັນ" />}
-                                                  </div>
-                                                ) : (
-                                                  <span className="text-slate-300">-</span>
-                                                )}
+                                                {(() => {
+                                                  const images = collectDeliveryImages(detail);
+                                                  return images.length > 0 ? (
+                                                    <div className="flex flex-wrap items-center gap-1.5">
+                                                      {images.map((image, idx) => (
+                                                        <ImageThumb key={`${detail.bill_no}-${idx}`} src={image.src} label={image.label} />
+                                                      ))}
+                                                    </div>
+                                                  ) : (
+                                                    <span className="text-slate-300">-</span>
+                                                  );
+                                                })()}
                                               </td>
                                               <td className="py-2">
                                                 <div className="space-y-1">

@@ -52,6 +52,27 @@ function ImageThumb({ src, label }: { src: string; label: string }) {
 }
 // Ported from server actions: getBillsWaitingSentDetails, deleteJob, getJobBillsWithProducts
 
+function collectDeliveryImages(detail: {
+  url_img?: string;
+  sight_img?: string;
+  delivery_images?: string[];
+}): Array<{ src: string; label: string }> {
+  const out: Array<{ src: string; label: string }> = [];
+  const seen = new Set<string>();
+  const push = (src: string | undefined | null, label: string) => {
+    if (!src) return;
+    if (seen.has(src)) return;
+    seen.add(src);
+    out.push({ src, label });
+  };
+  if (Array.isArray(detail.delivery_images)) {
+    detail.delivery_images.forEach((src, i) => push(src, `ຮູບ ${i + 1}`));
+  }
+  push(detail.url_img, "ຮູບຫຼັກ");
+  push(detail.sight_img, "ລາຍເຊັນ");
+  return out;
+}
+
 export interface WaitingSentJob {
   doc_date: string;
   doc_no: string;
@@ -87,6 +108,7 @@ export interface WaitingSentBillDetail {
   delivered_qty_total?: number | string;
   url_img?: string;
   sight_img?: string;
+  delivery_images?: string[];
   forward_transport_code?: string;
   forward_transport_name?: string;
 }
@@ -683,12 +705,17 @@ export default function BillsWaitingSentClient({
                                                 <span>ເລີ່ມ: {detail.sent_start}</span>
                                                 <span>ຈົບ: {detail.sent_end}</span>
                                               </div>
-                                              {(detail.url_img || detail.sight_img) && (
-                                                <div className="flex items-center gap-2 mt-2 ml-7">
-                                                  {detail.url_img && <ImageThumb src={detail.url_img} label="ຮູບ" />}
-                                                  {detail.sight_img && <ImageThumb src={detail.sight_img} label="ລາຍເຊັນ" />}
-                                                </div>
-                                              )}
+                                              {(() => {
+                                                const images = collectDeliveryImages(detail);
+                                                if (images.length === 0) return null;
+                                                return (
+                                                  <div className="flex flex-wrap items-center gap-2 mt-2 ml-7">
+                                                    {images.map((image, idx) => (
+                                                      <ImageThumb key={`${detail.bill_no}-${idx}`} src={image.src} label={image.label} />
+                                                    ))}
+                                                  </div>
+                                                );
+                                              })()}
                                               {detail.remark && (
                                                 <p className="text-[10px] text-rose-500 mt-1 ml-7">{detail.remark}</p>
                                               )}

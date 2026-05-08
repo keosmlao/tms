@@ -1010,7 +1010,7 @@ export default function BillsPendingClient() {
 
                             {bill.manual_pending_bill && (
                               <span className="inline-flex items-center rounded-full border border-teal-500/20 bg-teal-500/10 px-2 py-0.5 text-[10px] font-semibold text-teal-700 dark:text-teal-400">
-                                {bill.source_type === "odservice.s_trans"
+                                {bill.source_type === "odservice.tb_product"
                                   ? "ສູນບໍລິການ"
                                   : `ic_trans flag ${bill.source_trans_flag ?? "56/72"}`}
                               </span>
@@ -1177,7 +1177,7 @@ export default function BillsPendingClient() {
                 </div>
                 <div>
                   <h3 className="text-sm font-bold text-slate-800 dark:text-slate-100">ເພີ່ມບິນເຂົ້າລໍຖ້າຈັດຖ້ຽວ</h3>
-                  <p className="text-[11px] text-slate-500">ຄົ້ນຈາກ ic_trans 56/72 ແລະ odservice.s_trans</p>
+                  <p className="text-[11px] text-slate-500">ຄົ້ນຈາກ ic_trans 56/72 ແລະ odservice.tb_product</p>
                 </div>
               </div>
               <button onClick={closeManualModal} className="p-1.5 text-slate-400 hover:text-slate-600 hover:bg-white rounded-lg transition-colors">
@@ -1242,7 +1242,7 @@ export default function BillsPendingClient() {
                             <div className="flex items-center gap-2">
                               <span className="font-mono text-xs font-bold text-slate-800 dark:text-slate-100">{bill.doc_no}</span>
                               <span className="rounded-full bg-slate-500/10 px-1.5 py-0.5 text-[9px] font-bold text-slate-500">
-                                {bill.source_type === "odservice.s_trans" ? "service" : `flag ${bill.source_trans_flag}`}
+                                {bill.source_type === "odservice.tb_product" ? "service" : `flag ${bill.source_trans_flag}`}
                               </span>
                               <span className="ml-auto text-[10px] text-slate-500">{bill.count_item} ລາຍການ</span>
                             </div>

@@ -63,6 +63,7 @@ interface PublicTrackingResult {
   driver_photo: string;
   url_img: string;
   sight_img: string;
+  delivery_images?: string[];
   bill_remark: string;
   lat: string;
   lng: string;
@@ -251,10 +252,11 @@ function TrackPageInner() {
               <ItemsCard items={result.items} />
             )}
 
-            {result.bill_status === 1 && (result.url_img || result.sight_img) && (
+            {result.bill_status === 1 && (result.url_img || result.sight_img || (result.delivery_images?.length ?? 0) > 0) && (
               <DeliveryProofCard
                 photo={result.url_img}
                 signature={result.sight_img}
+                extraImages={result.delivery_images ?? []}
                 remark={result.bill_remark}
               />
             )}
@@ -546,13 +548,25 @@ function ItemsCard({ items }: { items: TrackingItem[] }) {
 function DeliveryProofCard({
   photo,
   signature,
+  extraImages,
   remark,
 }: {
   photo: string;
   signature: string;
+  extraImages: string[];
   remark: string;
 }) {
   const [zoomed, setZoomed] = useState<string | null>(null);
+  const seen = new Set<string>();
+  const items: Array<{ src: string; label: string; tone: "rose" | "indigo" }> = [];
+  const push = (src: string | undefined, label: string, tone: "rose" | "indigo") => {
+    if (!src || seen.has(src)) return;
+    seen.add(src);
+    items.push({ src, label, tone });
+  };
+  extraImages.forEach((src, i) => push(src, `ຮູບການສົ່ງ ${i + 1}`, "rose"));
+  push(photo, "ຮູບການສົ່ງ", "rose");
+  push(signature, "ລາຍເຊັນລູກຄ້າ", "indigo");
   return (
     <>
       <div className="bg-white dark:bg-slate-900 rounded-xl border border-emerald-200 dark:border-emerald-900/40 overflow-hidden">
@@ -565,24 +579,16 @@ function DeliveryProofCard({
           </h2>
         </div>
         <div className="p-4 grid grid-cols-1 sm:grid-cols-2 gap-3">
-          {photo && (
+          {items.map((item) => (
             <ProofThumb
-              src={photo}
-              icon={<FaCamera size={11} />}
-              label="ຮູບການສົ່ງ"
-              tone="rose"
-              onZoom={() => setZoomed(photo)}
+              key={item.src}
+              src={item.src}
+              icon={item.tone === "indigo" ? <FaPenNib size={11} /> : <FaCamera size={11} />}
+              label={item.label}
+              tone={item.tone}
+              onZoom={() => setZoomed(item.src)}
             />
-          )}
-          {signature && (
-            <ProofThumb
-              src={signature}
-              icon={<FaPenNib size={11} />}
-              label="ລາຍເຊັນລູກຄ້າ"
-              tone="indigo"
-              onZoom={() => setZoomed(signature)}
-            />
-          )}
+          ))}
         </div>
         {remark && (
           <div className="px-4 pb-4">

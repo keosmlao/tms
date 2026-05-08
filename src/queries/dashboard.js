@@ -218,6 +218,12 @@ async function getDashboardData(session) {
       END as job_status_text,
       COALESCE(d.url_img, '') as url_img,
       COALESCE(d.sight_img, '') as sight_img,
+      COALESCE(img.delivery_images, ARRAY[]::text[]) as delivery_images,
+      (
+        CASE WHEN COALESCE(d.url_img, '') <> '' THEN 1 ELSE 0 END
+        + CASE WHEN COALESCE(d.sight_img, '') <> '' THEN 1 ELSE 0 END
+        + COALESCE(img.delivery_image_count, 0)
+      )::int as image_count,
       COALESCE(d.remark, '') as remark,
       COUNT(*) OVER() AS total_delivered_pending_close
     FROM public.odg_tms_detail d
@@ -227,6 +233,12 @@ async function getDashboardData(session) {
     LEFT JOIN public.odg_tms_driver drvT ON drvT.code = a.driver
     LEFT JOIN ic_trans_shipment s ON s.doc_no = d.bill_no
     LEFT JOIN transport_type tt ON tt.code = s.transport_code
+    LEFT JOIN LATERAL (
+      SELECT array_agg(di.image_data ORDER BY di.created_at ASC, di.roworder ASC) as delivery_images,
+             COUNT(*)::int as delivery_image_count
+      FROM public.odg_tms_delivery_images di
+      WHERE di.bill_no = d.bill_no
+    ) img ON true
     WHERE COALESCE(d.status, 0) = 1
       AND d.sent_end IS NOT NULL
       AND ${getFixedYearSqlFilter("d.doc_date")}

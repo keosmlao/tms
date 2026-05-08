@@ -74,6 +74,8 @@ interface TrackingResult {
   driver: string;
   driver_photo?: string;
   url_img: string;
+  sight_img?: string;
+  delivery_images?: string[];
   lat: string;
   lng: string;
   lat_end: string;
@@ -449,9 +451,27 @@ function LocationCard({ result }: { result: TrackingResult }) {
 }
 
 // ==================== Delivery Image ====================
-function DeliveryImage({ url }: { url: string }) {
-  const [expanded, setExpanded] = useState(false);
-  if (!url) return null;
+function DeliveryImage({
+  url,
+  signature,
+  extra,
+}: {
+  url: string;
+  signature?: string;
+  extra?: string[];
+}) {
+  const [zoomed, setZoomed] = useState<string | null>(null);
+  const seen = new Set<string>();
+  const items: Array<{ src: string; label: string }> = [];
+  const push = (src: string | undefined | null, label: string) => {
+    if (!src || seen.has(src)) return;
+    seen.add(src);
+    items.push({ src, label });
+  };
+  (extra ?? []).forEach((src, i) => push(src, `ຮູບ ${i + 1}`));
+  push(url, "ຮູບຫຼັກ");
+  push(signature, "ລາຍເຊັນ");
+  if (items.length === 0) return null;
 
   return (
     <>
@@ -460,40 +480,38 @@ function DeliveryImage({ url }: { url: string }) {
           <div className="w-7 h-7 rounded-lg bg-rose-500/10 flex items-center justify-center">
             <FaCamera className="text-rose-500" size={12} />
           </div>
-          <h2 className="text-sm font-bold text-slate-800 dark:text-white">ຫຼັກຖານການສົ່ງ</h2>
+          <h2 className="text-sm font-bold text-slate-800 dark:text-white">ຫຼັກຖານການສົ່ງ ({items.length})</h2>
         </div>
-        <div className="p-4">
-          <button
-            type="button"
-            onClick={() => setExpanded(true)}
-            className="relative w-full rounded-lg overflow-hidden group cursor-zoom-in border border-slate-100"
-          >
-            <img
-              src={url}
-              alt="Delivery proof"
-              width={400}
-              height={300}
-              className="w-full h-auto transition-transform duration-300 group-hover:scale-105"
-            />
-            <div className="absolute inset-0 bg-black/0 group-hover:bg-black/30 transition-all flex items-center justify-center">
-              <span className="opacity-0 group-hover:opacity-100 transition-opacity bg-white/90 text-slate-700 text-[11px] font-semibold px-3 py-1.5 rounded-full">
-                ຄລິກເພື່ອຂະຫຍາຍ
+        <div className="grid grid-cols-2 gap-2 p-4">
+          {items.map((item) => (
+            <button
+              key={item.src}
+              type="button"
+              onClick={() => setZoomed(item.src)}
+              className="relative w-full rounded-lg overflow-hidden group cursor-zoom-in border border-slate-100"
+              title={item.label}
+            >
+              <img
+                src={item.src}
+                alt={item.label}
+                className="w-full h-auto transition-transform duration-300 group-hover:scale-105"
+              />
+              <span className="pointer-events-none absolute inset-x-0 bottom-0 bg-gradient-to-t from-black/70 to-transparent text-[10px] font-semibold text-white px-2 py-1 text-center">
+                {item.label}
               </span>
-            </div>
-          </button>
+            </button>
+          ))}
         </div>
       </div>
 
-      {expanded && (
+      {zoomed && (
         <div
           className="fixed inset-0 z-50 bg-black/80 flex items-center justify-center p-4 cursor-zoom-out"
-          onClick={() => setExpanded(false)}
+          onClick={() => setZoomed(null)}
         >
           <img
-            src={url}
+            src={zoomed}
             alt="Delivery proof"
-            width={1200}
-            height={900}
             className="max-w-full max-h-[90vh] object-contain rounded-lg"
           />
         </div>
@@ -1016,7 +1034,7 @@ function TrackingPageInner() {
             </div>
             <div className="lg:col-span-2 space-y-4">
               <LocationCard result={result} />
-              <DeliveryImage url={result.url_img} />
+              <DeliveryImage url={result.url_img} signature={result.sight_img} extra={result.delivery_images} />
             </div>
           </div>
         </div>

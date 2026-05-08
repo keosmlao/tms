@@ -72,6 +72,7 @@ async function trackBill(session, search) {
       COALESCE(b2.employee_photo, '') as driver_photo,
       c.imei as car_imei,
       url_img, COALESCE(a.sight_img, '') as sight_img,
+      COALESCE(img.delivery_images, ARRAY[]::text[]) as delivery_images,
       a.lat, a.lng, a.lat_end, a.lng_end, a.remark,
       COALESCE(a.status, 0) as bill_status,
       (SELECT json_agg(json_build_object(
@@ -92,6 +93,11 @@ async function trackBill(session, search) {
     LEFT JOIN odg_tms_car c ON c.code=a.car
     LEFT JOIN odg_tms_driver d ON d.code=b.driver
     LEFT JOIN biotime_employee b2 ON b2.code = b.driver
+    LEFT JOIN LATERAL (
+      SELECT array_agg(di.image_data ORDER BY di.created_at ASC, di.roworder ASC) as delivery_images
+      FROM public.odg_tms_delivery_images di
+      WHERE di.bill_no = a.bill_no
+    ) img ON true
     WHERE bill_no LIKE $1 AND ${getFixedYearSqlFilter("a.doc_date")} ${branchClause}
     ORDER BY COALESCE(b.create_date_time_now, a.create_date_time_now, a.doc_date::timestamp) DESC NULLS LAST,
              a.doc_no DESC
@@ -172,6 +178,7 @@ async function trackBillPublic(billNo) {
             a.lat, a.lng, a.lat_end, a.lng_end,
             COALESCE(a.url_img, '') as url_img,
             COALESCE(a.sight_img, '') as sight_img,
+            COALESCE(img.delivery_images, ARRAY[]::text[]) as delivery_images,
             COALESCE(a.remark, '') as bill_remark,
             COALESCE(a.status, 0) as bill_status,
             (SELECT json_agg(json_build_object(
@@ -192,6 +199,11 @@ async function trackBillPublic(billNo) {
      LEFT JOIN odg_tms j ON j.doc_no = a.doc_no
      LEFT JOIN odg_tms_driver d ON d.code = j.driver
      LEFT JOIN biotime_employee b2 ON b2.code = j.driver
+     LEFT JOIN LATERAL (
+       SELECT array_agg(di.image_data ORDER BY di.created_at ASC, di.roworder ASC) as delivery_images
+       FROM public.odg_tms_delivery_images di
+       WHERE di.bill_no = a.bill_no
+     ) img ON true
      WHERE bill_no = $1 AND ${getFixedYearSqlFilter("a.doc_date")}
      ORDER BY COALESCE(j.create_date_time_now, a.create_date_time_now, a.doc_date::timestamp) DESC NULLS LAST,
               a.doc_no DESC
