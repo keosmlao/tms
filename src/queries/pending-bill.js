@@ -44,6 +44,17 @@ async function ensurePendingBillSchemaInternal(db) {
     ALTER TABLE public.odg_tms_pending_bill
     ADD COLUMN IF NOT EXISTS delivery_round_code character varying
   `);
+  // Pre-trip transport (warehouse) override — independent of ic_trans_shipment
+  // so admin can assign a transport branch to manual / service bills without
+  // touching the ERP shipment row.
+  await safeDdl(db, `
+    ALTER TABLE public.odg_tms_pending_bill
+    ADD COLUMN IF NOT EXISTS transport_code character varying
+  `);
+  await safeDdl(db, `
+    CREATE INDEX IF NOT EXISTS idx_odg_tms_pending_bill_transport
+    ON public.odg_tms_pending_bill (transport_code) WHERE transport_code IS NOT NULL
+  `);
   await safeDdl(db, `
     CREATE INDEX IF NOT EXISTS idx_odg_tms_pending_bill_scheduled
     ON public.odg_tms_pending_bill (scheduled_date)
@@ -65,7 +76,7 @@ async function ensurePendingBillSchemaInternal(db) {
 // Bump the cache version whenever the DDL changes so existing dev/prod
 // processes re-run the ALTER TABLE migrations on next call (the global cache
 // otherwise persists across hot-reloads).
-const PENDING_BILL_SCHEMA_VERSION = "v3_route";
+const PENDING_BILL_SCHEMA_VERSION = "v4_transport";
 
 async function ensurePendingBillSchema() {
   const readyKey = `__tmsPendingBillSchemaReady_${PENDING_BILL_SCHEMA_VERSION}`;
@@ -97,6 +108,7 @@ async function getPendingBillScheduleMap(billNos) {
             COALESCE(action_status, '') as action_status,
             COALESCE(delivery_route_code, '') as delivery_route_code,
             COALESCE(delivery_round_code, '') as delivery_round_code,
+            COALESCE(transport_code, '') as transport_code,
             COALESCE(updated_by, '') as updated_by,
             to_char(updated_at,'DD-MM-YYYY HH24:MI') as updated_at
      FROM public.odg_tms_pending_bill
@@ -113,6 +125,7 @@ async function upsertPendingBillSchedule({
   actionStatus,
   deliveryRouteCode,
   deliveryRoundCode,
+  transportCode,
   userCode,
 }) {
   const code = String(billNo ?? "").trim();
@@ -124,10 +137,11 @@ async function upsertPendingBillSchedule({
   const status = actionStatus ? String(actionStatus).trim() || null : null;
   const route = deliveryRouteCode ? String(deliveryRouteCode).trim() || null : null;
   const round = deliveryRoundCode ? String(deliveryRoundCode).trim() || null : null;
+  const transport = transportCode ? String(transportCode).trim() || null : null;
   const user = userCode ? String(userCode).trim() || null : null;
 
   // If all fields are blank, drop the row instead of keeping an empty entry.
-  if (!date && !note && !status && !route && !round) {
+  if (!date && !note && !status && !route && !round && !transport) {
     await pool.query(
       `DELETE FROM public.odg_tms_pending_bill WHERE bill_no = $1`,
       [code]
@@ -136,17 +150,18 @@ async function upsertPendingBillSchedule({
   }
 
   await pool.query(
-    `INSERT INTO public.odg_tms_pending_bill (bill_no, scheduled_date, remark, action_status, delivery_route_code, delivery_round_code, updated_by, updated_at)
-     VALUES ($1, $2::date, $3, $4, $5, $6, $7, LOCALTIMESTAMP(0))
+    `INSERT INTO public.odg_tms_pending_bill (bill_no, scheduled_date, remark, action_status, delivery_route_code, delivery_round_code, transport_code, updated_by, updated_at)
+     VALUES ($1, $2::date, $3, $4, $5, $6, $7, $8, LOCALTIMESTAMP(0))
      ON CONFLICT (bill_no) DO UPDATE
        SET scheduled_date = EXCLUDED.scheduled_date,
            remark = EXCLUDED.remark,
            action_status = EXCLUDED.action_status,
            delivery_route_code = EXCLUDED.delivery_route_code,
            delivery_round_code = EXCLUDED.delivery_round_code,
+           transport_code = EXCLUDED.transport_code,
            updated_by = EXCLUDED.updated_by,
            updated_at = LOCALTIMESTAMP(0)`,
-    [code, date, note, status, route, round, user]
+    [code, date, note, status, route, round, transport, user]
   );
   return { success: true };
 }
@@ -162,6 +177,7 @@ async function getPendingBillSchedule(billNo) {
             COALESCE(action_status, '') as action_status,
             COALESCE(delivery_route_code, '') as delivery_route_code,
             COALESCE(delivery_round_code, '') as delivery_round_code,
+            COALESCE(transport_code, '') as transport_code,
             COALESCE(updated_by, '') as updated_by,
             to_char(updated_at,'DD-MM-YYYY HH24:MI') as updated_at
      FROM public.odg_tms_pending_bill

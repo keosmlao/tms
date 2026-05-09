@@ -244,6 +244,7 @@ async function searchManualPendingBills(q) {
             COALESCE(pb.delivery_round_code, '') as delivery_round_code,
             COALESCE(dr.name, '') as delivery_round_name,
             COALESCE(dr.time_label, '') as delivery_round_time_label,
+            COALESCE(pb.transport_code, '') as transport_code,
             'ic_trans' as source_type
      FROM ic_trans a
      LEFT JOIN ar_customer b ON b.code = a.cust_code
@@ -294,6 +295,7 @@ async function searchManualPendingBills(q) {
       delivery_round_code: sched?.delivery_round_code ?? "",
       delivery_round_name: "",
       delivery_round_time_label: "",
+      transport_code: sched?.transport_code ?? "",
     };
   });
   const icSummaries = await getRemainingSummaryMap(icRows.map((row) => row.doc_no));
@@ -320,11 +322,12 @@ async function searchManualPendingBills(q) {
   });
 }
 
-async function addManualPendingBill({ billNo, scheduledDate, deliveryRoundCode, deliveryRouteCode, remark, userCode, sourceType }) {
+async function addManualPendingBill({ billNo, scheduledDate, deliveryRoundCode, deliveryRouteCode, transportCode, remark, userCode, sourceType }) {
   const code = String(billNo ?? "").trim();
   const date = String(scheduledDate ?? "").trim();
   const round = String(deliveryRoundCode ?? "").trim();
   const route = deliveryRouteCode ? String(deliveryRouteCode).trim() : "";
+  const transport = transportCode ? String(transportCode).trim() : "";
   if (!code) throw new Error("bill_no is required");
   if (!date) throw new Error("scheduled_date is required");
   if (!round) throw new Error("delivery_round_code is required");
@@ -351,6 +354,7 @@ async function addManualPendingBill({ billNo, scheduledDate, deliveryRoundCode, 
     actionStatus: "contacted_ready",
     deliveryRoundCode: round,
     deliveryRouteCode: route || null,
+    transportCode: transport || null,
     userCode,
   });
   return { success: true };

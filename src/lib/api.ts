@@ -77,6 +77,10 @@ export const Actions = {
   getReportByBill: reports.getReportByBill,
   getReportMonthlyCar: reports.getReportMonthlyCar,
   getReportMonthlyDriver: reports.getReportMonthlyDriver,
+  getReportPendingDaily: reports.getReportPendingDaily,
+  getReportDeliveredDaily: reports.getReportDeliveredDaily,
+  getReportCancelledDaily: reports.getReportCancelledDaily,
+  getAttemptDeliveryItems: reports.getAttemptDeliveryItems,
 
   // Cars
   getCars: masterData.getCars,

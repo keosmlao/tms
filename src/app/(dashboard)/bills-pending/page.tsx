@@ -107,6 +107,7 @@ interface ManualPendingBill {
   delivery_round_code?: string;
   delivery_round_name?: string;
   delivery_round_time_label?: string;
+  transport_code?: string;
 }
 
 // Flat state model — action_status combines contact result + reason:
@@ -204,6 +205,7 @@ export default function BillsPendingClient() {
   const [manualDate, setManualDate] = useState(getFixedTodayDate());
   const [manualRound, setManualRound] = useState("");
   const [manualRoute, setManualRoute] = useState("");
+  const [manualTransport, setManualTransport] = useState("");
   const [manualRemark, setManualRemark] = useState("");
   const [manualSearching, setManualSearching] = useState(false);
   const [manualSaving, setManualSaving] = useState(false);
@@ -491,6 +493,7 @@ export default function BillsPendingClient() {
     setManualDate(tomorrow);
     setManualRound("");
     setManualRoute("");
+    setManualTransport("");
     setManualRemark("");
   };
 
@@ -525,6 +528,7 @@ export default function BillsPendingClient() {
         scheduled_date: manualDate,
         delivery_round_code: manualRound,
         delivery_route_code: manualRoute || null,
+        transport_code: manualTransport || null,
         remark: manualRemark,
         source_type: manualSelected.source_type ?? null,
       });
@@ -1292,6 +1296,7 @@ export default function BillsPendingClient() {
                               if (bill.scheduled_date) setManualDate(bill.scheduled_date);
                               if (bill.delivery_round_code) setManualRound(bill.delivery_round_code);
                               if (bill.delivery_route_code) setManualRoute(bill.delivery_route_code);
+                              if (bill.transport_code) setManualTransport(bill.transport_code);
                             }}
                             className={`w-full rounded-lg border px-3 py-2 text-left transition-colors ${
                               active
@@ -1351,6 +1356,17 @@ export default function BillsPendingClient() {
                       {deliveryRoutes.map((r) => (
                         <option key={r.code} value={r.code}>
                           {r.name}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                  <div>
+                    <label className="block text-[10px] font-semibold text-slate-500 uppercase tracking-wider mb-1.5">ຂົນສົ່ງ</label>
+                    <select value={manualTransport} onChange={(e) => setManualTransport(e.target.value)} className={inputCls}>
+                      <option value="">-- ບໍ່ກຳນົດ --</option>
+                      {transports.map((t) => (
+                        <option key={t.code} value={t.code}>
+                          {t.name_1}
                         </option>
                       ))}
                     </select>

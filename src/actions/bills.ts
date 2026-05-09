@@ -54,6 +54,7 @@ export async function addManualPendingBill(input: {
   scheduled_date: string;
   delivery_round_code: string;
   delivery_route_code?: string | null;
+  transport_code?: string | null;
   remark?: string | null;
   source_type?: string | null;
 }) {
@@ -63,6 +64,7 @@ export async function addManualPendingBill(input: {
     scheduledDate: input.scheduled_date,
     deliveryRoundCode: input.delivery_round_code,
     deliveryRouteCode: input.delivery_route_code ?? null,
+    transportCode: input.transport_code ?? null,
     remark: input.remark ?? null,
     sourceType: input.source_type ?? null,
     userCode: (s as { code?: string; usercode?: string })?.code ?? (s as { usercode?: string })?.usercode,
@@ -135,6 +137,7 @@ export async function upsertPendingBillSchedule(input: {
   action_status?: string | null;
   delivery_route_code?: string | null;
   delivery_round_code?: string | null;
+  transport_code?: string | null;
 }) {
   const s = await requireSession();
   const current = await svcGetPendingBillSchedule(input.bill_no);
@@ -150,6 +153,9 @@ export async function upsertPendingBillSchedule(input: {
     deliveryRoundCode: has("delivery_round_code")
       ? input.delivery_round_code ?? null
       : current?.delivery_round_code ?? null,
+    transportCode: has("transport_code")
+      ? input.transport_code ?? null
+      : current?.transport_code ?? null,
     userCode: (s as { code?: string })?.code,
   });
 }

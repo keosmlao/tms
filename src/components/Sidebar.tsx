@@ -90,6 +90,9 @@ const navSections: NavSection[] = [
     key: "report",
     items: [
       { label: "ປະຈຳວັນ", href: "/reports/daily", icon: <FaCalendarDay size={13} /> },
+      { label: "ບິນຄ້າງສົ່ງ/ວັນ", href: "/reports/pending-daily", icon: <FaFileInvoice size={13} /> },
+      { label: "ສົ່ງສຳເລັດ/ວັນ", href: "/reports/delivered-daily", icon: <FaFileInvoice size={13} /> },
+      { label: "ຍົກເລີກ/ວັນ", href: "/reports/cancelled-daily", icon: <FaFileInvoice size={13} /> },
       { label: "ຕາມຄົນຂັບ", href: "/reports/by-driver", icon: <FaUserTie size={13} /> },
       { label: "ຕາມລົດ", href: "/reports/by-car", icon: <FaTruck size={13} /> },
       { label: "ຕາມບິນ", href: "/reports/by-bill", icon: <FaFileInvoice size={13} /> },

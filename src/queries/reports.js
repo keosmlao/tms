@@ -106,6 +106,158 @@ async function getReportMonthlyDriver(session, monthly) {
   return result;
 }
 
+// Daily pending-bills report grouped by sale department + transport branch.
+// Reuses getBillsPending so the figures stay in sync with /bills-pending and
+// the dashboard's "ຄ້າງສົ່ງ" tile — no duplicated WHERE clauses to drift.
+//
+// Returns:
+//   { rows, days, departments, transports, totals }
+//   - rows: per-bill records (date, department, transport, bill_no, ...)
+//   - days/departments/transports: distinct sorted dimensions for filter UI
+//   - totals: aggregate { bills, items, qty } for the whole range
+async function getReportPendingDaily(session, fromDate, toDate) {
+  const { getBillsPending } = require("./bills");
+  const { trans } = await getBillsPending(session, fromDate, toDate, "all");
+
+  const rows = trans.map((bill) => ({
+    send_date: bill.send_date ?? null,
+    send_date_display: bill.send_date_display ?? bill.send_date ?? "-",
+    department: (bill.department && String(bill.department).trim()) || "(ບໍ່ກຳນົດພະແນກ)",
+    transport_code: bill.transport_code ?? "",
+    transport: (bill.transport && String(bill.transport).trim()) || "(ບໍ່ກຳນົດຂົນສົ່ງ)",
+    doc_no: bill.doc_no,
+    customer: bill.transport_name || bill.cust_name || bill.cust_code || "-",
+    sale: bill.sale ?? "",
+    remaining_count: Number(bill.remaining_count ?? 0),
+    remaining_qty_total: Number(bill.remaining_qty_total ?? 0),
+    scheduled_date_display: bill.scheduled_date_display ?? "",
+    action_status: bill.action_status ?? "",
+    source_type: bill.source_type ?? "ic_trans_shipment",
+  }));
+
+  const sortedUnique = (vals) => Array.from(new Set(vals)).sort();
+  const totals = rows.reduce(
+    (acc, r) => {
+      acc.bills += 1;
+      acc.items += r.remaining_count;
+      acc.qty += r.remaining_qty_total;
+      return acc;
+    },
+    { bills: 0, items: 0, qty: 0 }
+  );
+
+  return {
+    rows,
+    days: sortedUnique(rows.map((r) => r.send_date_display).filter(Boolean)),
+    departments: sortedUnique(rows.map((r) => r.department)),
+    transports: sortedUnique(rows.map((r) => r.transport)),
+    totals,
+  };
+}
+
+// Helper: per-bill rows for a given final status (1 = ສຳເລັດ, 2 = ຍົກເລີກ),
+// grouped + filterable by sale department + transport branch the same way
+// the pending report does. Driven by sent_end so partial deliveries on the
+// same bill across multiple trips each count once per attempt.
+async function getReportByDeliveryStatus(session, fromDate, toDate, status) {
+  const scope = getBranchScope(session);
+  const branchClause = scope.scoped
+    ? `AND s.transport_code = '${scope.branch}'`
+    : "";
+  const rows = await query(
+    `SELECT
+       to_char(d.sent_end, 'YYYY-MM-DD') AS finished_date,
+       to_char(d.sent_end, 'DD-MM-YYYY') AS finished_date_display,
+       to_char(d.sent_end, 'HH24:MI') AS finished_time,
+       d.bill_no,
+       d.doc_no,
+       COALESCE(NULLIF(TRIM(cust.name_1), ''), d.cust_code, '-') AS customer,
+       COALESCE(NULLIF(TRIM(dep.name_1::text), ''), NULLIF(TRIM(saleU.department::text), ''), '(ບໍ່ກຳນົດພະແນກ)') AS department,
+       COALESCE(NULLIF(TRIM(saleU.name_1::text), ''), '') AS sale,
+       COALESCE(NULLIF(TRIM(s.transport_code), ''), '') AS transport_code,
+       COALESCE(NULLIF(TRIM(tt.name_1::text), ''), '(ບໍ່ກຳນົດຂົນສົ່ງ)') AS transport,
+       COALESCE(NULLIF(TRIM(carT.name_1::text), ''), d.car, '-') AS car,
+       COALESCE(NULLIF(TRIM(drvT.name_1::text), ''), j.driver, '-') AS driver,
+       COALESCE(NULLIF(TRIM(d.count_item::text), ''), '0')::int AS item_count,
+       COALESCE(d.remark, '') AS remark
+     FROM public.odg_tms_detail d
+     LEFT JOIN odg_tms j ON j.doc_no = d.doc_no
+     LEFT JOIN public.ic_trans_shipment s ON s.doc_no = d.bill_no
+     LEFT JOIN public.ic_trans ic ON ic.doc_no = d.bill_no
+     LEFT JOIN erp_user saleU ON saleU.code = ic.sale_code
+     LEFT JOIN erp_department_list dep ON dep.code = saleU.department
+     LEFT JOIN public.transport_type tt ON tt.code = s.transport_code
+     LEFT JOIN ar_customer cust ON cust.code = d.cust_code
+     LEFT JOIN public.odg_tms_car carT ON carT.code = d.car
+     LEFT JOIN public.odg_tms_driver drvT ON drvT.code = j.driver
+     WHERE COALESCE(d.status, 0) = $3
+       AND d.sent_end IS NOT NULL
+       AND d.sent_end::date BETWEEN $1::date AND $2::date
+       AND ${getFixedYearSqlFilter("d.doc_date")}
+       ${branchClause}
+     ORDER BY d.sent_end DESC, d.bill_no`,
+    [fromDate, toDate, status]
+  );
+
+  const sortedUnique = (vals) => Array.from(new Set(vals)).sort();
+  const totals = rows.reduce(
+    (acc, r) => {
+      acc.bills += 1;
+      acc.items += Number(r.item_count) || 0;
+      return acc;
+    },
+    { bills: 0, items: 0 }
+  );
+  return {
+    rows,
+    days: sortedUnique(rows.map((r) => r.finished_date_display)),
+    departments: sortedUnique(rows.map((r) => r.department)),
+    transports: sortedUnique(rows.map((r) => r.transport)),
+    totals,
+  };
+}
+
+async function getReportDeliveredDaily(session, fromDate, toDate) {
+  return getReportByDeliveryStatus(session, fromDate, toDate, 1);
+}
+
+async function getReportCancelledDaily(session, fromDate, toDate) {
+  return getReportByDeliveryStatus(session, fromDate, toDate, 2);
+}
+
+// Per-attempt items: what was loaded into this trip for this bill, and how
+// much actually got delivered. Falls back to ic_trans_detail when the row
+// table is empty (cancelled before pickup) so the UI can still show what
+// the bill contained.
+async function getAttemptDeliveryItems(docNo, billNo) {
+  const items = await query(
+    `SELECT i.item_code,
+            i.item_name,
+            COALESCE(i.qty, 0)::numeric AS qty,
+            COALESCE(i.selected_qty, 0)::numeric AS selected_qty,
+            COALESCE(i.delivered_qty, 0)::numeric AS delivered_qty,
+            i.unit_code
+     FROM public.odg_tms_detail_item i
+     WHERE i.doc_no = $1 AND i.bill_no = $2
+     ORDER BY i.roworder NULLS LAST, i.item_code`,
+    [docNo, billNo]
+  );
+  if (items.length > 0) return items;
+  return query(
+    `SELECT t.item_code,
+            MAX(t.item_name) AS item_name,
+            SUM(COALESCE(t.qty, 0))::numeric AS qty,
+            SUM(COALESCE(t.qty, 0))::numeric AS selected_qty,
+            0::numeric AS delivered_qty,
+            MAX(t.unit_code) AS unit_code
+     FROM ic_trans_detail t
+     WHERE t.doc_no = $1 AND t.item_code NOT LIKE '97%'
+     GROUP BY t.item_code
+     ORDER BY t.item_code`,
+    [billNo]
+  );
+}
+
 module.exports = {
   getReportDaily,
   getReportByDriver,
@@ -113,4 +265,8 @@ module.exports = {
   getReportByBill,
   getReportMonthlyCar,
   getReportMonthlyDriver,
+  getReportPendingDaily,
+  getReportDeliveredDaily,
+  getReportCancelledDaily,
+  getAttemptDeliveryItems,
 };
