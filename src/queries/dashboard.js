@@ -12,7 +12,6 @@ const {
   toDisplayMonth,
   getBranchScope,
   branchFilterJob,
-  getRemainingSummaryMap,
 } = require("./helpers");
 
 async function getDashboardData(session) {
@@ -84,11 +83,22 @@ async function getDashboardData(session) {
     ORDER BY a.create_date_time_now ASC, a.doc_date ASC`,
     [FIXED_YEAR_START, FIXED_YEAR_NEXT_START]
   );
-  const pendingSummaries = await getRemainingSummaryMap(
-    allPendingCandidates.map((bill) => bill.doc_no)
+  // Mirror /bills-pending: include manual pending bills (ic_trans flag 56/72
+  // + service tb_product) alongside ic_trans_shipment so the dashboard count
+  // and the page count reconcile. applyRemainingCounts handles both sources.
+  const { getManualPendingRowsForPending } = require("./bills");
+  const { applyRemainingCounts } = require("./helpers");
+  const manualPendingRaw = await getManualPendingRowsForPending(
+    FIXED_YEAR_START,
+    FIXED_YEAR_NEXT_START
   );
-  const pendingWithRemaining = allPendingCandidates.filter(
-    (bill) => (pendingSummaries.get(bill.doc_no)?.remaining_count ?? 0) > 0
+  const manualScoped = scoped
+    ? manualPendingRaw.filter((bill) => bill.transport_code === userBranch)
+    : manualPendingRaw;
+  const allCandidates = [...allPendingCandidates, ...manualScoped];
+  const counted = await applyRemainingCounts(allCandidates);
+  const pendingWithRemaining = counted.filter(
+    (bill) => Number(bill.count_item ?? 0) > 0
   );
   const trans = pendingWithRemaining.slice(0, 10);
   const transMonth = pendingWithRemaining

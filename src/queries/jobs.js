@@ -1318,10 +1318,10 @@ async function getJobsByStatus(session, fromDate, toDate, jobStatus) {
     LEFT JOIN bill_summary bs ON bs.doc_no = a.doc_no
     WHERE COALESCE(a.approve_status, 0) = 1
       AND COALESCE(a.job_status, 0) = $3
-      AND a.doc_date BETWEEN $1 AND $2
+      AND a.date_logistic BETWEEN $1 AND $2
       AND ${getFixedYearSqlFilter("a.doc_date")}
       ${branchFilterJob(scope, "a")}
-    ORDER BY a.doc_date DESC, a.doc_no DESC`,
+    ORDER BY a.date_logistic DESC, a.doc_no DESC`,
     [from, to, jobStatus]
   );
 }
@@ -1382,7 +1382,7 @@ async function getJobsClosedByDriver(session, fromDate, toDate) {
     LEFT JOIN erp_user adc ON adc.code = a.admin_close_user
     LEFT JOIN bill_summary bs ON bs.doc_no = a.doc_no
     WHERE COALESCE(a.approve_status, 0) = 1
-      AND a.doc_date BETWEEN $1 AND $2
+      AND a.date_logistic BETWEEN $1 AND $2
       AND ${getFixedYearSqlFilter("a.doc_date")}
       AND (
         COALESCE(a.job_status, 0) = 3
@@ -1393,7 +1393,7 @@ async function getJobsClosedByDriver(session, fromDate, toDate) {
         )
       )
       ${branchFilterJob(scope, "a")}
-    ORDER BY a.doc_date DESC, a.doc_no DESC`,
+    ORDER BY a.date_logistic DESC, a.doc_no DESC`,
     [from, to]
   );
 }
@@ -1439,10 +1439,10 @@ async function getJobsWaitingReceive(session, fromDate, toDate) {
     LEFT JOIN bill_summary bs ON bs.doc_no = a.doc_no
     WHERE COALESCE(a.approve_status, 0) = 1
       AND COALESCE(a.job_status, 0) = 0
-      AND a.doc_date BETWEEN $1 AND $2
+      AND a.date_logistic BETWEEN $1 AND $2
       AND ${getFixedYearSqlFilter("a.doc_date")}
       ${branchFilterJob(scope, "a")}
-    ORDER BY a.doc_date DESC, a.doc_no DESC`,
+    ORDER BY a.date_logistic DESC, a.doc_no DESC`,
     [from, to]
   );
 }
@@ -1488,11 +1488,11 @@ async function getJobsWaitingPickup(session, fromDate, toDate) {
     LEFT JOIN bill_summary bs ON bs.doc_no = a.doc_no
     WHERE COALESCE(a.approve_status, 0) = 1
       AND COALESCE(a.job_status, 0) = 1
-      AND a.doc_date BETWEEN $1 AND $2
+      AND a.date_logistic BETWEEN $1 AND $2
       AND ${getFixedYearSqlFilter("a.doc_date")}
       AND COALESCE(bs.pending_pickup_count, 0) > 0
       ${branchFilterJob(scope, "a")}
-    ORDER BY a.doc_date DESC, a.doc_no DESC`,
+    ORDER BY a.date_logistic DESC, a.doc_no DESC`,
     [from, to]
   );
 }

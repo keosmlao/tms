@@ -472,8 +472,17 @@ function AttemptsCard({ attempts, currentDocNo }: { attempts?: TrackingAttempt[]
                     const sent = Number(it.selected_qty ?? 0);
                     const delivered = Number(it.delivered_qty ?? 0);
                     const isCancelled = status === "ຍົກເລີກ";
-                    const itemDelivered = !isCancelled && delivered > 0 && delivered >= sent;
-                    const itemPartial = !isCancelled && delivered > 0 && delivered < sent;
+                    const isCompleted = status === "ສຳເລັດ";
+                    // When the attempt is finalised, paint each item to match
+                    // the trip outcome — items only fall back to the per-row
+                    // delivered_qty when the trip is still in flight.
+                    const itemDelivered = isCompleted || (!isCancelled && delivered > 0 && delivered >= sent);
+                    const itemPartial = !isCancelled && !isCompleted && delivered > 0 && delivered < sent;
+                    const displayQty = isCompleted
+                      ? sent
+                      : delivered > 0 && delivered !== sent
+                      ? `${delivered}/${sent}`
+                      : sent;
                     return (
                       <div key={it.item_code} className="px-3 py-1.5 flex items-center gap-2 text-[11px]">
                         <FaBox size={9} className={
@@ -482,7 +491,11 @@ function AttemptsCard({ attempts, currentDocNo }: { attempts?: TrackingAttempt[]
                           : isCancelled ? "text-rose-500"
                           : "text-slate-400"
                         } />
-                        <span className="flex-1 text-slate-700 dark:text-slate-300 truncate" title={it.item_name}>
+                        <span className={`flex-1 truncate ${
+                          isCancelled
+                            ? "text-rose-600/80 line-through dark:text-rose-400/80"
+                            : "text-slate-700 dark:text-slate-300"
+                        }`} title={it.item_name}>
                           {it.item_name || it.item_code}
                         </span>
                         <span className={`tabular-nums font-semibold ${
@@ -491,7 +504,7 @@ function AttemptsCard({ attempts, currentDocNo }: { attempts?: TrackingAttempt[]
                           : isCancelled ? "text-rose-500"
                           : "text-slate-500"
                         }`}>
-                          {delivered > 0 && delivered !== sent ? `${delivered}/${sent}` : sent}
+                          {displayQty}
                           <span className="ml-0.5 text-[10px] text-slate-400">{it.unit_code}</span>
                         </span>
                       </div>
