@@ -86,8 +86,7 @@ async function getDashboardData(session) {
   // Mirror /bills-pending: include manual pending bills (ic_trans flag 56/72
   // + service tb_product) alongside ic_trans_shipment so the dashboard count
   // and the page count reconcile. applyRemainingCounts handles both sources.
-  const { getManualPendingRowsForPending } = require("./bills");
-  const { applyRemainingCounts } = require("./helpers");
+  const { getManualPendingRowsForPending, applyRemainingCounts } = require("./bills");
   const manualPendingRaw = await getManualPendingRowsForPending(
     FIXED_YEAR_START,
     FIXED_YEAR_NEXT_START

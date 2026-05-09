@@ -1066,6 +1066,7 @@ async function getBillsPartialList(session, fromDate, toDate) {
 }
 
 module.exports = {
+  applyRemainingCounts,
   getAvailableBillsWithProducts,
   getAvailableBills,
   getAvailableBillProducts,
@@ -1073,6 +1074,7 @@ module.exports = {
   addManualPendingBill,
   removeManualPendingBill,
   getBillsPending,
+  getManualPendingRowsForPending,
   updateBillTransport,
   getBillProducts,
   getBillsWaitingSent,
