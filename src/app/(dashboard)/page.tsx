@@ -775,7 +775,11 @@ export default function DashboardPage() {
     ];
     const teams = data.user_branch ? allTeams.filter((t) => t.branch === data.user_branch) : allTeams;
 
-    const totalPending = teams.reduce((s, t) => s + toNumber(t.stats.still), 0);
+    // Use the pending-summary year total directly so the Hero "ຄ້າງສົ່ງ" KPI
+    // matches the count on /bills-pending (and dashboard's own ປີ tab).
+    // The per-team `still` field excludes manual bills + bills outside the
+    // 3 hard-coded branch buckets, so summing teams under-counts.
+    const totalPending = toNumber(data.pending_summary.year_pending);
     const totalComplete = teams.reduce((s, t) => s + toNumber(t.stats.complete), 0);
     const completionRate = getPercent(totalComplete, totalPending + totalComplete);
     const logisticRate = getPercent(logistic, totalBills);
