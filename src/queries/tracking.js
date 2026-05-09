@@ -7,6 +7,7 @@ const {
 const { ensurePendingBillSchema } = require("./pending-bill");
 const { ensureDeliveryRouteSchema } = require("./delivery-route");
 const { ensureDeliveryRoundSchema } = require("./delivery-round");
+const { ensureDeliveryWorkflowSchema } = require("./delivery");
 
 const trackingCache = globalThis;
 const REALTIME_PROVIDER_MIN_GAP_MS = Math.max(
@@ -183,6 +184,7 @@ async function getBillAttempts(billNo, branchClause = "") {
 }
 
 async function trackBill(session, search) {
+  await ensureDeliveryWorkflowSchema();
   const scope = getBranchScope(session);
   const branchClause = scope.scoped
     ? `AND EXISTS (SELECT 1 FROM public.ic_trans_shipment __ts WHERE __ts.doc_no = a.bill_no AND __ts.transport_code = '${scope.branch}')`
@@ -205,7 +207,7 @@ async function trackBill(session, search) {
       ) ORDER BY event_at ASC NULLS LAST) FROM (
         SELECT create_date_time_now AS event_at, to_char(create_date_time_now,'DD-MM-YYYY') as doc_date, to_char(create_date_time_now,'HH24:MI') as doc_time, 'ຈັດຖ້ຽວແລ້ວ' as status, '' as remark FROM odg_tms_detail WHERE bill_no=a.bill_no AND doc_no=a.doc_no
         UNION ALL SELECT recipt_job, to_char(recipt_job,'DD-MM-YYYY'), to_char(recipt_job,'HH24:MI'), 'ຮັບຖ້ຽວ / ເບີກເຄື່ອງ', COALESCE(NULLIF(TRIM(ott.name_1), ''), NULLIF(TRIM(b.origin_transport_code), ''), '') FROM odg_tms_detail WHERE recipt_job IS NOT NULL AND bill_no=a.bill_no AND doc_no=a.doc_no
-        UNION ALL SELECT sent_start, to_char(sent_start,'DD-MM-YYYY'), to_char(sent_start,'HH24:MI'), 'ເລີ່ມຈັດສົ່ງ', '' FROM odg_tms_detail WHERE sent_start IS NOT NULL AND bill_no=a.bill_no AND doc_no=a.doc_no
+        UNION ALL SELECT COALESCE(b.dispatch_started_at, sent_start), to_char(COALESCE(b.dispatch_started_at, sent_start),'DD-MM-YYYY'), to_char(COALESCE(b.dispatch_started_at, sent_start),'HH24:MI'), 'ເລີ່ມຈັດສົ່ງ', '' FROM odg_tms_detail WHERE COALESCE(b.dispatch_started_at, sent_start) IS NOT NULL AND bill_no=a.bill_no AND doc_no=a.doc_no
         UNION ALL SELECT sent_end, to_char(sent_end,'DD-MM-YYYY'), to_char(sent_end,'HH24:MI'), case when status=2 then 'ຍົກເລີກຈັດສົ່ງ' else 'ຈັດສົ່ງສຳເລັດ' end, remark FROM odg_tms_detail WHERE sent_end IS NOT NULL AND bill_no=a.bill_no AND doc_no=a.doc_no
         UNION ALL SELECT b.job_close, to_char(b.job_close,'DD-MM-YYYY'), to_char(b.job_close,'HH24:MI'), 'ຄົນຂັບປິດງານ', '' WHERE b.job_close IS NOT NULL
         UNION ALL SELECT b.admin_close_at, to_char(b.admin_close_at,'DD-MM-YYYY'), to_char(b.admin_close_at,'HH24:MI'), 'admin ປິດຖ້ຽວ', '' WHERE b.admin_close_at IS NOT NULL
@@ -341,6 +343,7 @@ async function trackBill(session, search) {
 // customer-facing page can show delivery status without exposing private
 // data. Looks up the most recent dispatch for the given bill_no.
 async function trackBillPublic(billNo) {
+  await ensureDeliveryWorkflowSchema();
   const text = String(billNo ?? "").trim().toUpperCase();
   if (!text) return null;
 
@@ -365,7 +368,7 @@ async function trackBillPublic(billNo) {
             ) ORDER BY event_at ASC NULLS LAST) FROM (
               SELECT create_date_time_now AS event_at, to_char(create_date_time_now,'DD-MM-YYYY') as doc_date, to_char(create_date_time_now,'HH24:MI') as doc_time, 'ຈັດຖ້ຽວແລ້ວ' as status, '' as remark FROM odg_tms_detail WHERE bill_no=a.bill_no AND doc_no=a.doc_no
               UNION ALL SELECT recipt_job, to_char(recipt_job,'DD-MM-YYYY'), to_char(recipt_job,'HH24:MI'), 'ຮັບຖ້ຽວ / ເບີກເຄື່ອງ', COALESCE(NULLIF(TRIM(ott.name_1), ''), NULLIF(TRIM(j.origin_transport_code), ''), '') FROM odg_tms_detail WHERE recipt_job IS NOT NULL AND bill_no=a.bill_no AND doc_no=a.doc_no
-              UNION ALL SELECT sent_start, to_char(sent_start,'DD-MM-YYYY'), to_char(sent_start,'HH24:MI'), 'ເລີ່ມຈັດສົ່ງ', '' FROM odg_tms_detail WHERE sent_start IS NOT NULL AND bill_no=a.bill_no AND doc_no=a.doc_no
+              UNION ALL SELECT COALESCE(j.dispatch_started_at, sent_start), to_char(COALESCE(j.dispatch_started_at, sent_start),'DD-MM-YYYY'), to_char(COALESCE(j.dispatch_started_at, sent_start),'HH24:MI'), 'ເລີ່ມຈັດສົ່ງ', '' FROM odg_tms_detail WHERE COALESCE(j.dispatch_started_at, sent_start) IS NOT NULL AND bill_no=a.bill_no AND doc_no=a.doc_no
               UNION ALL SELECT sent_end, to_char(sent_end,'DD-MM-YYYY'), to_char(sent_end,'HH24:MI'), case when status=2 then 'ຍົກເລີກຈັດສົ່ງ' else 'ຈັດສົ່ງສຳເລັດ' end, remark FROM odg_tms_detail WHERE sent_end IS NOT NULL AND bill_no=a.bill_no AND doc_no=a.doc_no
               UNION ALL SELECT j.job_close, to_char(j.job_close,'DD-MM-YYYY'), to_char(j.job_close,'HH24:MI'), 'ຄົນຂັບປິດງານ', '' WHERE j.job_close IS NOT NULL
               UNION ALL SELECT j.admin_close_at, to_char(j.admin_close_at,'DD-MM-YYYY'), to_char(j.admin_close_at,'HH24:MI'), 'admin ປິດຖ້ຽວ', '' WHERE j.admin_close_at IS NOT NULL

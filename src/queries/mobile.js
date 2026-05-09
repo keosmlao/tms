@@ -101,7 +101,7 @@ async function mobileJobsList(driverId, date) {
         COUNT(*) FILTER (WHERE COALESCE(d.status, 0) = 1)::int AS completed_bill_count,
         COUNT(*) FILTER (WHERE COALESCE(d.status, 0) = 2)::int AS cancelled_bill_count,
         MIN(d.recipt_job) AS received_at,
-        MIN(d.sent_start) FILTER (WHERE d.sent_start IS NOT NULL) AS dispatch_started_at
+        MIN(d.sent_start) FILTER (WHERE d.sent_start IS NOT NULL) AS first_bill_started_at
       FROM public.odg_tms_detail d
       WHERE ${getFixedYearSqlFilter("d.doc_date")}
       GROUP BY d.doc_no
@@ -117,7 +117,7 @@ async function mobileJobsList(driverId, date) {
       COALESCE(bs.completed_bill_count, 0) as completed_bill_count,
       COALESCE(bs.cancelled_bill_count, 0) as cancelled_bill_count,
       COALESCE(to_char(bs.received_at,'DD-MM-YYYY HH24:MI'), '-') as received_at,
-      COALESCE(to_char(bs.dispatch_started_at,'DD-MM-YYYY HH24:MI'), '-') as dispatch_started_at,
+      COALESCE(to_char(a.dispatch_started_at,'DD-MM-YYYY HH24:MI'), to_char(bs.first_bill_started_at,'DD-MM-YYYY HH24:MI'), '-') as dispatch_started_at,
       COALESCE(a.miles_start, '') as miles_start,
       -- Same rationale as the bills query — keep image bytes out of the list
       -- response, expose only a presence flag. Drivers rarely need to see
@@ -329,6 +329,7 @@ async function mobileJobAction(body) {
         await client.query(
           `UPDATE odg_tms
            SET job_status = 2,
+               dispatch_started_at = COALESCE(dispatch_started_at, LOCALTIMESTAMP(0)),
                miles_start = COALESCE($2, miles_start),
                img_start = COALESCE($3, img_start),
                lat_start = COALESCE($4, lat_start),

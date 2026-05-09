@@ -65,6 +65,10 @@ async function ensureDeliveryWorkflowSchemaInternal(db) {
     ALTER TABLE public.odg_tms
     ADD COLUMN IF NOT EXISTS admin_close_user character varying
   `);
+  await safeDdl(db, `
+    ALTER TABLE public.odg_tms
+    ADD COLUMN IF NOT EXISTS dispatch_started_at timestamp without time zone
+  `);
 
   await safeDdl(db, `
     CREATE TABLE IF NOT EXISTS public.odg_tms_travel_history (
@@ -140,26 +144,26 @@ async function ensureDeliveryWorkflowSchema(client) {
   // this short-circuit each mobile API request was re-running ~10 DDL
   // statements, which can stall under concurrent load while ALTER TABLE waits
   // for an ACCESS EXCLUSIVE lock.
-  if (deliveryCache.__tmsDeliverySchemaReady_v2) return;
+  if (deliveryCache.__tmsDeliverySchemaReady_v3) return;
 
   const isSharedPool = !client || client === pool;
   if (!isSharedPool) {
     await ensureDeliveryWorkflowSchemaInternal(client);
-    deliveryCache.__tmsDeliverySchemaReady_v2 = true;
+    deliveryCache.__tmsDeliverySchemaReady_v3 = true;
     return;
   }
 
-  if (!deliveryCache.__tmsDeliverySchemaPromise) {
-    deliveryCache.__tmsDeliverySchemaPromise = ensureDeliveryWorkflowSchemaInternal(pool)
+  if (!deliveryCache.__tmsDeliverySchemaPromise_v3) {
+    deliveryCache.__tmsDeliverySchemaPromise_v3 = ensureDeliveryWorkflowSchemaInternal(pool)
       .then(() => {
-        deliveryCache.__tmsDeliverySchemaReady_v2 = true;
+        deliveryCache.__tmsDeliverySchemaReady_v3 = true;
       })
       .catch((err) => {
-        deliveryCache.__tmsDeliverySchemaPromise = null;
+        deliveryCache.__tmsDeliverySchemaPromise_v3 = null;
         throw err;
       });
   }
-  await deliveryCache.__tmsDeliverySchemaPromise;
+  await deliveryCache.__tmsDeliverySchemaPromise_v3;
 }
 
 async function ensureJobDeliveryItems(docNo, client) {
