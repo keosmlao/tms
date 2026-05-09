@@ -1,4 +1,5 @@
 const { pool, query, queryOne } = require("../lib/db");
+const { getBranchScope } = require("./helpers");
 
 const fuelCache = globalThis;
 
@@ -39,6 +40,13 @@ async function ensureFuelSchemaInternal(db) {
       created_at timestamp without time zone DEFAULT LOCALTIMESTAMP(0)
     )
   `);
+  // Per-row branch tag so the dashboard can scope to the user's logistic
+  // branch. NULL = legacy row (saved before this column existed) — those
+  // rows are still surfaced when the viewer has no branch.
+  await safeDdl(db, `
+    ALTER TABLE public.odg_tms_fuel_log
+    ADD COLUMN IF NOT EXISTS transport_code character varying
+  `);
   await safeDdl(db, `
     CREATE INDEX IF NOT EXISTS idx_odg_tms_fuel_log_date
     ON public.odg_tms_fuel_log (fuel_date)
@@ -46,6 +54,10 @@ async function ensureFuelSchemaInternal(db) {
   await safeDdl(db, `
     CREATE INDEX IF NOT EXISTS idx_odg_tms_fuel_log_user
     ON public.odg_tms_fuel_log (user_code)
+  `);
+  await safeDdl(db, `
+    CREATE INDEX IF NOT EXISTS idx_odg_tms_fuel_log_transport
+    ON public.odg_tms_fuel_log (transport_code)
   `);
 }
 
@@ -98,10 +110,10 @@ async function saveFuelRefill(payload, client) {
   const sql = `
     INSERT INTO public.odg_tms_fuel_log
       (fuel_date, user_code, driver_name, car, doc_no, liters, amount, odometer,
-       station, note, image_data, lat, lng)
+       station, note, image_data, lat, lng, transport_code)
     VALUES (
       COALESCE($1::date, CURRENT_DATE),
-      $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13
+      $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14
     )
     RETURNING id
   `;
@@ -119,12 +131,13 @@ async function saveFuelRefill(payload, client) {
     asNullableText(payload?.image_data),
     asNullableText(payload?.lat),
     asNullableText(payload?.lng),
+    asNullableText(payload?.transport_code),
   ];
   const result = await db.query(sql, params);
   return { success: true, id: result.rows[0]?.id ?? null };
 }
 
-async function getFuelLogs({ fromDate, toDate, search, userCode } = {}) {
+async function getFuelLogs({ fromDate, toDate, search, userCode, session } = {}) {
   await ensureFuelSchema();
 
   const params = [];
@@ -141,6 +154,14 @@ async function getFuelLogs({ fromDate, toDate, search, userCode } = {}) {
   if (userCode) {
     params.push(userCode);
     where.push(`user_code = $${params.length}`);
+  }
+  // Branch scope: when the viewer has a logistic_code, only show their
+  // branch's refills. Legacy rows (transport_code IS NULL) stay visible so
+  // history isn't lost. Viewers with no branch see everything.
+  const scope = getBranchScope(session);
+  if (scope.scoped) {
+    params.push(scope.branch);
+    where.push(`(transport_code = $${params.length} OR transport_code IS NULL)`);
   }
   if (search) {
     params.push(`%${search}%`);
@@ -179,7 +200,7 @@ async function getFuelLogs({ fromDate, toDate, search, userCode } = {}) {
   return rows;
 }
 
-async function getFuelSummary({ fromDate, toDate, userCode } = {}) {
+async function getFuelSummary({ fromDate, toDate, userCode, session } = {}) {
   await ensureFuelSchema();
   const params = [];
   const where = [];
@@ -194,6 +215,11 @@ async function getFuelSummary({ fromDate, toDate, userCode } = {}) {
   if (userCode) {
     params.push(userCode);
     where.push(`user_code = $${params.length}`);
+  }
+  const scope = getBranchScope(session);
+  if (scope.scoped) {
+    params.push(scope.branch);
+    where.push(`(transport_code = $${params.length} OR transport_code IS NULL)`);
   }
   const whereClause = where.length ? `WHERE ${where.join(" AND ")}` : "";
   const row = await queryOne(

@@ -203,6 +203,7 @@ export default function BillsPendingClient() {
   const [manualSelected, setManualSelected] = useState<ManualPendingBill | null>(null);
   const [manualDate, setManualDate] = useState(getFixedTodayDate());
   const [manualRound, setManualRound] = useState("");
+  const [manualRoute, setManualRoute] = useState("");
   const [manualRemark, setManualRemark] = useState("");
   const [manualSearching, setManualSearching] = useState(false);
   const [manualSaving, setManualSaving] = useState(false);
@@ -489,6 +490,7 @@ export default function BillsPendingClient() {
     setManualSelected(null);
     setManualDate(tomorrow);
     setManualRound("");
+    setManualRoute("");
     setManualRemark("");
   };
 
@@ -522,6 +524,7 @@ export default function BillsPendingClient() {
         bill_no: manualSelected.doc_no,
         scheduled_date: manualDate,
         delivery_round_code: manualRound,
+        delivery_route_code: manualRoute || null,
         remark: manualRemark,
         source_type: manualSelected.source_type ?? null,
       });
@@ -1288,6 +1291,7 @@ export default function BillsPendingClient() {
                               setManualSelected(bill);
                               if (bill.scheduled_date) setManualDate(bill.scheduled_date);
                               if (bill.delivery_round_code) setManualRound(bill.delivery_round_code);
+                              if (bill.delivery_route_code) setManualRoute(bill.delivery_route_code);
                             }}
                             className={`w-full rounded-lg border px-3 py-2 text-left transition-colors ${
                               active
@@ -1336,6 +1340,17 @@ export default function BillsPendingClient() {
                       {deliveryRounds.map((r) => (
                         <option key={r.code} value={r.code}>
                           {r.name}{r.time_label ? ` (${r.time_label})` : ""}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                  <div>
+                    <label className="block text-[10px] font-semibold text-slate-500 uppercase tracking-wider mb-1.5">ສາຍທາງ</label>
+                    <select value={manualRoute} onChange={(e) => setManualRoute(e.target.value)} className={inputCls}>
+                      <option value="">-- ບໍ່ກຳນົດ --</option>
+                      {deliveryRoutes.map((r) => (
+                        <option key={r.code} value={r.code}>
+                          {r.name}
                         </option>
                       ))}
                     </select>

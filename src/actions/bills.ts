@@ -53,6 +53,7 @@ export async function addManualPendingBill(input: {
   bill_no: string;
   scheduled_date: string;
   delivery_round_code: string;
+  delivery_route_code?: string | null;
   remark?: string | null;
   source_type?: string | null;
 }) {
@@ -61,6 +62,7 @@ export async function addManualPendingBill(input: {
     billNo: input.bill_no,
     scheduledDate: input.scheduled_date,
     deliveryRoundCode: input.delivery_round_code,
+    deliveryRouteCode: input.delivery_route_code ?? null,
     remark: input.remark ?? null,
     sourceType: input.source_type ?? null,
     userCode: (s as { code?: string; usercode?: string })?.code ?? (s as { usercode?: string })?.usercode,

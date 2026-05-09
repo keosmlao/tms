@@ -17,13 +17,13 @@ export interface FuelLogFilter {
 }
 
 export async function getFuelLogs(filter: FuelLogFilter = {}) {
-  await requireSession();
-  return svcGetFuelLogs(filter);
+  const session = await requireSession();
+  return svcGetFuelLogs({ ...filter, session });
 }
 
 export async function getFuelSummary(filter: FuelLogFilter = {}) {
-  await requireSession();
-  return svcGetFuelSummary(filter);
+  const session = await requireSession();
+  return svcGetFuelSummary({ ...filter, session });
 }
 
 export async function getFuelImage(id: number | string) {
@@ -50,6 +50,7 @@ export interface FuelRefillInput {
   image_data?: string;
   lat?: string;
   lng?: string;
+  transport_code?: string;
 }
 
 export async function saveFuelRefill(input: FuelRefillInput) {
@@ -58,5 +59,6 @@ export async function saveFuelRefill(input: FuelRefillInput) {
     ...input,
     user_code: input.user_code ?? (s as { code?: string })?.code,
     driver_name: input.driver_name ?? (s as { name_1?: string })?.name_1,
+    transport_code: (s as { logistic_code?: string })?.logistic_code,
   });
 }

@@ -118,7 +118,7 @@ const FuelRefill = z.object({
   doc_no: OptionalString,
   liters: z.coerce.number().nonnegative().max(10000),
   amount: z.coerce.number().nonnegative().max(100000000),
-  odometer: z.coerce.number().nonnegative().max(10000000).optional(),
+  odometer: z.coerce.number().nonnegative().max(10000000).nullish(),
   station: OptionalString,
   note: OptionalString,
   image_data: DataUri,

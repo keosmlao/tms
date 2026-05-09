@@ -44,20 +44,30 @@ export function parseSearchParams<T>(
 // Common building blocks. Mobile callers send everything as strings; we coerce
 // + trim + bound at the edge so query/action code can trust the shapes.
 export const NonEmptyString = z.string().trim().min(1);
+// Mobile clients (Dart/Swift) JSON-encode missing values as `null`, not by
+// omitting the key. Use .nullish() everywhere a field is optional so the
+// schema accepts both null and undefined uniformly.
 export const OptionalString = z
   .string()
   .trim()
-  .optional()
+  .nullish()
   .transform((v) => (v && v.length ? v : undefined));
 export const DateLike = z
   .string()
   .trim()
   .regex(/^\d{4}-\d{2}-\d{2}$/, "must be YYYY-MM-DD")
-  .optional();
-export const LatLng = z.string().trim().regex(/^-?\d+(\.\d+)?$/, "must be a number").optional();
+  .nullish()
+  .transform((v) => (v ? v : undefined));
+export const LatLng = z
+  .string()
+  .trim()
+  .regex(/^-?\d+(\.\d+)?$/, "must be a number")
+  .nullish()
+  .transform((v) => (v ? v : undefined));
 // Data URI cap at 8MB base64 (~6MB binary) — anything larger is a misuse.
 export const DataUri = z
   .string()
   .max(8 * 1024 * 1024, "image too large")
   .refine((s) => s.startsWith("data:image/"), "must be a data:image/* URI")
-  .optional();
+  .nullish()
+  .transform((v) => (v ? v : undefined));

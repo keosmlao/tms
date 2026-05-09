@@ -320,10 +320,11 @@ async function searchManualPendingBills(q) {
   });
 }
 
-async function addManualPendingBill({ billNo, scheduledDate, deliveryRoundCode, remark, userCode, sourceType }) {
+async function addManualPendingBill({ billNo, scheduledDate, deliveryRoundCode, deliveryRouteCode, remark, userCode, sourceType }) {
   const code = String(billNo ?? "").trim();
   const date = String(scheduledDate ?? "").trim();
   const round = String(deliveryRoundCode ?? "").trim();
+  const route = deliveryRouteCode ? String(deliveryRouteCode).trim() : "";
   if (!code) throw new Error("bill_no is required");
   if (!date) throw new Error("scheduled_date is required");
   if (!round) throw new Error("delivery_round_code is required");
@@ -349,6 +350,7 @@ async function addManualPendingBill({ billNo, scheduledDate, deliveryRoundCode, 
     remark: remark ?? null,
     actionStatus: "contacted_ready",
     deliveryRoundCode: round,
+    deliveryRouteCode: route || null,
     userCode,
   });
   return { success: true };
