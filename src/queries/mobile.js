@@ -166,9 +166,10 @@ function normalizeItems(value) {
 async function notifyJobDispatchStarted(docNo) {
   try {
     const dispatchBills = await query(
-      `SELECT bill_no, to_char(LOCALTIMESTAMP(0), 'DD-MM HH24:MI') AS dispatch_at
-       FROM public.odg_tms_detail
-       WHERE doc_no=$1 AND ${getFixedYearSqlFilter("doc_date")}`,
+      `SELECT d.bill_no, to_char(j.dispatch_started_at, 'DD-MM HH24:MI') AS dispatch_at
+       FROM public.odg_tms_detail d
+       LEFT JOIN public.odg_tms j ON j.doc_no = d.doc_no
+       WHERE d.doc_no=$1 AND ${getFixedYearSqlFilter("d.doc_date")}`,
       [docNo]
     );
     for (const b of dispatchBills) {

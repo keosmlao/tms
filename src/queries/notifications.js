@@ -100,6 +100,60 @@ async function getBillTimeline(billNo, activeLabel, overrides = {}) {
   }
 }
 
+// Translate odg_tms_pending_bill.action_status into the Lao label shown in
+// the LINE bubble's pre-trip section. Mirrors contactStatusLabel in
+// tracking.js but kept local so this module has no cross-imports.
+function preTripContactLabel(status) {
+  switch (status) {
+    case "contacted_ready":
+      return "ພ້ອມຮັບ";
+    case "contact_failed":
+      return "ຕິດຕໍ່ບໍ່ໄດ້";
+    case "customer_postponed":
+      return "ລູກຄ້າເລື່ອນວັນຮັບ";
+    case "customer_cancelled":
+      return "ລູກຄ້າປະຕິເສດ/ຍົກເລີກ";
+    default:
+      return "";
+  }
+}
+
+// Pre-trip status snapshot for the LINE bubble's "ສະຖານະບິນກ່ອນຈັດຖ້ຽວ"
+// section. Pulls from odg_tms_pending_bill (the warehouse pre-call workflow)
+// and the round/route reference tables. Returns null if nothing's set so the
+// caller can skip the section entirely.
+async function getBillPreTrip(billNo) {
+  try {
+    const row = await queryOne(
+      `SELECT pb.action_status,
+              to_char(pb.scheduled_date,'DD-MM-YYYY') AS scheduled_date,
+              COALESCE(dr.name,'')      AS delivery_round_name,
+              COALESCE(dr.time_label,'') AS delivery_round_time,
+              COALESCE(rt.name,'')      AS delivery_route_name
+       FROM public.odg_tms_pending_bill pb
+       LEFT JOIN public.odg_tms_delivery_round dr ON dr.code = pb.delivery_round_code
+       LEFT JOIN public.odg_tms_delivery_route rt ON rt.code = pb.delivery_route_code
+       WHERE pb.bill_no = $1
+       LIMIT 1`,
+      [billNo]
+    );
+    if (!row) return null;
+    const contact = preTripContactLabel(row.action_status);
+    const round = [row.delivery_round_name, row.delivery_round_time].filter(Boolean).join(" ").trim();
+    const result = {
+      contact,
+      scheduledDate: row.scheduled_date || "",
+      round,
+      route: row.delivery_route_name || "",
+    };
+    if (!result.contact && !result.scheduledDate && !result.round && !result.route) return null;
+    return result;
+  } catch (err) {
+    console.warn("[notify] pre-trip lookup failed:", err?.message ?? err);
+    return null;
+  }
+}
+
 async function getBillContext(billNo) {
   // Split the lookup so a malformed date value on one of the joined tables
   // (ic_trans / ar_customer have legacy empty-string dates that pg refuses to
@@ -175,9 +229,10 @@ async function getBillContext(billNo) {
 // link so they can open the live map directly from chat.
 async function notifyCustomerLine(billNo, statusLabel, options = {}) {
   try {
-    const [ctx, customerTestTo] = await Promise.all([
+    const [ctx, customerTestTo, preTrip] = await Promise.all([
       getBillContext(billNo),
       getCustomerLineTestTo(),
+      getBillPreTrip(billNo),
     ]);
     if (!ctx) return;
     const recipient = ctx.cust_line_id || (customerTestTo ? "customer-line-missing" : "");
@@ -197,6 +252,7 @@ async function notifyCustomerLine(billNo, statusLabel, options = {}) {
       statusNote: options.note,
       trackingUrl: trackingLink(billNo),
       testTo: customerTestTo,
+      preTrip,
       timeline,
     });
   } catch (err) {
@@ -206,7 +262,10 @@ async function notifyCustomerLine(billNo, statusLabel, options = {}) {
 
 async function notifySalesLine(billNo, statusLabel, options = {}) {
   try {
-    const ctx = await getBillContext(billNo);
+    const [ctx, preTrip] = await Promise.all([
+      getBillContext(billNo),
+      getBillPreTrip(billNo),
+    ]);
     if (!ctx) return;
 
     // Prefer the bill's own sales person; fall back to a configured OA target
@@ -231,6 +290,7 @@ async function notifySalesLine(billNo, statusLabel, options = {}) {
       driverName: ctx.driver_name,
       statusNote: options.note,
       trackingUrl: trackingLink(billNo),
+      preTrip,
       timeline,
     });
   } catch (err) {

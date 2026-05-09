@@ -101,6 +101,11 @@ const STATUS_COLORS = {
  * @param {string} [input.statusNote]      optional note shown under details
  * @param {string} [input.trackingUrl]     adds an "ຕິດຕາມ" CTA button
  * @param {string} [input.testTo]          optional per-message test redirect
+ * @param {Object} [input.preTrip]          pre-trip status snapshot
+ * @param {string} [input.preTrip.contact]  customer contact status (e.g. "ພ້ອມຮັບ")
+ * @param {string} [input.preTrip.scheduledDate] scheduled delivery date
+ * @param {string} [input.preTrip.round]    delivery round name + time label
+ * @param {string} [input.preTrip.route]    delivery route name
  * @param {Array<{label:string,time?:string,done:boolean,active?:boolean}>} [input.timeline]
  *        Optional ordered timeline of delivery checkpoints. Done steps render
  *        in green, the active step in the bubble's accent colour, future
@@ -119,6 +124,7 @@ async function sendDeliveryFlex(input) {
     statusNote,
     trackingUrl,
     testTo,
+    preTrip,
     timeline,
   } = input ?? {};
 
@@ -155,6 +161,46 @@ async function sendDeliveryFlex(input) {
     { type: "separator", margin: "md" },
     { type: "box", layout: "vertical", spacing: "sm", margin: "md", contents: rows },
   ];
+
+  if (preTrip && (preTrip.contact || preTrip.scheduledDate || preTrip.round || preTrip.route)) {
+    const preTripRows = [];
+    const addPreRow = (label, value) => {
+      if (!value) return;
+      preTripRows.push({
+        type: "box",
+        layout: "baseline",
+        spacing: "sm",
+        contents: [
+          { type: "text", text: label, color: "#94A3B8", size: "xs", flex: 2 },
+          { type: "text", text: String(value), wrap: true, size: "sm", color: "#1E293B", flex: 5 },
+        ],
+      });
+    };
+    addPreRow("ລູກຄ້າ", preTrip.contact);
+    addPreRow("ວັນທີ່", preTrip.scheduledDate);
+    addPreRow("ຮອບ", preTrip.round);
+    addPreRow("ສາຍທາງ", preTrip.route);
+    if (preTripRows.length > 0) {
+      bodyContents.push(
+        { type: "separator", margin: "md" },
+        {
+          type: "text",
+          text: "ສະຖານະບິນກ່ອນຈັດຖ້ຽວ",
+          size: "xs",
+          color: "#64748B",
+          weight: "bold",
+          margin: "md",
+        },
+        {
+          type: "box",
+          layout: "vertical",
+          spacing: "sm",
+          margin: "sm",
+          contents: preTripRows,
+        }
+      );
+    }
+  }
 
   if (Array.isArray(timeline) && timeline.length > 0) {
     const timelineRows = timeline.map((step) => {
