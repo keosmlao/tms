@@ -46,14 +46,15 @@ function trackingLink(billNo) {
 async function getBillTimeline(billNo, activeLabel, overrides = {}) {
   try {
     const row = await queryOne(
-      `SELECT to_char(create_date_time_now,'DD-MM HH24:MI') as created_at,
-              to_char(recipt_job,'DD-MM HH24:MI') as picked_at,
-              to_char(sent_start,'DD-MM HH24:MI') as dispatch_at,
-              to_char(sent_end,'DD-MM HH24:MI') as finished_at,
-              COALESCE(status, 0) as status
-       FROM public.odg_tms_detail
-       WHERE bill_no = $1
-       ORDER BY create_date_time_now DESC NULLS LAST
+      `SELECT to_char(d.create_date_time_now,'DD-MM HH24:MI') as created_at,
+              to_char(d.recipt_job,'DD-MM HH24:MI') as picked_at,
+              to_char(j.dispatch_started_at,'DD-MM HH24:MI') as dispatch_at,
+              to_char(d.sent_end,'DD-MM HH24:MI') as finished_at,
+              COALESCE(d.status, 0) as status
+       FROM public.odg_tms_detail d
+       LEFT JOIN public.odg_tms j ON j.doc_no = d.doc_no
+       WHERE d.bill_no = $1
+       ORDER BY d.create_date_time_now DESC NULLS LAST
        LIMIT 1`,
       [billNo]
     );
