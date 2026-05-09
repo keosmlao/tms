@@ -173,7 +173,10 @@ async function getBillAttempts(billNo, branchClause = "") {
        ) AS cancel_remark,
        -- Items dispatched in this attempt — frontend uses them to show what
        -- was sent. selected_qty = what was loaded; delivered_qty = what
-       -- actually arrived (smaller when partial / cancelled).
+       -- actually arrived (smaller when partial / cancelled). When the row
+       -- table hasn't been populated yet (driver never tapped pickup; trip
+       -- cancelled before pickup) fall back to ic_trans_detail so the user
+       -- still sees what the bill contained.
        COALESCE(
          (SELECT json_agg(json_build_object(
             'item_code', i.item_code,
@@ -185,6 +188,23 @@ async function getBillAttempts(billNo, branchClause = "") {
           ) ORDER BY i.roworder NULLS LAST, i.item_code)
           FROM public.odg_tms_detail_item i
           WHERE i.bill_no = $1 AND i.doc_no = d.doc_no),
+         (SELECT json_agg(json_build_object(
+            'item_code', sub.item_code,
+            'item_name', sub.item_name,
+            'qty', sub.qty,
+            'selected_qty', sub.qty,
+            'delivered_qty', 0,
+            'unit_code', sub.unit_code
+          ) ORDER BY sub.item_code)
+          FROM (
+            SELECT t.item_code,
+                   MAX(t.item_name) AS item_name,
+                   SUM(COALESCE(t.qty, 0))::numeric AS qty,
+                   MAX(t.unit_code) AS unit_code
+            FROM ic_trans_detail t
+            WHERE t.doc_no = $1 AND t.item_code NOT LIKE '97%'
+            GROUP BY t.item_code
+          ) sub),
          '[]'::json
        ) AS items,
        MAX(COALESCE(j.create_date_time_now, d.create_date_time_now, d.doc_date::timestamp)) AS sort_at
