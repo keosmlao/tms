@@ -298,6 +298,23 @@ async function mobileJobAction(body) {
           [billNo]
         );
 
+        // Cascade sent_start = recipt_job when picked up away from the trip's
+        // origin warehouse — those bills leave that warehouse immediately
+        // (no separate "ເລີ່ມຈັດສົ່ງ" step happens from there).
+        await client.query(
+          `UPDATE public.odg_tms_detail d
+           SET sent_start = COALESCE(d.sent_start, d.recipt_job, LOCALTIMESTAMP(0))
+           FROM odg_tms j
+           WHERE d.bill_no = $1
+             AND j.doc_no = d.doc_no
+             AND d.sent_start IS NULL
+             AND COALESCE(d.pickup_transport_code,
+                          (SELECT s.transport_code FROM public.ic_trans_shipment s WHERE s.doc_no = d.bill_no LIMIT 1),
+                          '') <> COALESCE(j.origin_transport_code, '')
+             AND ${getFixedYearSqlFilter("d.doc_date")}`,
+          [billNo]
+        );
+
         await client.query("COMMIT");
         void notifyBillStatus(billNo, "📦 ເບີກເຄື່ອງແລ້ວ");
         return { success: true, doc_no: currentDocNo };
@@ -335,6 +352,26 @@ async function mobileJobAction(body) {
                lng_start = COALESCE($5, lng_start)
            WHERE doc_no = $1 AND COALESCE(approve_status, 0) = 1 AND ${getFixedYearSqlFilter("doc_date")}`,
           [docNo, milesStart, startImage, lat, lng]
+        );
+
+        // Cascade sent_start = dispatch_started_at for bills picked up at
+        // the trip's origin warehouse — for those bills, "leaving the depot"
+        // and "starting delivery" are the same moment. Bills picked up at a
+        // different warehouse (or at the customer) get sent_start set during
+        // pickup_bill / checkin_bill instead.
+        await client.query(
+          `UPDATE public.odg_tms_detail d
+           SET sent_start = COALESCE(d.sent_start, j.dispatch_started_at)
+           FROM odg_tms j
+           LEFT JOIN public.ic_trans_shipment s_inner ON FALSE
+           WHERE d.doc_no = $1
+             AND j.doc_no = d.doc_no
+             AND d.sent_start IS NULL
+             AND COALESCE(d.pickup_transport_code,
+                          (SELECT s.transport_code FROM public.ic_trans_shipment s WHERE s.doc_no = d.bill_no LIMIT 1),
+                          '') = COALESCE(j.origin_transport_code, '')
+             AND ${getFixedYearSqlFilter("d.doc_date")}`,
+          [docNo]
         );
 
         await client.query("COMMIT");
@@ -376,14 +413,15 @@ async function mobileJobAction(body) {
         const dispatchAutoStarted = !currentBill.dispatch_started_at;
 
         // One active checkin per job — block until the previously checked-in
-        // bill is completed or cancelled. A bill is "active" when sent_start
-        // is set, sent_end is still null, and the bill hasn't been finalised
-        // (status NOT IN 1=delivered, 2=cancelled).
+        // bill is completed or cancelled. "Active" now means checkin_at is
+        // set (driver tapped Check in) and the bill hasn't been finalised.
+        // sent_start can be set ahead of checkin (e.g. start_dispatch fills
+        // it for default-warehouse bills), so it's no longer the right gate.
         const activeCheckin = await client.query(
           `SELECT bill_no FROM public.odg_tms_detail
            WHERE doc_no = $1
              AND bill_no <> $2
-             AND sent_start IS NOT NULL
+             AND checkin_at IS NOT NULL
              AND sent_end IS NULL
              AND COALESCE(status, 0) NOT IN (1, 2)
              AND ${getFixedYearSqlFilter("doc_date")}
@@ -396,10 +434,23 @@ async function mobileJobAction(body) {
           );
         }
 
+        // checkin_at = arrival at the destination (always set here).
+        // For customer-pickup bills the same checkin doubles as the moment
+        // the driver picks up + starts delivering, so backfill recipt_job
+        // and sent_start too.
         await client.query(
           `UPDATE public.odg_tms_detail
-           SET sent_start = COALESCE(sent_start, LOCALTIMESTAMP(0)),
-               recipt_job = COALESCE(recipt_job, LOCALTIMESTAMP(0)),
+           SET checkin_at = COALESCE(checkin_at, LOCALTIMESTAMP(0)),
+               recipt_job = CASE
+                 WHEN pickup_transport_code = '__CUSTOMER__'
+                   THEN COALESCE(recipt_job, LOCALTIMESTAMP(0))
+                 ELSE recipt_job
+               END,
+               sent_start = CASE
+                 WHEN pickup_transport_code = '__CUSTOMER__'
+                   THEN COALESCE(sent_start, LOCALTIMESTAMP(0))
+                 ELSE sent_start
+               END,
                lat = COALESCE($2, lat), lng = COALESCE($3, lng)
            WHERE bill_no = $1 AND ${getFixedYearSqlFilter("doc_date")}`,
           [billNo, lat, lng]

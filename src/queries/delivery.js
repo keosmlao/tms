@@ -78,6 +78,22 @@ async function ensureDeliveryWorkflowSchemaInternal(db) {
     ADD COLUMN IF NOT EXISTS pickup_transport_code character varying
   `);
 
+  // checkin_at — moment the driver tapped "Check in" at the destination.
+  // sent_start used to double as both "dispatch start" and "checkin time",
+  // which conflated two different events. We keep sent_start as a backward-
+  // compat mirror but checkin_at is now the canonical timestamp for arrival.
+  await safeDdl(db, `
+    ALTER TABLE public.odg_tms_detail
+    ADD COLUMN IF NOT EXISTS checkin_at timestamp without time zone
+  `);
+  // Backfill existing rows so the new column matches what sent_start already
+  // recorded. Idempotent: only fills NULLs.
+  await safeDdl(db, `
+    UPDATE public.odg_tms_detail
+    SET checkin_at = sent_start
+    WHERE checkin_at IS NULL AND sent_start IS NOT NULL
+  `);
+
   await safeDdl(db, `
     CREATE TABLE IF NOT EXISTS public.odg_tms_travel_history (
       roworder BIGSERIAL PRIMARY KEY,
