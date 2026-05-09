@@ -75,39 +75,18 @@ async function getServiceBillProducts(billNo) {
     [billNo]
   );
   if (billItems.length === 0) return [];
+  // Service bills (tb_product) can be re-delivered for repeat servicing, so
+  // we don't subtract delivered_qty — only the qty currently held by an
+  // in-flight job is unavailable.
   const usageRows = await query(
-    `WITH active_locked AS (
-       SELECT item.item_code,
-              COALESCE(SUM(item.selected_qty), 0)::numeric AS locked_qty
-       FROM public.odg_tms_detail_item item
-       INNER JOIN public.odg_tms_detail det
-         ON det.bill_no = item.bill_no AND det.doc_no = item.doc_no
-       WHERE item.bill_no = $1
-         AND COALESCE(det.status, 0) NOT IN (1, 2)
-       GROUP BY item.item_code
-     ),
-     delivered AS (
-       SELECT item.item_code,
-              COALESCE(SUM(
-                CASE
-                  WHEN COALESCE(det.status, 0) = 1
-                   AND COALESCE(item.delivered_qty, 0) = 0
-                    THEN COALESCE(item.selected_qty, 0)
-                  ELSE COALESCE(item.delivered_qty, 0)
-                END
-              ), 0)::numeric AS delivered_qty
-       FROM public.odg_tms_detail_item item
-       INNER JOIN public.odg_tms_detail det
-         ON det.bill_no = item.bill_no AND det.doc_no = item.doc_no
-       WHERE item.bill_no = $1
-         AND COALESCE(det.status, 0) IN (1, 2)
-       GROUP BY item.item_code
-     )
-     SELECT COALESCE(al.item_code, dl.item_code) as item_code,
-            COALESCE(al.locked_qty, 0)::numeric as locked_qty,
-            COALESCE(dl.delivered_qty, 0)::numeric as delivered_qty
-     FROM active_locked al
-     FULL OUTER JOIN delivered dl ON dl.item_code = al.item_code`,
+    `SELECT item.item_code,
+            COALESCE(SUM(item.selected_qty), 0)::numeric AS locked_qty
+     FROM public.odg_tms_detail_item item
+     INNER JOIN public.odg_tms_detail det
+       ON det.bill_no = item.bill_no AND det.doc_no = item.doc_no
+     WHERE item.bill_no = $1
+       AND COALESCE(det.status, 0) NOT IN (1, 2)
+     GROUP BY item.item_code`,
     [billNo]
   );
   const usage = new Map(usageRows.map((row) => [row.item_code, row]));
@@ -115,9 +94,7 @@ async function getServiceBillProducts(billNo) {
     .map((row) => {
       const used = usage.get(row.item_code);
       const qty = Math.max(
-        Number(row.total_qty ?? 0) -
-          Number(used?.locked_qty ?? 0) -
-          Number(used?.delivered_qty ?? 0),
+        Number(row.total_qty ?? 0) - Number(used?.locked_qty ?? 0),
         0
       );
       return {
@@ -321,12 +298,13 @@ async function searchManualPendingBills(q) {
       count_item: icSummaries.get(row.doc_no)?.remaining_count ?? 0,
     }))
     .filter((row) => row.count_item > 0);
-  const serviceResult = serviceRowsWithSchedule
-    .map((row) => ({
-      ...row,
-      count_item: serviceSummaries.get(row.doc_no)?.remaining_count ?? 0,
-    }))
-    .filter((row) => row.count_item > 0);
+  // Service bills (tb_product) can be re-added to pending after a completed
+  // delivery — the same unit may come back for repeat servicing — so we keep
+  // them in search results regardless of remaining_count.
+  const serviceResult = serviceRowsWithSchedule.map((row) => ({
+    ...row,
+    count_item: serviceSummaries.get(row.doc_no)?.remaining_count ?? 0,
+  }));
   const seen = new Set();
   return [...icResult, ...serviceResult].filter((row) => {
     const key = `${row.source_type}:${row.doc_no}`;

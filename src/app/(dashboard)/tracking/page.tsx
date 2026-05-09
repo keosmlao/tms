@@ -332,9 +332,40 @@ function AttemptsCard({ attempts, currentDocNo }: { attempts?: TrackingAttempt[]
 }
 
 // ==================== Timeline ====================
+const CORE_TIMELINE_KEYS = ["ຈັດຖ້ຽວແລ້ວ", "ຮັບຖ້ຽວ / ເບີກເຄື່ອງ", "ເລີ່ມຈັດສົ່ງ"];
+const FINAL_KEYS = new Set(["ຈັດສົ່ງສຳເລັດ", "ຍົກເລີກຈັດສົ່ງ"]);
+
+type FullStep = TrackingStep & { done: boolean };
+
+function buildFullTimeline(steps: TrackingStep[]): FullStep[] {
+  const remaining = new Map<string, TrackingStep>();
+  for (const s of steps) if (!remaining.has(s.status)) remaining.set(s.status, s);
+
+  const result: FullStep[] = [];
+  for (const key of CORE_TIMELINE_KEYS) {
+    const existing = remaining.get(key);
+    if (existing) {
+      result.push({ ...existing, done: true });
+      remaining.delete(key);
+    } else {
+      result.push({ doc_date: "", doc_time: "", status: key, remark: "", done: false });
+    }
+  }
+
+  for (const s of remaining.values()) result.push({ ...s, done: true });
+
+  const hasFinal = result.some((s) => FINAL_KEYS.has(s.status));
+  if (!hasFinal) {
+    result.push({ doc_date: "", doc_time: "", status: "ຈັດສົ່ງສຳເລັດ", remark: "", done: false });
+  }
+  return result;
+}
+
 function Timeline({ steps }: { steps: TrackingStep[] }) {
   if (!steps.length) return null;
-  const currentIndex = steps.length - 1;
+  const fullSteps = buildFullTimeline(steps);
+  const lastDoneIdx = fullSteps.reduce((acc, s, i) => (s.done ? i : acc), -1);
+  const doneCount = fullSteps.filter((s) => s.done).length;
 
   return (
     <div className="glass rounded-lg overflow-hidden">
@@ -343,12 +374,12 @@ function Timeline({ steps }: { steps: TrackingStep[] }) {
           <FaClock className="text-teal-500" size={12} />
         </div>
         <h2 className="text-sm font-bold text-slate-800 dark:text-white">ປະຫວັດການຈັດສົ່ງ</h2>
-        <span className="ml-auto text-[10px] text-slate-400 font-medium">{steps.length} ລາຍການ</span>
+        <span className="ml-auto text-[10px] text-slate-400 font-medium">{doneCount} / {fullSteps.length} ລາຍການ</span>
       </div>
       <div className="p-5">
         <div className="relative">
-          {steps.map((step, idx) => {
-            const isCurrent = idx === currentIndex;
+          {fullSteps.map((step, idx) => {
+            const isCurrent = idx === lastDoneIdx;
             const isCancelled = step.status === cancelStatus.key;
             const matched = allStatuses.find((s) => s.key === step.status);
             const color: ColorKey = isCancelled ? "rose" : (matched?.color as ColorKey) || "slate";
@@ -360,26 +391,34 @@ function Timeline({ steps }: { steps: TrackingStep[] }) {
 
             return (
               <div key={idx} className="flex gap-3 relative">
-                {idx < steps.length - 1 && (
+                {idx < fullSteps.length - 1 && (
                   <div className="absolute left-[15px] top-8 bottom-0 w-px bg-slate-200" />
                 )}
                 <div
                   className={`relative z-10 w-8 h-8 rounded-full flex items-center justify-center shrink-0 transition-all ${
-                    isCurrent
-                      ? `${cm.activeBg} ${cm.activeText} ring-4 ${cm.activeRing}`
-                      : `${cm.doneBg} ${cm.doneText}`
+                    !step.done
+                      ? "bg-slate-100 text-slate-300 dark:bg-white/5 dark:text-slate-600"
+                      : isCurrent
+                        ? `${cm.activeBg} ${cm.activeText} ring-4 ${cm.activeRing}`
+                        : `${cm.doneBg} ${cm.doneText}`
                   }`}
                 >
                   {icon}
                 </div>
-                <div className={`flex-1 ${idx < steps.length - 1 ? "pb-5" : ""}`}>
+                <div className={`flex-1 ${idx < fullSteps.length - 1 ? "pb-5" : ""}`}>
                   <div className="flex items-start justify-between gap-2">
                     <div>
-                      <p className={`text-sm font-bold ${isCurrent ? "text-slate-900 dark:text-white" : "text-slate-700 dark:text-slate-300"}`}>
+                      <p className={`text-sm font-bold ${
+                        !step.done
+                          ? "text-slate-400 dark:text-slate-500"
+                          : isCurrent
+                            ? "text-slate-900 dark:text-white"
+                            : "text-slate-700 dark:text-slate-300"
+                      }`}>
                         {label}
                       </p>
                       <p className="text-[11px] text-slate-400 mt-0.5">
-                        {step.doc_date} · {step.doc_time}
+                        {step.done ? `${step.doc_date} · ${step.doc_time}` : "ລໍຖ້າ"}
                       </p>
                     </div>
                     {isCurrent && (
