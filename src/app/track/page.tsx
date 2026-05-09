@@ -91,6 +91,15 @@ const COLOR_TONE: Record<string, { bg: string; text: string; ring: string; light
   rose:    { bg: "bg-rose-500",    text: "text-white", ring: "ring-rose-200",    light: "bg-rose-50 text-rose-600" },
 };
 
+function formatBuddhistDisplayDate(value?: string | null) {
+  if (!value || value === "-") return value || "-";
+  return value.replace(/\b(\d{2}-\d{2}-)(\d{4})(?=\b|\s)/g, (_match, prefix: string, year: string) => {
+    const parsedYear = Number.parseInt(year, 10);
+    if (!Number.isFinite(parsedYear) || parsedYear >= 2400) return `${prefix}${year}`;
+    return `${prefix}${parsedYear + 543}`;
+  });
+}
+
 function TrackPageInner() {
   const searchParams = useSearchParams();
   const [bill, setBill] = useState(searchParams.get("bill") ?? "");
@@ -343,7 +352,7 @@ function ProgressCard({ list, status }: { list: TrackingStep[]; status: number }
                     {step.status}
                   </p>
                   <p className="text-[10px] text-slate-400">
-                    {step.doc_date} · {step.doc_time}
+                    {formatBuddhistDisplayDate(step.doc_date)} · {step.doc_time}
                   </p>
                 </div>
               </div>
@@ -398,7 +407,7 @@ function BillInfoCard({ result }: { result: PublicTrackingResult }) {
   return (
     <div className="bg-white dark:bg-slate-900 rounded-xl border border-slate-200 dark:border-slate-800 p-4 grid grid-cols-2 gap-3 text-xs">
       <Info icon={<FaRoute />} label="ເລກບິນ" value={result.bill_no} />
-      <Info icon={<FaCalendar />} label="ວັນທີບິນ" value={result.bill_date} />
+      <Info icon={<FaCalendar />} label="ວັນທີບິນ" value={formatBuddhistDisplayDate(result.bill_date)} />
       <Info icon={<FaTruck />} label="ລົດ" value={result.car || "-"} />
       <Info icon={<FaRoute />} label="ຖ້ຽວ" value={result.doc_no} />
     </div>
@@ -450,7 +459,7 @@ function AttemptsCard({ attempts, currentDocNo }: { attempts?: TrackingAttempt[]
                   {current && <span className="ml-2 text-[10px] text-sky-600">ຖ້ຽວລ່າສຸດ</span>}
                 </p>
                 <p className="text-[10px] text-slate-400">
-                  {attempt.cancelled_at || attempt.created_at || attempt.doc_date || "-"}
+                  {formatBuddhistDisplayDate(attempt.cancelled_at || attempt.created_at || attempt.doc_date || "-")}
                 </p>
                 {attempt.cancel_remark && (
                   <p className="mt-0.5 text-[10px] text-rose-500 truncate">

@@ -171,8 +171,26 @@ export default function ByBillReportPage() {
     });
   }, [items, searchText, filter]);
 
-  const totalPages = Math.max(1, Math.ceil(filteredItems.length / perPage));
-  const pagedItems = filteredItems.slice((currentPage - 1) * perPage, currentPage * perPage);
+  const groupedItems = useMemo(() => {
+    const groups = new Map<string, ReportItem[]>();
+    for (const item of filteredItems) {
+      const key = item.doc_no || "-";
+      const bucket = groups.get(key);
+      if (bucket) bucket.push(item);
+      else groups.set(key, [item]);
+    }
+    return Array.from(groups.entries()).map(([docNo, bills]) => ({
+      docNo,
+      bills,
+      docDate: bills[0]?.doc_date ?? "",
+      car: bills[0]?.car ?? "",
+      driver: bills[0]?.driver ?? "",
+    }));
+  }, [filteredItems]);
+
+  const totalPages = Math.max(1, Math.ceil(groupedItems.length / perPage));
+  const pagedGroups = groupedItems.slice((currentPage - 1) * perPage, currentPage * perPage);
+  const pagedBillCount = pagedGroups.reduce((sum, g) => sum + g.bills.length, 0);
 
   return (
     <div className="space-y-5">
@@ -350,10 +368,10 @@ export default function ByBillReportPage() {
             <div className="flex items-center justify-between px-5 py-3 border-b border-slate-200/30 dark:border-white/5">
               <div>
                 <p className="text-[10px] font-semibold uppercase tracking-widest text-slate-400">Bill Journey</p>
-                <h2 className="text-sm font-bold text-slate-800 dark:text-white">ລາຍການບິນ</h2>
+                <h2 className="text-sm font-bold text-slate-800 dark:text-white">ລາຍການບິນ (ຈັດກຸ່ມຕາມເລກຖ້ຽວ)</h2>
               </div>
               <span className="rounded-full bg-teal-500/10 px-2.5 py-1 text-[11px] font-bold text-teal-600 dark:text-teal-400 tabular-nums">
-                {filteredItems.length} / {items.length}
+                {groupedItems.length} ຖ້ຽວ / {filteredItems.length} ບິນ
               </span>
             </div>
             <div className="overflow-x-auto">
@@ -362,7 +380,7 @@ export default function ByBillReportPage() {
                   <tr className="bg-white/30 dark:bg-white/5 border-b border-slate-200/30 dark:border-white/5 text-[10px] font-semibold uppercase tracking-wider text-slate-500 dark:text-slate-400">
                     <th className="px-3 py-2.5 text-left w-10">#</th>
                     <th className="px-3 py-2.5 text-left">ວັນທີ</th>
-                    <th className="px-3 py-2.5 text-left">ເລກບິນ / ຖ້ຽວ</th>
+                    <th className="px-3 py-2.5 text-left">ເລກບິນ</th>
                     <th className="px-3 py-2.5 text-left">ລູກຄ້າ</th>
                     <th className="px-3 py-2.5 text-left">ລົດ / ຄົນຂັບ</th>
                     <th className="px-3 py-2.5 text-left">ສະຖານະ</th>
@@ -370,76 +388,120 @@ export default function ByBillReportPage() {
                     <th className="px-3 py-2.5 text-left">ໝາຍເຫດ</th>
                   </tr>
                 </thead>
-                <tbody className="divide-y divide-slate-200/30 dark:divide-white/5">
-                  {pagedItems.length === 0 ? (
+                {pagedGroups.length === 0 ? (
+                  <tbody>
                     <tr>
                       <td colSpan={8} className="px-4 py-10 text-center text-xs text-slate-400">
                         ບໍ່ພົບຜົນທີ່ກົງກັບການຄົ້ນຫາ
                       </td>
                     </tr>
-                  ) : (
-                    pagedItems.map((item, index) => {
-                      const phase = classifyBill(item.status_trans);
-                      const style = PHASE_STYLE[phase];
-                      return (
-                        <tr key={`${item.doc_no}-${item.bill_no}`} className="hover:bg-white/30 dark:hover:bg-white/5 transition-colors align-top">
-                          <td className="px-3 py-3">
-                            <span className="inline-flex items-center justify-center min-w-[24px] px-1.5 py-0.5 rounded-md bg-slate-500/10 text-slate-500 dark:text-slate-400 text-[10px] font-bold">
-                              {(currentPage - 1) * perPage + index + 1}
-                            </span>
-                          </td>
-                          <td className="px-3 py-3 text-slate-600 dark:text-slate-300 text-xs whitespace-nowrap">{item.doc_date}</td>
-                          <td className="px-3 py-3">
-                            <p className="text-sm font-bold text-slate-900 dark:text-white">{item.bill_no}</p>
-                            <p className="text-[10px] text-slate-400 font-mono mt-0.5">{item.doc_no}</p>
-                          </td>
-                          <td className="px-3 py-3 text-xs text-slate-700 dark:text-slate-200">{item.cust_code || "-"}</td>
-                          <td className="px-3 py-3">
-                            <div className="flex items-center gap-1.5 text-xs text-slate-700">
-                              <FaTruck size={10} className="text-sky-500" />
-                              <span className="font-medium truncate">{item.car || "-"}</span>
-                            </div>
-                            <div className="mt-0.5 flex items-center gap-1.5 text-[11px] text-slate-500">
-                              <FaUserTie size={9} className="text-sky-500" />
-                              <span className="truncate">{item.driver || "-"}</span>
-                            </div>
-                          </td>
-                          <td className="px-3 py-3">
-                            <span className={`inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-[10px] font-semibold ${style.bg}`}>
-                              <span className={`h-1.5 w-1.5 rounded-full ${style.dot}`} />
-                              {item.status_trans}
-                            </span>
-                          </td>
-                          <td className="px-3 py-3">
-                            <div className="flex flex-col gap-0.5 text-[10px] text-slate-600">
-                              <span className="inline-flex items-center gap-1">
-                                <FaIdCard size={8} className="text-amber-500" />
-                                ຮັບຖ້ຽວ: <span className="font-medium text-slate-700">{item.recipt_job || "-"}</span>
+                  </tbody>
+                ) : (
+                  pagedGroups.map((group, groupIndex) => {
+                    const groupNumber = (currentPage - 1) * perPage + groupIndex + 1;
+                    const billCount = group.bills.length;
+                    const doneCount = group.bills.filter((b) => classifyBill(b.status_trans) === "done").length;
+                    return (
+                      <tbody
+                        key={group.docNo}
+                        className="divide-y divide-slate-200/30 dark:divide-white/5 border-b-4 border-slate-200/40 dark:border-white/10"
+                      >
+                        <tr className="bg-gradient-to-r from-teal-500/10 via-sky-500/5 to-transparent">
+                          <td colSpan={8} className="px-3 py-2.5">
+                            <div className="flex flex-wrap items-center gap-x-4 gap-y-1.5">
+                              <span className="inline-flex items-center justify-center min-w-[24px] px-1.5 py-0.5 rounded-md bg-teal-600/90 text-white text-[10px] font-bold">
+                                #{groupNumber}
                               </span>
-                              <span className="inline-flex items-center gap-1">
-                                <FaPlay size={8} className="text-sky-500" />
-                                ເລີ່ມ: <span className="font-medium text-slate-700">{item.sent_start || "-"}</span>
+                              <span className="inline-flex items-center gap-1.5 text-xs">
+                                <FaFileInvoice size={10} className="text-teal-600 dark:text-teal-400" />
+                                <span className="text-[10px] uppercase tracking-wider text-slate-500 dark:text-slate-400">ຖ້ຽວ</span>
+                                <span className="font-mono font-bold text-slate-900 dark:text-white">{group.docNo}</span>
                               </span>
-                              <span className="inline-flex items-center gap-1">
-                                <FaCheckCircle size={8} className="text-emerald-500" />
-                                ສຳເລັດ: <span className="font-medium text-slate-700">{item.sent_end || "-"}</span>
+                              <span className="inline-flex items-center gap-1.5 text-xs text-slate-700 dark:text-slate-200">
+                                <FaCalendar size={10} className="text-slate-400" />
+                                {group.docDate || "-"}
+                              </span>
+                              <span className="inline-flex items-center gap-1.5 text-xs text-slate-700 dark:text-slate-200">
+                                <FaTruck size={10} className="text-sky-500" />
+                                {group.car || "-"}
+                              </span>
+                              <span className="inline-flex items-center gap-1.5 text-xs text-slate-700 dark:text-slate-200">
+                                <FaUserTie size={10} className="text-sky-500" />
+                                {group.driver || "-"}
+                              </span>
+                              <span className="ml-auto inline-flex items-center gap-1.5 rounded-full bg-white/60 dark:bg-white/10 px-2.5 py-0.5 text-[10px] font-bold text-slate-700 dark:text-slate-200 tabular-nums">
+                                <FaListUl size={9} className="text-teal-500" />
+                                {doneCount}/{billCount} ບິນ
                               </span>
                             </div>
-                          </td>
-                          <td className="px-3 py-3 text-xs text-slate-600 max-w-[200px]">
-                            {item.remark ? (
-                              <span className="block truncate" title={item.remark}>
-                                {item.remark}
-                              </span>
-                            ) : (
-                              <span className="text-slate-400">-</span>
-                            )}
                           </td>
                         </tr>
-                      );
-                    })
-                  )}
-                </tbody>
+                        {group.bills.map((item, billIndex) => {
+                          const phase = classifyBill(item.status_trans);
+                          const style = PHASE_STYLE[phase];
+                          return (
+                            <tr
+                              key={`${item.doc_no}-${item.bill_no}`}
+                              className="hover:bg-white/30 dark:hover:bg-white/5 transition-colors align-top"
+                            >
+                              <td className="px-3 py-3 pl-6">
+                                <span className="inline-flex items-center justify-center min-w-[20px] px-1 py-0.5 rounded bg-slate-500/10 text-slate-500 dark:text-slate-400 text-[10px] font-semibold">
+                                  {billIndex + 1}
+                                </span>
+                              </td>
+                              <td className="px-3 py-3 text-slate-600 dark:text-slate-300 text-xs whitespace-nowrap">{item.doc_date}</td>
+                              <td className="px-3 py-3">
+                                <p className="text-sm font-bold text-slate-900 dark:text-white">{item.bill_no}</p>
+                              </td>
+                              <td className="px-3 py-3 text-xs text-slate-700 dark:text-slate-200">{item.cust_code || "-"}</td>
+                              <td className="px-3 py-3">
+                                <div className="flex items-center gap-1.5 text-xs text-slate-700">
+                                  <FaTruck size={10} className="text-sky-500" />
+                                  <span className="font-medium truncate">{item.car || "-"}</span>
+                                </div>
+                                <div className="mt-0.5 flex items-center gap-1.5 text-[11px] text-slate-500">
+                                  <FaUserTie size={9} className="text-sky-500" />
+                                  <span className="truncate">{item.driver || "-"}</span>
+                                </div>
+                              </td>
+                              <td className="px-3 py-3">
+                                <span className={`inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-[10px] font-semibold ${style.bg}`}>
+                                  <span className={`h-1.5 w-1.5 rounded-full ${style.dot}`} />
+                                  {item.status_trans}
+                                </span>
+                              </td>
+                              <td className="px-3 py-3">
+                                <div className="flex flex-col gap-0.5 text-[10px] text-slate-600">
+                                  <span className="inline-flex items-center gap-1">
+                                    <FaIdCard size={8} className="text-amber-500" />
+                                    ຮັບຖ້ຽວ: <span className="font-medium text-slate-700">{item.recipt_job || "-"}</span>
+                                  </span>
+                                  <span className="inline-flex items-center gap-1">
+                                    <FaPlay size={8} className="text-sky-500" />
+                                    ເລີ່ມ: <span className="font-medium text-slate-700">{item.sent_start || "-"}</span>
+                                  </span>
+                                  <span className="inline-flex items-center gap-1">
+                                    <FaCheckCircle size={8} className="text-emerald-500" />
+                                    ສຳເລັດ: <span className="font-medium text-slate-700">{item.sent_end || "-"}</span>
+                                  </span>
+                                </div>
+                              </td>
+                              <td className="px-3 py-3 text-xs text-slate-600 max-w-[200px]">
+                                {item.remark ? (
+                                  <span className="block truncate" title={item.remark}>
+                                    {item.remark}
+                                  </span>
+                                ) : (
+                                  <span className="text-slate-400">-</span>
+                                )}
+                              </td>
+                            </tr>
+                          );
+                        })}
+                      </tbody>
+                    );
+                  })
+                )}
               </table>
             </div>
 
@@ -448,7 +510,8 @@ export default function ByBillReportPage() {
               <div className="flex items-center justify-between gap-2 px-4 py-3 border-t border-slate-200/30 dark:border-white/5">
                 <p className="text-[11px] text-slate-500">
                   ສະແດງ {(currentPage - 1) * perPage + 1}-
-                  {Math.min(currentPage * perPage, filteredItems.length)} ຈາກ {filteredItems.length}
+                  {Math.min(currentPage * perPage, groupedItems.length)} ຈາກ {groupedItems.length} ຖ້ຽວ
+                  <span className="text-slate-400"> ({pagedBillCount} ບິນ)</span>
                 </p>
                 <div className="flex items-center gap-1">
                   <button
