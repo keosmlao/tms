@@ -65,10 +65,16 @@ interface SelectedProduct extends Product {
   selectedQty: number;
 }
 
+// Special pickup_transport_code value meaning "pickup at customer's home/shop"
+// rather than at a transport_type warehouse. Mirrors the constant used by the
+// backend (no real transport_type code is ever this string).
+export const PICKUP_AT_CUSTOMER = "__CUSTOMER__";
+
 interface AddedBillGroup {
   bill: AvailableBill;
   items: SelectedProduct[];
   forward_transport_code?: string;
+  pickup_transport_code?: string | null;
 }
 
 interface TransportBranch {
@@ -96,6 +102,7 @@ export interface JobForEdit {
     telephone: string;
     count_item: number;
     forward_transport_code: string | null;
+    pickup_transport_code: string | null;
     items: Array<{
       item_code: string;
       item_name: string;
@@ -392,6 +399,7 @@ export default function AddJobClient({
             unit_code: it.unit_code,
           })),
           forward_transport_code: b.forward_transport_code || undefined,
+          pickup_transport_code: b.pickup_transport_code || null,
         };
       }
       return map;
@@ -637,6 +645,20 @@ export default function AddJobClient({
     });
   };
 
+  const setBillPickupCode = (billNo: string, code: string | null) => {
+    setAddedByBill((prev) => {
+      const group = prev[billNo];
+      if (!group) return prev;
+      return {
+        ...prev,
+        [billNo]: {
+          ...group,
+          pickup_transport_code: code,
+        },
+      };
+    });
+  };
+
   const handleRemoveBill = (billNo: string) =>
     setAddedByBill((prev) => {
       const next = { ...prev };
@@ -667,6 +689,7 @@ export default function AddJobClient({
         count_item: group.items.length,
         telephone: group.bill.telephone,
         forward_transport_code: group.forward_transport_code || null,
+        pickup_transport_code: group.pickup_transport_code || null,
         items: group.items.map((p) => ({
           item_code: p.item_code,
           item_name: p.item_name,
@@ -1040,7 +1063,9 @@ export default function AddJobClient({
                     onRemoveBill={() => handleRemoveBill(billNo)}
                     toggleAddedItem={toggleAddedItem}
                     forwardableBranches={forwardableBranches}
+                    transportBranches={transportBranches}
                     onSetForwardCode={(code) => setBillForwardCode(billNo, code)}
+                    onSetPickupCode={(code) => setBillPickupCode(billNo, code)}
                     qtyDrafts={qtyDrafts}
                     setQtyDrafts={setQtyDrafts}
                     commitItemQty={commitItemQty}
@@ -1217,7 +1242,9 @@ function InJobCard({
   onRemoveBill,
   toggleAddedItem,
   forwardableBranches,
+  transportBranches,
   onSetForwardCode,
+  onSetPickupCode,
   qtyDrafts,
   setQtyDrafts,
   commitItemQty,
@@ -1235,7 +1262,9 @@ function InJobCard({
   onRemoveBill: () => void;
   toggleAddedItem: (bill: AvailableBill, product: Product) => void;
   forwardableBranches: TransportBranch[];
+  transportBranches: TransportBranch[];
   onSetForwardCode: (code: string | null) => void;
+  onSetPickupCode: (code: string | null) => void;
   qtyDrafts: Record<string, string>;
   setQtyDrafts: React.Dispatch<React.SetStateAction<Record<string, string>>>;
   commitItemQty: (billNo: string, itemCode: string, maxQty: number) => void;
@@ -1310,6 +1339,28 @@ function InJobCard({
         >
           <FaTimes size={12} />
         </button>
+      </div>
+
+      <div className="flex flex-wrap items-center gap-1.5 border-t border-slate-100 bg-slate-50/60 px-3 py-2 dark:border-slate-800 dark:bg-slate-900/40">
+        <span className="text-[10px] font-semibold text-slate-500 dark:text-slate-400">
+          🏬 ຮັບເຄື່ອງ:
+        </span>
+        <select
+          value={group.pickup_transport_code ?? ""}
+          onChange={(e) => onSetPickupCode(e.target.value === "" ? null : e.target.value)}
+          className="h-7 rounded-md border border-slate-200 bg-white px-1.5 text-[10px] outline-none focus:border-teal-400 focus:ring-2 focus:ring-teal-500/20 dark:border-slate-700 dark:bg-slate-900"
+          title="ຈຸດທີ່ຄົນຂັບໄປຮັບສິນຄ້າຂອງບິນນີ້"
+        >
+          <option value="">
+            ຄ່າເລີ່ມຕົ້ນ ({group.bill.origin_transport_name || group.bill.origin_transport_code || "ສາງຂອງບິນ"})
+          </option>
+          {transportBranches.map((b) => (
+            <option key={b.code} value={b.code}>
+              ສາງ {b.name_1}
+            </option>
+          ))}
+          <option value={PICKUP_AT_CUSTOMER}>🏠 ບ້ານ/ຮ້ານລູກຄ້າ</option>
+        </select>
       </div>
 
       <div className="flex flex-wrap items-center gap-1.5 border-t border-slate-100 bg-slate-50/60 px-3 py-2 dark:border-slate-800 dark:bg-slate-900/40">

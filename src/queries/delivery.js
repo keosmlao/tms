@@ -70,6 +70,14 @@ async function ensureDeliveryWorkflowSchemaInternal(db) {
     ADD COLUMN IF NOT EXISTS dispatch_started_at timestamp without time zone
   `);
 
+  // Per-bill pickup origin override. NULL → use ic_trans_shipment.transport_code
+  // as default. Special value '__CUSTOMER__' → pickup at customer's home/shop.
+  // Any other value → transport_type.code.
+  await safeDdl(db, `
+    ALTER TABLE public.odg_tms_detail
+    ADD COLUMN IF NOT EXISTS pickup_transport_code character varying
+  `);
+
   await safeDdl(db, `
     CREATE TABLE IF NOT EXISTS public.odg_tms_travel_history (
       roworder BIGSERIAL PRIMARY KEY,

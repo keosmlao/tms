@@ -348,7 +348,7 @@ async function mobileJobAction(body) {
 
         const billRow = await client.query(
           `SELECT d.doc_no, d.cust_code, t.approve_status, t.job_status, d.recipt_job,
-                  t.dispatch_started_at
+                  d.pickup_transport_code, t.dispatch_started_at
            FROM public.odg_tms_detail d
            INNER JOIN odg_tms t ON t.doc_no = d.doc_no
            WHERE d.bill_no = $1 AND ${getFixedYearSqlFilter("d.doc_date")}
@@ -362,7 +362,14 @@ async function mobileJobAction(body) {
         if (!currentDocNo) throw new Error("Bill was not found");
         if (Number(currentBill.approve_status ?? 0) !== 1) throw new Error("ຖ້ຽວນີ້ຍັງບໍ່ຖືກອະນຸມັດ");
         if (Number(currentBill.job_status ?? 0) < 1) throw new Error("ກະລຸນາຮັບຖ້ຽວກ່ອນ");
-        if (!currentBill.recipt_job) throw new Error("ກະລຸນາເບີກເຄື່ອງກ່ອນ");
+        // Pickup-at-customer flow collapses pickup + delivery into one stop:
+        // the driver arrives at the customer, hands over the freshly received
+        // goods, and that single checkin counts as both. Skip the recipt_job
+        // gate — we backfill it below in the same UPDATE.
+        const pickupAtCustomer = currentBill.pickup_transport_code === "__CUSTOMER__";
+        if (!pickupAtCustomer && !currentBill.recipt_job) {
+          throw new Error("ກະລຸນາເບີກເຄື່ອງກ່ອນ");
+        }
         // Driver may skip the explicit "ເລີ່ມຈັດສົ່ງ" button (older trips, or
         // they jumped straight to the customer). Backfill dispatch_started_at
         // here so the timeline + LINE notification still get a real timestamp.
@@ -392,6 +399,7 @@ async function mobileJobAction(body) {
         await client.query(
           `UPDATE public.odg_tms_detail
            SET sent_start = COALESCE(sent_start, LOCALTIMESTAMP(0)),
+               recipt_job = COALESCE(recipt_job, LOCALTIMESTAMP(0)),
                lat = COALESCE($2, lat), lng = COALESCE($3, lng)
            WHERE bill_no = $1 AND ${getFixedYearSqlFilter("doc_date")}`,
           [billNo, lat, lng]
@@ -952,6 +960,14 @@ async function mobileBills({ docNo, billNo, type, driverId }) {
         COALESCE(to_char(a.sent_start,'DD-MM-YYYY HH24:MI'), '-') as sent_start,
         COALESCE(to_char(a.sent_end,'DD-MM-YYYY HH24:MI'), '-') as sent_end,
         COALESCE(NULLIF(TRIM(s.destination), ''), '') as destination,
+        -- Pickup point: per-bill override > bill's transport_code (default).
+        -- '__CUSTOMER__' means pickup at the customer's home/shop; otherwise
+        -- it's a transport_type code joined to its name below.
+        COALESCE(NULLIF(TRIM(a.pickup_transport_code), ''), NULLIF(TRIM(s.transport_code), ''), '') as pickup_transport_code,
+        CASE
+          WHEN a.pickup_transport_code = '__CUSTOMER__' THEN 'ບ້ານ/ຮ້ານລູກຄ້າ'
+          ELSE COALESCE(NULLIF(TRIM(pt.name_1), ''), '')
+        END as pickup_transport_name,
         -- Image bytes are excluded from the list response — they were causing
         -- huge JSON payloads (each image is 3-5MB base64) which timed out the
         -- mobile request when a bill had photos. The app uses the boolean
@@ -966,6 +982,7 @@ async function mobileBills({ docNo, billNo, type, driverId }) {
       LEFT JOIN ar_customer b ON b.code = a.cust_code
       LEFT JOIN ar_customer_detail acd ON acd.ar_code = a.cust_code
       LEFT JOIN ic_trans_shipment s ON s.doc_no = a.bill_no
+      LEFT JOIN public.transport_type pt ON pt.code = COALESCE(NULLIF(a.pickup_transport_code, '__CUSTOMER__'), s.transport_code)
       WHERE a.doc_no = $1 AND ${getFixedYearSqlFilter("a.doc_date")}
       ORDER BY a.bill_no`,
       [docNo]
