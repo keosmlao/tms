@@ -117,7 +117,7 @@ async function mobileJobsList(driverId, date) {
       COALESCE(bs.completed_bill_count, 0) as completed_bill_count,
       COALESCE(bs.cancelled_bill_count, 0) as cancelled_bill_count,
       COALESCE(to_char(bs.received_at,'DD-MM-YYYY HH24:MI'), '-') as received_at,
-      COALESCE(to_char(a.dispatch_started_at,'DD-MM-YYYY HH24:MI'), to_char(bs.first_bill_started_at,'DD-MM-YYYY HH24:MI'), '-') as dispatch_started_at,
+      COALESCE(to_char(a.dispatch_started_at,'DD-MM-YYYY HH24:MI'), '-') as dispatch_started_at,
       COALESCE(a.miles_start, '') as miles_start,
       -- Same rationale as the bills query — keep image bytes out of the list
       -- response, expose only a presence flag. Drivers rarely need to see
