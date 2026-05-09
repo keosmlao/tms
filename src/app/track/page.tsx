@@ -280,11 +280,40 @@ function TrackPageInner() {
   );
 }
 
+// Mirror the CORE_TIMELINE_KEYS approach from the dashboard tracking page so
+// "ເລີ່ມຈັດສົ່ງ" still shows as a placeholder when the driver skipped it
+// (older trips lack dispatch_started_at).
+const PUBLIC_CORE_KEYS = ["ຈັດຖ້ຽວແລ້ວ", "ຮັບຖ້ຽວ / ເບີກເຄື່ອງ", "ເລີ່ມຈັດສົ່ງ"] as const;
+const PUBLIC_FINAL_KEYS = new Set(["ຈັດສົ່ງສຳເລັດ", "ຍົກເລີກຈັດສົ່ງ"]);
+
+type PublicListStep = TrackingStep & { done: boolean };
+
+function buildPublicList(list: TrackingStep[]): PublicListStep[] {
+  const remaining = new Map<string, TrackingStep>();
+  for (const s of list) if (!remaining.has(s.status)) remaining.set(s.status, s);
+  const out: PublicListStep[] = [];
+  for (const key of PUBLIC_CORE_KEYS) {
+    const existing = remaining.get(key);
+    if (existing) {
+      out.push({ ...existing, done: true });
+      remaining.delete(key);
+    } else {
+      out.push({ doc_date: "", doc_time: "", status: key, remark: "", done: false });
+    }
+  }
+  for (const s of remaining.values()) out.push({ ...s, done: true });
+  if (!out.some((s) => PUBLIC_FINAL_KEYS.has(s.status))) {
+    out.push({ doc_date: "", doc_time: "", status: "ຈັດສົ່ງສຳເລັດ", remark: "", done: false });
+  }
+  return out;
+}
+
 function ProgressCard({ list, status }: { list: TrackingStep[]; status: number }) {
   const reached = new Set(list.map((s) => s.status));
   const cancelled = status === 2 || reached.has("ຍົກເລີກຈັດສົ່ງ");
   const currentIndex = STATUS_FLOW.findIndex((s) => !reached.has(s.key));
   const activeIdx = currentIndex === -1 ? STATUS_FLOW.length - 1 : currentIndex - 1;
+  const fullList = buildPublicList(list);
 
   if (cancelled) {
     return (
@@ -337,22 +366,30 @@ function ProgressCard({ list, status }: { list: TrackingStep[]; status: number }
         })}
       </div>
 
-      {list.length > 0 && (
+      {fullList.length > 0 && (
         <div className="mt-5 pt-4 border-t border-slate-100 dark:border-slate-800 space-y-2">
-          {list.map((step, i) => {
+          {fullList.map((step, i) => {
             const tone = STATUS_FLOW.find((s) => s.key === step.status)?.color ?? "slate";
             const c = COLOR_TONE[tone];
             return (
               <div key={i} className="flex items-start gap-3">
-                <div className={`w-6 h-6 rounded-full ${c.light} flex items-center justify-center mt-0.5`}>
+                <div className={`w-6 h-6 rounded-full ${
+                  step.done ? c.light : "bg-slate-100 text-slate-300 dark:bg-slate-800 dark:text-slate-600"
+                } flex items-center justify-center mt-0.5`}>
                   <span className="text-[10px] font-bold">{i + 1}</span>
                 </div>
                 <div className="flex-1 min-w-0">
-                  <p className="text-xs font-semibold text-slate-700 dark:text-slate-200">
+                  <p className={`text-xs font-semibold ${
+                    step.done
+                      ? "text-slate-700 dark:text-slate-200"
+                      : "text-slate-400 dark:text-slate-500"
+                  }`}>
                     {step.status}
                   </p>
                   <p className="text-[10px] text-slate-400">
-                    {formatBuddhistDisplayDate(step.doc_date)} · {step.doc_time}
+                    {step.done
+                      ? `${formatBuddhistDisplayDate(step.doc_date)} · ${step.doc_time}`
+                      : "ລໍຖ້າ"}
                   </p>
                 </div>
               </div>

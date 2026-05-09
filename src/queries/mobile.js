@@ -306,14 +306,13 @@ async function mobileJobAction(body) {
       case "dispatch":
       case "start_dispatch": {
         if (!docNo) throw new Error("doc_no is required");
+        // No pending_pickup_count check — a single trip may pick up from
+        // multiple warehouses or from a customer's home/shop, so the driver
+        // can leave (start_dispatch) before all bills have been picked up.
         const jobRow = await client.query(
-          `SELECT t.approve_status, t.job_status,
-             COUNT(*) FILTER (WHERE d.recipt_job IS NULL AND COALESCE(d.status, 0) NOT IN (1, 2))::int AS pending_pickup_count
-           FROM odg_tms t
-           LEFT JOIN public.odg_tms_detail d
-             ON d.doc_no = t.doc_no AND ${getFixedYearSqlFilter("d.doc_date")}
-           WHERE t.doc_no = $1 AND ${getFixedYearSqlFilter("t.doc_date")}
-           GROUP BY t.approve_status, t.job_status`,
+          `SELECT approve_status, job_status
+           FROM odg_tms
+           WHERE doc_no = $1 AND ${getFixedYearSqlFilter("doc_date")}`,
           [docNo]
         );
         const currentJob = jobRow.rows[0];
@@ -325,7 +324,6 @@ async function mobileJobAction(body) {
           return { success: true, already_started: true };
         }
         if (currentJobStatus !== 1) throw new Error("ກະລຸນາຮັບຖ້ຽວກ່ອນ");
-        if (Number(currentJob.pending_pickup_count ?? 0) > 0) throw new Error("ກະລຸນາເບີກເຄື່ອງໃຫ້ຄົບກ່ອນເລີ່ມຈັດສົ່ງ");
 
         await client.query(
           `UPDATE odg_tms
@@ -349,7 +347,8 @@ async function mobileJobAction(body) {
         await ensureBillDeliveryItems(billNo, client);
 
         const billRow = await client.query(
-          `SELECT d.doc_no, d.cust_code, t.approve_status, t.job_status, d.recipt_job
+          `SELECT d.doc_no, d.cust_code, t.approve_status, t.job_status, d.recipt_job,
+                  t.dispatch_started_at
            FROM public.odg_tms_detail d
            INNER JOIN odg_tms t ON t.doc_no = d.doc_no
            WHERE d.bill_no = $1 AND ${getFixedYearSqlFilter("d.doc_date")}
@@ -362,8 +361,12 @@ async function mobileJobAction(body) {
         const currentDocNo = currentBill?.doc_no;
         if (!currentDocNo) throw new Error("Bill was not found");
         if (Number(currentBill.approve_status ?? 0) !== 1) throw new Error("ຖ້ຽວນີ້ຍັງບໍ່ຖືກອະນຸມັດ");
-        if (Number(currentBill.job_status ?? 0) !== 2) throw new Error("ກະລຸນາເລີ່ມຈັດສົ່ງກ່ອນ");
+        if (Number(currentBill.job_status ?? 0) < 1) throw new Error("ກະລຸນາຮັບຖ້ຽວກ່ອນ");
         if (!currentBill.recipt_job) throw new Error("ກະລຸນາເບີກເຄື່ອງກ່ອນ");
+        // Driver may skip the explicit "ເລີ່ມຈັດສົ່ງ" button (older trips, or
+        // they jumped straight to the customer). Backfill dispatch_started_at
+        // here so the timeline + LINE notification still get a real timestamp.
+        const dispatchAutoStarted = !currentBill.dispatch_started_at;
 
         // One active checkin per job — block until the previously checked-in
         // bill is completed or cancelled. A bill is "active" when sent_start
@@ -396,7 +399,8 @@ async function mobileJobAction(body) {
 
         await client.query(
           `UPDATE odg_tms
-           SET job_status = CASE WHEN COALESCE(job_status, 0) < 2 THEN 2 ELSE job_status END
+           SET job_status = CASE WHEN COALESCE(job_status, 0) < 2 THEN 2 ELSE job_status END,
+               dispatch_started_at = COALESCE(dispatch_started_at, LOCALTIMESTAMP(0))
            WHERE doc_no = $1 AND ${getFixedYearSqlFilter("doc_date")}`,
           [currentDocNo]
         );
@@ -445,6 +449,7 @@ async function mobileJobAction(body) {
         }
 
         await client.query("COMMIT");
+        if (dispatchAutoStarted) void notifyJobDispatchStarted(currentDocNo);
         void notifyBillStatus(billNo, "📍 ຮອດຈຸດສົ່ງ");
         return { success: true, doc_no: currentDocNo };
       }
@@ -946,6 +951,7 @@ async function mobileBills({ docNo, billNo, type, driverId }) {
         COALESCE(to_char(a.recipt_job,'DD-MM-YYYY HH24:MI'), '-') as recipt_job,
         COALESCE(to_char(a.sent_start,'DD-MM-YYYY HH24:MI'), '-') as sent_start,
         COALESCE(to_char(a.sent_end,'DD-MM-YYYY HH24:MI'), '-') as sent_end,
+        COALESCE(NULLIF(TRIM(s.destination), ''), '') as destination,
         -- Image bytes are excluded from the list response — they were causing
         -- huge JSON payloads (each image is 3-5MB base64) which timed out the
         -- mobile request when a bill had photos. The app uses the boolean
@@ -959,6 +965,7 @@ async function mobileBills({ docNo, billNo, type, driverId }) {
       FROM public.odg_tms_detail a
       LEFT JOIN ar_customer b ON b.code = a.cust_code
       LEFT JOIN ar_customer_detail acd ON acd.ar_code = a.cust_code
+      LEFT JOIN ic_trans_shipment s ON s.doc_no = a.bill_no
       WHERE a.doc_no = $1 AND ${getFixedYearSqlFilter("a.doc_date")}
       ORDER BY a.bill_no`,
       [docNo]

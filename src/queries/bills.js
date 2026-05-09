@@ -129,12 +129,15 @@ async function getAvailableBillsWithProducts(session) {
     `SELECT a.doc_no, to_char(a.doc_date,'DD-MM-YYYY') as doc_date, a.cust_code, b.name_1 as cust_name, b.telephone,
       (SELECT count(item_code) FROM ic_trans_detail WHERE doc_no=a.doc_no AND item_code NOT LIKE '97%') as count_item,
       ${SCHEDULED_BILL_FIELDS},
+      COALESCE(a.transport_code, '') as origin_transport_code,
+      COALESCE(tt.name_1, '') as origin_transport_name,
       CASE WHEN fwd.bill_no IS NULL THEN false ELSE true END as incoming_forwarded,
       COALESCE(fwd.origin_transport_code, '') as forward_from_transport_code,
       COALESCE(fwd.origin_transport_name, '') as forward_from_transport_name,
       COALESCE(fwd.forwarded_at, '') as forwarded_at
     FROM ic_trans_shipment a
     LEFT JOIN ar_customer b ON b.code=a.cust_code
+    LEFT JOIN public.transport_type tt ON tt.code = a.transport_code
     ${SCHEDULED_BILL_JOIN}
     LEFT JOIN LATERAL (
       SELECT d.bill_no,
@@ -181,12 +184,15 @@ async function getAvailableBills(session) {
       b.name_1 as cust_name, b.telephone,
       (SELECT count(item_code) FROM ic_trans_detail WHERE doc_no=a.doc_no AND item_code NOT LIKE '97%') as count_item,
       ${SCHEDULED_BILL_FIELDS},
+      COALESCE(a.transport_code, '') as origin_transport_code,
+      COALESCE(tt.name_1, '') as origin_transport_name,
       CASE WHEN fwd.bill_no IS NULL THEN false ELSE true END as incoming_forwarded,
       COALESCE(fwd.origin_transport_code, '') as forward_from_transport_code,
       COALESCE(fwd.origin_transport_name, '') as forward_from_transport_name,
       COALESCE(fwd.forwarded_at, '') as forwarded_at
     FROM ic_trans_shipment a
     LEFT JOIN ar_customer b ON b.code=a.cust_code
+    LEFT JOIN public.transport_type tt ON tt.code = a.transport_code
     ${SCHEDULED_BILL_JOIN}
     LEFT JOIN LATERAL (
       SELECT d.bill_no,

@@ -42,6 +42,8 @@ export interface AvailableBill {
   cust_name: string;
   telephone: string;
   count_item: number;
+  origin_transport_code?: string;
+  origin_transport_name?: string;
   scheduled_date?: string | null;
   scheduled_date_display?: string | null;
   delivery_route_code?: string | null;
@@ -1148,6 +1150,14 @@ function AvailableCard({
         <p className="mt-0.5 truncate text-[11px] text-slate-500 dark:text-slate-400">
           {bill.cust_name || bill.cust_code} · {bill.doc_date}
         </p>
+        {(bill.origin_transport_name || bill.origin_transport_code) && (
+          <p
+            className="mt-0.5 truncate text-[10px] text-slate-500 dark:text-slate-400"
+            title={`ສາງຮັບເຄື່ອງ: ${bill.origin_transport_name || bill.origin_transport_code}`}
+          >
+            🏬 ຮັບເຄື່ອງ: <span className="font-semibold text-slate-700 dark:text-slate-200">{bill.origin_transport_name || bill.origin_transport_code}</span>
+          </p>
+        )}
         {(bill.scheduled_date_display || bill.delivery_round_name) && (
           <div className="mt-1 flex flex-wrap items-center gap-1">
             {bill.scheduled_date_display && (
@@ -1276,6 +1286,14 @@ function InJobCard({
             <p className="mt-0.5 truncate text-[11px] text-slate-500 dark:text-slate-400">
               {group.bill.cust_name || group.bill.cust_code}
             </p>
+            {(group.bill.origin_transport_name || group.bill.origin_transport_code) && (
+              <p
+                className="mt-0.5 truncate text-[10px] text-slate-500 dark:text-slate-400"
+                title={`ສາງຮັບເຄື່ອງ: ${group.bill.origin_transport_name || group.bill.origin_transport_code}`}
+              >
+                🏬 ຮັບເຄື່ອງ: <span className="font-semibold text-slate-700 dark:text-slate-200">{group.bill.origin_transport_name || group.bill.origin_transport_code}</span>
+              </p>
+            )}
           </div>
           <span className="rounded-full bg-teal-100 px-2 py-0.5 text-[10px] font-semibold text-teal-700 dark:bg-teal-950/40 dark:text-teal-300">
             {addedCount}/{totalOriginal}
