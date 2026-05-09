@@ -266,8 +266,6 @@ async function trackBill(session, search) {
         UNION ALL SELECT recipt_job, to_char(recipt_job,'DD-MM-YYYY'), to_char(recipt_job,'HH24:MI'), 'ຮັບຖ້ຽວ / ເບີກເຄື່ອງ', COALESCE(NULLIF(TRIM(ott.name_1), ''), NULLIF(TRIM(b.origin_transport_code), ''), '') FROM odg_tms_detail WHERE recipt_job IS NOT NULL AND bill_no=a.bill_no AND doc_no=a.doc_no
         UNION ALL SELECT b.dispatch_started_at, to_char(b.dispatch_started_at,'DD-MM-YYYY'), to_char(b.dispatch_started_at,'HH24:MI'), 'ເລີ່ມຈັດສົ່ງ', '' WHERE b.dispatch_started_at IS NOT NULL
         UNION ALL SELECT sent_end, to_char(sent_end,'DD-MM-YYYY'), to_char(sent_end,'HH24:MI'), case when status=2 then 'ຍົກເລີກຈັດສົ່ງ' else 'ຈັດສົ່ງສຳເລັດ' end, remark FROM odg_tms_detail WHERE sent_end IS NOT NULL AND bill_no=a.bill_no AND doc_no=a.doc_no
-        UNION ALL SELECT b.job_close, to_char(b.job_close,'DD-MM-YYYY'), to_char(b.job_close,'HH24:MI'), 'ຄົນຂັບປິດງານ', '' WHERE b.job_close IS NOT NULL
-        UNION ALL SELECT b.admin_close_at, to_char(b.admin_close_at,'DD-MM-YYYY'), to_char(b.admin_close_at,'HH24:MI'), 'admin ປິດຖ້ຽວ', '' WHERE b.admin_close_at IS NOT NULL
       ) events) as list
     FROM odg_tms_detail a
     LEFT JOIN odg_tms b ON b.doc_no=a.doc_no
@@ -430,8 +428,6 @@ async function trackBillPublic(billNo) {
               UNION ALL SELECT recipt_job, to_char(recipt_job,'DD-MM-YYYY'), to_char(recipt_job,'HH24:MI'), 'ຮັບຖ້ຽວ / ເບີກເຄື່ອງ', COALESCE(NULLIF(TRIM(ott.name_1), ''), NULLIF(TRIM(j.origin_transport_code), ''), '') FROM odg_tms_detail WHERE recipt_job IS NOT NULL AND bill_no=a.bill_no AND doc_no=a.doc_no
               UNION ALL SELECT j.dispatch_started_at, to_char(j.dispatch_started_at,'DD-MM-YYYY'), to_char(j.dispatch_started_at,'HH24:MI'), 'ເລີ່ມຈັດສົ່ງ', '' WHERE j.dispatch_started_at IS NOT NULL
               UNION ALL SELECT sent_end, to_char(sent_end,'DD-MM-YYYY'), to_char(sent_end,'HH24:MI'), case when status=2 then 'ຍົກເລີກຈັດສົ່ງ' else 'ຈັດສົ່ງສຳເລັດ' end, remark FROM odg_tms_detail WHERE sent_end IS NOT NULL AND bill_no=a.bill_no AND doc_no=a.doc_no
-              UNION ALL SELECT j.job_close, to_char(j.job_close,'DD-MM-YYYY'), to_char(j.job_close,'HH24:MI'), 'ຄົນຂັບປິດງານ', '' WHERE j.job_close IS NOT NULL
-              UNION ALL SELECT j.admin_close_at, to_char(j.admin_close_at,'DD-MM-YYYY'), to_char(j.admin_close_at,'HH24:MI'), 'admin ປິດຖ້ຽວ', '' WHERE j.admin_close_at IS NOT NULL
             ) events) as list
      FROM odg_tms_detail a
      LEFT JOIN odg_tms_car c ON c.code = a.car

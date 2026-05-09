@@ -2,7 +2,7 @@ const { query, queryOne } = require("../lib/db");
 const {
   getFixedTodayDate,
   FIXED_YEAR_START,
-  FIXED_YEAR_NEXT_START,
+  FIXED_YEAR_END,
   getFixedYearSqlFilter,
 } = require("../lib/fixed-year");
 const {
@@ -58,46 +58,16 @@ async function getDashboardData(session) {
     [monthStart, nextMonthStart, fixedToday]
   );
 
-  const pendingSelect = `
-    SELECT a.doc_no, to_char(a.doc_date,'DD-MM-YYYY') AS doc_date, a.transport_name, c.name_1 AS sale, d.name_1 AS transport,
-      a.transport_code,
-      to_char(b.send_date::date,'YYYY-MM-DD') AS send_date,
-      to_char(a.create_date_time_now,'DD-MM-YYYY HH24:MI:SS') AS time_open,
-      now() - a.create_date_time_now AS time_use,
-      greatest(floor(extract(epoch from now() - a.create_date_time_now)), 0)::bigint AS time_use_seconds
-    FROM ic_trans_shipment a
-    LEFT JOIN ic_trans b ON b.doc_no=a.doc_no
-    LEFT JOIN erp_user c ON c.code=b.sale_code
-    LEFT JOIN transport_type d ON d.code=a.transport_code
-  `;
-  const pendingBaseWhere = `
-    WHERE check_status=0
-      AND a.transport_code NOT IN ('02-0004')
-      ${branchAnd("a")}
-  `;
-
-  const allPendingCandidates = await query(
-    `${pendingSelect} ${pendingBaseWhere}
-      AND b.send_date::date >= $1::date
-      AND b.send_date::date < $2::date
-    ORDER BY a.create_date_time_now ASC, a.doc_date ASC`,
-    [FIXED_YEAR_START, FIXED_YEAR_NEXT_START]
-  );
-  // Mirror /bills-pending: include manual pending bills (ic_trans flag 56/72
-  // + service tb_product) alongside ic_trans_shipment so the dashboard count
-  // and the page count reconcile. applyRemainingCounts handles both sources.
-  const { getManualPendingRowsForPending, applyRemainingCounts } = require("./bills");
-  const manualPendingRaw = await getManualPendingRowsForPending(
+  // Single source of truth: delegate to getBillsPending so the dashboard's
+  // count is byte-for-byte identical to what /bills-pending shows for the
+  // same date range. We use the year's full range here — month_pending /
+  // today_pending are derived by filtering this list in JS below.
+  const { getBillsPending } = require("./bills");
+  const { trans: pendingWithRemaining } = await getBillsPending(
+    session,
     FIXED_YEAR_START,
-    FIXED_YEAR_NEXT_START
-  );
-  const manualScoped = scoped
-    ? manualPendingRaw.filter((bill) => bill.transport_code === userBranch)
-    : manualPendingRaw;
-  const allCandidates = [...allPendingCandidates, ...manualScoped];
-  const counted = await applyRemainingCounts(allCandidates);
-  const pendingWithRemaining = counted.filter(
-    (bill) => Number(bill.count_item ?? 0) > 0
+    FIXED_YEAR_END,
+    "all"
   );
   const trans = pendingWithRemaining.slice(0, 10);
   const transMonth = pendingWithRemaining

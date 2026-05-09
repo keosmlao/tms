@@ -555,6 +555,7 @@ async function getBillsPending(session, fromDate, toDate, transportCode) {
     query(
       `SELECT
         a.doc_no, to_char(b.doc_date,'DD-MM-YYYY') as doc_date, a.transport_name,
+        a.transport_code,
         to_char(b.send_date,'YYYY-MM-DD') as send_date,
         to_char(b.send_date,'DD-MM-YYYY') as send_date_display,
         c.name_1 as sale, COALESCE(dep.name_1::text, c.department::text, '') as department,
