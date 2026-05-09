@@ -1326,8 +1326,76 @@ async function getJobsByStatus(session, fromDate, toDate, jobStatus) {
   );
 }
 
+// Jobs ready for admin closing — surfaces both:
+//   1. job_status = 3 (driver tapped ປິດງານ — original case)
+//   2. job_status = 2 (driver still in transit) BUT every bill is finalised
+//      (sent_end set OR status IN 1/2). Trips like 20260500131 land here
+//      when the driver finished delivering everything yet forgot to close
+//      the trip — admin needs to be able to close it for them.
 async function getJobsClosedByDriver(session, fromDate, toDate) {
-  return getJobsByStatus(session, fromDate, toDate, 3);
+  const { getBranchScope, branchFilterJob } = require("./helpers");
+  const scope = getBranchScope(session);
+  const from = coerceDateToFixedYear(fromDate ?? getFixedTodayDate());
+  const to = coerceDateToFixedYear(toDate ?? getFixedTodayDate());
+  return query(
+    `WITH bill_summary AS (
+      SELECT d.doc_no,
+        COUNT(*)::int AS total_bills,
+        COUNT(*) FILTER (WHERE d.recipt_job IS NULL AND COALESCE(d.status, 0) NOT IN (1, 2))::int AS pending_pickup_count,
+        COUNT(*) FILTER (WHERE d.recipt_job IS NOT NULL)::int AS picked_count,
+        COUNT(*) FILTER (WHERE COALESCE(d.status, 0) = 1)::int AS completed_count,
+        COUNT(*) FILTER (WHERE COALESCE(d.status, 0) = 2)::int AS cancelled_count,
+        COUNT(*) FILTER (
+          WHERE COALESCE(d.status, 0) NOT IN (1, 2) AND d.sent_end IS NULL
+        )::int AS open_count
+      FROM public.odg_tms_detail d
+      WHERE ${getFixedYearSqlFilter("d.doc_date")}
+      GROUP BY d.doc_no
+    )
+    SELECT
+      to_char(a.doc_date,'DD-MM-YYYY') as doc_date,
+      a.doc_no,
+      to_char(a.date_logistic,'DD-MM-YYYY') as date_logistic,
+      to_char(a.create_date_time_now,'DD-MM-YYYY HH24:MI') as created_at,
+      to_char(a.job_close,'DD-MM-YYYY HH24:MI') as driver_closed_at,
+      to_char(a.admin_close_at,'DD-MM-YYYY HH24:MI') as admin_closed_at,
+      COALESCE(NULLIF(TRIM(b.name_1), ''), a.car, '-') as car,
+      COALESCE(NULLIF(TRIM(c.name_1), ''), a.driver, '-') as driver,
+      COALESCE(NULLIF(TRIM(uc.name_1), ''), a.user_created, '-') as user_created,
+      COALESCE(NULLIF(TRIM(ap.name_1), ''), a.approve_user, '-') as approve_user,
+      COALESCE(NULLIF(TRIM(adc.name_1), ''), a.admin_close_user, '-') as admin_close_user,
+      a.item_bill,
+      COALESCE(bs.pending_pickup_count, 0) as pending_pickup_count,
+      COALESCE(bs.picked_count, 0) as picked_count,
+      COALESCE(bs.completed_count, 0) as completed_count,
+      COALESCE(bs.cancelled_count, 0) as cancelled_count,
+      COALESCE(bs.picked_count, 0) as received_count,
+      COALESCE(bs.pending_pickup_count, 0) as pending_receive_count,
+      COALESCE(a.miles_start, '') as miles_start,
+      COALESCE(a.miles_end, '') as miles_end,
+      COALESCE(a.job_status, 0) as job_status
+    FROM odg_tms a
+    LEFT JOIN public.odg_tms_car b ON b.code = a.car
+    LEFT JOIN public.odg_tms_driver c ON c.code = a.driver
+    LEFT JOIN erp_user uc ON uc.code = a.user_created
+    LEFT JOIN erp_user ap ON ap.code = a.approve_user
+    LEFT JOIN erp_user adc ON adc.code = a.admin_close_user
+    LEFT JOIN bill_summary bs ON bs.doc_no = a.doc_no
+    WHERE COALESCE(a.approve_status, 0) = 1
+      AND a.doc_date BETWEEN $1 AND $2
+      AND ${getFixedYearSqlFilter("a.doc_date")}
+      AND (
+        COALESCE(a.job_status, 0) = 3
+        OR (
+          COALESCE(a.job_status, 0) = 2
+          AND COALESCE(bs.total_bills, 0) > 0
+          AND COALESCE(bs.open_count, 0) = 0
+        )
+      )
+      ${branchFilterJob(scope, "a")}
+    ORDER BY a.doc_date DESC, a.doc_no DESC`,
+    [from, to]
+  );
 }
 
 async function getJobsClosed(session, fromDate, toDate) {

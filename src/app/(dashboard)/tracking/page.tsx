@@ -49,12 +49,62 @@ interface TrackingAttempt {
   completed_count: number;
   cancelled_count: number;
   active_count: number;
+  job_status?: number;
   cancelled_at?: string;
   cancel_remark?: string;
   car?: string;
   driver?: string;
   destination?: string;
+  forward_transport_code?: string;
+  forward_transport_name?: string;
   items?: TrackingItem[];
+}
+
+// Status priority for an attempt:
+//   - all bills cancelled → ຍົກເລີກ
+//   - all bills resolved (delivered + cancelled = total) → ສຳເລັດ
+//   - any bill currently checked-in or trip dispatched → ກຳລັງຈັດສົ່ງ
+//   - trip received → ຮັບແລ້ວ
+//   - otherwise → ລໍຖ້າ
+function attemptStatus(a: TrackingAttempt): "ກຳລັງຈັດສົ່ງ" | "ຍົກເລີກ" | "ສຳເລັດ" | "ຮັບແລ້ວ" | "ລໍຖ້າ" {
+  const total = Number(a.row_count ?? 0);
+  const done = Number(a.completed_count ?? 0);
+  const cancelled = Number(a.cancelled_count ?? 0);
+  const active = Number(a.active_count ?? 0);
+  const job = Number(a.job_status ?? 0);
+  if (total > 0 && cancelled === total) return "ຍົກເລີກ";
+  if (total > 0 && done + cancelled === total && done > 0) return "ສຳເລັດ";
+  if (active > 0 || job >= 2) return "ກຳລັງຈັດສົ່ງ";
+  if (job === 1) return "ຮັບແລ້ວ";
+  return "ລໍຖ້າ";
+}
+
+// Renders the "ສົ່ງລູກຄ້າ" / "ສົ່ງສາຂາ <name>" pill consistently across the
+// tracking pages. Returns null when there's no signal to render so the
+// caller can spread it inline without an extra guard.
+function DeliveryTypeTag({
+  forwardCode,
+  forwardName,
+}: {
+  forwardCode?: string;
+  forwardName?: string;
+}) {
+  const isForward = !!(forwardCode && forwardCode.trim());
+  return (
+    <span
+      className={`inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-bold ${
+        isForward
+          ? "bg-sky-500/10 text-sky-600 dark:text-sky-400"
+          : "bg-emerald-500/10 text-emerald-600 dark:text-emerald-400"
+      }`}
+      title={isForward ? `ສົ່ງສາຂາ ${forwardName || forwardCode}` : "ສົ່ງລູກຄ້າ"}
+    >
+      {isForward ? "🏢 ສົ່ງສາຂາ" : "👤 ສົ່ງລູກຄ້າ"}
+      {isForward && (forwardName || forwardCode) && (
+        <span className="font-medium opacity-80">{forwardName || forwardCode}</span>
+      )}
+    </span>
+  );
 }
 
 interface CarPosition {
@@ -79,6 +129,8 @@ interface TrackingResult {
   driver_photo?: string;
   origin_transport_code?: string;
   origin_transport_name?: string;
+  forward_transport_code?: string;
+  forward_transport_name?: string;
   url_img: string;
   sight_img?: string;
   delivery_images?: string[];
@@ -256,6 +308,15 @@ function InfoStrip({ result }: { result: TrackingResult }) {
           </div>
         ))}
       </div>
+      {(result.forward_transport_code || result.tracking_stage !== "pending") && (
+        <div className="mt-3 flex items-center gap-2">
+          <span className="text-[10px] text-slate-400 font-medium">ປະເພດການຂົນສົ່ງ:</span>
+          <DeliveryTypeTag
+            forwardCode={result.forward_transport_code}
+            forwardName={result.forward_transport_name}
+          />
+        </div>
+      )}
     </div>
   );
 }
@@ -332,14 +393,7 @@ function AttemptsCard({ attempts, currentDocNo }: { attempts?: TrackingAttempt[]
       <div className="divide-y divide-slate-200/30 dark:divide-white/5">
         {attempts.map((attempt, index) => {
           const current = attempt.doc_no === currentDocNo;
-          const status =
-            Number(attempt.active_count) > 0
-              ? "ກຳລັງຈັດສົ່ງ"
-              : Number(attempt.cancelled_count) > 0 && Number(attempt.completed_count) === 0
-              ? "ຍົກເລີກ"
-              : Number(attempt.completed_count) > 0
-              ? "ສຳເລັດ"
-              : "ລໍຖ້າ";
+          const status = attemptStatus(attempt);
           const tone =
             status === "ກຳລັງຈັດສົ່ງ"
               ? "bg-sky-500/10 text-sky-600 dark:text-sky-400"
@@ -347,6 +401,8 @@ function AttemptsCard({ attempts, currentDocNo }: { attempts?: TrackingAttempt[]
               ? "bg-rose-500/10 text-rose-600 dark:text-rose-400"
               : status === "ສຳເລັດ"
               ? "bg-emerald-500/10 text-emerald-600 dark:text-emerald-400"
+              : status === "ຮັບແລ້ວ"
+              ? "bg-amber-500/10 text-amber-600 dark:text-amber-400"
               : "bg-slate-500/10 text-slate-600 dark:text-slate-400";
           const items = attempt.items ?? [];
           return (
@@ -379,6 +435,12 @@ function AttemptsCard({ attempts, currentDocNo }: { attempts?: TrackingAttempt[]
                 <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full shrink-0 ${tone}`}>
                   {status}
                 </span>
+              </div>
+              <div className="mt-2 ml-10">
+                <DeliveryTypeTag
+                  forwardCode={attempt.forward_transport_code}
+                  forwardName={attempt.forward_transport_name}
+                />
               </div>
               {(attempt.car || attempt.driver || attempt.destination) && (
                 <div className="mt-2 ml-10 flex flex-wrap items-center gap-x-3 gap-y-1 text-[10px] text-slate-500 dark:text-slate-400">

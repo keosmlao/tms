@@ -1019,6 +1019,9 @@ async function mobileBills({ docNo, billNo, type, driverId }) {
           WHEN a.pickup_transport_code = '__CUSTOMER__' THEN 'ບ້ານ/ຮ້ານລູກຄ້າ'
           ELSE COALESCE(NULLIF(TRIM(pt.name_1), ''), '')
         END as pickup_transport_name,
+        -- Delivery type: forward_transport_code NULL = ສົ່ງລູກຄ້າ; ມີຄ່າ = ສົ່ງສາຂາ
+        COALESCE(NULLIF(TRIM(a.forward_transport_code), ''), '') as forward_transport_code,
+        COALESCE(NULLIF(TRIM(fwd.name_1), ''), '') as forward_transport_name,
         -- Image bytes are excluded from the list response — they were causing
         -- huge JSON payloads (each image is 3-5MB base64) which timed out the
         -- mobile request when a bill had photos. The app uses the boolean
@@ -1034,6 +1037,7 @@ async function mobileBills({ docNo, billNo, type, driverId }) {
       LEFT JOIN ar_customer_detail acd ON acd.ar_code = a.cust_code
       LEFT JOIN ic_trans_shipment s ON s.doc_no = a.bill_no
       LEFT JOIN public.transport_type pt ON pt.code = COALESCE(NULLIF(a.pickup_transport_code, '__CUSTOMER__'), s.transport_code)
+      LEFT JOIN public.transport_type fwd ON fwd.code = a.forward_transport_code
       WHERE a.doc_no = $1 AND ${getFixedYearSqlFilter("a.doc_date")}
       ORDER BY a.bill_no`,
       [docNo]

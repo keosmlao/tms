@@ -162,14 +162,23 @@ async function getBillAttempts(billNo, branchClause = "") {
        COALESCE(MAX(NULLIF(TRIM(car.name_1), '')), MAX(NULLIF(TRIM(j.car), '')), '') AS car,
        COALESCE(MAX(NULLIF(TRIM(drv.name_1), '')), MAX(NULLIF(TRIM(j.driver), '')), '') AS driver,
        COALESCE(MAX(NULLIF(TRIM(s.destination), '')), '') AS destination,
+       -- Delivery type: forward_transport_code NULL = delivered to customer,
+       -- non-NULL = forwarded to a sister branch. Forward name lets the UI
+       -- render "ສົ່ງສາຂາ <name>" without a second lookup.
+       COALESCE(MAX(NULLIF(TRIM(d.forward_transport_code), '')), '') AS forward_transport_code,
+       COALESCE(MAX(NULLIF(TRIM(fwd.name_1), '')), '') AS forward_transport_name,
        COUNT(*)::int AS row_count,
        COUNT(*) FILTER (WHERE COALESCE(d.status, 0) = 1)::int AS completed_count,
        COUNT(*) FILTER (WHERE COALESCE(d.status, 0) = 2)::int AS cancelled_count,
        COUNT(*) FILTER (
-         WHERE d.sent_start IS NOT NULL
+         WHERE d.checkin_at IS NOT NULL
            AND d.sent_end IS NULL
            AND COALESCE(d.status, 0) NOT IN (1, 2)
        )::int AS active_count,
+       -- Trip-level status (0=ລໍຖ້າ, 1=ຮັບຖ້ຽວ, 2=ກຳລັງຈັດສົ່ງ,
+       -- 3=ຄົນຂັບປິດງານ, 4=admin ປິດ). Frontend uses this so a bill's row
+       -- shows "ກຳລັງຈັດສົ່ງ" once the truck rolls, even before checkin.
+       COALESCE(MAX(j.job_status), 0)::int AS job_status,
        to_char(MAX(d.sent_end) FILTER (WHERE COALESCE(d.status, 0) = 2), 'DD-MM-YYYY HH24:MI') AS cancelled_at,
        COALESCE(
          (ARRAY_AGG(NULLIF(TRIM(d.remark), '') ORDER BY d.sent_end DESC NULLS LAST)
@@ -219,6 +228,7 @@ async function getBillAttempts(billNo, branchClause = "") {
      LEFT JOIN public.odg_tms_car car ON car.code = j.car
      LEFT JOIN public.odg_tms_driver drv ON drv.code = j.driver
      LEFT JOIN public.ic_trans_shipment s ON s.doc_no = d.bill_no
+     LEFT JOIN public.transport_type fwd ON fwd.code = d.forward_transport_code
      WHERE d.bill_no = $1
        AND ${getFixedYearSqlFilter("d.doc_date")}
        ${branchClause.replaceAll("a.", "d.")}
@@ -239,6 +249,8 @@ async function trackBill(session, search) {
       COALESCE(b2.employee_photo, '') as driver_photo,
       COALESCE(b.origin_transport_code, '') as origin_transport_code,
       COALESCE(ott.name_1, '') as origin_transport_name,
+      COALESCE(a.forward_transport_code, '') as forward_transport_code,
+      COALESCE(fwd.name_1, '') as forward_transport_name,
       c.imei as car_imei,
       url_img, COALESCE(a.sight_img, '') as sight_img,
       COALESCE(img.delivery_images, ARRAY[]::text[]) as delivery_images,
@@ -263,6 +275,7 @@ async function trackBill(session, search) {
     LEFT JOIN odg_tms_driver d ON d.code=b.driver
     LEFT JOIN biotime_employee b2 ON b2.code = b.driver
     LEFT JOIN transport_type ott ON ott.code = b.origin_transport_code
+    LEFT JOIN public.transport_type fwd ON fwd.code = a.forward_transport_code
     LEFT JOIN LATERAL (
       SELECT array_agg(di.image_data ORDER BY di.created_at ASC, di.roworder ASC) as delivery_images
       FROM public.odg_tms_delivery_images di
@@ -399,6 +412,8 @@ async function trackBillPublic(billNo) {
             d.name_1 as driver, COALESCE(b2.employee_photo, '') as driver_photo,
             COALESCE(j.origin_transport_code, '') as origin_transport_code,
             COALESCE(ott.name_1, '') as origin_transport_name,
+            COALESCE(a.forward_transport_code, '') as forward_transport_code,
+            COALESCE(fwd.name_1, '') as forward_transport_name,
             a.lat, a.lng, a.lat_end, a.lng_end,
             COALESCE(a.url_img, '') as url_img,
             COALESCE(a.sight_img, '') as sight_img,
@@ -424,6 +439,7 @@ async function trackBillPublic(billNo) {
      LEFT JOIN odg_tms_driver d ON d.code = j.driver
      LEFT JOIN biotime_employee b2 ON b2.code = j.driver
      LEFT JOIN transport_type ott ON ott.code = j.origin_transport_code
+     LEFT JOIN public.transport_type fwd ON fwd.code = a.forward_transport_code
      LEFT JOIN LATERAL (
        SELECT array_agg(di.image_data ORDER BY di.created_at ASC, di.roworder ASC) as delivery_images
        FROM public.odg_tms_delivery_images di
