@@ -51,6 +51,7 @@ interface TrackingAttempt {
   active_count: number;
   cancelled_at?: string;
   cancel_remark?: string;
+  items?: TrackingItem[];
 }
 
 interface CarPosition {
@@ -256,6 +257,58 @@ function InfoStrip({ result }: { result: TrackingResult }) {
   );
 }
 
+// Pre-trip status card — renders the same "ສະຖານະບິນກ່ອນຈັດຖ້ຽວ" section
+// the LINE bubble shows. Hidden when none of the four fields are present so
+// the page doesn't get an empty card for legacy bills.
+const PRE_TRIP_CONTACT_LABELS: Record<string, string> = {
+  contacted_ready: "ພ້ອມຮັບ",
+  contact_failed: "ຕິດຕໍ່ບໍ່ໄດ້",
+  customer_postponed: "ລູກຄ້າເລື່ອນວັນຮັບ",
+  customer_cancelled: "ລູກຄ້າປະຕິເສດ/ຍົກເລີກ",
+};
+
+function PreTripStatusCard({ result }: { result: TrackingResult }) {
+  const contact = PRE_TRIP_CONTACT_LABELS[result.action_status ?? ""] || "";
+  const scheduled = result.scheduled_date_display || "";
+  const round = [result.delivery_round_name, result.delivery_round_time_label]
+    .filter(Boolean)
+    .join(" ")
+    .trim();
+  const route = result.delivery_route_name || result.delivery_route_code || "";
+
+  if (!contact && !scheduled && !round && !route) return null;
+
+  const rows: Array<{ label: string; value: string; icon: React.ReactNode; tone: string }> = [];
+  if (contact) rows.push({ label: "ລູກຄ້າ", value: contact, icon: <FaUser size={11} />, tone: "text-emerald-600 dark:text-emerald-400 bg-emerald-500/10" });
+  if (scheduled) rows.push({ label: "ວັນທີ່", value: scheduled, icon: <FaCalendarAlt size={11} />, tone: "text-sky-600 dark:text-sky-400 bg-sky-500/10" });
+  if (round) rows.push({ label: "ຮອບ", value: round, icon: <FaClock size={11} />, tone: "text-amber-600 dark:text-amber-400 bg-amber-500/10" });
+  if (route) rows.push({ label: "ສາຍທາງ", value: route, icon: <FaRoute size={11} />, tone: "text-teal-600 dark:text-teal-400 bg-teal-500/10" });
+
+  return (
+    <div className="glass rounded-lg overflow-hidden">
+      <div className="px-5 py-3.5 border-b border-slate-200/30 dark:border-white/5 flex items-center gap-2">
+        <div className="w-7 h-7 rounded-lg bg-amber-500/10 flex items-center justify-center">
+          <FaCheckCircle className="text-amber-500" size={12} />
+        </div>
+        <h2 className="text-sm font-bold text-slate-800 dark:text-white">ສະຖານະບິນກ່ອນຈັດຖ້ຽວ</h2>
+      </div>
+      <div className="p-4 grid grid-cols-2 sm:grid-cols-4 gap-3">
+        {rows.map((r, i) => (
+          <div key={i} className="flex items-center gap-2.5">
+            <div className={`w-8 h-8 rounded-lg ${r.tone} flex items-center justify-center shrink-0`}>
+              {r.icon}
+            </div>
+            <div className="min-w-0">
+              <p className="text-[10px] text-slate-400 font-medium">{r.label}</p>
+              <p className="text-xs font-bold text-slate-800 dark:text-white truncate" title={r.value}>{r.value}</p>
+            </div>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
 function AttemptsCard({ attempts, currentDocNo }: { attempts?: TrackingAttempt[]; currentDocNo: string }) {
   if (!attempts || attempts.length <= 1) return null;
   return (
@@ -292,37 +345,71 @@ function AttemptsCard({ attempts, currentDocNo }: { attempts?: TrackingAttempt[]
               : status === "ສຳເລັດ"
               ? "bg-emerald-500/10 text-emerald-600 dark:text-emerald-400"
               : "bg-slate-500/10 text-slate-600 dark:text-slate-400";
+          const items = attempt.items ?? [];
           return (
             <div
               key={attempt.doc_no}
-              className={`px-5 py-3 flex items-center gap-3 ${
-                current ? "bg-sky-500/5" : "bg-transparent"
-              }`}
+              className={`px-5 py-3 ${current ? "bg-sky-500/5" : "bg-transparent"}`}
             >
-              <div className="w-7 h-7 rounded-full bg-slate-900 text-white text-[11px] font-bold flex items-center justify-center">
-                {index + 1}
-              </div>
-              <div className="min-w-0 flex-1">
-                <p className="text-xs font-bold text-slate-800 dark:text-white">
-                  {attempt.doc_no}
-                  {current && (
-                    <span className="ml-2 text-[10px] font-bold text-sky-600 dark:text-sky-400">
-                      ຖ້ຽວລ່າສຸດ
-                    </span>
-                  )}
-                </p>
-                <p className="text-[10px] text-slate-400">
-                  {attempt.cancelled_at || attempt.created_at || attempt.doc_date || "-"}
-                </p>
-                {attempt.cancel_remark && (
-                  <p className="mt-0.5 text-[10px] text-rose-500 truncate">
-                    {attempt.cancel_remark}
+              <div className="flex items-center gap-3">
+                <div className="w-7 h-7 rounded-full bg-slate-900 text-white text-[11px] font-bold flex items-center justify-center shrink-0">
+                  {index + 1}
+                </div>
+                <div className="min-w-0 flex-1">
+                  <p className="text-xs font-bold text-slate-800 dark:text-white">
+                    {attempt.doc_no}
+                    {current && (
+                      <span className="ml-2 text-[10px] font-bold text-sky-600 dark:text-sky-400">
+                        ຖ້ຽວລ່າສຸດ
+                      </span>
+                    )}
                   </p>
-                )}
+                  <p className="text-[10px] text-slate-400">
+                    {attempt.cancelled_at || attempt.created_at || attempt.doc_date || "-"}
+                  </p>
+                  {attempt.cancel_remark && (
+                    <p className="mt-0.5 text-[10px] text-rose-500 truncate">
+                      {attempt.cancel_remark}
+                    </p>
+                  )}
+                </div>
+                <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full shrink-0 ${tone}`}>
+                  {status}
+                </span>
               </div>
-              <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${tone}`}>
-                {status}
-              </span>
+              {items.length > 0 && (
+                <div className="mt-2 ml-10 rounded-md border border-slate-200/40 dark:border-white/5 bg-white/40 dark:bg-white/5 divide-y divide-slate-200/40 dark:divide-white/5">
+                  {items.map((it) => {
+                    const sent = Number(it.selected_qty ?? 0);
+                    const delivered = Number(it.delivered_qty ?? 0);
+                    const isCancelled = status === "ຍົກເລີກ";
+                    const itemDelivered = !isCancelled && delivered > 0 && delivered >= sent;
+                    const itemPartial = !isCancelled && delivered > 0 && delivered < sent;
+                    return (
+                      <div key={it.item_code} className="px-3 py-1.5 flex items-center gap-2 text-[11px]">
+                        <FaBox size={9} className={
+                          itemDelivered ? "text-emerald-500"
+                          : itemPartial ? "text-amber-500"
+                          : isCancelled ? "text-rose-500"
+                          : "text-slate-400"
+                        } />
+                        <span className="flex-1 text-slate-700 dark:text-slate-300 truncate" title={it.item_name}>
+                          {it.item_name || it.item_code}
+                        </span>
+                        <span className={`tabular-nums font-semibold ${
+                          itemDelivered ? "text-emerald-600 dark:text-emerald-400"
+                          : itemPartial ? "text-amber-600 dark:text-amber-400"
+                          : isCancelled ? "text-rose-500"
+                          : "text-slate-500"
+                        }`}>
+                          {delivered > 0 && delivered !== sent ? `${delivered}/${sent}` : sent}
+                          <span className="ml-0.5 text-[10px] text-slate-400">{it.unit_code}</span>
+                        </span>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
             </div>
           );
         })}
@@ -1057,6 +1144,7 @@ function TrackingPageInner() {
         <div className="space-y-4">
           <HorizontalProgress steps={result.list} />
           <InfoStrip result={result} />
+          <PreTripStatusCard result={result} />
           <AttemptsCard attempts={result.attempts} currentDocNo={result.doc_no} />
 
           {(result.driver || result.driver_photo) && (

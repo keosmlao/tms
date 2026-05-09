@@ -179,8 +179,50 @@ async function pushToDriver(driverCode, title, body, data = {}) {
   }
 }
 
+// Scan trips that have been received + had at least one bill picked up but
+// the driver hasn't yet tapped "ເລີ່ມຈັດສົ່ງ". Push a nudge to the driver
+// every cron tick. Returns count of trips pushed for caller logging.
+//
+// Idempotency: each trip's tag is reused (`job_<doc_no>_dispatch_reminder`)
+// so the OS replaces the old notification instead of stacking. Cron should
+// fire every 5 min; the function itself does no rate-limiting beyond the
+// recipt_job-age guard.
+async function remindUnstartedDispatches({ minMinutesSincePickup = 5 } = {}) {
+  const { query } = require("../lib/db");
+  const { getFixedYearSqlFilter } = require("../lib/fixed-year");
+  const rows = await query(
+    `SELECT t.doc_no, t.driver,
+            MIN(d.recipt_job) AS earliest_pickup
+     FROM odg_tms t
+     INNER JOIN public.odg_tms_detail d
+       ON d.doc_no = t.doc_no AND ${getFixedYearSqlFilter("d.doc_date")}
+     WHERE COALESCE(t.approve_status, 0) = 1
+       AND COALESCE(t.job_status, 0) = 1
+       AND t.dispatch_started_at IS NULL
+       AND ${getFixedYearSqlFilter("t.doc_date")}
+     GROUP BY t.doc_no, t.driver
+     HAVING MIN(d.recipt_job) IS NOT NULL
+        AND MIN(d.recipt_job) <= LOCALTIMESTAMP(0) - ($1 || ' minutes')::interval`,
+    [String(minMinutesSincePickup)]
+  );
+
+  let pushed = 0;
+  for (const r of rows) {
+    if (!r.driver) continue;
+    await pushToDriver(
+      r.driver,
+      "ກະລຸນາກົດເລີ່ມຈັດສົ່ງ",
+      `ທ່ານຍັງບໍ່ໄດ້ກົດເລີ່ມຈັດສົ່ງສຳລັບຖ້ຽວ ${r.doc_no} — ກະລຸນາກົດເລີ່ມຈັດສົ່ງກ່ອນຈຶ່ງດຳເນີນການຈັດສົ່ງ`,
+      { doc_no: r.doc_no, type: "dispatch_reminder" }
+    );
+    pushed += 1;
+  }
+  return { scanned: rows.length, pushed };
+}
+
 module.exports = {
   saveToken,
   deleteToken,
   pushToDriver,
+  remindUnstartedDispatches,
 };

@@ -171,6 +171,22 @@ async function getBillAttempts(billNo, branchClause = "") {
          )[1],
          ''
        ) AS cancel_remark,
+       -- Items dispatched in this attempt — frontend uses them to show what
+       -- was sent. selected_qty = what was loaded; delivered_qty = what
+       -- actually arrived (smaller when partial / cancelled).
+       COALESCE(
+         (SELECT json_agg(json_build_object(
+            'item_code', i.item_code,
+            'item_name', i.item_name,
+            'qty', i.qty,
+            'selected_qty', i.selected_qty,
+            'delivered_qty', i.delivered_qty,
+            'unit_code', i.unit_code
+          ) ORDER BY i.roworder NULLS LAST, i.item_code)
+          FROM public.odg_tms_detail_item i
+          WHERE i.bill_no = $1 AND i.doc_no = d.doc_no),
+         '[]'::json
+       ) AS items,
        MAX(COALESCE(j.create_date_time_now, d.create_date_time_now, d.doc_date::timestamp)) AS sort_at
      FROM public.odg_tms_detail d
      LEFT JOIN public.odg_tms j ON j.doc_no = d.doc_no

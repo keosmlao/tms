@@ -122,10 +122,19 @@ export function TrackingLiveMap({
       : end
       ? [end.lat, end.lng]
       : [17.9757, 102.6331];
+    // Map is preview-only — disable every interaction. The driver opens
+    // Google Maps via the button in the header for actual zoom/navigation.
     const map = L.map(containerRef.current, {
       center,
       zoom: 13,
-      zoomControl: true,
+      zoomControl: false,
+      scrollWheelZoom: false,
+      doubleClickZoom: false,
+      touchZoom: false,
+      boxZoom: false,
+      keyboard: false,
+      dragging: false,
+      tap: false,
     });
     mapRef.current = map;
     L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
@@ -224,9 +233,23 @@ export function TrackingLiveMap({
     };
   }, [billNo, refreshFn]);
 
+  // Google Maps deep-link — prefers car-to-destination directions, then car
+  // position, then start/end. Returns null when there's nothing locatable.
+  const gmapsUrl = (() => {
+    if (car && end) {
+      return `https://www.google.com/maps/dir/?api=1&origin=${car.lat},${car.lng}&destination=${end.lat},${end.lng}`;
+    }
+    if (start && end) {
+      return `https://www.google.com/maps/dir/?api=1&origin=${start.lat},${start.lng}&destination=${end.lat},${end.lng}`;
+    }
+    const target = car || end || start;
+    if (target) return `https://www.google.com/maps?q=${target.lat},${target.lng}`;
+    return null;
+  })();
+
   return (
     <div className="glass rounded-lg overflow-hidden">
-      <div className="px-5 py-3 border-b border-slate-200/30 dark:border-white/5 flex items-center justify-between">
+      <div className="px-5 py-3 border-b border-slate-200/30 dark:border-white/5 flex items-center justify-between gap-2">
         <div className="flex items-center gap-2">
           <div className="w-7 h-7 rounded-lg bg-sky-500/10 flex items-center justify-center">
             <span>🗺️</span>
@@ -235,20 +258,34 @@ export function TrackingLiveMap({
             ແຜນທີ່ສົດ
           </h2>
         </div>
-        <span
-          className={`text-[10px] font-bold px-2 py-0.5 rounded-full inline-flex items-center gap-1 ${
-            refreshing
-              ? "bg-amber-500/10 text-amber-600 dark:text-amber-400"
-              : "bg-emerald-500/10 text-emerald-600 dark:text-emerald-400"
-          }`}
-        >
+        <div className="flex items-center gap-2">
           <span
-            className={`w-1.5 h-1.5 rounded-full ${
-              refreshing ? "bg-amber-500" : "bg-emerald-500 animate-pulse"
+            className={`text-[10px] font-bold px-2 py-0.5 rounded-full inline-flex items-center gap-1 ${
+              refreshing
+                ? "bg-amber-500/10 text-amber-600 dark:text-amber-400"
+                : "bg-emerald-500/10 text-emerald-600 dark:text-emerald-400"
             }`}
-          />
-          {refreshing ? "ກຳລັງໂຫຼດ..." : "Live"}
-        </span>
+          >
+            <span
+              className={`w-1.5 h-1.5 rounded-full ${
+                refreshing ? "bg-amber-500" : "bg-emerald-500 animate-pulse"
+              }`}
+            />
+            {refreshing ? "ກຳລັງໂຫຼດ..." : "Live"}
+          </span>
+          {gmapsUrl && (
+            <a
+              href={gmapsUrl}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="text-[10px] font-bold px-2.5 py-1 rounded-full bg-sky-500/10 text-sky-600 dark:text-sky-400 hover:bg-sky-500/20 transition-colors inline-flex items-center gap-1"
+              title="ເປີດໃນ Google Maps"
+            >
+              <span>🌐</span>
+              Google Maps
+            </a>
+          )}
+        </div>
       </div>
       <div ref={containerRef} className="w-full h-[420px] z-0" />
     </div>
