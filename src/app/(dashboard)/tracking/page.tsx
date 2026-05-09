@@ -51,6 +51,9 @@ interface TrackingAttempt {
   active_count: number;
   cancelled_at?: string;
   cancel_remark?: string;
+  car?: string;
+  driver?: string;
+  destination?: string;
   items?: TrackingItem[];
 }
 
@@ -377,6 +380,30 @@ function AttemptsCard({ attempts, currentDocNo }: { attempts?: TrackingAttempt[]
                   {status}
                 </span>
               </div>
+              {(attempt.car || attempt.driver || attempt.destination) && (
+                <div className="mt-2 ml-10 flex flex-wrap items-center gap-x-3 gap-y-1 text-[10px] text-slate-500 dark:text-slate-400">
+                  {attempt.car && (
+                    <span className="inline-flex items-center gap-1">
+                      <FaTruck size={9} className="text-sky-500" />
+                      <span className="font-medium text-slate-700 dark:text-slate-300">{attempt.car}</span>
+                    </span>
+                  )}
+                  {attempt.driver && (
+                    <span className="inline-flex items-center gap-1">
+                      <FaUser size={9} className="text-sky-500" />
+                      <span className="font-medium text-slate-700 dark:text-slate-300">{attempt.driver}</span>
+                    </span>
+                  )}
+                  {attempt.destination && (
+                    <span className="inline-flex items-center gap-1 max-w-full">
+                      <FaMapMarkerAlt size={9} className="text-emerald-500" />
+                      <span className="font-medium text-slate-700 dark:text-slate-300 truncate" title={attempt.destination}>
+                        {attempt.destination}
+                      </span>
+                    </span>
+                  )}
+                </div>
+              )}
               {items.length > 0 && (
                 <div className="mt-2 ml-10 rounded-md border border-slate-200/40 dark:border-white/5 bg-white/40 dark:bg-white/5 divide-y divide-slate-200/40 dark:divide-white/5">
                   {items.map((it) => {

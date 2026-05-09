@@ -156,6 +156,12 @@ async function getBillAttempts(billNo, branchClause = "") {
          to_char(MAX(d.create_date_time_now), 'DD-MM-YYYY HH24:MI'),
          '-'
        ) AS created_at,
+       -- Trip-level metadata: car name + driver name + destination address
+       -- so each attempt row in the UI can show what was sent / by whom /
+       -- where without an extra round-trip per attempt.
+       COALESCE(MAX(NULLIF(TRIM(car.name_1), '')), MAX(NULLIF(TRIM(j.car), '')), '') AS car,
+       COALESCE(MAX(NULLIF(TRIM(drv.name_1), '')), MAX(NULLIF(TRIM(j.driver), '')), '') AS driver,
+       COALESCE(MAX(NULLIF(TRIM(s.destination), '')), '') AS destination,
        COUNT(*)::int AS row_count,
        COUNT(*) FILTER (WHERE COALESCE(d.status, 0) = 1)::int AS completed_count,
        COUNT(*) FILTER (WHERE COALESCE(d.status, 0) = 2)::int AS cancelled_count,
@@ -210,6 +216,9 @@ async function getBillAttempts(billNo, branchClause = "") {
        MAX(COALESCE(j.create_date_time_now, d.create_date_time_now, d.doc_date::timestamp)) AS sort_at
      FROM public.odg_tms_detail d
      LEFT JOIN public.odg_tms j ON j.doc_no = d.doc_no
+     LEFT JOIN public.odg_tms_car car ON car.code = j.car
+     LEFT JOIN public.odg_tms_driver drv ON drv.code = j.driver
+     LEFT JOIN public.ic_trans_shipment s ON s.doc_no = d.bill_no
      WHERE d.bill_no = $1
        AND ${getFixedYearSqlFilter("d.doc_date")}
        ${branchClause.replaceAll("a.", "d.")}

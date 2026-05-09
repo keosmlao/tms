@@ -15,6 +15,8 @@ import {
   FaTimes,
   FaTruck,
   FaCalendar,
+  FaUser,
+  FaMapMarkerAlt,
 } from "react-icons/fa";
 import { TrackingLiveMap } from "@/components/tracking-live-map";
 
@@ -43,6 +45,10 @@ interface TrackingAttempt {
   active_count: number;
   cancelled_at?: string;
   cancel_remark?: string;
+  car?: string;
+  driver?: string;
+  destination?: string;
+  items?: TrackingItem[];
 }
 
 interface CarPosition {
@@ -480,33 +486,93 @@ function AttemptsCard({ attempts, currentDocNo }: { attempts?: TrackingAttempt[]
               : status === "ສຳເລັດ"
               ? "bg-emerald-50 text-emerald-600"
               : "bg-slate-100 text-slate-600";
+          const items = attempt.items ?? [];
           return (
             <div
               key={attempt.doc_no}
-              className={`px-4 py-3 flex items-center gap-3 ${
+              className={`px-4 py-3 ${
                 current ? "bg-sky-50/70 dark:bg-sky-950/20" : ""
               }`}
             >
-              <div className="w-7 h-7 rounded-full bg-slate-900 text-white text-[11px] font-bold flex items-center justify-center">
-                {index + 1}
-              </div>
-              <div className="min-w-0 flex-1">
-                <p className="text-xs font-bold text-slate-800 dark:text-slate-200">
-                  {attempt.doc_no}
-                  {current && <span className="ml-2 text-[10px] text-sky-600">ຖ້ຽວລ່າສຸດ</span>}
-                </p>
-                <p className="text-[10px] text-slate-400">
-                  {formatBuddhistDisplayDate(attempt.cancelled_at || attempt.created_at || attempt.doc_date || "-")}
-                </p>
-                {attempt.cancel_remark && (
-                  <p className="mt-0.5 text-[10px] text-rose-500 truncate">
-                    {attempt.cancel_remark}
+              <div className="flex items-center gap-3">
+                <div className="w-7 h-7 rounded-full bg-slate-900 text-white text-[11px] font-bold flex items-center justify-center shrink-0">
+                  {index + 1}
+                </div>
+                <div className="min-w-0 flex-1">
+                  <p className="text-xs font-bold text-slate-800 dark:text-slate-200">
+                    {attempt.doc_no}
+                    {current && <span className="ml-2 text-[10px] text-sky-600">ຖ້ຽວລ່າສຸດ</span>}
                   </p>
-                )}
+                  <p className="text-[10px] text-slate-400">
+                    {formatBuddhistDisplayDate(attempt.cancelled_at || attempt.created_at || attempt.doc_date || "-")}
+                  </p>
+                  {attempt.cancel_remark && (
+                    <p className="mt-0.5 text-[10px] text-rose-500 truncate">
+                      {attempt.cancel_remark}
+                    </p>
+                  )}
+                </div>
+                <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full shrink-0 ${tone}`}>
+                  {status}
+                </span>
               </div>
-              <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${tone}`}>
-                {status}
-              </span>
+              {(attempt.car || attempt.driver || attempt.destination) && (
+                <div className="mt-2 ml-10 flex flex-wrap items-center gap-x-3 gap-y-1 text-[10px] text-slate-500 dark:text-slate-400">
+                  {attempt.car && (
+                    <span className="inline-flex items-center gap-1">
+                      <FaTruck size={9} className="text-sky-500" />
+                      <span className="font-medium text-slate-700 dark:text-slate-300">{attempt.car}</span>
+                    </span>
+                  )}
+                  {attempt.driver && (
+                    <span className="inline-flex items-center gap-1">
+                      <FaUser size={9} className="text-sky-500" />
+                      <span className="font-medium text-slate-700 dark:text-slate-300">{attempt.driver}</span>
+                    </span>
+                  )}
+                  {attempt.destination && (
+                    <span className="inline-flex items-center gap-1 max-w-full">
+                      <FaMapMarkerAlt size={9} className="text-emerald-500" />
+                      <span className="font-medium text-slate-700 dark:text-slate-300 truncate" title={attempt.destination}>
+                        {attempt.destination}
+                      </span>
+                    </span>
+                  )}
+                </div>
+              )}
+              {items.length > 0 && (
+                <div className="mt-2 ml-10 rounded-md border border-slate-200 dark:border-slate-700 bg-slate-50/60 dark:bg-slate-800/40 divide-y divide-slate-200 dark:divide-slate-700">
+                  {items.map((it) => {
+                    const sent = Number(it.selected_qty ?? 0);
+                    const delivered = Number(it.delivered_qty ?? 0);
+                    const isCancelled = status === "ຍົກເລີກ";
+                    const itemDelivered = !isCancelled && delivered > 0 && delivered >= sent;
+                    const itemPartial = !isCancelled && delivered > 0 && delivered < sent;
+                    return (
+                      <div key={it.item_code} className="px-2.5 py-1.5 flex items-center gap-2 text-[11px]">
+                        <FaBox size={9} className={
+                          itemDelivered ? "text-emerald-500"
+                          : itemPartial ? "text-amber-500"
+                          : isCancelled ? "text-rose-500"
+                          : "text-slate-400"
+                        } />
+                        <span className="flex-1 text-slate-700 dark:text-slate-300 truncate" title={it.item_name}>
+                          {it.item_name || it.item_code}
+                        </span>
+                        <span className={`tabular-nums font-semibold ${
+                          itemDelivered ? "text-emerald-600"
+                          : itemPartial ? "text-amber-600"
+                          : isCancelled ? "text-rose-500"
+                          : "text-slate-500"
+                        }`}>
+                          {delivered > 0 && delivered !== sent ? `${delivered}/${sent}` : sent}
+                          <span className="ml-0.5 text-[10px] text-slate-400">{it.unit_code}</span>
+                        </span>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
             </div>
           );
         })}
