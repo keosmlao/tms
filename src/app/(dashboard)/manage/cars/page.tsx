@@ -170,6 +170,26 @@ function AssignmentBadges({
   );
 }
 
+function CarTypeBadge({ carType }: { carType?: string }) {
+  const value = carType?.trim();
+
+  if (!value) {
+    return (
+      <span className="inline-flex w-fit items-center gap-1 rounded-full bg-slate-500/10 px-2 py-0.5 text-[10px] font-medium text-slate-500 dark:text-slate-400">
+        <FaCarSide size={9} />
+        ບໍ່ລະບຸ
+      </span>
+    );
+  }
+
+  return (
+    <span className="inline-flex w-fit items-center gap-1 rounded-full bg-violet-500/10 px-2 py-0.5 text-[10px] font-semibold text-violet-600 dark:text-violet-400">
+      <FaCarSide size={9} />
+      {value}
+    </span>
+  );
+}
+
 function SearchableMultiSelectField({
   label,
   icon,
@@ -702,12 +722,7 @@ export default function CarsManagePage() {
                             {car.plate_no}
                           </span>
                         )}
-                        {car.car_type && (
-                          <span className="inline-flex items-center gap-1 rounded-full bg-violet-500/10 px-1.5 py-0.5 font-medium text-violet-600 dark:text-violet-400">
-                            <FaCarSide size={8} />
-                            {car.car_type}
-                          </span>
-                        )}
+                        <CarTypeBadge carType={car.car_type} />
                         {car.tank_no && (
                           <span className="inline-flex items-center gap-1 text-slate-500">
                             <FaWarehouse size={8} className="text-slate-400" />
@@ -781,6 +796,7 @@ export default function CarsManagePage() {
                   <tr className="bg-white/30 dark:bg-white/5 border-b border-slate-200/30 dark:border-white/5 text-[10px] font-semibold uppercase tracking-wider text-slate-500 dark:text-slate-400">
                     <th className="px-4 py-2.5 text-left">ສະຖານະ</th>
                     <th className="px-4 py-2.5 text-left">ລົດ</th>
+                    <th className="px-4 py-2.5 text-left">ປະເພດລົດ</th>
                     <th className="px-4 py-2.5 text-left">GPS / IMEI</th>
                     <th className="px-4 py-2.5 text-left">ຄົນຂັບ</th>
                     <th className="px-4 py-2.5 text-left">ກຳມະກອນຕິດລົດ</th>
@@ -812,12 +828,6 @@ export default function CarsManagePage() {
                                     {car.plate_no}
                                   </span>
                                 )}
-                                {car.car_type && (
-                                  <span className="inline-flex items-center gap-1 rounded-full bg-violet-500/10 px-1.5 py-0.5 font-medium text-violet-600 dark:text-violet-400">
-                                    <FaCarSide size={8} />
-                                    {car.car_type}
-                                  </span>
-                                )}
                                 {car.tank_no && (
                                   <span className="inline-flex items-center gap-1 text-slate-500">
                                     <FaWarehouse size={8} className="text-slate-400" />
@@ -827,6 +837,9 @@ export default function CarsManagePage() {
                               </div>
                             </div>
                           </div>
+                        </td>
+                        <td className="px-4 py-3">
+                          <CarTypeBadge carType={car.car_type} />
                         </td>
                         <td className="px-4 py-3">
                           {car.imei ? (
