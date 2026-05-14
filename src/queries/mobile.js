@@ -834,6 +834,22 @@ async function mobileJobAction(body) {
           [billNo, lat, lng, latEnd, lngEnd, deliveryImage, comment, currentDocNo]
         );
 
+        // ປ່ອຍ check_status ເມື່ອບໍ່ມີຖ້ຽວເປີດຄ້າງສຳລັບບິນນີ້ — ຖ້າຍັງມີ detail ອື່ນທີ່ຍັງບໍ່ປິດ (ຈັດຫຼາຍຄັ້ງ) ຈະບໍ່ປ່ອຍ
+        await client.query(
+          `UPDATE ic_trans_shipment s
+           SET check_status = 0
+           WHERE s.doc_no = $1
+             AND ${getFixedYearSqlFilter("s.doc_date")}
+             AND NOT EXISTS (
+               SELECT 1
+               FROM public.odg_tms_detail det
+               WHERE det.bill_no = s.doc_no
+                 AND ${getFixedYearSqlFilter("det.doc_date")}
+                 AND COALESCE(det.status, 0) NOT IN (1, 2)
+             )`,
+          [billNo]
+        );
+
         const openBillCount = await getOpenBillCount(currentDocNo, client);
 
         await client.query("COMMIT");

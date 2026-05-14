@@ -1,5 +1,6 @@
 "use client";
 
+import type { ReactNode } from "react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import {
   FaBroadcastTower,
@@ -81,6 +82,50 @@ const CAR_TYPE_OPTIONS = [
 ];
 
 // ==================== Helpers ====================
+
+function toText(value: unknown) {
+  if (typeof value === "string") return value;
+  if (value === null || value === undefined) return "";
+  return String(value);
+}
+
+function normalizeOptions(data: unknown): Option[] {
+  if (!Array.isArray(data)) return [];
+
+  return data
+    .map((item) => {
+      const record =
+        item && typeof item === "object" ? (item as Record<string, unknown>) : {};
+      const code = toText(record.code).trim();
+      const name = toText(record.name_1).trim();
+      return { code, name_1: name || code };
+    })
+    .filter((item) => item.code.length > 0);
+}
+
+function normalizeCarProfiles(data: unknown): CarProfile[] {
+  if (!Array.isArray(data)) return [];
+
+  return data
+    .map((item) => {
+      const record =
+        item && typeof item === "object" ? (item as Record<string, unknown>) : {};
+      const code = toText(record.code).trim();
+      const name = toText(record.name_1).trim();
+
+      return {
+        code,
+        name_1: name || code,
+        imei: toText(record.imei),
+        plate_no: toText(record.plate_no),
+        tank_no: toText(record.tank_no),
+        car_type: toText(record.car_type),
+        drivers: normalizeOptions(record.drivers),
+        workers: normalizeOptions(record.workers),
+      };
+    })
+    .filter((car) => car.code.length > 0);
+}
 
 function getCarStatus(car: CarProfile) {
   if (car.drivers.length > 0 && car.workers.length > 0) {
@@ -203,7 +248,7 @@ function SearchableMultiSelectField({
   accent = "sky",
 }: {
   label: string;
-  icon: React.ReactNode;
+  icon: ReactNode;
   placeholder: string;
   allOptions: Option[];
   availableOptions: Option[];
@@ -358,9 +403,9 @@ export default function CarsManagePage() {
         Actions.getDispatchDrivers(),
         Actions.getDispatchWorkers(),
       ]);
-      setCars(carsData as CarProfile[]);
-      setDriverOptions(driversData as Option[]);
-      setWorkerOptions(workersData as Option[]);
+      setCars(normalizeCarProfiles(carsData));
+      setDriverOptions(normalizeOptions(driversData));
+      setWorkerOptions(normalizeOptions(workersData));
     } catch (error) {
       console.error(error);
     } finally {
@@ -385,9 +430,9 @@ export default function CarsManagePage() {
           Actions.getDispatchWorkers(),
         ]);
         if (cancelled) return;
-        setCars(carsData as CarProfile[]);
-        setDriverOptions(driversData as Option[]);
-        setWorkerOptions(workersData as Option[]);
+        setCars(normalizeCarProfiles(carsData));
+        setDriverOptions(normalizeOptions(driversData));
+        setWorkerOptions(normalizeOptions(workersData));
       } catch (error) {
         console.error(error);
       } finally {

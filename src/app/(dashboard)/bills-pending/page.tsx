@@ -144,7 +144,7 @@ function formatRoutePath(route: DeliveryRoute) {
 const CONTACT_KEYS = ["contact_failed", "customer_postponed", "customer_cancelled", "contacted_ready"] as const;
 type ContactKey = (typeof CONTACT_KEYS)[number];
 
-type QueueFilter = "call" | "uncontacted" | "ready" | "problem" | "future" | "all";
+type QueueFilter = "call" | "uncontacted" | "ready" | "problem" | "future" | "cancelled_job" | "all";
 type WorkflowKey = "ready" | "missing_date" | "missing_route" | "missing_round" | "missing_contact" | "not_ready";
 
 export interface Transport {
@@ -275,6 +275,8 @@ export default function BillsPendingClient() {
   // This page is for calling customers one day before delivery and deciding
   // whether each pending bill is ready, postponed, cancelled, or unreachable.
   const isContactWindow = (b: Bill): boolean => {
+    // ບິນທີ່ເຄີຍຖືກຍົກເລີກຈາກຖ້ຽວ ອາດຍັງມີຄ້າງສົ່ງ ແຕ່ວັນພ້ອມຮັບຖືກຕັ້ງໄປໄກ — ຍັງຕ້ອງຢູ່ໃນຄິວໂທ/ຕິດຕາມ
+    if (b.cancelled_delivery) return true;
     const d = b.scheduled_date;
     if (!d) return true; // no date → treat as due (admin should set)
     return d <= tomorrow;
@@ -383,6 +385,7 @@ export default function BillsPendingClient() {
   );
   const needsFollowUp = (b: Bill): boolean => {
     if (!isContactWindow(b)) return false;
+    if (b.cancelled_delivery && !isDispatchReady(b)) return true;
     if (
       b.action_status === "contact_failed" ||
       b.action_status === "customer_postponed" ||
@@ -393,6 +396,7 @@ export default function BillsPendingClient() {
     return b.action_status === "contacted_ready" && !isDispatchReady(b);
   };
   const problemCount = bills.filter(needsFollowUp).length;
+  const cancelledJobCount = bills.filter((b) => b.cancelled_delivery).length;
 
   const kw = searchText.trim().toLowerCase();
   const filtered = bills.filter((b) => {
@@ -406,6 +410,7 @@ export default function BillsPendingClient() {
       return false;
     }
     if (queueFilter === "future" && !isNotYetTime(b)) return false;
+    if (queueFilter === "cancelled_job" && !b.cancelled_delivery) return false;
 
     if (!kw) return true;
     return [
@@ -417,6 +422,10 @@ export default function BillsPendingClient() {
       b.transport,
       b.time_open,
       b.partial_delivery ? "ກຳລັງທະຍອຍສົ່ງ partial delivery" : "",
+      b.cancelled_delivery ? "ຍົກເລີກຈັດສົ່ງ cancelled delivery" : "",
+      b.cancelled_delivery_job,
+      b.cancelled_delivery_remark,
+      b.cancelled_delivery_at,
     ].filter(Boolean).join(" ").toLowerCase().includes(kw);
   });
 
@@ -684,6 +693,7 @@ export default function BillsPendingClient() {
             { key: "uncontacted", label: "ຍັງບໍ່ໂທ", count: contactCounts.uncontacted, color: "amber" },
             { key: "ready", label: "ພ້ອມຈັດຖ້ຽວ", count: dispatchReadyCount, color: "emerald" },
             { key: "problem", label: "ຕ້ອງຕິດຕາມ", count: problemCount, color: "slate" },
+            { key: "cancelled_job", label: "ຍົກເລີກຈັດສົ່ງ", count: cancelledJobCount, color: "rose" },
             { key: "future", label: `ຍັງບໍ່ເຖິງເວລາ > ${notYetDays} ມື້`, count: dueCounts.future, color: "sky" },
             { key: "all", label: "ທັງໝົດ", count: bills.length, color: "slate" },
           ] as const
