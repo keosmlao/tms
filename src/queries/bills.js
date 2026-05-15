@@ -471,7 +471,11 @@ async function getManualPendingRowsForPending(fromDate, toDate) {
     `SELECT
       a.doc_no,
       to_char(a.doc_date,'DD-MM-YYYY') as doc_date,
+      a.cust_code,
+      COALESCE(NULLIF(TRIM(cust.name_1), ''), a.cust_code, '') as cust_name,
       COALESCE(NULLIF(TRIM(cust.name_1), ''), a.cust_code, '') as transport_name,
+      COALESCE(NULLIF(TRIM(acd.latitude::text), ''), '') as cust_lat,
+      COALESCE(NULLIF(TRIM(acd.longitude::text), ''), '') as cust_lng,
       to_char(COALESCE(a.send_date, pb.scheduled_date, a.doc_date),'YYYY-MM-DD') as send_date,
       to_char(COALESCE(a.send_date, pb.scheduled_date, a.doc_date),'DD-MM-YYYY') as send_date_display,
       COALESCE(sale.name_1, '') as sale,
@@ -488,6 +492,7 @@ async function getManualPendingRowsForPending(fromDate, toDate) {
       AND pb.scheduled_date IS NOT NULL
       AND COALESCE(NULLIF(TRIM(pb.delivery_round_code), ''), NULL) IS NOT NULL
     LEFT JOIN ar_customer cust ON cust.code = a.cust_code
+    LEFT JOIN ar_customer_detail acd ON acd.ar_code = a.cust_code
     LEFT JOIN erp_user sale ON sale.code = a.sale_code
     LEFT JOIN erp_department_list dep ON dep.code = sale.department
     WHERE a.trans_flag IN (${manualFlagListSql()})
@@ -560,6 +565,10 @@ async function getBillsPending(session, fromDate, toDate, transportCode) {
       `SELECT
         a.doc_no, to_char(b.doc_date,'DD-MM-YYYY') as doc_date, a.transport_name,
         a.transport_code,
+        a.cust_code,
+        COALESCE(NULLIF(TRIM(cust.name_1), ''), a.cust_code, '') as cust_name,
+        COALESCE(NULLIF(TRIM(acd.latitude::text), ''), '') as cust_lat,
+        COALESCE(NULLIF(TRIM(acd.longitude::text), ''), '') as cust_lng,
         to_char(b.send_date,'YYYY-MM-DD') as send_date,
         to_char(b.send_date,'DD-MM-YYYY') as send_date_display,
         c.name_1 as sale, COALESCE(dep.name_1::text, c.department::text, '') as department,
@@ -567,6 +576,8 @@ async function getBillsPending(session, fromDate, toDate, transportCode) {
         now() - a.create_date_time_now as time_use
       FROM ic_trans_shipment a
       LEFT JOIN ic_trans b ON b.doc_no=a.doc_no
+      LEFT JOIN ar_customer cust ON cust.code = a.cust_code
+      LEFT JOIN ar_customer_detail acd ON acd.ar_code = a.cust_code
       LEFT JOIN erp_user c ON c.code=b.sale_code
       LEFT JOIN erp_department_list dep ON dep.code=c.department
       LEFT JOIN transport_type d ON d.code=a.transport_code
@@ -649,6 +660,7 @@ async function getBillsPending(session, fromDate, toDate, transportCode) {
       // Anything else (legacy values like contacted_waiting/contacted_dispatched)
       // is cleared so the bill falls back to "ບໍ່ຕິດຕໍ່" until admin retags.
       const allowedStatuses = [
+        "sales_not_notified",
         "contact_failed",
         "customer_postponed",
         "customer_cancelled",
@@ -679,6 +691,8 @@ async function getBillsPending(session, fromDate, toDate, transportCode) {
         todo_done_count: Number(todo?.done_count ?? 0),
         todo_earliest_deadline: todo?.earliest_deadline ?? null,
         todo_earliest_deadline_display: todo?.earliest_deadline_display ?? null,
+        planned_lat: sched?.planned_lat ?? "",
+        planned_lng: sched?.planned_lng ?? "",
       };
     })
     // Service bills (tb_product) can be re-delivered for repeat servicing,

@@ -89,6 +89,12 @@ const RevertCompleteBill = z.object({
   action: z.literal("revert_complete_bill"),
   bill_no: NonEmptyString,
 });
+const EditCompleteBill = z.object({
+  action: z.literal("edit_complete_bill"),
+  bill_no: NonEmptyString,
+  items: z.array(z.record(z.string(), z.unknown())).default([]),
+  comment: OptionalString,
+});
 const CompleteJob = z.object({
   action: z.literal("complete_job"),
   doc_no: NonEmptyString,
@@ -113,6 +119,11 @@ const AttachBillImage = z.object({
   bill_no: NonEmptyString,
   kind: z.enum(["primary", "delivery", "signature"]),
   image_data: DataUri,
+  // Edit-mode flag: when true on a `delivery` upload, the server wipes
+  // existing delivery images for this bill before inserting the new one.
+  // Sent on the first attach call of an edit batch; subsequent calls
+  // append as usual. No-op for `primary` / `signature` (those overwrite).
+  replace: z.boolean().optional(),
 });
 const FuelRefill = z.object({
   action: z.literal("fuel_refill"),
@@ -138,6 +149,7 @@ export const JobActionSchema = z.discriminatedUnion("action", [
   CompleteBill,
   CancelBill,
   RevertCompleteBill,
+  EditCompleteBill,
   CompleteJob,
   SaveTravelHistory,
   AttachJobImage,

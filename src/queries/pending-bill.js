@@ -55,6 +55,17 @@ async function ensurePendingBillSchemaInternal(db) {
     CREATE INDEX IF NOT EXISTS idx_odg_tms_pending_bill_transport
     ON public.odg_tms_pending_bill (transport_code) WHERE transport_code IS NOT NULL
   `);
+  // Planned delivery location set by dispatcher on a pending bill. The driver
+  // app reads this for the navigation pin so they head to the right spot
+  // even before any GPS is captured at delivery time.
+  await safeDdl(db, `
+    ALTER TABLE public.odg_tms_pending_bill
+    ADD COLUMN IF NOT EXISTS planned_lat character varying
+  `);
+  await safeDdl(db, `
+    ALTER TABLE public.odg_tms_pending_bill
+    ADD COLUMN IF NOT EXISTS planned_lng character varying
+  `);
   await safeDdl(db, `
     CREATE INDEX IF NOT EXISTS idx_odg_tms_pending_bill_scheduled
     ON public.odg_tms_pending_bill (scheduled_date)
@@ -76,7 +87,7 @@ async function ensurePendingBillSchemaInternal(db) {
 // Bump the cache version whenever the DDL changes so existing dev/prod
 // processes re-run the ALTER TABLE migrations on next call (the global cache
 // otherwise persists across hot-reloads).
-const PENDING_BILL_SCHEMA_VERSION = "v4_transport";
+const PENDING_BILL_SCHEMA_VERSION = "v5_planned_location";
 
 async function ensurePendingBillSchema() {
   const readyKey = `__tmsPendingBillSchemaReady_${PENDING_BILL_SCHEMA_VERSION}`;
@@ -109,6 +120,8 @@ async function getPendingBillScheduleMap(billNos) {
             COALESCE(delivery_route_code, '') as delivery_route_code,
             COALESCE(delivery_round_code, '') as delivery_round_code,
             COALESCE(transport_code, '') as transport_code,
+            COALESCE(planned_lat, '') as planned_lat,
+            COALESCE(planned_lng, '') as planned_lng,
             COALESCE(updated_by, '') as updated_by,
             to_char(updated_at,'DD-MM-YYYY HH24:MI') as updated_at
      FROM public.odg_tms_pending_bill
@@ -178,6 +191,8 @@ async function getPendingBillSchedule(billNo) {
             COALESCE(delivery_route_code, '') as delivery_route_code,
             COALESCE(delivery_round_code, '') as delivery_round_code,
             COALESCE(transport_code, '') as transport_code,
+            COALESCE(planned_lat, '') as planned_lat,
+            COALESCE(planned_lng, '') as planned_lng,
             COALESCE(updated_by, '') as updated_by,
             to_char(updated_at,'DD-MM-YYYY HH24:MI') as updated_at
      FROM public.odg_tms_pending_bill
@@ -186,9 +201,49 @@ async function getPendingBillSchedule(billNo) {
   );
 }
 
+// Set or clear the dispatcher's planned delivery location on a pending bill.
+// Stored separately from scheduled_date / route / round — those are touched
+// from the schedule dialog and we don't want to entangle the two flows.
+async function upsertPendingBillLocation({ billNo, lat, lng, userCode }) {
+  const code = String(billNo ?? "").trim();
+  if (!code) throw new Error("bill_no is required");
+  await ensurePendingBillSchema();
+
+  const latStr = lat === null || lat === undefined || lat === "" ? null : String(lat).trim();
+  const lngStr = lng === null || lng === undefined || lng === "" ? null : String(lng).trim();
+  const user = userCode ? String(userCode).trim() || null : null;
+
+  if (latStr === null || lngStr === null) {
+    await pool.query(
+      `INSERT INTO public.odg_tms_pending_bill (bill_no, planned_lat, planned_lng, updated_by, updated_at)
+       VALUES ($1, NULL, NULL, $2, LOCALTIMESTAMP(0))
+       ON CONFLICT (bill_no) DO UPDATE
+         SET planned_lat = NULL,
+             planned_lng = NULL,
+             updated_by = EXCLUDED.updated_by,
+             updated_at = LOCALTIMESTAMP(0)`,
+      [code, user]
+    );
+    return { success: true, cleared: true };
+  }
+
+  await pool.query(
+    `INSERT INTO public.odg_tms_pending_bill (bill_no, planned_lat, planned_lng, updated_by, updated_at)
+     VALUES ($1, $2, $3, $4, LOCALTIMESTAMP(0))
+     ON CONFLICT (bill_no) DO UPDATE
+       SET planned_lat = EXCLUDED.planned_lat,
+           planned_lng = EXCLUDED.planned_lng,
+           updated_by = EXCLUDED.updated_by,
+           updated_at = LOCALTIMESTAMP(0)`,
+    [code, latStr, lngStr, user]
+  );
+  return { success: true };
+}
+
 module.exports = {
   ensurePendingBillSchema,
   getPendingBillScheduleMap,
   getPendingBillSchedule,
   upsertPendingBillSchedule,
+  upsertPendingBillLocation,
 };

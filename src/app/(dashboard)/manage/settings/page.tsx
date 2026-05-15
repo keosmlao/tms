@@ -6,6 +6,7 @@ import {
   FaCog,
   FaFlask,
   FaLine,
+  FaQrcode,
   FaSave,
   FaSpinner,
   FaUserTie,
@@ -24,6 +25,7 @@ interface NotifySettings {
   "whatsapp.test_enabled": string;
   "whatsapp.test_to": string;
   "pending.not_yet_days": string;
+  "app.qr_scan_verify_enabled": string;
 }
 
 const EMPTY: NotifySettings = {
@@ -34,6 +36,7 @@ const EMPTY: NotifySettings = {
   "whatsapp.test_enabled": "",
   "whatsapp.test_to": "",
   "pending.not_yet_days": "3",
+  "app.qr_scan_verify_enabled": "1",
 };
 
 export default function SettingsPage() {
@@ -82,6 +85,10 @@ export default function SettingsPage() {
     }
   };
 
+  const qrScanEnabled =
+    data["app.qr_scan_verify_enabled"] === "1" ||
+    data["app.qr_scan_verify_enabled"] === "true" ||
+    data["app.qr_scan_verify_enabled"] === "";
   const lineEnabled =
     data["line.test_enabled"] === "1" || data["line.test_enabled"] === "true";
   const customerLineEnabled =
@@ -106,6 +113,22 @@ export default function SettingsPage() {
         </div>
       ) : (
         <>
+          <SectionCard
+            title="App ຄົນຂັບ"
+            subtitle="ຄຸນສົມບັດທີ່ສະແດງໃນ app ຂອງຄົນຂັບ"
+            icon={<FaQrcode className="text-teal-600" />}
+            tone="teal"
+          >
+            <Toggle
+              label="ກວດສອບຈຸດສົ່ງດ້ວຍ QR (Scan QR)"
+              description="ເມື່ອເປີດ: ປຸ່ມ Scan QR ປະກົດໃນບີນຕອນຈັດສົ່ງ ໃຫ້ຄົນຂັບ scan ບີນເພື່ອກວດສອບໄລຍະ. ປິດເພື່ອເຊື່ອງ."
+              checked={qrScanEnabled}
+              onChange={(v) =>
+                update("app.qr_scan_verify_enabled", v ? "1" : "0")
+              }
+            />
+          </SectionCard>
+
           <SectionCard
             title="Pending ບິນ"
             subtitle="ກຳນົດເກນວັນສຳລັບມຸມມອງ “ຍັງບໍ່ເຖິງເວລາ”"

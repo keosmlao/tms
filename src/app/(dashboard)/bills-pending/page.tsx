@@ -13,8 +13,10 @@ import {
   FaExchangeAlt,
   FaExclamationTriangle,
   FaFileInvoice,
+  FaMapMarkerAlt,
   FaPhone,
   FaPlus,
+  FaPrint,
   FaRoute,
   FaSearch,
   FaSortAmountDown,
@@ -32,7 +34,12 @@ import {
   PendingBillScheduleDialog,
   type PendingScheduleDefaults,
 } from "@/components/pending-bill-schedule-dialog";
+import {
+  PendingBillLocationDialog,
+  type PendingLocationDefaults,
+} from "@/components/pending-bill-location-dialog";
 import { BillTodoPopover } from "@/components/bill-todo-popover";
+import { printBillLocationQr } from "@/lib/print-bill-location-qr";
 // Ported from server actions: getBillProducts, getBillsPending, updateBillTransport
 
 interface TimeUse {
@@ -75,6 +82,12 @@ export interface Bill {
   todo_done_count?: number;
   todo_earliest_deadline?: string | null;
   todo_earliest_deadline_display?: string | null;
+  planned_lat?: string | null;
+  planned_lng?: string | null;
+  cust_code?: string | null;
+  cust_name?: string | null;
+  cust_lat?: string | null;
+  cust_lng?: string | null;
 }
 
 interface DeliveryRound {
@@ -114,11 +127,13 @@ interface ManualPendingBill {
 //   ຍັງບໍ່ເຖິງເວລາ uses send_date more than 3 days from today.
 //   ຕ້ອງໂທຫາລູກຄ້າ uses missing/overdue/today/tomorrow scheduled_date.
 //     ├── ບໍ່ຕິດຕໍ່             (action_status = null)
+//     ├── ພະນັກງານຂາຍຍັງບໍ່ແຈ້ງ  (action_status = "sales_not_notified")
 //     ├── ຕິດຕໍ່ບໍ່ໄດ້           (action_status = "contact_failed")
 //     ├── ລູກຄ້າເລື່ອນວັນຮັບ     (action_status = "customer_postponed")
 //     ├── ລູກຄ້າປະຕິເສດ/ຍົກເລີກ (action_status = "customer_cancelled")
 //     └── ພ້ອມຮັບ              (action_status = "contacted_ready")
 const ACTION_STATUSES = [
+  { key: "sales_not_notified", label: "ພະນັກງານຂາຍຍັງບໍ່ແຈ້ງ", color: "slate" },
   { key: "contact_failed", label: "ຕິດຕໍ່ບໍ່ໄດ້", color: "rose" },
   { key: "customer_postponed", label: "ລູກຄ້າເລື່ອນວັນຮັບ", color: "amber" },
   { key: "customer_cancelled", label: "ລູກຄ້າປະຕິເສດ/ຍົກເລີກ", color: "slate" },
@@ -126,6 +141,7 @@ const ACTION_STATUSES = [
 ] as const;
 
 const ACTION_STATUS_MAP: Record<string, { label: string; color: string }> = {
+  sales_not_notified: { label: "ພະນັກງານຂາຍຍັງບໍ່ແຈ້ງ", color: "slate" },
   contact_failed: { label: "ຕິດຕໍ່ບໍ່ໄດ້", color: "rose" },
   customer_postponed: { label: "ລູກຄ້າເລື່ອນວັນຮັບ", color: "amber" },
   customer_cancelled: { label: "ລູກຄ້າປະຕິເສດ/ຍົກເລີກ", color: "slate" },
@@ -141,7 +157,7 @@ function formatRoutePath(route: DeliveryRoute) {
     .join(" → ");
 }
 
-const CONTACT_KEYS = ["contact_failed", "customer_postponed", "customer_cancelled", "contacted_ready"] as const;
+const CONTACT_KEYS = ["sales_not_notified", "contact_failed", "customer_postponed", "customer_cancelled", "contacted_ready"] as const;
 type ContactKey = (typeof CONTACT_KEYS)[number];
 
 type QueueFilter = "call" | "uncontacted" | "ready" | "problem" | "future" | "cancelled_job" | "all";
@@ -190,6 +206,7 @@ export default function BillsPendingClient() {
   const [productsByDoc, setProductsByDoc] = useState<Record<string, Product[]>>({});
   const [loadingDoc, setLoadingDoc] = useState<string | null>(null);
   const [scheduleBill, setScheduleBill] = useState<{ billNo: string; defaults: PendingScheduleDefaults } | null>(null);
+  const [locationBill, setLocationBill] = useState<{ billNo: string; defaults: PendingLocationDefaults } | null>(null);
   const [todoOpen, setTodoOpen] = useState<{ billNo: string; anchor: HTMLElement } | null>(null);
   const [queueFilter, setQueueFilter] = useState<QueueFilter>("call");
   const [statusMenu, setStatusMenu] = useState<{ billNo: string; anchor: HTMLElement } | null>(null);
@@ -311,6 +328,18 @@ export default function BillsPendingClient() {
     });
   };
 
+  const openLocationDialog = (b: Bill) => {
+    setLocationBill({
+      billNo: b.doc_no,
+      defaults: {
+        planned_lat: b.planned_lat ?? null,
+        planned_lng: b.planned_lng ?? null,
+        cust_lat: b.cust_lat ?? null,
+        cust_lng: b.cust_lng ?? null,
+      },
+    });
+  };
+
   const workflowKey = (b: Bill): WorkflowKey => {
     if (isDispatchReady(b)) return "ready";
     if (b.action_status !== "contacted_ready") {
@@ -377,6 +406,7 @@ export default function BillsPendingClient() {
     },
     {
       uncontacted: 0,
+      sales_not_notified: 0,
       contact_failed: 0,
       customer_postponed: 0,
       customer_cancelled: 0,
@@ -387,6 +417,7 @@ export default function BillsPendingClient() {
     if (!isContactWindow(b)) return false;
     if (b.cancelled_delivery && !isDispatchReady(b)) return true;
     if (
+      b.action_status === "sales_not_notified" ||
       b.action_status === "contact_failed" ||
       b.action_status === "customer_postponed" ||
       b.action_status === "customer_cancelled"
@@ -832,6 +863,26 @@ export default function BillsPendingClient() {
                       const chipBase = "inline-flex items-center gap-1.5 rounded-md border px-2 py-1 text-[10px] font-semibold transition-colors";
                       const chipDone = "border-emerald-500/30 bg-emerald-500/10 text-emerald-700 dark:text-emerald-400 hover:bg-emerald-500/15";
                       const chipTodo = "border-slate-300/50 bg-white/40 text-slate-600 hover:bg-slate-500/10 dark:border-white/10 dark:bg-white/5 dark:text-slate-300";
+                      // Inline "x" button styling — appended directly next to
+                      // a filled chip so dispatchers can clear route/round/date
+                      // without opening the dropdown. The chip itself loses
+                      // its right rounding so they read as a single tag.
+                      const chipClear =
+                        "inline-flex items-center justify-center rounded-r-md border border-l-0 border-rose-300/40 bg-rose-50/40 px-1.5 py-1 text-rose-500 hover:bg-rose-500/15 hover:text-rose-600 dark:border-rose-500/30 dark:bg-rose-500/[0.06] dark:text-rose-400";
+                      const clearScheduleField = async (
+                        billNo: string,
+                        field: "delivery_route_code" | "delivery_round_code" | "scheduled_date"
+                      ) => {
+                        try {
+                          await Actions.upsertPendingBillSchedule({
+                            bill_no: billNo,
+                            [field]: null,
+                          });
+                          await fetchBills();
+                        } catch (e) {
+                          console.error("[clearScheduleField]", e);
+                        }
+                      };
                       const canPlanDelivery = true;
                       return (
                         <article
@@ -1013,63 +1064,138 @@ export default function BillsPendingClient() {
                                 {contactMeta?.label ?? "ຍັງບໍ່ບັນທຶກການຕິດຕໍ່"}
                                 <FaChevronDown size={7} className="opacity-60" />
                               </button>
-                              <button
-                                type="button"
-                                disabled={!canPlanDelivery}
-                                onClick={() => {
-                                  if (canPlanDelivery) openScheduleDialog(bill);
-                                }}
-                                className={`${chipBase} ${
-                                  !canPlanDelivery
-                                    ? "cursor-not-allowed border-slate-200/60 bg-slate-100/60 text-slate-400 dark:border-white/5 dark:bg-white/[0.03]"
-                                    : bill.scheduled_date_display
-                                    ? chipDone
-                                    : chipTodo
-                                }`}
-                                title={canPlanDelivery ? "ກຳນົດ ຫຼືແກ້ວັນທີ່ລູກຄ້າພ້ອມຮັບ" : "ຕ້ອງຕັ້ງສະຖານະເປັນ ພ້ອມຮັບ ກ່ອນ"}
-                              >
-                                <FaCalendar size={9} />
-                                {canPlanDelivery
-                                  ? bill.scheduled_date_display ? bill.scheduled_date_display : "ກຳນົດວັນຮັບ"
-                                  : "ວັນຮັບ: ລໍຖ້າພ້ອມຮັບ"}
-                                {bill.scheduled_date_overridden && <span className="text-amber-600 dark:text-amber-400">(ແກ້)</span>}
-                                {canPlanDelivery && <FaChevronDown size={7} className="opacity-60" />}
-                              </button>
-                              <button
-                                type="button"
-                                onClick={(e) => {
-                                  setRouteMenu({ billNo: bill.doc_no, anchor: e.currentTarget });
-                                }}
-                                className={`${chipBase} ${
-                                  bill.delivery_route_code
-                                    ? chipDone
-                                    : chipTodo
-                                }`}
-                                title="ກຳນົດ ຫຼືແກ້ເສັ້ນທາງຂົນສົ່ງ"
-                              >
-                                <FaRoute size={9} />
-                                {routeName || "ເລືອກເສັ້ນທາງ"}
-                                <FaChevronDown size={7} className="opacity-60" />
-                              </button>
-                              <button
-                                type="button"
-                                disabled={!canPlanDelivery}
-                                onClick={(e) => {
-                                  if (canPlanDelivery) setRoundMenu({ billNo: bill.doc_no, anchor: e.currentTarget });
-                                }}
-                                className={`${chipBase} ${
-                                  !canPlanDelivery
-                                    ? "cursor-not-allowed border-slate-200/60 bg-slate-100/60 text-slate-400 dark:border-white/5 dark:bg-white/[0.03]"
-                                    : bill.delivery_round_code
-                                    ? chipDone
-                                    : chipTodo
-                                }`}
-                                title={canPlanDelivery ? "ກຳນົດ ຫຼືແກ້ຮອບສົ່ງ" : "ຕ້ອງຕັ້ງສະຖານະເປັນ ພ້ອມຮັບ ກ່ອນ"}
-                              >
-                                <FaClock size={9} />
-                                {canPlanDelivery ? roundName || "ເລືອກຮອບສົ່ງ" : "ຮອບ: ລໍຖ້າພ້ອມຮັບ"}
-                                {canPlanDelivery && <FaChevronDown size={7} className="opacity-60" />}
-                              </button>
+                              <span className="inline-flex">
+                                <button
+                                  type="button"
+                                  disabled={!canPlanDelivery}
+                                  onClick={() => {
+                                    if (canPlanDelivery) openScheduleDialog(bill);
+                                  }}
+                                  className={`${chipBase} ${bill.scheduled_date_overridden ? "rounded-r-none" : ""} ${
+                                    !canPlanDelivery
+                                      ? "cursor-not-allowed border-slate-200/60 bg-slate-100/60 text-slate-400 dark:border-white/5 dark:bg-white/[0.03]"
+                                      : bill.scheduled_date_display
+                                      ? chipDone
+                                      : chipTodo
+                                  }`}
+                                  title={canPlanDelivery ? "ກຳນົດ ຫຼືແກ້ວັນທີ່ລູກຄ້າພ້ອມຮັບ" : "ຕ້ອງຕັ້ງສະຖານະເປັນ ພ້ອມຮັບ ກ່ອນ"}
+                                >
+                                  <FaCalendar size={9} />
+                                  {canPlanDelivery
+                                    ? bill.scheduled_date_display ? bill.scheduled_date_display : "ກຳນົດວັນຮັບ"
+                                    : "ວັນຮັບ: ລໍຖ້າພ້ອມຮັບ"}
+                                  {bill.scheduled_date_overridden && <span className="text-amber-600 dark:text-amber-400">(ແກ້)</span>}
+                                  {canPlanDelivery && !bill.scheduled_date_overridden && <FaChevronDown size={7} className="opacity-60" />}
+                                </button>
+                                {bill.scheduled_date_overridden && canPlanDelivery && (
+                                  <button
+                                    type="button"
+                                    onClick={() => void clearScheduleField(bill.doc_no, "scheduled_date")}
+                                    className={chipClear}
+                                    title="ລົບວັນທີ່ກຳນົດ — ກັບໄປໃຊ້ send_date ຂອງບິນ"
+                                  >
+                                    <FaTimes size={8} />
+                                  </button>
+                                )}
+                              </span>
+                              <span className="inline-flex">
+                                <button
+                                  type="button"
+                                  onClick={(e) => {
+                                    setRouteMenu({ billNo: bill.doc_no, anchor: e.currentTarget });
+                                  }}
+                                  className={`${chipBase} ${bill.delivery_route_code ? "rounded-r-none" : ""} ${
+                                    bill.delivery_route_code
+                                      ? chipDone
+                                      : chipTodo
+                                  }`}
+                                  title="ກຳນົດ ຫຼືແກ້ເສັ້ນທາງຂົນສົ່ງ"
+                                >
+                                  <FaRoute size={9} />
+                                  {routeName || "ເລືອກເສັ້ນທາງ"}
+                                  {!bill.delivery_route_code && <FaChevronDown size={7} className="opacity-60" />}
+                                </button>
+                                {bill.delivery_route_code && (
+                                  <button
+                                    type="button"
+                                    onClick={() => void clearScheduleField(bill.doc_no, "delivery_route_code")}
+                                    className={chipClear}
+                                    title="ລົບເສັ້ນທາງທີ່ກຳນົດ"
+                                  >
+                                    <FaTimes size={8} />
+                                  </button>
+                                )}
+                              </span>
+                              <span className="inline-flex">
+                                <button
+                                  type="button"
+                                  disabled={!canPlanDelivery}
+                                  onClick={(e) => {
+                                    if (canPlanDelivery) setRoundMenu({ billNo: bill.doc_no, anchor: e.currentTarget });
+                                  }}
+                                  className={`${chipBase} ${bill.delivery_round_code && canPlanDelivery ? "rounded-r-none" : ""} ${
+                                    !canPlanDelivery
+                                      ? "cursor-not-allowed border-slate-200/60 bg-slate-100/60 text-slate-400 dark:border-white/5 dark:bg-white/[0.03]"
+                                      : bill.delivery_round_code
+                                      ? chipDone
+                                      : chipTodo
+                                  }`}
+                                  title={canPlanDelivery ? "ກຳນົດ ຫຼືແກ້ຮອບສົ່ງ" : "ຕ້ອງຕັ້ງສະຖານະເປັນ ພ້ອມຮັບ ກ່ອນ"}
+                                >
+                                  <FaClock size={9} />
+                                  {canPlanDelivery ? roundName || "ເລືອກຮອບສົ່ງ" : "ຮອບ: ລໍຖ້າພ້ອມຮັບ"}
+                                  {canPlanDelivery && !bill.delivery_round_code && <FaChevronDown size={7} className="opacity-60" />}
+                                </button>
+                                {bill.delivery_round_code && canPlanDelivery && (
+                                  <button
+                                    type="button"
+                                    onClick={() => void clearScheduleField(bill.doc_no, "delivery_round_code")}
+                                    className={chipClear}
+                                    title="ລົບຮອບສົ່ງທີ່ກຳນົດ"
+                                  >
+                                    <FaTimes size={8} />
+                                  </button>
+                                )}
+                              </span>
+                              {(() => {
+                                const planned = (bill.planned_lat ?? "").toString().trim() && (bill.planned_lng ?? "").toString().trim();
+                                const custLoc = (bill.cust_lat ?? "").toString().trim() && (bill.cust_lng ?? "").toString().trim();
+                                // Surface either: planned (set by dispatcher) or fallback to
+                                // the customer's stored location. The dialog handles editing.
+                                const hasAnyLoc = Boolean(planned || custLoc);
+                                return (
+                                  <>
+                                    <button
+                                      type="button"
+                                      onClick={() => openLocationDialog(bill)}
+                                      className={`${chipBase} ${planned ? chipDone : custLoc ? "border-sky-500/30 bg-sky-500/10 text-sky-700 hover:bg-sky-500/15 dark:text-sky-400" : chipTodo}`}
+                                      title={planned ? "ແກ້ຈຸດຈັດສົ່ງ" : custLoc ? "ໃຊ້/ປ່ຽນຈຸດທີ່ບັນທຶກໄວ້ໃນຂໍ້ມູນລູກຄ້າ" : "ກຳນົດຈຸດຈັດສົ່ງສຳລັບໃຫ້ຄົນຂັບນຳທາງ"}
+                                    >
+                                      <FaMapMarkerAlt size={9} />
+                                      {planned ? "ຈຸດສົ່ງ" : custLoc ? "ຈຸດລູກຄ້າ" : "ກຳນົດຈຸດສົ່ງ"}
+                                    </button>
+                                    {hasAnyLoc && (
+                                      <button
+                                        type="button"
+                                        onClick={() => {
+                                          const lat = (planned ? bill.planned_lat : bill.cust_lat) ?? "";
+                                          const lng = (planned ? bill.planned_lng : bill.cust_lng) ?? "";
+                                          void printBillLocationQr({
+                                            billNo: bill.doc_no,
+                                            custName: bill.cust_name ?? null,
+                                            lat,
+                                            lng,
+                                          }).catch((e) => alert(e instanceof Error ? e.message : "Print ບໍ່ສຳເລັດ"));
+                                        }}
+                                        className="inline-flex items-center justify-center rounded-md border border-slate-300/40 bg-white/60 px-1.5 py-1 text-slate-700 hover:bg-white dark:border-white/10 dark:bg-white/[0.04] dark:text-slate-200 dark:hover:bg-white/10"
+                                        title="ພິມ QR ຈຸດສົ່ງ ເພື່ອແນບກັບບິນ"
+                                      >
+                                        <FaPrint size={10} />
+                                      </button>
+                                    )}
+                                  </>
+                                );
+                              })()}
                             </div>
                           </div>
 
@@ -1423,6 +1549,14 @@ export default function BillsPendingClient() {
         billNo={scheduleBill?.billNo ?? null}
         initial={scheduleBill?.defaults ?? null}
         onClose={() => setScheduleBill(null)}
+        onSaved={() => void fetchBills()}
+      />
+
+      <PendingBillLocationDialog
+        open={locationBill !== null}
+        billNo={locationBill?.billNo ?? null}
+        initial={locationBill?.defaults ?? null}
+        onClose={() => setLocationBill(null)}
         onSaved={() => void fetchBills()}
       />
 

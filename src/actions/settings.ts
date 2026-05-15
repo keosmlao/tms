@@ -14,6 +14,9 @@ const NOTIFY_KEYS = [
   "whatsapp.test_enabled",
   "whatsapp.test_to",
   "pending.not_yet_days",
+  // Driver-app feature flag. "1" = QR-scan verify button visible in bill rows;
+  // anything else hides it. Defaulted to "1" in the dashboard form.
+  "app.qr_scan_verify_enabled",
 ] as const;
 
 export interface NotifySettings {
@@ -24,6 +27,7 @@ export interface NotifySettings {
   "whatsapp.test_enabled": string;
   "whatsapp.test_to": string;
   "pending.not_yet_days": string;
+  "app.qr_scan_verify_enabled": string;
 }
 
 export async function getNotifySettings(): Promise<NotifySettings> {

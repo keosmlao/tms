@@ -523,6 +523,14 @@ async function mobileJobAction(body) {
         if (!imageData) throw new Error("image_data is required");
 
         if (kind === "delivery") {
+          if (body.replace) {
+            // Edit flow: wipe existing delivery images for this bill before
+            // inserting the new one. Sent on the first attach of an edit batch.
+            await client.query(
+              `DELETE FROM public.odg_tms_delivery_images WHERE bill_no = $1`,
+              [billNo]
+            );
+          }
           await saveDeliveryImages(billNo, [imageData], client);
         } else if (kind === "signature") {
           await client.query(
@@ -930,6 +938,81 @@ async function mobileJobAction(body) {
         };
       }
 
+      case "edit_complete_bill": {
+        // Edit a completed delivery in place: update delivered_qty per item
+        // and remark. Image / signature changes are uploaded ahead of this
+        // call via attach_bill_image (delivery uses replace=true to wipe the
+        // old set; primary + signature overwrite naturally). Lat/lng are
+        // preserved — the original delivery location stays on the record.
+        if (!billNo) throw new Error("bill_no is required");
+        const billRow = await client.query(
+          `SELECT d.doc_no, t.job_status,
+                  COALESCE(d.status, 0) AS status
+           FROM public.odg_tms_detail d
+           INNER JOIN odg_tms t ON t.doc_no = d.doc_no
+           WHERE d.bill_no = $1 AND ${getFixedYearSqlFilter("d.doc_date")}
+           ORDER BY (CASE WHEN COALESCE(d.status, 0) NOT IN (1, 2) THEN 0 ELSE 1 END),
+                    d.create_date_time_now DESC NULLS LAST
+           LIMIT 1`,
+          [billNo]
+        );
+        const currentBill = billRow.rows[0];
+        const currentDocNo = currentBill?.doc_no;
+        if (!currentDocNo) throw new Error("Bill was not found");
+        if (Number(currentBill.status ?? 0) !== 1) {
+          throw new Error("ບິນນີ້ບໍ່ໄດ້ຢູ່ໃນສະຖານະຈັດສົ່ງສຳເລັດ");
+        }
+        if (Number(currentBill.job_status ?? 0) >= 3) {
+          throw new Error("ປິດຖ້ຽວແລ້ວ ບໍ່ສາມາດແກ້ໄຂໄດ້");
+        }
+
+        const itemRows = await client.query(
+          `SELECT item_code, selected_qty
+           FROM public.odg_tms_detail_item
+           WHERE bill_no = $1
+           ORDER BY item_code`,
+          [billNo]
+        );
+        if (itemRows.rows.length === 0) {
+          throw new Error("No delivery items found for this bill");
+        }
+        const allowedQty = new Map(
+          itemRows.rows.map((row) => [row.item_code, Number(row.selected_qty ?? 0)])
+        );
+
+        const requestedItems = normalizeItems(body.items);
+        for (const item of requestedItems) {
+          const maxQty = allowedQty.get(item.item_code);
+          if (maxQty === undefined) {
+            throw new Error(`Item ${item.item_code} was not found`);
+          }
+          const newQty = Math.max(0, Math.min(item.qty, maxQty));
+          await client.query(
+            `UPDATE public.odg_tms_detail_item
+             SET delivered_qty = $2
+             WHERE bill_no = $1 AND item_code = $3`,
+            [billNo, newQty, item.item_code]
+          );
+        }
+
+        if (comment !== null) {
+          await client.query(
+            `UPDATE public.odg_tms_detail
+             SET remark = $2
+             WHERE bill_no = $1 AND doc_no = $3 AND ${getFixedYearSqlFilter("doc_date")}`,
+            [billNo, comment, currentDocNo]
+          );
+        }
+
+        await client.query("COMMIT");
+        void notifyBillStatus(billNo, "✏️ ແກ້ໄຂການຈັດສົ່ງ");
+        return {
+          success: true,
+          doc_no: currentDocNo,
+          bill_no: billNo,
+        };
+      }
+
       case "complete_job": {
         if (!docNo) throw new Error("doc_no is required");
         const jobCarClause = carCode ? "AND car = $2" : "";
@@ -1113,13 +1196,16 @@ async function mobileBills({ docNo, billNo, type, driverId }) {
         '' as sight_img,
         (a.url_img IS NOT NULL AND a.url_img <> '') as has_url_img,
         (a.sight_img IS NOT NULL AND a.sight_img <> '') as has_sight_img,
-        COALESCE(a.remark, '') as remark
+        COALESCE(a.remark, '') as remark,
+        COALESCE(NULLIF(TRIM(pb.planned_lat), ''), '') as planned_lat,
+        COALESCE(NULLIF(TRIM(pb.planned_lng), ''), '') as planned_lng
       FROM public.odg_tms_detail a
       LEFT JOIN ar_customer b ON b.code = a.cust_code
       LEFT JOIN ar_customer_detail acd ON acd.ar_code = a.cust_code
       LEFT JOIN ic_trans_shipment s ON s.doc_no = a.bill_no
       LEFT JOIN public.transport_type pt ON pt.code = COALESCE(NULLIF(a.pickup_transport_code, '__CUSTOMER__'), s.transport_code)
       LEFT JOIN public.transport_type fwd ON fwd.code = a.forward_transport_code
+      LEFT JOIN public.odg_tms_pending_bill pb ON pb.bill_no = a.bill_no
       WHERE a.doc_no = $1 AND ${getFixedYearSqlFilter("a.doc_date")}
       ORDER BY a.bill_no`,
       [docNo]

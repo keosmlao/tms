@@ -137,6 +137,21 @@ paths:
         '400': { $ref: '#/components/responses/ValidationError' }
         '401': { $ref: '#/components/responses/Unauthorized' }
 
+  /api/mobile/settings:
+    get:
+      tags: [settings]
+      summary: Driver-app feature flags. Allow-list controlled server-side.
+      responses:
+        '200':
+          description: Feature flag map.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  qr_scan_verify_enabled: { type: boolean }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+
   /api/mobile/fcm-token:
     post:
       tags: [notifications]
@@ -307,6 +322,7 @@ components:
         - $ref: '#/components/schemas/CompleteBillAction'
         - $ref: '#/components/schemas/CancelBillAction'
         - $ref: '#/components/schemas/RevertCompleteBillAction'
+        - $ref: '#/components/schemas/EditCompleteBillAction'
         - $ref: '#/components/schemas/CompleteJobAction'
         - $ref: '#/components/schemas/SaveTravelHistoryAction'
         - $ref: '#/components/schemas/AttachJobImageAction'
@@ -375,6 +391,16 @@ components:
       properties:
         action: { const: revert_complete_bill }
         bill_no: { type: string }
+    EditCompleteBillAction:
+      type: object
+      required: [action, bill_no]
+      properties:
+        action: { const: edit_complete_bill }
+        bill_no: { type: string }
+        items:
+          type: array
+          items: { type: object }
+        comment: { type: string }
     CompleteJobAction:
       type: object
       required: [action, doc_no, miles_end]
@@ -410,6 +436,9 @@ components:
         bill_no: { type: string }
         kind: { type: string, enum: [primary, delivery, signature] }
         image_data: { type: string }
+        replace:
+          type: boolean
+          description: 'When true on a `delivery` upload, wipe existing delivery images for this bill first. Used in edit flow.'
     FuelRefillAction:
       type: object
       required: [action, user_code, liters, amount]

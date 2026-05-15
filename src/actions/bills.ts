@@ -21,6 +21,7 @@ import {
 import {
   getPendingBillSchedule as svcGetPendingBillSchedule,
   upsertPendingBillSchedule as svcUpsertPendingBillSchedule,
+  upsertPendingBillLocation as svcUpsertPendingBillLocation,
 } from "@/queries/pending-bill.js";
 import {
   getBillTodos as svcGetBillTodos,
@@ -156,6 +157,20 @@ export async function upsertPendingBillSchedule(input: {
     transportCode: has("transport_code")
       ? input.transport_code ?? null
       : current?.transport_code ?? null,
+    userCode: (s as { code?: string })?.code,
+  });
+}
+
+export async function setPendingBillLocation(input: {
+  bill_no: string;
+  lat: string | number | null;
+  lng: string | number | null;
+}) {
+  const s = await requireSession();
+  return svcUpsertPendingBillLocation({
+    billNo: input.bill_no,
+    lat: input.lat,
+    lng: input.lng,
     userCode: (s as { code?: string })?.code,
   });
 }

@@ -65,6 +65,7 @@ export const Actions = {
   getBillsPartialList: bills.getBillsPartialList,
   getPendingBillSchedule: bills.getPendingBillSchedule,
   upsertPendingBillSchedule: bills.upsertPendingBillSchedule,
+  setPendingBillLocation: bills.setPendingBillLocation,
   getBillTodos: bills.getBillTodos,
   createBillTodo: bills.createBillTodo,
   setBillTodoDone: bills.setBillTodoDone,
