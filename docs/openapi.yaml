@@ -306,6 +306,7 @@ components:
         - $ref: '#/components/schemas/CheckinBillAction'
         - $ref: '#/components/schemas/CompleteBillAction'
         - $ref: '#/components/schemas/CancelBillAction'
+        - $ref: '#/components/schemas/RevertCompleteBillAction'
         - $ref: '#/components/schemas/CompleteJobAction'
         - $ref: '#/components/schemas/SaveTravelHistoryAction'
         - $ref: '#/components/schemas/AttachJobImageAction'
@@ -368,6 +369,12 @@ components:
         lng: { type: string }
         lat_end: { type: string }
         lng_end: { type: string }
+    RevertCompleteBillAction:
+      type: object
+      required: [action, bill_no]
+      properties:
+        action: { const: revert_complete_bill }
+        bill_no: { type: string }
     CompleteJobAction:
       type: object
       required: [action, doc_no, miles_end]

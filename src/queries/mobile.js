@@ -864,6 +864,72 @@ async function mobileJobAction(body) {
         };
       }
 
+      case "revert_complete_bill": {
+        // Driver completed delivery but realised the photo / location was
+        // wrong. Roll the bill back to "ກຳລັງຈັດສົ່ງ" (phase=inprogress) so
+        // they can run the complete flow again. Only allowed while the trip
+        // is still open (job_status < 3) — once the driver closes the trip,
+        // delivery records are locked.
+        if (!billNo) throw new Error("bill_no is required");
+        const billRow = await client.query(
+          `SELECT d.doc_no, t.job_status,
+                  COALESCE(d.status, 0) AS status
+           FROM public.odg_tms_detail d
+           INNER JOIN odg_tms t ON t.doc_no = d.doc_no
+           WHERE d.bill_no = $1 AND ${getFixedYearSqlFilter("d.doc_date")}
+           ORDER BY (CASE WHEN COALESCE(d.status, 0) NOT IN (1, 2) THEN 0 ELSE 1 END),
+                    d.create_date_time_now DESC NULLS LAST
+           LIMIT 1`,
+          [billNo]
+        );
+        const currentBill = billRow.rows[0];
+        const currentDocNo = currentBill?.doc_no;
+        if (!currentDocNo) throw new Error("Bill was not found");
+        if (Number(currentBill.status ?? 0) !== 1) {
+          throw new Error("ບິນນີ້ບໍ່ໄດ້ຢູ່ໃນສະຖານະຈັດສົ່ງສຳເລັດ");
+        }
+        if (Number(currentBill.job_status ?? 0) >= 3) {
+          throw new Error("ປິດຖ້ຽວແລ້ວ ບໍ່ສາມາດຍົກເລີກສຳເລັດໄດ້");
+        }
+
+        await client.query(
+          `UPDATE public.odg_tms_detail
+           SET status = 0,
+               sent_end = NULL,
+               lat_end = NULL,
+               lng_end = NULL,
+               url_img = NULL,
+               sight_img = NULL,
+               remark = NULL
+           WHERE bill_no = $1 AND doc_no = $2 AND ${getFixedYearSqlFilter("doc_date")}`,
+          [billNo, currentDocNo]
+        );
+
+        await client.query(
+          `UPDATE public.odg_tms_detail_item
+           SET delivered_qty = 0
+           WHERE bill_no = $1`,
+          [billNo]
+        );
+
+        await client.query(
+          `DELETE FROM public.odg_tms_delivery_images
+           WHERE bill_no = $1`,
+          [billNo]
+        );
+
+        const openBillCount = await getOpenBillCount(currentDocNo, client);
+
+        await client.query("COMMIT");
+        void notifyBillStatus(billNo, "↩️ ຍົກເລີກສຳເລັດ");
+        return {
+          success: true,
+          doc_no: currentDocNo,
+          bill_no: billNo,
+          open_bill_count: openBillCount,
+        };
+      }
+
       case "complete_job": {
         if (!docNo) throw new Error("doc_no is required");
         const jobCarClause = carCode ? "AND car = $2" : "";

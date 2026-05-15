@@ -85,6 +85,10 @@ const CancelBill = z.object({
   lat_end: LatLng,
   lng_end: LatLng,
 });
+const RevertCompleteBill = z.object({
+  action: z.literal("revert_complete_bill"),
+  bill_no: NonEmptyString,
+});
 const CompleteJob = z.object({
   action: z.literal("complete_job"),
   doc_no: NonEmptyString,
@@ -133,6 +137,7 @@ export const JobActionSchema = z.discriminatedUnion("action", [
   CheckinBill,
   CompleteBill,
   CancelBill,
+  RevertCompleteBill,
   CompleteJob,
   SaveTravelHistory,
   AttachJobImage,

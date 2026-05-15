@@ -37,7 +37,9 @@ export async function POST(request: Request) {
         m.includes("remaining only") ||
         m.includes("Still has pending") ||
         m.includes("must be") ||
-        m.startsWith("ກະລຸນາ")
+        m.startsWith("ກະລຸນາ") ||
+        m === "ບິນນີ້ບໍ່ໄດ້ຢູ່ໃນສະຖານະຈັດສົ່ງສຳເລັດ" ||
+        m === "ປິດຖ້ຽວແລ້ວ ບໍ່ສາມາດຍົກເລີກສຳເລັດໄດ້"
       ) {
         (err as { status?: number }).status = 400;
       }
