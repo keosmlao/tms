@@ -23,6 +23,7 @@ export async function POST(request: Request) {
       ...body,
       driver_id: session.driver_id,
       user_code: session.usercode,
+      transport_code: session.logistic_code,
     });
     return Response.json(data);
   } catch (error: unknown) {

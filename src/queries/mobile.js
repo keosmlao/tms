@@ -1080,6 +1080,7 @@ async function mobileJobAction(body) {
             image_data: asNullableText(body.image_data ?? body.photo),
             lat,
             lng,
+            transport_code: asNullableText(body.transport_code),
           },
           client
         );

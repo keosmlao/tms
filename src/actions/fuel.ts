@@ -57,8 +57,8 @@ export async function saveFuelRefill(input: FuelRefillInput) {
   const s = await requireSession();
   return svcSaveFuelRefill({
     ...input,
-    user_code: input.user_code ?? (s as { code?: string })?.code,
-    driver_name: input.driver_name ?? (s as { name_1?: string })?.name_1,
-    transport_code: (s as { logistic_code?: string })?.logistic_code,
+    user_code: input.user_code ?? s.usercode,
+    driver_name: input.driver_name ?? s.username,
+    transport_code: s.logistic_code,
   });
 }
