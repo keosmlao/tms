@@ -61,7 +61,7 @@ export const DateLike = z
 export const LatLng = z
   .string()
   .trim()
-  .regex(/^-?\d+(\.\d+)?$/, "must be a number")
+  .regex(/^(-?\d+(\.\d+)?)?$/, "must be a number")
   .nullish()
   .transform((v) => (v ? v : undefined));
 // Data URI cap at 8MB base64 (~6MB binary) — anything larger is a misuse.
