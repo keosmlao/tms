@@ -22,6 +22,42 @@ interface Option {
   name_1: string;
 }
 
+async function compressImage(
+  file: File,
+  maxEdge = 1280,
+  quality = 0.75
+): Promise<string> {
+  const dataUrl = await new Promise<string>((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () =>
+      typeof reader.result === "string"
+        ? resolve(reader.result)
+        : reject(new Error("read-failed"));
+    reader.onerror = () => reject(new Error("read-failed"));
+    reader.readAsDataURL(file);
+  });
+
+  const img = await new Promise<HTMLImageElement>((resolve, reject) => {
+    const el = new Image();
+    el.onload = () => resolve(el);
+    el.onerror = () => reject(new Error("decode-failed"));
+    el.src = dataUrl;
+  });
+
+  const { width, height } = img;
+  const scale = Math.min(1, maxEdge / Math.max(width, height));
+  const w = Math.round(width * scale);
+  const h = Math.round(height * scale);
+
+  const canvas = document.createElement("canvas");
+  canvas.width = w;
+  canvas.height = h;
+  const ctx = canvas.getContext("2d");
+  if (!ctx) throw new Error("canvas-unavailable");
+  ctx.drawImage(img, 0, 0, w, h);
+  return canvas.toDataURL("image/jpeg", quality);
+}
+
 function SearchableSelect({
   value,
   options,
@@ -225,18 +261,18 @@ export function FuelEntryDialog({
     onClose();
   };
 
-  const onPickFile = (file: File | null) => {
+  const onPickFile = async (file: File | null) => {
     if (!file) return;
-    if (file.size > 5 * 1024 * 1024) {
-      setError("ຮູບໃຫຍ່ເກີນໄປ (>5MB)");
+    if (file.size > 15 * 1024 * 1024) {
+      setError("ຮູບໃຫຍ່ເກີນໄປ (>15MB)");
       return;
     }
-    const reader = new FileReader();
-    reader.onload = () => {
-      setImageData(typeof reader.result === "string" ? reader.result : null);
-    };
-    reader.onerror = () => setError("ບໍ່ສາມາດອ່ານຮູບ");
-    reader.readAsDataURL(file);
+    try {
+      const compressed = await compressImage(file);
+      setImageData(compressed);
+    } catch {
+      setError("ບໍ່ສາມາດອ່ານຮູບ");
+    }
   };
 
   const submit = async (e: React.FormEvent) => {
