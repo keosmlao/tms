@@ -1164,7 +1164,13 @@ async function mobileBills({ docNo, billNo, type, driverId }) {
     );
 
     const data = await query(
-      `SELECT
+      // DISTINCT ON (bill_no) collapses any accidental duplicate rows in
+      // odg_tms_detail (there is no UNIQUE (doc_no, bill_no) constraint).
+      // The inner ORDER BY picks the most-progressed row per bill so the
+      // driver sees the latest state, not a stale dup that still has the
+      // "ສຳເລັດ" button. Outer SELECT re-sorts by bill_no for display.
+      `SELECT * FROM (
+        SELECT DISTINCT ON (a.bill_no)
         a.bill_no, to_char(a.bill_date,'DD-MM-YYYY') as bill_date,
         a.cust_code, b.name_1 as cust_name, b.telephone,
         to_char(a.date_logistic,'DD-MM-YYYY') as date_logistic,
@@ -1208,7 +1214,20 @@ async function mobileBills({ docNo, billNo, type, driverId }) {
       LEFT JOIN public.transport_type fwd ON fwd.code = a.forward_transport_code
       LEFT JOIN public.odg_tms_pending_bill pb ON pb.bill_no = a.bill_no
       WHERE a.doc_no = $1 AND ${getFixedYearSqlFilter("a.doc_date")}
-      ORDER BY a.bill_no`,
+      ORDER BY a.bill_no,
+               -- Most-progressed wins: cancelled / done before in-progress
+               -- before picked-up before waiting. Keeps the duplicate that
+               -- reflects the action the driver actually took.
+               CASE COALESCE(a.status, 0)
+                 WHEN 1 THEN 0
+                 WHEN 2 THEN 1
+                 ELSE 2
+               END,
+               (a.sent_start IS NOT NULL) DESC,
+               (a.recipt_job IS NOT NULL) DESC,
+               a.create_date_time_now DESC NULLS LAST
+      ) dedup
+      ORDER BY bill_no`,
       [docNo]
     );
 

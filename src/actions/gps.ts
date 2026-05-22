@@ -7,7 +7,9 @@ import {
   syncGpsDay as svcSyncGpsDay,
   syncGpsRange as svcSyncGpsRange,
   getGpsUsageSummary as svcGetGpsUsageSummary,
+  getGpsUsageSummaryCached as svcGetGpsUsageSummaryCached,
   getGpsUsageDaily as svcGetGpsUsageDaily,
+  getGpsUsageDailyCached as svcGetGpsUsageDailyCached,
   getGpsUsageTrack as svcGetGpsUsageTrack,
   getCarsWithGps as svcGetCarsWithGps,
   probeGpsHistory as svcProbeGpsHistory,
@@ -82,19 +84,40 @@ export async function syncGpsRange(
 export async function getGpsUsageSummary(
   fromDate: string,
   toDate: string,
+  carCode?: string,
+  opts?: { fillMissing?: boolean }
+) {
+  await requireSession();
+  return svcGetGpsUsageSummary(fromDate, toDate, carCode, opts);
+}
+
+// Fast initial-render path: reads from DB cache only, no provider calls.
+export async function getGpsUsageSummaryCached(
+  fromDate: string,
+  toDate: string,
   carCode?: string
 ) {
   await requireSession();
-  return svcGetGpsUsageSummary(fromDate, toDate, carCode);
+  return svcGetGpsUsageSummaryCached(fromDate, toDate, carCode);
 }
 
 export async function getGpsUsageDaily(
   fromDate: string,
   toDate: string,
+  imei: string,
+  opts?: { fillMissing?: boolean }
+) {
+  await requireSession();
+  return svcGetGpsUsageDaily(fromDate, toDate, imei, opts);
+}
+
+export async function getGpsUsageDailyCached(
+  fromDate: string,
+  toDate: string,
   imei: string
 ) {
   await requireSession();
-  return svcGetGpsUsageDaily(fromDate, toDate, imei);
+  return svcGetGpsUsageDailyCached(fromDate, toDate, imei);
 }
 
 export async function getGpsUsageTrack(imei: string, date: string) {

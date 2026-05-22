@@ -117,6 +117,8 @@ export const Actions = {
   searchActiveDeliveryBills: tracking.searchActiveDeliveryBills,
   getGpsRealtime: tracking.getGpsRealtime,
   getGpsRealtimeAll: tracking.getGpsRealtimeAll,
+  getGpsRealtimeAllLive: tracking.getGpsRealtimeAllLive,
+  getGpsRealtimeAllLean: tracking.getGpsRealtimeAllLean,
   getLocations: tracking.getLocations,
 
   // GPS
@@ -125,7 +127,9 @@ export const Actions = {
   syncGpsDay: gps.syncGpsDay,
   syncGpsRange: gps.syncGpsRange,
   getGpsUsageSummary: gps.getGpsUsageSummary,
+  getGpsUsageSummaryCached: gps.getGpsUsageSummaryCached,
   getGpsUsageDaily: gps.getGpsUsageDaily,
+  getGpsUsageDailyCached: gps.getGpsUsageDailyCached,
   getGpsUsageTrack: gps.getGpsUsageTrack,
   startGpsBackfill: gps.startGpsBackfill,
   getGpsBackfillStatus: gps.getGpsBackfillStatus,

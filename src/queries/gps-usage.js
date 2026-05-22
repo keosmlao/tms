@@ -10,6 +10,12 @@ const RANGE_SYNC_CONCURRENCY = Math.max(
   1,
   Number.parseInt(process.env.GPS_USAGE_RANGE_CONCURRENCY ?? "1", 10) || 1
 );
+// Cap auto-fallback fetches (past days missing from DB cache) to avoid running
+// past Next.js's server-action timeout. Each fetch ~1.2s due to provider gap.
+const LIVE_FALLBACK_MAX_FETCHES = Math.max(
+  1,
+  Number.parseInt(process.env.GPS_USAGE_FALLBACK_MAX_FETCHES ?? "60", 10) || 60
+);
 
 // ==================== Schema ====================
 
@@ -228,6 +234,66 @@ async function ensureSchema() {
       });
   }
   await gpsUsageCache.__tmsGpsUsageSchemaPromise;
+}
+
+async function ensureRealtimeLogSchemaForUsage() {
+  await safeDdl(`
+    CREATE TABLE IF NOT EXISTS public.odg_tms_gps_realtime_log (
+      roworder BIGSERIAL PRIMARY KEY,
+      imei character varying NOT NULL,
+      car_code character varying,
+      car_name character varying,
+      lat numeric,
+      lng numeric,
+      speed numeric,
+      heading numeric,
+      recorded_at timestamp without time zone,
+      address text,
+      fetched_at timestamp without time zone NOT NULL DEFAULT LOCALTIMESTAMP(0)
+    )
+  `);
+  await safeDdl(`
+    CREATE UNIQUE INDEX IF NOT EXISTS uq_odg_tms_gps_realtime_log_imei_ts
+    ON public.odg_tms_gps_realtime_log (imei, recorded_at)
+  `);
+}
+
+async function insertRealtimeLogRowsFromUsage(rows) {
+  if (!Array.isArray(rows) || rows.length === 0) return 0;
+  await ensureRealtimeLogSchemaForUsage();
+  const batchSize = 500;
+  let inserted = 0;
+  for (let i = 0; i < rows.length; i += batchSize) {
+    const batch = rows.slice(i, i + batchSize);
+    const values = [];
+    const params = [];
+    for (const row of batch) {
+      const base = params.length;
+      values.push(
+        `($${base + 1},$${base + 2},$${base + 3},$${base + 4},$${base + 5},$${base + 6},$${base + 7},$${base + 8},$${base + 9})`
+      );
+      params.push(
+        String(row.imei ?? "").trim(),
+        String(row.car_code ?? "").trim(),
+        String(row.car_name ?? "").trim(),
+        Number.isFinite(Number(row.lat)) ? Number(row.lat) : null,
+        Number.isFinite(Number(row.lng)) ? Number(row.lng) : null,
+        Number.isFinite(Number(row.speed)) ? Number(row.speed) : null,
+        Number.isFinite(Number(row.heading)) ? Number(row.heading) : null,
+        String(row.recorded_at ?? "").trim() || null,
+        String(row.address ?? "").trim() || null
+      );
+    }
+    const result = await pool.query(
+      `INSERT INTO public.odg_tms_gps_realtime_log
+         (imei, car_code, car_name, lat, lng, speed, heading, recorded_at, address)
+       VALUES ${values.join(",")}
+       ON CONFLICT (imei, recorded_at) DO NOTHING`,
+      params
+    );
+    inserted += result.rowCount || 0;
+  }
+  return inserted;
 }
 
 // ==================== Provider config ====================
@@ -1337,33 +1403,165 @@ function buildDailyFromAggRow(car, day, aggRow) {
   };
 }
 
-async function getGpsUsageSummary(fromDate, toDate, carCode) {
+// Hybrid aggregator: past days come from the realtime_log DB cache (fast SQL),
+// today's row is fetched live from the provider (always fresh). Optionally,
+// for past days missing from the DB cache, falls back to live provider fetch
+// (capped to LIVE_FALLBACK_MAX_FETCHES) — opt in via opts.fillMissing.
+// Returns a Map keyed by `${imei}|${YYYY-MM-DD}`.
+async function buildHybridDailyAgg(cars, fromDate, toDate, opts = {}) {
+  const fillMissing = Boolean(opts.fillMissing);
+  const days = daysFromRange(fromDate, toDate);
+  const today = todayYmd();
+  const pastDays = days.filter((d) => d < today);
+  const includeToday = days.includes(today);
+
+  const byImeiDate = new Map();
+
+  const liveFetchOne = async (car, day) => {
+    const { points } = await fetchGpsHistoryOneDay(car.imei, day);
+    const s = summarize(points);
+    const firstHms = s.first_time
+      ? String(s.first_time).match(/\d{2}:\d{2}:\d{2}/)?.[0] ?? null
+      : null;
+    const lastHms = s.last_time
+      ? String(s.last_time).match(/\d{2}:\d{2}:\d{2}/)?.[0] ?? null
+      : null;
+    return {
+      row: {
+        imei: car.imei,
+        usage_date: day,
+        points_count: s.points_count,
+        first_time: firstHms,
+        last_time: lastHms,
+        distance_km: s.distance_km,
+        max_speed: s.max_speed,
+        avg_speed: s.avg_speed,
+        moving_seconds: s.moving_seconds,
+        stopped_seconds: s.stopped_seconds,
+      },
+      points,
+    };
+  };
+
+  if (pastDays.length > 0) {
+    const dbAgg = await aggregateDailyFromLogs(
+      cars.map((c) => c.imei),
+      pastDays[0],
+      pastDays[pastDays.length - 1]
+    );
+    for (const a of dbAgg) {
+      byImeiDate.set(`${a.imei}|${a.usage_date}`, a);
+    }
+  }
+
+  // Auto-fallback (opt-in via fillMissing): any (car, past_day) without a DB
+  // row → fetch live + persist. Prioritize most recent days when capped.
+  const missingPairs = [];
+  if (fillMissing) {
+    for (const car of cars) {
+      for (const day of pastDays) {
+        if (!byImeiDate.has(`${car.imei}|${day}`)) {
+          missingPairs.push({ car, day });
+        }
+      }
+    }
+    missingPairs.sort((a, b) => b.day.localeCompare(a.day));
+  }
+  const fallbackPairs = missingPairs.slice(0, LIVE_FALLBACK_MAX_FETCHES);
+  const droppedFallback = missingPairs.length - fallbackPairs.length;
+
+  if (fallbackPairs.length > 0) {
+    const results = await withConcurrency(fallbackPairs, 4, async ({ car, day }) => {
+      try {
+        const { row, points } = await liveFetchOne(car, day);
+        if (points.length > 0) {
+          try {
+            await insertRealtimeLogRowsFromUsage(
+              points.map((p) => ({
+                imei: car.imei,
+                car_code: car.code,
+                car_name: car.name_1,
+                lat: p.lat,
+                lng: p.lng,
+                speed: p.speed,
+                heading: p.heading,
+                recorded_at: p.recordedAt,
+                address: "",
+              }))
+            );
+          } catch (err) {
+            console.warn(
+              `[gps-usage] fallback persist failed imei=${car.imei} day=${day}: ${err?.message ?? err}`
+            );
+          }
+        }
+        return row;
+      } catch (err) {
+        console.warn(
+          `[gps-usage] fallback fetch failed imei=${car.imei} day=${day}: ${err?.message ?? err}`
+        );
+        return null;
+      }
+    });
+    for (const r of results) {
+      if (r) byImeiDate.set(`${r.imei}|${r.usage_date}`, r);
+    }
+  }
+
+  if (includeToday) {
+    const liveResults = await withConcurrency(cars, 4, async (car) => {
+      try {
+        const { row } = await liveFetchOne(car, today);
+        return row;
+      } catch (err) {
+        console.warn(
+          `[gps-usage] live today fetch failed imei=${car.imei}: ${err?.message ?? err}`
+        );
+        return null;
+      }
+    });
+    for (const r of liveResults) {
+      if (r) byImeiDate.set(`${r.imei}|${r.usage_date}`, r);
+    }
+  }
+
+  return {
+    byImeiDate,
+    days,
+    pastDaysCount: pastDays.length,
+    liveDay: includeToday ? today : null,
+    fallbackFetched: fallbackPairs.length,
+    fallbackDropped: droppedFallback,
+  };
+}
+
+async function getGpsUsageSummary(fromDate, toDate, carCode, opts = {}) {
   const range = validateDateRange(fromDate, toDate);
   const cars = await resolveTargetCars(carCode);
   if (cars.length === 0) return [];
 
   const started = Date.now();
-  const agg = await aggregateDailyFromLogs(
-    cars.map((c) => c.imei),
-    range.fromDate,
-    range.toDate
-  );
-  const byImeiDate = new Map();
-  for (const a of agg) byImeiDate.set(`${a.imei}|${a.usage_date}`, a);
+  const {
+    byImeiDate,
+    days,
+    pastDaysCount,
+    liveDay,
+    fallbackFetched,
+    fallbackDropped,
+  } = await buildHybridDailyAgg(cars, range.fromDate, range.toDate, opts);
 
   // Days with distance below this threshold are GPS jitter / parked, not real
   // movement. We exclude them from "active days" and from min/max/avg.
   const MOVEMENT_THRESHOLD_KM = 5;
 
-  const days = daysFromRange(range.fromDate, range.toDate);
   const totals = cars.map((car) => {
     let distance_km = 0;
     let moving_seconds = 0;
     let stopped_seconds = 0;
     let max_speed = 0;
     let points_count = 0;
-    let active_days = 0; // only days with > MOVEMENT_THRESHOLD_KM
-    let active_distance_km = 0; // sum across active days only
+    let active_days = 0;
+    let active_distance_km = 0;
     let avgSum = 0;
     let avgDays = 0;
     let max_daily_km = 0;
@@ -1410,9 +1608,8 @@ async function getGpsUsageSummary(fromDate, toDate, carCode) {
       stopped_seconds,
       points_count,
       max_daily_km: Number(max_daily_km.toFixed(3)),
-      min_daily_km: min_daily_km === null
-        ? 0
-        : Number(min_daily_km.toFixed(3)),
+      min_daily_km:
+        min_daily_km === null ? 0 : Number(min_daily_km.toFixed(3)),
       max_daily_km_date: max_daily_km_date ?? "",
       min_daily_km_date: min_daily_km_date ?? "",
       avg_daily_km:
@@ -1426,7 +1623,7 @@ async function getGpsUsageSummary(fromDate, toDate, carCode) {
 
   const elapsed = Date.now() - started;
   console.log(
-    `[gps-usage] summary cars=${cars.length} days=${days.length} elapsed=${elapsed}ms (from logs)`
+    `[gps-usage] summary cars=${cars.length} days=${days.length} past=${pastDaysCount} live=${liveDay ?? "-"} fallback=${fallbackFetched}/${fallbackFetched + fallbackDropped} elapsed=${elapsed}ms (hybrid)`
   );
 
   return totals.sort((a, b) =>
@@ -1434,7 +1631,7 @@ async function getGpsUsageSummary(fromDate, toDate, carCode) {
   );
 }
 
-async function getGpsUsageDaily(fromDate, toDate, imei) {
+async function getGpsUsageDaily(fromDate, toDate, imei, opts = {}) {
   const range = validateDateRange(fromDate, toDate);
   const cleanImei = String(imei ?? "").trim();
   if (!cleanImei) throw new Error("Missing imei");
@@ -1449,6 +1646,127 @@ async function getGpsUsageDaily(fromDate, toDate, imei) {
     name_1: car?.name_1 ?? "",
   };
 
+  const { byImeiDate, days } = await buildHybridDailyAgg(
+    [target],
+    range.fromDate,
+    range.toDate,
+    opts
+  );
+
+  return days.map((day) =>
+    buildDailyFromAggRow(target, day, byImeiDate.get(`${cleanImei}|${day}`))
+  );
+}
+
+// Fast path used for initial page render: reads aggregated stats entirely from
+// the realtime_log DB cache (no provider calls). Background workers keep the
+// cache fresh; the page can fire getGpsUsageSummary in the background to refresh
+// today and fill in missing past days.
+async function getGpsUsageSummaryCached(fromDate, toDate, carCode) {
+  const range = validateDateRange(fromDate, toDate);
+  const cars = await resolveTargetCars(carCode);
+  if (cars.length === 0) return [];
+
+  const started = Date.now();
+  const days = daysFromRange(range.fromDate, range.toDate);
+  const agg = await aggregateDailyFromLogs(
+    cars.map((c) => c.imei),
+    range.fromDate,
+    range.toDate
+  );
+  const byImeiDate = new Map();
+  for (const a of agg) byImeiDate.set(`${a.imei}|${a.usage_date}`, a);
+
+  const MOVEMENT_THRESHOLD_KM = 5;
+  const totals = cars.map((car) => {
+    let distance_km = 0;
+    let moving_seconds = 0;
+    let stopped_seconds = 0;
+    let max_speed = 0;
+    let points_count = 0;
+    let active_days = 0;
+    let active_distance_km = 0;
+    let avgSum = 0;
+    let avgDays = 0;
+    let max_daily_km = 0;
+    let min_daily_km = null;
+    let max_daily_km_date = null;
+    let min_daily_km_date = null;
+    for (const day of days) {
+      const a = byImeiDate.get(`${car.imei}|${day}`);
+      if (!a) continue;
+      const dkm = Number(a.distance_km) || 0;
+      distance_km += dkm;
+      moving_seconds += Number(a.moving_seconds) || 0;
+      stopped_seconds += Number(a.stopped_seconds) || 0;
+      max_speed = Math.max(max_speed, Number(a.max_speed) || 0);
+      points_count += Number(a.points_count) || 0;
+      if (dkm > MOVEMENT_THRESHOLD_KM) {
+        active_days += 1;
+        active_distance_km += dkm;
+        if ((Number(a.avg_speed) || 0) > 0) {
+          avgSum += Number(a.avg_speed);
+          avgDays += 1;
+        }
+        if (dkm > max_daily_km) {
+          max_daily_km = dkm;
+          max_daily_km_date = day;
+        }
+        if (min_daily_km === null || dkm < min_daily_km) {
+          min_daily_km = dkm;
+          min_daily_km_date = day;
+        }
+      }
+    }
+    return {
+      imei: car.imei,
+      car_code: car.code,
+      car_name: car.name_1,
+      days_count: days.length,
+      active_days,
+      distance_km: Number(distance_km.toFixed(3)),
+      max_speed: Number(max_speed.toFixed(1)),
+      avg_speed: Number((avgDays > 0 ? avgSum / avgDays : 0).toFixed(1)),
+      moving_seconds,
+      stopped_seconds,
+      points_count,
+      max_daily_km: Number(max_daily_km.toFixed(3)),
+      min_daily_km:
+        min_daily_km === null ? 0 : Number(min_daily_km.toFixed(3)),
+      max_daily_km_date: max_daily_km_date ?? "",
+      min_daily_km_date: min_daily_km_date ?? "",
+      avg_daily_km:
+        active_days > 0
+          ? Number((active_distance_km / active_days).toFixed(3))
+          : 0,
+      movement_threshold_km: MOVEMENT_THRESHOLD_KM,
+      last_synced: "",
+    };
+  });
+
+  const elapsed = Date.now() - started;
+  console.log(
+    `[gps-usage] summary-cached cars=${cars.length} days=${days.length} elapsed=${elapsed}ms (DB only)`
+  );
+  return totals.sort((a, b) =>
+    (a.car_name ?? "").localeCompare(b.car_name ?? "")
+  );
+}
+
+async function getGpsUsageDailyCached(fromDate, toDate, imei) {
+  const range = validateDateRange(fromDate, toDate);
+  const cleanImei = String(imei ?? "").trim();
+  if (!cleanImei) throw new Error("Missing imei");
+
+  const car = await queryOne(
+    `SELECT code, name_1, imei FROM public.odg_tms_car WHERE imei = $1 LIMIT 1`,
+    [cleanImei]
+  );
+  const target = {
+    imei: cleanImei,
+    code: car?.code ?? "",
+    name_1: car?.name_1 ?? "",
+  };
   const agg = await aggregateDailyFromLogs(
     [cleanImei],
     range.fromDate,
@@ -1456,7 +1774,6 @@ async function getGpsUsageDaily(fromDate, toDate, imei) {
   );
   const byDate = new Map();
   for (const a of agg) byDate.set(a.usage_date, a);
-
   return daysFromRange(range.fromDate, range.toDate).map((day) =>
     buildDailyFromAggRow(target, day, byDate.get(day))
   );
@@ -1489,7 +1806,42 @@ async function getGpsUsageTrack(imei, dateStr) {
      ORDER BY recorded_at ASC`,
     [cleanImei, usageDate]
   );
-  const points = logRows;
+  let points = logRows;
+  let source = "logs";
+
+  if (points.length === 0) {
+    try {
+      const fetched = await fetchGpsHistoryOneDay(cleanImei, usageDate);
+      points = fetched.points;
+      source = "provider";
+
+      if (points.length > 0) {
+        try {
+          await insertRealtimeLogRowsFromUsage(
+            points.map((p) => ({
+              imei: cleanImei,
+              car_code: car?.code ?? "",
+              car_name: car?.name_1 ?? "",
+              lat: p.lat,
+              lng: p.lng,
+              speed: p.speed,
+              heading: p.heading,
+              recorded_at: p.recordedAt,
+              address: "",
+            }))
+          );
+        } catch (err) {
+          console.warn(
+            `[gps-usage] track cache persist failed imei=${cleanImei} date=${usageDate}: ${err?.message ?? err}`
+          );
+        }
+      }
+    } catch (err) {
+      console.warn(
+        `[gps-usage] track provider fallback failed imei=${cleanImei} date=${usageDate}: ${err?.message ?? err}`
+      );
+    }
+  }
   const summary = summarize(points);
 
   const header = {
@@ -1528,7 +1880,7 @@ async function getGpsUsageTrack(imei, dateStr) {
 
   const elapsed = Date.now() - started;
   console.log(
-    `[gps-usage] track imei=${cleanImei} date=${usageDate} raw=${points.length} out=${out.length} elapsed=${elapsed}ms (from logs)`
+    `[gps-usage] track imei=${cleanImei} date=${usageDate} raw=${points.length} out=${out.length} elapsed=${elapsed}ms (from ${source})`
   );
 
   return { header, points: out };
@@ -1728,7 +2080,9 @@ module.exports = {
   syncGpsDay,
   syncGpsRange,
   getGpsUsageSummary,
+  getGpsUsageSummaryCached,
   getGpsUsageDaily,
+  getGpsUsageDailyCached,
   getGpsUsageTrack,
   backfillGpsLog,
   getCarsWithGps,

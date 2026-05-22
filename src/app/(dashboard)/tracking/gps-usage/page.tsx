@@ -319,10 +319,13 @@ export default function GpsUsagePage() {
     Record<string, GpsRealtime>
   >({});
   const [realtimeFetchedAt, setRealtimeFetchedAt] = useState<Date | null>(null);
+  const [refreshing, setRefreshing] = useState(false);
 
   const fetchRealtime = useCallback(async () => {
     try {
-      const data = (await Actions.getGpsRealtimeAll()) as GpsRealtime[];
+      // Lean DB-cached read: drops the LATERAL active-job join, which is the
+      // slow part for this page (we don't need that data here).
+      const data = (await Actions.getGpsRealtimeAllLean()) as GpsRealtime[];
       const map: Record<string, GpsRealtime> = {};
       for (const r of data) map[r.imei] = r;
       setRealtimeByImei(map);
@@ -332,33 +335,55 @@ export default function GpsUsagePage() {
     }
   }, []);
 
-  const fetchSummary = useCallback(async () => {
-    if (!isValidYmd(fromDate) || !isValidYmd(toDate)) {
-      setError("ກະລຸນາເລືອກວັນທີໃຫ້ຄົບ");
-      setSummary([]);
-      return;
-    }
-    if (fromDate > toDate) {
-      setError("ຊ່ວງວັນທີບໍ່ຖືກຕ້ອງ");
-      setSummary([]);
-      return;
-    }
-    setLoading(true);
-    setError(null);
-    try {
-      const data = await Actions.getGpsUsageSummary(
-        fromDate,
-        toDate,
-        carCode || undefined
-      );
-      setSummary(data as GpsUsageSummary[]);
-    } catch (err) {
-      console.error(err);
-      setError(getApiErrorMessage(err, "ດຶງຂໍ້ມູນບໍ່ສຳເລັດ"));
-    } finally {
+  const fetchSummary = useCallback(
+    async (opts: { fillMissing?: boolean } = {}) => {
+      if (!isValidYmd(fromDate) || !isValidYmd(toDate)) {
+        setError("ກະລຸນາເລືອກວັນທີໃຫ້ຄົບ");
+        setSummary([]);
+        return;
+      }
+      if (fromDate > toDate) {
+        setError("ຊ່ວງວັນທີບໍ່ຖືກຕ້ອງ");
+        setSummary([]);
+        return;
+      }
+      setLoading(true);
+      setError(null);
+      try {
+        // Fast path: pure DB read (~ms). Worker keeps it fresh.
+        const cached = await Actions.getGpsUsageSummaryCached(
+          fromDate,
+          toDate,
+          carCode || undefined
+        );
+        setSummary(cached as GpsUsageSummary[]);
+      } catch (err) {
+        console.error(err);
+        setError(getApiErrorMessage(err, "ດຶງຂໍ້ມູນບໍ່ສຳເລັດ"));
+        setLoading(false);
+        return;
+      }
       setLoading(false);
-    }
-  }, [fromDate, toDate, carCode]);
+
+      // Background refresh: today live (~36s). If fillMissing, also fetches
+      // missing past days from provider (~minutes).
+      setRefreshing(true);
+      try {
+        const fresh = await Actions.getGpsUsageSummary(
+          fromDate,
+          toDate,
+          carCode || undefined,
+          opts.fillMissing ? { fillMissing: true } : undefined
+        );
+        setSummary(fresh as GpsUsageSummary[]);
+      } catch (err) {
+        console.warn("background refresh failed", err);
+      } finally {
+        setRefreshing(false);
+      }
+    },
+    [fromDate, toDate, carCode]
+  );
 
   useEffect(() => {
     void fetchSummary();
@@ -366,7 +391,8 @@ export default function GpsUsagePage() {
       .then((data) => setGpsCars(data as GpsCarOption[]))
       .catch(console.error);
     void fetchRealtime();
-    const id = window.setInterval(() => void fetchRealtime(), 30_000);
+    // Realtime is now a DB-cached read; safe to poll often.
+    const id = window.setInterval(() => void fetchRealtime(), 20_000);
     return () => window.clearInterval(id);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
@@ -380,11 +406,27 @@ export default function GpsUsagePage() {
     if (!dailyByImei[imei]) {
       setDailyLoading(imei);
       try {
-        const data = await Actions.getGpsUsageDaily(fromDate, toDate, imei);
-        setDailyByImei((prev) => ({ ...prev, [imei]: data as GpsUsageDaily[] }));
+        // Show cached daily first (instant), then refresh in background.
+        const cached = await Actions.getGpsUsageDailyCached(
+          fromDate,
+          toDate,
+          imei
+        );
+        setDailyByImei((prev) => ({
+          ...prev,
+          [imei]: cached as GpsUsageDaily[],
+        }));
+        setDailyLoading(null);
+        Actions.getGpsUsageDaily(fromDate, toDate, imei)
+          .then((fresh) => {
+            setDailyByImei((prev) => ({
+              ...prev,
+              [imei]: fresh as GpsUsageDaily[],
+            }));
+          })
+          .catch((err) => console.warn("daily refresh failed", err));
       } catch (err) {
         console.error(err);
-      } finally {
         setDailyLoading(null);
       }
     }
@@ -431,11 +473,16 @@ export default function GpsUsagePage() {
                 ສະຫຼຸບການນຳໃຊ້ລົດຈາກ GPS
               </h1>
               <p className="mt-0.5 text-[11px] text-slate-300">
-                ດຶງປະຫວັດ GPS ຈາກ provider ເກັບໃສ່ DB ແລະສະແດງ
+                Instant ຈາກ DB cache · ມື້ນີ້ refresh ສົດໆໃນເບື້ອງຫຼັງ
               </p>
             </div>
           </div>
-
+          {refreshing && (
+            <div className="inline-flex items-center gap-1.5 rounded-full bg-teal-500/15 px-2.5 py-1 text-[10px] font-semibold text-teal-200 ring-1 ring-teal-400/30">
+              <FaSpinner className="animate-spin" size={10} />
+              ກຳລັງດຶງສົດ...
+            </div>
+          )}
         </div>
       </div>
 
@@ -505,6 +552,22 @@ export default function GpsUsagePage() {
               <FaSearch size={11} />
             )}
             ຄົ້ນຫາ
+          </button>
+        </div>
+        <div className="mt-3 flex justify-end">
+          <button
+            type="button"
+            disabled={loading || refreshing}
+            onClick={() => void fetchSummary({ fillMissing: true })}
+            title="ດຶງມື້ເກົ່າທີ່ DB ບໍ່ມີຈາກ provider API (ຊ້າ)"
+            className="inline-flex items-center gap-1.5 rounded-lg border border-slate-300/60 bg-white/50 dark:bg-white/5 hover:bg-white px-3 py-1.5 text-[11px] font-semibold text-slate-700 dark:text-slate-200 disabled:opacity-50 transition-colors"
+          >
+            {refreshing ? (
+              <FaSpinner className="animate-spin" size={10} />
+            ) : (
+              <FaRedo size={10} />
+            )}
+            ດຶງມື້ເກົ່າເພີ່ມ (ຊ້າ)
           </button>
         </div>
       </form>

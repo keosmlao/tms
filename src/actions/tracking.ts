@@ -5,9 +5,13 @@ import {
   trackBill as svcTrackBill,
   searchActiveDeliveryBills as svcSearchActiveDeliveryBills,
   getGpsRealtime as svcGetGpsRealtime,
+  getGpsRealtimeAll as svcGetGpsRealtimeAllLive,
   getLocations as svcGetLocations,
 } from "@/queries/tracking.js";
-import { getCurrentAll as svcGetCurrentAll } from "@/queries/gps-current.js";
+import {
+  getCurrentAll as svcGetCurrentAll,
+  getCurrentAllLean as svcGetCurrentAllLean,
+} from "@/queries/gps-current.js";
 
 export async function trackBill(search: string) {
   const s = await requireSession();
@@ -27,6 +31,20 @@ export async function getGpsRealtime(imei: string) {
 export async function getGpsRealtimeAll() {
   await requireSession();
   return svcGetCurrentAll();
+}
+
+// Bypasses DB cache and hits the provider /getRealTime endpoint directly per
+// car. Slow (~1.2s per car due to rate limit) but always fresh.
+export async function getGpsRealtimeAllLive() {
+  await requireSession();
+  return svcGetGpsRealtimeAllLive();
+}
+
+// Lean DB-cache read: skips active_job LATERAL join and daily distance query.
+// For pages that only need lat/lng/speed/recorded_at.
+export async function getGpsRealtimeAllLean() {
+  await requireSession();
+  return svcGetCurrentAllLean();
 }
 
 export async function getLocations(search?: string) {

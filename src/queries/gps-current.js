@@ -394,6 +394,34 @@ async function getCurrentAll() {
   return attachDailyDistance(rows.map(stripInternal), dist);
 }
 
+// Lean variant: drops the active_job LATERAL join and daily distance query.
+// Used by pages that only need lat/lng/speed/recorded_at (e.g. gps-usage).
+async function getCurrentAllLean() {
+  await ensureSchema();
+  const started = Date.now();
+  const rows = await query(
+    `SELECT
+       c.imei,
+       COALESCE(NULLIF(TRIM(v.code), ''), c.car_code, '') AS car_code,
+       COALESCE(NULLIF(TRIM(v.name_1), ''), c.car_name, '') AS car_name,
+       COALESCE(c.lat, '') AS lat,
+       COALESCE(c.lng, '') AS lng,
+       COALESCE(c.speed, '') AS speed,
+       COALESCE(c.heading, '') AS heading,
+       COALESCE(c.recorded_at, '') AS recorded_at,
+       COALESCE(c.address, '') AS address,
+       to_char(c.fetched_at, 'YYYY-MM-DD HH24:MI:SS') AS fetched_at
+     FROM public.odg_tms_gps_current c
+     LEFT JOIN public.odg_tms_car v ON v.imei = c.imei
+     ORDER BY car_name ASC, c.imei ASC`
+  );
+  const elapsed = Date.now() - started;
+  if (elapsed > 200) {
+    console.log(`[gps-current] lean read rows=${rows.length} elapsed=${elapsed}ms`);
+  }
+  return rows;
+}
+
 async function getCurrentOne(imei) {
   await ensureSchema();
   const cleanImei = String(imei ?? "").trim();
@@ -473,6 +501,7 @@ module.exports = {
   stopWorker,
   runTick,
   getCurrentAll,
+  getCurrentAllLean,
   getCurrentOne,
   ensureSchema,
   upsertCurrentRow,
