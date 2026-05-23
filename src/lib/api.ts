@@ -1,5 +1,6 @@
 import * as auth from "@/actions/auth";
 import * as approve from "@/actions/approve";
+import * as auditLog from "@/actions/audit-log";
 import * as billShipment from "@/actions/bill-shipment";
 import * as bills from "@/actions/bills";
 import * as dashboard from "@/actions/dashboard";
@@ -17,6 +18,10 @@ import * as tracking from "@/actions/tracking";
 export const Actions = {
   // Dashboard
   getDashboardData: dashboard.getDashboardData,
+  getDriverLeaderboard: dashboard.getDriverLeaderboard,
+
+  // Audit log
+  getAuditLog: auditLog.getAuditLog,
 
   // Approve
   getApproveList: approve.getApproveList,
@@ -65,6 +70,7 @@ export const Actions = {
   getBillsPartialList: bills.getBillsPartialList,
   getPendingBillSchedule: bills.getPendingBillSchedule,
   upsertPendingBillSchedule: bills.upsertPendingBillSchedule,
+  bulkUpdatePendingBills: bills.bulkUpdatePendingBills,
   setPendingBillLocation: bills.setPendingBillLocation,
   getBillTodos: bills.getBillTodos,
   createBillTodo: bills.createBillTodo,

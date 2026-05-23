@@ -17,6 +17,15 @@ const NOTIFY_KEYS = [
   // Driver-app feature flag. "1" = QR-scan verify button visible in bill rows;
   // anything else hides it. Defaulted to "1" in the dashboard form.
   "app.qr_scan_verify_enabled",
+  // Delivery KPI targets shown on the dashboard. Stored as strings so empty
+  // means "no target." Rates are percent (0-100); times are minutes.
+  "kpi.target_on_time_rate",
+  "kpi.target_avg_delivery_minutes",
+  "kpi.target_avg_close_minutes",
+  // KPI alert: when yesterday's KPI is below target, send LINE message to this
+  // user/group. Empty = disabled.
+  "kpi.alert_enabled",
+  "kpi.alert_line_to",
 ] as const;
 
 export interface NotifySettings {
@@ -28,6 +37,11 @@ export interface NotifySettings {
   "whatsapp.test_to": string;
   "pending.not_yet_days": string;
   "app.qr_scan_verify_enabled": string;
+  "kpi.target_on_time_rate": string;
+  "kpi.target_avg_delivery_minutes": string;
+  "kpi.target_avg_close_minutes": string;
+  "kpi.alert_enabled": string;
+  "kpi.alert_line_to": string;
 }
 
 export async function getNotifySettings(): Promise<NotifySettings> {

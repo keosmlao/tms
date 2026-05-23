@@ -33,7 +33,7 @@ const SCHEDULED_BILL_FIELDS = `
   COALESCE(dr.name, '') as delivery_round_name,
   COALESCE(dr.time_label, '') as delivery_round_time_label`;
 
-const MANUAL_IC_TRANS_FLAGS = [56, 72];
+const MANUAL_IC_TRANS_FLAGS = [56, 72, 44, 48];
 const SERVICE_SOURCE_TYPE = "odservice.tb_product";
 
 function manualFlagListSql() {
@@ -161,7 +161,8 @@ async function getAvailableBillsWithProducts(session) {
     ),
     getManualReadyBills(),
   ]);
-  const bills = [...shipmentBills, ...manualBills];
+  const shipmentDocNos = new Set(shipmentBills.map((bill) => bill.doc_no));
+  const bills = [...shipmentBills, ...manualBills.filter((bill) => !shipmentDocNos.has(bill.doc_no))];
   const availableBills = (await applyRemainingCounts(bills)).filter((bill) => bill.count_item > 0);
 
   const result = [];
@@ -189,9 +190,12 @@ async function getAvailableBills(session) {
       CASE WHEN fwd.bill_no IS NULL THEN false ELSE true END as incoming_forwarded,
       COALESCE(fwd.origin_transport_code, '') as forward_from_transport_code,
       COALESCE(fwd.origin_transport_name, '') as forward_from_transport_name,
-      COALESCE(fwd.forwarded_at, '') as forwarded_at
+      COALESCE(fwd.forwarded_at, '') as forwarded_at,
+      COALESCE(pb.planned_lat::text, NULLIF(TRIM(acd.latitude::text), ''), '') as planned_lat,
+      COALESCE(pb.planned_lng::text, NULLIF(TRIM(acd.longitude::text), ''), '') as planned_lng
     FROM ic_trans_shipment a
     LEFT JOIN ar_customer b ON b.code=a.cust_code
+    LEFT JOIN ar_customer_detail acd ON acd.ar_code = a.cust_code
     LEFT JOIN public.transport_type tt ON tt.code = a.transport_code
     ${SCHEDULED_BILL_JOIN}
     LEFT JOIN LATERAL (
@@ -216,7 +220,8 @@ async function getAvailableBills(session) {
     ),
     getManualReadyBills(),
   ]);
-  const bills = [...shipmentBills, ...manualBills];
+  const shipmentDocNos = new Set(shipmentBills.map((bill) => bill.doc_no));
+  const bills = [...shipmentBills, ...manualBills.filter((bill) => !shipmentDocNos.has(bill.doc_no))];
   return (await applyRemainingCounts(bills)).filter((bill) => bill.count_item > 0);
 }
 
@@ -344,7 +349,7 @@ async function addManualPendingBill({ billNo, scheduledDate, deliveryRoundCode, 
     [code]
   );
   if (!icBill && serviceBill.length === 0) {
-    throw new Error("Bill not found in ic_trans trans_flag 56/72 or odservice.tb_product");
+    throw new Error("Bill not found in ic_trans trans_flag 56/72/44/48 or odservice.tb_product");
   }
   const { upsertPendingBillSchedule } = require("./pending-bill");
   await upsertPendingBillSchedule({
@@ -375,7 +380,7 @@ async function removeManualPendingBill(billNo) {
     [code]
   );
   if (!icBill && serviceBill.length === 0) {
-    throw new Error("Bill not found in ic_trans trans_flag 56/72 or odservice.tb_product");
+    throw new Error("Bill not found in ic_trans trans_flag 56/72/44/48 or odservice.tb_product");
   }
   await query(
     `DELETE FROM public.odg_tms_pending_bill WHERE bill_no = $1`,
@@ -591,7 +596,8 @@ async function getBillsPending(session, fromDate, toDate, transportCode) {
       : query("SELECT code, name_1 FROM transport_type WHERE code NOT LIKE '01-%' ORDER BY code ASC"),
   ]);
 
-  const transRaw = [...shipmentRaw, ...manualRaw];
+  const shipmentDocNos = new Set(shipmentRaw.map((bill) => bill.doc_no));
+  const transRaw = [...shipmentRaw, ...manualRaw.filter((bill) => !shipmentDocNos.has(bill.doc_no))];
   if (transRaw.length === 0) return { trans: [], listtrans };
 
   const billNos = transRaw.map((bill) => bill.doc_no);

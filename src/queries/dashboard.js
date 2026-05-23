@@ -10,8 +10,6 @@ const {
   getNextMonthStart,
   toDisplayDate,
   toDisplayMonth,
-  getBranchScope,
-  branchFilterJob,
 } = require("./helpers");
 
 async function getDashboardData(session) {
@@ -94,12 +92,229 @@ async function getDashboardData(session) {
     year_pending: pendingWithRemaining.length,
   };
 
+  // Breakdown for the pending KPI strip. Computed in JS from the same
+  // pendingWithRemaining list to stay consistent with /bills-pending.
+  //   overdue        — ANY pending bill whose effective scheduled_date is past
+  //   past_send_date — bills that are contacted+ready, but the delivery date
+  //                    has already slipped past today (escalation queue)
+  //   contacted      — has any contact action_status set
+  //   uncontacted    — no action_status yet
+  //   ready          — contacted_ready, dispatch-eligible
+  const pendingBreakdown = {
+    total: pendingWithRemaining.length,
+    overdue: pendingWithRemaining.filter(
+      (bill) => bill.scheduled_date && bill.scheduled_date < fixedToday
+    ).length,
+    past_send_date: pendingWithRemaining.filter(
+      (bill) =>
+        bill.action_status === "contacted_ready" &&
+        bill.scheduled_date &&
+        bill.scheduled_date < fixedToday
+    ).length,
+    contacted: pendingWithRemaining.filter((bill) => bill.action_status).length,
+    uncontacted: pendingWithRemaining.filter((bill) => !bill.action_status).length,
+    ready: pendingWithRemaining.filter(
+      (bill) => bill.action_status === "contacted_ready"
+    ).length,
+  };
+
   const branchNameRows = await query(
     `SELECT code, COALESCE(NULLIF(TRIM(name_1), ''), code) AS name
      FROM transport_type
      WHERE code IN ('02-0001','02-0002','02-0003')`
   );
   const branchNames = Object.fromEntries(branchNameRows.map((r) => [r.code, r.name]));
+
+  // Delivery KPIs measured on completed bills (status=1, sent_end set):
+  //   on_time   — sent_end::date <= target (scheduled_date | send_date | bill_date)
+  //   breach    — sent_end::date >  target
+  //   delivery  — avg seconds from sent_start → sent_end
+  //   close     — avg seconds from sent_end → odg_tms.job_close
+  // Window selected on the bill's actual delivery date (sent_end::date) so a
+  // late bill closed today counts toward today's stats.
+  const kpiBranchClause = scope.scoped
+    ? `AND EXISTS (SELECT 1 FROM ic_trans_shipment __ts WHERE __ts.doc_no = d.bill_no AND __ts.transport_code = '${scope.branch}')`
+    : "";
+  // The delivered CTE adds a `branch_code` from the bill's shipment record so
+  // we can compute the same KPI bucket per-branch in one pass.
+  const kpiRows = await query(
+    `WITH delivered AS (
+       SELECT
+         COALESCE(s.transport_code, '') AS branch_code,
+         d.sent_end::date AS delivered_date,
+         EXTRACT(EPOCH FROM (d.sent_end - d.sent_start))::float8 AS delivery_seconds,
+         CASE WHEN a.job_close IS NOT NULL
+              THEN EXTRACT(EPOCH FROM (a.job_close - d.sent_end))::float8
+         END AS close_seconds,
+         CASE
+           WHEN COALESCE(pb.scheduled_date::date, t.send_date::date, d.bill_date::date) IS NULL THEN NULL
+           WHEN d.sent_end::date <= COALESCE(pb.scheduled_date::date, t.send_date::date, d.bill_date::date) THEN true
+           ELSE false
+         END AS is_on_time
+       FROM public.odg_tms_detail d
+       INNER JOIN public.odg_tms a ON a.doc_no = d.doc_no
+       LEFT JOIN public.odg_tms_pending_bill pb ON pb.bill_no = d.bill_no
+       LEFT JOIN ic_trans t ON t.doc_no = d.bill_no
+       LEFT JOIN ic_trans_shipment s ON s.doc_no = d.bill_no
+       WHERE d.status = 1
+         AND d.sent_end IS NOT NULL
+         AND COALESCE(a.approve_status, 0) = 1
+         AND ${getFixedYearSqlFilter("d.doc_date")}
+         ${kpiBranchClause}
+     ),
+     bucket AS (
+       SELECT branch_code, period, delivery_seconds, close_seconds, is_on_time
+       FROM delivered
+       CROSS JOIN LATERAL (
+         VALUES
+           ('today', delivered_date = $3::date),
+           ('month', delivered_date >= $1::date AND delivered_date < $2::date),
+           ('year', true)
+       ) AS p(period, matches)
+       WHERE p.matches
+     )
+     SELECT
+       branch_code,
+       period,
+       COUNT(*) AS total,
+       COUNT(*) FILTER (WHERE is_on_time = true) AS on_time,
+       COUNT(*) FILTER (WHERE is_on_time = false) AS breach,
+       AVG(delivery_seconds) AS avg_delivery,
+       AVG(close_seconds) AS avg_close
+     FROM bucket
+     GROUP BY GROUPING SETS ((period), (branch_code, period))`,
+    [monthStart, nextMonthStart, fixedToday]
+  );
+  // Split rows into all-branches summary (branch_code IS NULL from rollup) and
+  // per-branch breakdown. Postgres GROUPING SETS marks the rollup row with
+  // branch_code = NULL.
+  const overallByPeriod = new Map();
+  const perBranchByPeriod = new Map();
+  for (const row of kpiRows) {
+    const period = row.period;
+    const entry = {
+      total: Number(row.total ?? 0),
+      on_time: Number(row.on_time ?? 0),
+      breach: Number(row.breach ?? 0),
+      avg_delivery_seconds: row.avg_delivery == null ? null : Number(row.avg_delivery),
+      avg_close_seconds: row.avg_close == null ? null : Number(row.avg_close),
+    };
+    if (row.branch_code === null) {
+      overallByPeriod.set(period, entry);
+    } else {
+      const code = String(row.branch_code || "").trim() || "unknown";
+      if (!perBranchByPeriod.has(period)) perBranchByPeriod.set(period, []);
+      perBranchByPeriod.get(period).push({ branch_code: code, ...entry });
+    }
+  }
+  const emptyKpi = {
+    total: 0,
+    on_time: 0,
+    breach: 0,
+    avg_delivery_seconds: null,
+    avg_close_seconds: null,
+  };
+  const kpiBuild = (period) => overallByPeriod.get(period) ?? emptyKpi;
+  const kpiBranchesBuild = (period) => {
+    const list = perBranchByPeriod.get(period) ?? [];
+    return list
+      .map((row) => ({
+        ...row,
+        branch_name: branchNames[row.branch_code]?.trim() || row.branch_code,
+      }))
+      .sort((a, b) => a.branch_code.localeCompare(b.branch_code));
+  };
+  // 30-day rolling trend for KPI sparkline. One row per day with the same
+  // on-time / breach / avg-delivery / avg-close metrics as the snapshot.
+  const trendRows = await query(
+    `WITH delivered AS (
+       SELECT
+         d.sent_end::date AS delivered_date,
+         EXTRACT(EPOCH FROM (d.sent_end - d.sent_start))::float8 AS delivery_seconds,
+         CASE WHEN a.job_close IS NOT NULL
+              THEN EXTRACT(EPOCH FROM (a.job_close - d.sent_end))::float8
+         END AS close_seconds,
+         CASE
+           WHEN COALESCE(pb.scheduled_date::date, t.send_date::date, d.bill_date::date) IS NULL THEN NULL
+           WHEN d.sent_end::date <= COALESCE(pb.scheduled_date::date, t.send_date::date, d.bill_date::date) THEN true
+           ELSE false
+         END AS is_on_time
+       FROM public.odg_tms_detail d
+       INNER JOIN public.odg_tms a ON a.doc_no = d.doc_no
+       LEFT JOIN public.odg_tms_pending_bill pb ON pb.bill_no = d.bill_no
+       LEFT JOIN ic_trans t ON t.doc_no = d.bill_no
+       WHERE d.status = 1
+         AND d.sent_end IS NOT NULL
+         AND COALESCE(a.approve_status, 0) = 1
+         AND d.sent_end::date >= ($1::date - INTERVAL '29 days')
+         AND d.sent_end::date <= $1::date
+         ${kpiBranchClause}
+     )
+     SELECT
+       to_char(delivered_date, 'YYYY-MM-DD') AS day,
+       COUNT(*) AS total,
+       COUNT(*) FILTER (WHERE is_on_time = true) AS on_time,
+       COUNT(*) FILTER (WHERE is_on_time = false) AS breach,
+       AVG(delivery_seconds) AS avg_delivery,
+       AVG(close_seconds) AS avg_close
+     FROM delivered
+     GROUP BY delivered_date
+     ORDER BY delivered_date ASC`,
+    [fixedToday]
+  );
+  const trendMap = new Map(trendRows.map((row) => [row.day, row]));
+  const deliveryKpiTrend = [];
+  for (let i = 29; i >= 0; i--) {
+    const d = new Date(`${fixedToday}T00:00:00`);
+    d.setDate(d.getDate() - i);
+    const key = d.toISOString().slice(0, 10);
+    const row = trendMap.get(key);
+    deliveryKpiTrend.push({
+      day: key,
+      total: Number(row?.total ?? 0),
+      on_time: Number(row?.on_time ?? 0),
+      breach: Number(row?.breach ?? 0),
+      avg_delivery_seconds: row?.avg_delivery == null ? null : Number(row.avg_delivery),
+      avg_close_seconds: row?.avg_close == null ? null : Number(row.avg_close),
+    });
+  }
+
+  const { getCustomerRatingSummary } = require("./customer-rating");
+  const ratingSummary = await getCustomerRatingSummary().catch(() => ({
+    total: 0,
+    avg_stars: null,
+    positive: 0,
+    negative: 0,
+  }));
+
+  const { getSettings } = require("./settings");
+  const kpiSettings = await getSettings([
+    "kpi.target_on_time_rate",
+    "kpi.target_avg_delivery_minutes",
+    "kpi.target_avg_close_minutes",
+  ]);
+  const parseTarget = (raw) => {
+    const trimmed = String(raw ?? "").trim();
+    if (!trimmed) return null;
+    const n = Number(trimmed);
+    return Number.isFinite(n) ? n : null;
+  };
+  const deliveryKpi = {
+    today: kpiBuild("today"),
+    month: kpiBuild("month"),
+    year: kpiBuild("year"),
+    by_branch: {
+      today: kpiBranchesBuild("today"),
+      month: kpiBranchesBuild("month"),
+      year: kpiBranchesBuild("year"),
+    },
+    trend_30d: deliveryKpiTrend,
+    targets: {
+      on_time_rate: parseTarget(kpiSettings["kpi.target_on_time_rate"]),
+      avg_delivery_minutes: parseTarget(kpiSettings["kpi.target_avg_delivery_minutes"]),
+      avg_close_minutes: parseTarget(kpiSettings["kpi.target_avg_close_minutes"]),
+    },
+  };
 
   const inProgressBranchClause = scope.scoped
     ? `AND EXISTS (SELECT 1 FROM ic_trans_shipment __ts WHERE __ts.doc_no = d.bill_no AND __ts.transport_code = '${scope.branch}')`
@@ -258,6 +473,9 @@ async function getDashboardData(session) {
       current_date: toDisplayDate(fixedToday),
       current_month: toDisplayMonth(fixedMonth),
     },
+    pending_breakdown: pendingBreakdown,
+    delivery_kpi: deliveryKpi,
+    customer_rating: ratingSummary,
   };
 }
 

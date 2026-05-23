@@ -21,6 +21,7 @@ import {
 import {
   getPendingBillSchedule as svcGetPendingBillSchedule,
   upsertPendingBillSchedule as svcUpsertPendingBillSchedule,
+  bulkUpdatePendingBills as svcBulkUpdatePendingBills,
   upsertPendingBillLocation as svcUpsertPendingBillLocation,
 } from "@/queries/pending-bill.js";
 import {
@@ -60,7 +61,10 @@ export async function addManualPendingBill(input: {
   source_type?: string | null;
 }) {
   const s = await requireSession();
-  return svcAddManualPendingBill({
+  const userCode =
+    (s as { code?: string; usercode?: string })?.code ?? (s as { usercode?: string })?.usercode;
+  const { recordAudit } = await import("@/queries/audit-log.js");
+  const result = await svcAddManualPendingBill({
     billNo: input.bill_no,
     scheduledDate: input.scheduled_date,
     deliveryRoundCode: input.delivery_round_code,
@@ -68,13 +72,35 @@ export async function addManualPendingBill(input: {
     transportCode: input.transport_code ?? null,
     remark: input.remark ?? null,
     sourceType: input.source_type ?? null,
-    userCode: (s as { code?: string; usercode?: string })?.code ?? (s as { usercode?: string })?.usercode,
+    userCode,
   });
+  await recordAudit({
+    action: "pending_bill.add_manual",
+    entityType: "bill",
+    entityId: input.bill_no,
+    userCode,
+    changes: {
+      scheduled_date: input.scheduled_date,
+      delivery_round_code: input.delivery_round_code,
+      delivery_route_code: input.delivery_route_code ?? null,
+      transport_code: input.transport_code ?? null,
+      source_type: input.source_type ?? null,
+    },
+  });
+  return result;
 }
 
 export async function removeManualPendingBill(billNo: string) {
-  await requireSession();
-  return svcRemoveManualPendingBill(billNo);
+  const s = await requireSession();
+  const { recordAudit } = await import("@/queries/audit-log.js");
+  const result = await svcRemoveManualPendingBill(billNo);
+  await recordAudit({
+    action: "pending_bill.remove_manual",
+    entityType: "bill",
+    entityId: billNo,
+    userCode: (s as { code?: string })?.code,
+  });
+  return result;
 }
 
 export async function getBillsPending(
@@ -87,8 +113,17 @@ export async function getBillsPending(
 }
 
 export async function updateBillTransport(docNo: string, transportCode: string) {
-  await requireSession();
-  return svcUpdateBillTransport(docNo, transportCode);
+  const s = await requireSession();
+  const { recordAudit } = await import("@/queries/audit-log.js");
+  const result = await svcUpdateBillTransport(docNo, transportCode);
+  await recordAudit({
+    action: "bill.update_transport",
+    entityType: "bill",
+    entityId: docNo,
+    userCode: (s as { code?: string })?.code,
+    changes: { transport_code: transportCode },
+  });
+  return result;
 }
 
 export async function getBillProducts(docNo: string) {
@@ -159,6 +194,41 @@ export async function upsertPendingBillSchedule(input: {
       : current?.transport_code ?? null,
     userCode: (s as { code?: string })?.code,
   });
+}
+
+export async function bulkUpdatePendingBills(input: {
+  bill_nos: string[];
+  scheduled_date?: string | null;
+  delivery_round_code?: string | null;
+  delivery_route_code?: string | null;
+  action_status?: string | null;
+}) {
+  const s = await requireSession();
+  const userCode = (s as { code?: string })?.code;
+  const patch: {
+    scheduledDate?: string | null;
+    deliveryRoundCode?: string | null;
+    deliveryRouteCode?: string | null;
+    actionStatus?: string | null;
+  } = {};
+  if ("scheduled_date" in input) patch.scheduledDate = input.scheduled_date ?? null;
+  if ("delivery_round_code" in input) patch.deliveryRoundCode = input.delivery_round_code ?? null;
+  if ("delivery_route_code" in input) patch.deliveryRouteCode = input.delivery_route_code ?? null;
+  if ("action_status" in input) patch.actionStatus = input.action_status ?? null;
+  const { recordAudit } = await import("@/queries/audit-log.js");
+  const result = await svcBulkUpdatePendingBills({
+    billNos: input.bill_nos,
+    patch,
+    userCode,
+  });
+  await recordAudit({
+    action: "pending_bill.bulk_update",
+    entityType: "bill",
+    entityId: `bulk:${input.bill_nos.length}`,
+    userCode,
+    changes: { bill_nos: input.bill_nos, patch },
+  });
+  return result;
 }
 
 export async function setPendingBillLocation(input: {

@@ -31,11 +31,35 @@ interface WaitingRouteBill {
   incoming_forwarded?: boolean;
   forward_from_transport_name?: string;
   forwarded_at?: string;
+  planned_lat?: string | null;
+  planned_lng?: string | null;
 }
 
 interface DeliveryRoute {
   code: string;
   name: string;
+  origin_lat?: number | null;
+  origin_lng?: number | null;
+}
+
+function haversineKm(lat1: number, lng1: number, lat2: number, lng2: number) {
+  const R = 6371;
+  const dLat = ((lat2 - lat1) * Math.PI) / 180;
+  const dLng = ((lng2 - lng1) * Math.PI) / 180;
+  const a =
+    Math.sin(dLat / 2) ** 2 +
+    Math.cos((lat1 * Math.PI) / 180) *
+      Math.cos((lat2 * Math.PI) / 180) *
+      Math.sin(dLng / 2) ** 2;
+  return 2 * R * Math.asin(Math.sqrt(a));
+}
+
+function billDistanceFromRoute(bill: WaitingRouteBill, route: DeliveryRoute | undefined) {
+  if (!route?.origin_lat || !route?.origin_lng) return null;
+  const lat = Number(bill.planned_lat ?? "");
+  const lng = Number(bill.planned_lng ?? "");
+  if (!Number.isFinite(lat) || !Number.isFinite(lng) || (lat === 0 && lng === 0)) return null;
+  return haversineKm(Number(route.origin_lat), Number(route.origin_lng), lat, lng);
 }
 
 interface Product {
@@ -98,6 +122,7 @@ export default function BillsWaitingRoutesPage() {
   const [expandedBill, setExpandedBill] = useState<string | null>(null);
   const [productsByBill, setProductsByBill] = useState<Record<string, Product[]>>({});
   const [loadingProducts, setLoadingProducts] = useState<string | null>(null);
+  const [sortByDistance, setSortByDistance] = useState(false);
 
   useEffect(() => {
     let alive = true;
@@ -225,7 +250,7 @@ export default function BillsWaitingRoutesPage() {
       roundGroup.itemCount += itemCount;
     });
 
-    return Array.from(routeMapByKey.values())
+    const result = Array.from(routeMapByKey.values())
       .map((routeGroup) => ({
         ...routeGroup,
         dates: routeGroup.dates
@@ -240,7 +265,26 @@ export default function BillsWaitingRoutesPage() {
           .sort((a, b) => a.date.localeCompare(b.date)),
       }))
       .sort((a, b) => a.routeName.localeCompare(b.routeName));
-  }, [filteredBills, routeMap]);
+
+    if (sortByDistance) {
+      for (const routeGroup of result) {
+        const route = routeMap.get(routeGroup.routeCode);
+        for (const dateGroup of routeGroup.dates) {
+          for (const roundGroup of dateGroup.rounds) {
+            roundGroup.bills.sort((a, b) => {
+              const da = billDistanceFromRoute(a, route);
+              const db = billDistanceFromRoute(b, route);
+              if (da == null && db == null) return a.doc_no.localeCompare(b.doc_no);
+              if (da == null) return 1;
+              if (db == null) return -1;
+              return da - db;
+            });
+          }
+        }
+      }
+    }
+    return result;
+  }, [filteredBills, routeMap, sortByDistance]);
 
   const summary = useMemo(
     () =>
@@ -332,6 +376,19 @@ export default function BillsWaitingRoutesPage() {
             </select>
           </label>
         </div>
+        <div className="mt-3 flex items-center justify-end">
+          <label className="inline-flex items-center gap-2 cursor-pointer">
+            <input
+              type="checkbox"
+              checked={sortByDistance}
+              onChange={(e) => setSortByDistance(e.target.checked)}
+              className="rounded border-slate-300 text-emerald-600 focus:ring-emerald-500"
+            />
+            <span className="text-[11px] text-slate-600 dark:text-slate-300">
+              ຈັດຮຽງຕາມໄລຍະທາງຈາກຕົ້ນທາງ (ໃກ້→ໄກ)
+            </span>
+          </label>
+        </div>
       </section>
 
       {loading ? (
@@ -401,7 +458,10 @@ export default function BillsWaitingRoutesPage() {
                           </div>
 
                           <div className="divide-y divide-slate-200/60 dark:divide-white/10">
-                            {roundGroup.bills.map((bill) => (
+                            {roundGroup.bills.map((bill) => {
+                              const route = routeMap.get(routeGroup.routeCode);
+                              const distanceKm = billDistanceFromRoute(bill, route);
+                              return (
                               <div key={bill.doc_no}>
                                 <div className="px-3 py-3">
                                   <button
@@ -423,6 +483,11 @@ export default function BillsWaitingRoutesPage() {
                                       <span className="rounded-full bg-slate-100 px-2 py-0.5 text-[10px] font-semibold text-slate-500 dark:bg-white/10 dark:text-slate-300">
                                         {toNumber(bill.count_item)} ລາຍການ
                                       </span>
+                                      {distanceKm != null && (
+                                        <span className="rounded-full bg-emerald-500/10 px-2 py-0.5 text-[10px] font-semibold text-emerald-700 dark:text-emerald-400">
+                                          {distanceKm < 1 ? `${Math.round(distanceKm * 1000)} m` : `${distanceKm.toFixed(1)} km`}
+                                        </span>
+                                      )}
                                       {bill.incoming_forwarded && (
                                         <span className="rounded-full bg-sky-500/10 px-2 py-0.5 text-[10px] font-semibold text-sky-700 dark:text-sky-400">
                                           ສົ່ງຕໍ່
@@ -488,7 +553,8 @@ export default function BillsWaitingRoutesPage() {
                                   </div>
                                 )}
                               </div>
-                            ))}
+                              );
+                            })}
                           </div>
                         </div>
                       ))}

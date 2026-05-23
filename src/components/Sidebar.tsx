@@ -30,6 +30,7 @@ import {
   FaBroadcastTower,
   FaGasPump,
   FaRoute,
+  FaHistory,
 } from "react-icons/fa";
 
 interface NavItem {
@@ -98,6 +99,7 @@ const navSections: NavSection[] = [
       { label: "ຕາມບິນ", href: "/reports/by-bill", icon: <FaFileInvoice size={13} /> },
       { label: "ນຳໃຊ້ລົດ/ເດືອນ", href: "/reports/monthly-car", icon: <FaChartLine size={13} /> },
       { label: "ຄົນຂັບ/ເດືອນ", href: "/reports/monthly-driver", icon: <FaChartLine size={13} /> },
+      { label: "Leaderboard ຄົນຂັບ", href: "/reports/drivers", icon: <FaUserTie size={13} /> },
     ],
   },
   {
@@ -119,6 +121,7 @@ const navSections: NavSection[] = [
       { label: "ເສັ້ນທາງຂົນສົ່ງ", href: "/manage/delivery-routes", icon: <FaRoute size={13} /> },
       { label: "ຮອບການຈັດສົ່ງ", href: "/manage/delivery-rounds", icon: <FaClock size={13} /> },
       { label: "ຕັ້ງຄ່າ", href: "/manage/settings", icon: <FaCog size={13} /> },
+      { label: "Audit Log", href: "/manage/audit-log", icon: <FaHistory size={13} /> },
     ],
   },
 ];

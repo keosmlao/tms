@@ -6,13 +6,17 @@ import {
   FaArrowRight,
   FaBoxOpen,
   FaBroadcastTower,
+  FaCalendarTimes,
   FaChartLine,
   FaCheckCircle,
   FaClipboardCheck,
   FaExclamationTriangle,
   FaMapMarkedAlt,
+  FaPhone,
+  FaPhoneSlash,
   FaRoute,
   FaSyncAlt,
+  FaThumbsUp,
   FaTruck,
   FaSpinner,
   FaClock,
@@ -99,6 +103,63 @@ interface PendingSummary {
   current_date: string; current_month: string;
 }
 
+interface PendingBreakdown {
+  total: CountValue;
+  overdue: CountValue;
+  past_send_date: CountValue;
+  contacted: CountValue;
+  uncontacted: CountValue;
+  ready: CountValue;
+}
+
+interface DeliveryKpiPeriod {
+  total: CountValue;
+  on_time: CountValue;
+  breach: CountValue;
+  avg_delivery_seconds: number | null;
+  avg_close_seconds: number | null;
+}
+
+interface DeliveryKpiTargets {
+  on_time_rate: number | null;
+  avg_delivery_minutes: number | null;
+  avg_close_minutes: number | null;
+}
+
+interface DeliveryKpiBranch extends DeliveryKpiPeriod {
+  branch_code: string;
+  branch_name: string;
+}
+
+interface DeliveryKpiTrendDay {
+  day: string;
+  total: number;
+  on_time: number;
+  breach: number;
+  avg_delivery_seconds: number | null;
+  avg_close_seconds: number | null;
+}
+
+interface DeliveryKpi {
+  today: DeliveryKpiPeriod;
+  month: DeliveryKpiPeriod;
+  year: DeliveryKpiPeriod;
+  by_branch?: {
+    today: DeliveryKpiBranch[];
+    month: DeliveryKpiBranch[];
+    year: DeliveryKpiBranch[];
+  };
+  trend_30d?: DeliveryKpiTrendDay[];
+  targets?: DeliveryKpiTargets;
+}
+
+interface CustomerRatingSummary {
+  total: number;
+  avg_stars: number | null;
+  positive: number;
+  negative: number;
+}
+
 interface DashboardData {
   data: SummaryData; kl: TeamData; dt: TeamData; ps: TeamData;
   user_branch: string | null;
@@ -111,6 +172,9 @@ interface DashboardData {
   delivered_pending_close?: DeliveredPendingCloseShipment[];
   delivered_pending_close_count?: CountValue;
   pending_summary: PendingSummary;
+  pending_breakdown?: PendingBreakdown;
+  delivery_kpi?: DeliveryKpi;
+  customer_rating?: CustomerRatingSummary;
 }
 
 // ==================== Helpers ====================
@@ -187,6 +251,37 @@ function HeroKpiTile({
         <div className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-lg ${accent} text-white shadow-sm`}>
           {icon}
         </div>
+      </div>
+    </div>
+  );
+}
+
+type PendingStatTone = "amber" | "rose" | "orange" | "sky" | "slate" | "emerald";
+
+const pendingStatPalette: Record<PendingStatTone, { icon: string; text: string; badge: string }> = {
+  amber: { icon: "bg-amber-500/10 text-amber-600 dark:text-amber-400", text: "text-amber-700 dark:text-amber-300", badge: "bg-amber-50 dark:bg-amber-950/30" },
+  rose: { icon: "bg-rose-500/10 text-rose-600 dark:text-rose-400", text: "text-rose-700 dark:text-rose-300", badge: "bg-rose-50 dark:bg-rose-950/30" },
+  orange: { icon: "bg-orange-500/10 text-orange-600 dark:text-orange-400", text: "text-orange-700 dark:text-orange-300", badge: "bg-orange-50 dark:bg-orange-950/30" },
+  sky: { icon: "bg-sky-500/10 text-sky-600 dark:text-sky-400", text: "text-sky-700 dark:text-sky-300", badge: "bg-sky-50 dark:bg-sky-950/30" },
+  slate: { icon: "bg-slate-500/10 text-slate-600 dark:text-slate-400", text: "text-slate-700 dark:text-slate-300", badge: "bg-slate-50 dark:bg-slate-800/40" },
+  emerald: { icon: "bg-emerald-500/10 text-emerald-600 dark:text-emerald-400", text: "text-emerald-700 dark:text-emerald-300", badge: "bg-emerald-50 dark:bg-emerald-950/30" },
+};
+
+function PendingStat({ label, value, icon, tone }: {
+  label: string;
+  value: CountValue;
+  icon: React.ReactNode;
+  tone: PendingStatTone;
+}) {
+  const c = pendingStatPalette[tone];
+  return (
+    <div className={`rounded-lg ${c.badge} p-3 flex items-center gap-3`}>
+      <div className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-lg ${c.icon}`}>
+        {icon}
+      </div>
+      <div className="min-w-0">
+        <p className="text-[10px] font-semibold uppercase tracking-wider text-slate-500 dark:text-slate-400 truncate">{label}</p>
+        <p className={`text-xl font-bold tabular-nums leading-tight ${c.text}`}>{formatNumber(value)}</p>
       </div>
     </div>
   );
@@ -707,6 +802,284 @@ function DeliveredPendingCloseList({ items, total, agingTick }: {
 // ==================== Main ====================
 
 type PendingTab = "year" | "month" | "today";
+type KpiTab = "today" | "month" | "year";
+
+function formatKpiDuration(seconds: number | null) {
+  if (seconds == null || !Number.isFinite(seconds) || seconds < 0) return "—";
+  const total = Math.round(seconds);
+  const h = Math.floor(total / 3600);
+  const m = Math.floor((total % 3600) / 60);
+  const s = total % 60;
+  if (h > 0) return `${h}h ${m}m`;
+  if (m > 0) return `${m}m ${s}s`;
+  return `${s}s`;
+}
+
+function Sparkline({ values, color, label, targetLine }: {
+  values: Array<number | null>;
+  color: string;
+  label: string;
+  targetLine?: number | null;
+}) {
+  const cleaned = values.map((v) => (v == null || !Number.isFinite(v) ? null : Number(v)));
+  const nonNull = cleaned.filter((v): v is number => v != null);
+  if (nonNull.length === 0) {
+    return (
+      <div className="h-10 flex items-center justify-center text-[10px] text-slate-400">
+        {label} — ບໍ່ມີຂໍ້ມູນ
+      </div>
+    );
+  }
+  const max = Math.max(...nonNull, targetLine ?? 0);
+  const min = Math.min(...nonNull, targetLine ?? max);
+  const range = max - min || 1;
+  const w = 200;
+  const h = 32;
+  const step = cleaned.length > 1 ? w / (cleaned.length - 1) : 0;
+  const points: Array<[number, number]> = [];
+  cleaned.forEach((v, i) => {
+    if (v == null) return;
+    const x = i * step;
+    const y = h - ((v - min) / range) * h;
+    points.push([x, y]);
+  });
+  const path = points
+    .map(([x, y], i) => `${i === 0 ? "M" : "L"}${x.toFixed(1)},${y.toFixed(1)}`)
+    .join(" ");
+  const targetY = targetLine != null ? h - ((targetLine - min) / range) * h : null;
+  return (
+    <svg viewBox={`0 0 ${w} ${h}`} preserveAspectRatio="none" className="w-full h-10">
+      {targetY != null && (
+        <line
+          x1={0}
+          y1={targetY}
+          x2={w}
+          y2={targetY}
+          stroke="currentColor"
+          strokeWidth="0.8"
+          strokeDasharray="2 2"
+          className="text-slate-400/60"
+        />
+      )}
+      <path d={path} fill="none" stroke={color} strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round" />
+      {points.length > 0 && (
+        <circle cx={points[points.length - 1][0]} cy={points[points.length - 1][1]} r="2" fill={color} />
+      )}
+    </svg>
+  );
+}
+
+type TargetStatus = "pass" | "fail" | "none";
+
+function targetBadge(status: TargetStatus, target: string | null): React.ReactNode {
+  if (status === "none" || !target) return null;
+  const cls = status === "pass"
+    ? "bg-emerald-500/15 text-emerald-700 dark:text-emerald-300 ring-emerald-500/30"
+    : "bg-rose-500/15 text-rose-700 dark:text-rose-300 ring-rose-500/30";
+  const icon = status === "pass" ? "▲" : "▼";
+  return (
+    <span className={`inline-flex items-center gap-1 rounded-full px-1.5 py-0.5 text-[9px] font-bold ring-1 ${cls}`}>
+      {icon} {target}
+    </span>
+  );
+}
+
+function DeliveryKpiCard({ kpi }: { kpi: DeliveryKpi }) {
+  const [tab, setTab] = useState<KpiTab>("today");
+  const period = kpi[tab];
+  const branches = kpi.by_branch?.[tab] ?? [];
+  const trend = kpi.trend_30d ?? [];
+  const targets = kpi.targets ?? { on_time_rate: null, avg_delivery_minutes: null, avg_close_minutes: null };
+  const onTimeSeries = trend.map((d) =>
+    d.total > 0 ? Math.round((d.on_time / d.total) * 100) : null
+  );
+  const breachSeries = trend.map((d) => d.breach);
+  const avgDeliverySeries = trend.map((d) =>
+    d.avg_delivery_seconds == null ? null : d.avg_delivery_seconds / 60
+  );
+  const avgCloseSeries = trend.map((d) =>
+    d.avg_close_seconds == null ? null : d.avg_close_seconds / 60
+  );
+  const onTimeRate = getPercent(toNumber(period.on_time), toNumber(period.total));
+  const breachRate = getPercent(toNumber(period.breach), toNumber(period.total));
+  const avgDeliveryMin = period.avg_delivery_seconds == null ? null : period.avg_delivery_seconds / 60;
+  const avgCloseMin = period.avg_close_seconds == null ? null : period.avg_close_seconds / 60;
+
+  const onTimeStatus: TargetStatus = targets.on_time_rate == null
+    ? "none"
+    : period.total
+    ? (onTimeRate >= targets.on_time_rate ? "pass" : "fail")
+    : "none";
+  const avgDeliveryStatus: TargetStatus = targets.avg_delivery_minutes == null
+    ? "none"
+    : avgDeliveryMin == null
+    ? "none"
+    : (avgDeliveryMin <= targets.avg_delivery_minutes ? "pass" : "fail");
+  const avgCloseStatus: TargetStatus = targets.avg_close_minutes == null
+    ? "none"
+    : avgCloseMin == null
+    ? "none"
+    : (avgCloseMin <= targets.avg_close_minutes ? "pass" : "fail");
+
+  const tabs: Array<{ key: KpiTab; label: string }> = [
+    { key: "today", label: "ວັນນີ້" },
+    { key: "month", label: "ເດືອນນີ້" },
+    { key: "year", label: "ປີນີ້" },
+  ];
+
+  return (
+    <div className="rounded-lg border border-slate-200/70 bg-white/80 p-4 dark:border-slate-800 dark:bg-slate-900/65">
+      <div className="flex flex-wrap items-center justify-between gap-3 mb-3">
+        <div className="flex items-center gap-2">
+          <div className="w-7 h-7 rounded-lg bg-teal-500/10 flex items-center justify-center">
+            <FaChartLine className="text-teal-600 dark:text-teal-400" size={12} />
+          </div>
+          <h2 className="text-sm font-bold text-slate-800 dark:text-white">KPI ການຈັດສົ່ງ</h2>
+          <Link
+            href="/manage/settings/kpi"
+            className="text-[10px] text-slate-400 hover:text-teal-600 dark:hover:text-teal-300 underline decoration-dotted"
+            title="ຕັ້ງຄ່າເປົ້າໝາຍ"
+          >
+            ຕັ້ງຄ່າເປົ້າໝາຍ
+          </Link>
+        </div>
+        <div className="inline-flex items-center gap-1 rounded-lg bg-slate-100 p-1 dark:bg-slate-800/70">
+          {tabs.map((t) => (
+            <button
+              key={t.key}
+              type="button"
+              onClick={() => setTab(t.key)}
+              className={`px-3 py-1 rounded-lg text-[11px] font-semibold transition-all ${
+                tab === t.key
+                  ? "bg-white text-teal-700 shadow-sm dark:bg-slate-900 dark:text-teal-300"
+                  : "text-slate-500 dark:text-gray-400 hover:text-slate-700"
+              }`}
+            >
+              {t.label}
+            </button>
+          ))}
+        </div>
+      </div>
+
+      <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
+        <div className="rounded-lg bg-emerald-50 dark:bg-emerald-950/30 p-3">
+          <div className="flex items-center justify-between gap-2 mb-1">
+            <div className="flex items-center gap-2 min-w-0">
+              <FaCheckCircle className="text-emerald-600 dark:text-emerald-400 shrink-0" size={11} />
+              <p className="text-[10px] font-semibold uppercase tracking-wider text-slate-500 dark:text-slate-400 truncate">
+                ສຳເລັດທັນເວລາ
+              </p>
+            </div>
+            {targetBadge(onTimeStatus, targets.on_time_rate != null ? `${targets.on_time_rate}%` : null)}
+          </div>
+          <p className="text-2xl font-bold text-emerald-700 dark:text-emerald-300 tabular-nums leading-tight">
+            {onTimeRate}%
+          </p>
+          <p className="text-[10px] text-slate-500 dark:text-slate-400 mt-0.5">
+            {formatNumber(period.on_time)} / {formatNumber(period.total)} ບິນ
+          </p>
+          <Sparkline values={onTimeSeries} color="#059669" label="on-time" targetLine={targets.on_time_rate} />
+        </div>
+
+        <div className="rounded-lg bg-rose-50 dark:bg-rose-950/30 p-3">
+          <div className="flex items-center gap-2 mb-1">
+            <FaExclamationTriangle className="text-rose-600 dark:text-rose-400" size={11} />
+            <p className="text-[10px] font-semibold uppercase tracking-wider text-slate-500 dark:text-slate-400">
+              ຊ້າກວ່າກຳນົດ
+            </p>
+          </div>
+          <p className="text-2xl font-bold text-rose-700 dark:text-rose-300 tabular-nums leading-tight">
+            {formatNumber(period.breach)}
+          </p>
+          <p className="text-[10px] text-slate-500 dark:text-slate-400 mt-0.5">{breachRate}% ຂອງທີ່ສົ່ງ</p>
+          <Sparkline values={breachSeries} color="#e11d48" label="breach" />
+        </div>
+
+        <div className="rounded-lg bg-sky-50 dark:bg-sky-950/30 p-3">
+          <div className="flex items-center justify-between gap-2 mb-1">
+            <div className="flex items-center gap-2 min-w-0">
+              <FaTruck className="text-sky-600 dark:text-sky-400 shrink-0" size={11} />
+              <p className="text-[10px] font-semibold uppercase tracking-wider text-slate-500 dark:text-slate-400 truncate">
+                ສະເລ່ຍເວລາສົ່ງ
+              </p>
+            </div>
+            {targetBadge(avgDeliveryStatus, targets.avg_delivery_minutes != null ? formatKpiDuration(targets.avg_delivery_minutes * 60) : null)}
+          </div>
+          <p className="text-2xl font-bold text-sky-700 dark:text-sky-300 tabular-nums leading-tight">
+            {formatKpiDuration(period.avg_delivery_seconds)}
+          </p>
+          <p className="text-[10px] text-slate-500 dark:text-slate-400 mt-0.5">ຮັບຖ້ຽວ → ສົ່ງສຳເລັດ</p>
+          <Sparkline values={avgDeliverySeries} color="#0284c7" label="avg delivery" targetLine={targets.avg_delivery_minutes} />
+        </div>
+
+        <div className="rounded-lg bg-amber-50 dark:bg-amber-950/30 p-3">
+          <div className="flex items-center justify-between gap-2 mb-1">
+            <div className="flex items-center gap-2 min-w-0">
+              <FaClock className="text-amber-600 dark:text-amber-400 shrink-0" size={11} />
+              <p className="text-[10px] font-semibold uppercase tracking-wider text-slate-500 dark:text-slate-400 truncate">
+                ສະເລ່ຍເວລາປິດຖ້ຽວ
+              </p>
+            </div>
+            {targetBadge(avgCloseStatus, targets.avg_close_minutes != null ? formatKpiDuration(targets.avg_close_minutes * 60) : null)}
+          </div>
+          <p className="text-2xl font-bold text-amber-700 dark:text-amber-300 tabular-nums leading-tight">
+            {formatKpiDuration(period.avg_close_seconds)}
+          </p>
+          <p className="text-[10px] text-slate-500 dark:text-slate-400 mt-0.5">ສົ່ງສຳເລັດ → ປິດຖ້ຽວ</p>
+          <Sparkline values={avgCloseSeries} color="#d97706" label="avg close" targetLine={targets.avg_close_minutes} />
+        </div>
+      </div>
+
+      <p className="mt-2 text-[9px] text-slate-400">trend 30 ມື້ຫຼ້າສຸດ · ເສັ້ນປະ = ເປົ້າໝາຍ</p>
+
+      {branches.length > 0 && (
+        <div className="mt-4 border-t border-slate-200/60 dark:border-white/10 pt-3">
+          <p className="text-[10px] font-semibold uppercase tracking-wider text-slate-500 dark:text-slate-400 mb-2">
+            ປຽບທຽບລະຫວ່າງສາຂາ
+          </p>
+          <div className="overflow-x-auto">
+            <table className="w-full text-[11px]">
+              <thead className="text-slate-500 dark:text-slate-400">
+                <tr>
+                  <th className="px-2 py-1.5 text-left font-semibold">ສາຂາ</th>
+                  <th className="px-2 py-1.5 text-right font-semibold">ສົ່ງສຳເລັດ</th>
+                  <th className="px-2 py-1.5 text-right font-semibold">ທັນເວລາ</th>
+                  <th className="px-2 py-1.5 text-right font-semibold">ຊ້າ</th>
+                  <th className="px-2 py-1.5 text-right font-semibold">ສະເລ່ຍສົ່ງ</th>
+                  <th className="px-2 py-1.5 text-right font-semibold">ສະເລ່ຍປິດ</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-slate-200/60 dark:divide-white/5">
+                {branches.map((b) => {
+                  const rate = getPercent(toNumber(b.on_time), toNumber(b.total));
+                  const meets = targets.on_time_rate == null || b.total === 0
+                    ? null
+                    : rate >= targets.on_time_rate;
+                  return (
+                    <tr key={b.branch_code} className="hover:bg-white/40 dark:hover:bg-white/5">
+                      <td className="px-2 py-1.5 font-semibold text-slate-700 dark:text-slate-200">{b.branch_name}</td>
+                      <td className="px-2 py-1.5 text-right tabular-nums text-slate-600 dark:text-slate-300">{formatNumber(b.total)}</td>
+                      <td className={`px-2 py-1.5 text-right tabular-nums font-bold ${
+                        meets === true ? "text-emerald-600 dark:text-emerald-400"
+                        : meets === false ? "text-rose-600 dark:text-rose-400"
+                        : "text-slate-600 dark:text-slate-300"
+                      }`}>
+                        {formatNumber(b.on_time)} <span className="text-[9px] font-normal text-slate-400">· {rate}%</span>
+                      </td>
+                      <td className="px-2 py-1.5 text-right tabular-nums text-rose-600 dark:text-rose-400">{formatNumber(b.breach)}</td>
+                      <td className="px-2 py-1.5 text-right tabular-nums text-sky-600 dark:text-sky-400">{formatKpiDuration(b.avg_delivery_seconds)}</td>
+                      <td className="px-2 py-1.5 text-right tabular-nums text-amber-600 dark:text-amber-400">{formatKpiDuration(b.avg_close_seconds)}</td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
 
 export default function DashboardPage() {
   const [data, setData] = useState<DashboardData | null>(null);
@@ -924,6 +1297,97 @@ export default function DashboardPage() {
         <div className="bg-amber-50 dark:bg-amber-950/30 border border-amber-200 dark:border-amber-800 rounded-lg px-4 py-3 text-sm text-amber-800 dark:text-amber-300 flex items-center gap-2">
           <FaExclamationTriangle size={12} />
           {error}
+        </div>
+      )}
+
+      {/* ========== PENDING BREAKDOWN ========== */}
+      {data.pending_breakdown && (
+        <Link
+          href="/bills-pending"
+          className="block rounded-lg border border-slate-200/70 bg-white/80 p-4 transition-all hover:-translate-y-0.5 hover:shadow-lg dark:border-slate-800 dark:bg-slate-900/65"
+        >
+          <div className="flex items-center justify-between gap-3 mb-3">
+            <div className="flex items-center gap-2">
+              <div className="w-7 h-7 rounded-lg bg-amber-500/10 flex items-center justify-center">
+                <FaClock className="text-amber-500" size={12} />
+              </div>
+              <h2 className="text-sm font-bold text-slate-800 dark:text-white">ສະຖານະບິນຄ້າງສົ່ງ</h2>
+            </div>
+            <FaArrowRight className="text-slate-300" size={11} />
+          </div>
+          <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3">
+            <PendingStat
+              label="ຈຳນວນທີ່ຄ້າງສົ່ງ"
+              value={data.pending_breakdown.total}
+              icon={<FaBoxOpen size={12} />}
+              tone="amber"
+            />
+            <PendingStat
+              label="ເກີນກຳນົດແລ້ວ"
+              value={data.pending_breakdown.overdue}
+              icon={<FaExclamationTriangle size={12} />}
+              tone="rose"
+            />
+            <PendingStat
+              label="ຕິດຕໍ່ແລ້ວ"
+              value={data.pending_breakdown.contacted}
+              icon={<FaPhone size={12} />}
+              tone="sky"
+            />
+            <PendingStat
+              label="ຍັງບໍ່ຕິດຕໍ່"
+              value={data.pending_breakdown.uncontacted}
+              icon={<FaPhoneSlash size={12} />}
+              tone="slate"
+            />
+            <PendingStat
+              label="ພ້ອມສົ່ງແລ້ວ"
+              value={data.pending_breakdown.ready}
+              icon={<FaThumbsUp size={12} />}
+              tone="emerald"
+            />
+            <PendingStat
+              label="ກາຍມື້ສົ່ງ"
+              value={data.pending_breakdown.past_send_date}
+              icon={<FaCalendarTimes size={12} />}
+              tone="orange"
+            />
+          </div>
+        </Link>
+      )}
+
+      {/* ========== DELIVERY KPI ========== */}
+      {data.delivery_kpi && <DeliveryKpiCard kpi={data.delivery_kpi} />}
+
+      {/* ========== CUSTOMER RATING ========== */}
+      {data.customer_rating && data.customer_rating.total > 0 && (
+        <div className="rounded-lg border border-slate-200/70 bg-white/80 p-4 dark:border-slate-800 dark:bg-slate-900/65">
+          <div className="flex items-center gap-2 mb-3">
+            <div className="w-7 h-7 rounded-lg bg-amber-500/10 flex items-center justify-center text-amber-500">
+              ★
+            </div>
+            <h2 className="text-sm font-bold text-slate-800 dark:text-white">ການປະເມີນຈາກລູກຄ້າ</h2>
+          </div>
+          <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
+            <div className="rounded-lg bg-amber-50 dark:bg-amber-950/30 p-3">
+              <p className="text-[10px] font-semibold uppercase tracking-wider text-slate-500 dark:text-slate-400">ສະເລ່ຍ</p>
+              <p className="text-2xl font-bold text-amber-700 dark:text-amber-300 tabular-nums">
+                {data.customer_rating.avg_stars?.toFixed(2) ?? "—"} <span className="text-base">★</span>
+              </p>
+            </div>
+            <div className="rounded-lg bg-slate-50 dark:bg-slate-800/40 p-3">
+              <p className="text-[10px] font-semibold uppercase tracking-wider text-slate-500 dark:text-slate-400">ປະເມີນທັງໝົດ</p>
+              <p className="text-2xl font-bold text-slate-700 dark:text-slate-200 tabular-nums">{formatNumber(data.customer_rating.total)}</p>
+            </div>
+            <div className="rounded-lg bg-emerald-50 dark:bg-emerald-950/30 p-3">
+              <p className="text-[10px] font-semibold uppercase tracking-wider text-slate-500 dark:text-slate-400">ດີ (4–5★)</p>
+              <p className="text-2xl font-bold text-emerald-700 dark:text-emerald-300 tabular-nums">{formatNumber(data.customer_rating.positive)}</p>
+            </div>
+            <div className="rounded-lg bg-rose-50 dark:bg-rose-950/30 p-3">
+              <p className="text-[10px] font-semibold uppercase tracking-wider text-slate-500 dark:text-slate-400">ບໍ່ດີ (1–2★)</p>
+              <p className="text-2xl font-bold text-rose-700 dark:text-rose-300 tabular-nums">{formatNumber(data.customer_rating.negative)}</p>
+            </div>
+          </div>
         </div>
       )}
 

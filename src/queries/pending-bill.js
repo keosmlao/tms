@@ -179,6 +179,82 @@ async function upsertPendingBillSchedule({
   return { success: true };
 }
 
+// Bulk-update a list of bills with the same patch (e.g. mark all as ready,
+// reassign to a round). Only fields that are explicitly provided are updated;
+// pass null to clear a field. Uses a single transaction so all rows succeed
+// or fail together.
+/**
+ * @param {{ billNos: string[], patch: { scheduledDate?: string|null, deliveryRoundCode?: string|null, deliveryRouteCode?: string|null, actionStatus?: string|null }, userCode?: string|null }} input
+ */
+async function bulkUpdatePendingBills(input) {
+  const { billNos, patch, userCode } = input || {};
+  const codes = (Array.isArray(billNos) ? billNos : [])
+    .map((b) => String(b ?? "").trim())
+    .filter(Boolean);
+  if (codes.length === 0) return { success: true, updated: 0 };
+  await ensurePendingBillSchema();
+
+  const sets = [];
+  const params = [];
+  let i = 1;
+  if ("scheduledDate" in (patch || {})) {
+    const v = patch.scheduledDate ? String(patch.scheduledDate).trim() || null : null;
+    params.push(v);
+    sets.push(`scheduled_date = $${i}::date`);
+    i++;
+  }
+  if ("actionStatus" in (patch || {})) {
+    const v = patch.actionStatus ? String(patch.actionStatus).trim() || null : null;
+    params.push(v);
+    sets.push(`action_status = $${i}`);
+    i++;
+  }
+  if ("deliveryRouteCode" in (patch || {})) {
+    const v = patch.deliveryRouteCode ? String(patch.deliveryRouteCode).trim() || null : null;
+    params.push(v);
+    sets.push(`delivery_route_code = $${i}`);
+    i++;
+  }
+  if ("deliveryRoundCode" in (patch || {})) {
+    const v = patch.deliveryRoundCode ? String(patch.deliveryRoundCode).trim() || null : null;
+    params.push(v);
+    sets.push(`delivery_round_code = $${i}`);
+    i++;
+  }
+  if (sets.length === 0) return { success: true, updated: 0 };
+  const userParam = userCode ? String(userCode).trim() || null : null;
+  params.push(userParam);
+  sets.push(`updated_by = $${i}`);
+  i++;
+  sets.push("updated_at = LOCALTIMESTAMP(0)");
+  params.push(codes);
+
+  const client = await pool.connect();
+  try {
+    await client.query("BEGIN");
+    // Insert rows for bills that don't yet have a pending_bill record so the
+    // UPDATE has something to hit. Conflict = do nothing because UPDATE will
+    // pick them up.
+    await client.query(
+      `INSERT INTO public.odg_tms_pending_bill (bill_no)
+       SELECT unnest($1::varchar[]) ON CONFLICT (bill_no) DO NOTHING`,
+      [codes]
+    );
+    const result = await client.query(
+      `UPDATE public.odg_tms_pending_bill SET ${sets.join(", ")}
+       WHERE bill_no = ANY($${i}::varchar[])`,
+      params
+    );
+    await client.query("COMMIT");
+    return { success: true, updated: result.rowCount ?? codes.length };
+  } catch (err) {
+    await client.query("ROLLBACK");
+    throw err;
+  } finally {
+    client.release();
+  }
+}
+
 async function getPendingBillSchedule(billNo) {
   const code = String(billNo ?? "").trim();
   if (!code) return null;
@@ -245,5 +321,6 @@ module.exports = {
   getPendingBillScheduleMap,
   getPendingBillSchedule,
   upsertPendingBillSchedule,
+  bulkUpdatePendingBills,
   upsertPendingBillLocation,
 };

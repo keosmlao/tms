@@ -173,6 +173,27 @@ async function pushToDriver(driverCode, title, body, data = {}) {
     });
     for (const tok of invalid) await deleteToken(tok);
 
+    // Best-effort audit log so admins can verify a push was attempted.
+    try {
+      const { recordAudit } = require("./audit-log");
+      await recordAudit({
+        action: "push.sent",
+        entityType: "driver",
+        entityId: driverCode,
+        userCode: "system",
+        changes: {
+          title,
+          body,
+          data,
+          token_count: tokens.length,
+          sent: res.successCount,
+          failed: res.failureCount,
+        },
+      });
+    } catch (_) {
+      // audit log being unavailable must not break push
+    }
+
     return { sent: res.successCount, failed: res.failureCount };
   } catch (err) {
     console.error("[push] send failed:", err);

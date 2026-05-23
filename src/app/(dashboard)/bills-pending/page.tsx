@@ -189,6 +189,7 @@ const T = {
 export default function BillsPendingClient() {
   const [bills, setBills] = useState<Bill[]>([]);
   const [transports, setTransports] = useState<Transport[]>([]);
+  const [allBranches, setAllBranches] = useState<Transport[]>([]);
   const [fromDate, setFromDate] = useState(FIXED_YEAR_START);
   const [toDate, setToDate] = useState(FIXED_YEAR_END);
   const [transportCode, setTransportCode] = useState("all");
@@ -227,6 +228,11 @@ export default function BillsPendingClient() {
   const [manualSearching, setManualSearching] = useState(false);
   const [manualSaving, setManualSaving] = useState(false);
   const [removingManualBillNo, setRemovingManualBillNo] = useState<string | null>(null);
+  const [selectedBillNos, setSelectedBillNos] = useState<Set<string>>(new Set());
+  const [bulkAction, setBulkAction] = useState<"" | "mark_ready" | "set_round" | "set_date">("");
+  const [bulkRound, setBulkRound] = useState("");
+  const [bulkDate, setBulkDate] = useState(getFixedTodayDate());
+  const [bulkSaving, setBulkSaving] = useState(false);
   const perPage = 20;
   const today = getFixedTodayDate();
   const addDays = (date: string, days: number) => {
@@ -250,6 +256,9 @@ export default function BillsPendingClient() {
     void Actions.listDeliveryRoutes(true)
       .then((data) => setDeliveryRoutes((data ?? []) as DeliveryRoute[]))
       .catch(() => setDeliveryRoutes([]));
+    void Actions.getTransportBranches()
+      .then((data) => setAllBranches((data ?? []) as Transport[]))
+      .catch(() => setAllBranches([]));
   }, []);
 
   useEffect(() => {
@@ -583,6 +592,41 @@ export default function BillsPendingClient() {
     }
   };
 
+  const toggleSelectBill = (billNo: string) => {
+    setSelectedBillNos((current) => {
+      const next = new Set(current);
+      if (next.has(billNo)) next.delete(billNo);
+      else next.add(billNo);
+      return next;
+    });
+  };
+
+  const clearSelection = () => setSelectedBillNos(new Set());
+
+  const applyBulkAction = async () => {
+    const billNos = Array.from(selectedBillNos);
+    if (billNos.length === 0 || !bulkAction) return;
+    setBulkSaving(true);
+    try {
+      if (bulkAction === "mark_ready") {
+        await Actions.bulkUpdatePendingBills({ bill_nos: billNos, action_status: "contacted_ready" });
+      } else if (bulkAction === "set_round") {
+        if (!bulkRound) return;
+        await Actions.bulkUpdatePendingBills({ bill_nos: billNos, delivery_round_code: bulkRound });
+      } else if (bulkAction === "set_date") {
+        if (!bulkDate) return;
+        await Actions.bulkUpdatePendingBills({ bill_nos: billNos, scheduled_date: bulkDate });
+      }
+      clearSelection();
+      setBulkAction("");
+      await fetchBills();
+    } catch (e) {
+      console.error(e);
+    } finally {
+      setBulkSaving(false);
+    }
+  };
+
   const removeManualBill = async (billNo: string) => {
     if (!window.confirm(`ລົບ ${billNo} ອອກຈາກລາຍການລໍຖ້າຈັດຖ້ຽວ?`)) return;
     setRemovingManualBillNo(billNo);
@@ -787,6 +831,70 @@ export default function BillsPendingClient() {
             </button>
           </div>
 
+          {/* Bulk-action toolbar (visible when bills are selected) */}
+          {selectedBillNos.size > 0 && (
+            <div className="sticky top-2 z-20 flex flex-wrap items-center gap-2 rounded-lg border border-teal-200 bg-teal-50 px-3 py-2 shadow-md dark:border-teal-800 dark:bg-teal-950/50">
+              <span className="text-xs font-bold text-teal-700 dark:text-teal-300">
+                ເລືອກແລ້ວ {selectedBillNos.size} ບິນ
+              </span>
+              <button
+                type="button"
+                onClick={clearSelection}
+                className="text-[10px] text-teal-600 hover:underline"
+              >
+                ລ້າງ
+              </button>
+              <select
+                value={bulkAction}
+                onChange={(e) => setBulkAction(e.target.value as typeof bulkAction)}
+                className="rounded-lg border border-teal-200 bg-white px-2 py-1 text-xs dark:border-teal-700 dark:bg-slate-900"
+              >
+                <option value="">-- ເລືອກການກະທຳ --</option>
+                <option value="mark_ready">ໝາຍວ່າພ້ອມຮັບ</option>
+                <option value="set_round">ກຳນົດຮອບສົ່ງ</option>
+                <option value="set_date">ກຳນົດວັນສົ່ງ</option>
+              </select>
+              {bulkAction === "set_round" && (
+                <select
+                  value={bulkRound}
+                  onChange={(e) => setBulkRound(e.target.value)}
+                  className="rounded-lg border border-teal-200 bg-white px-2 py-1 text-xs dark:border-teal-700 dark:bg-slate-900"
+                >
+                  <option value="">-- ເລືອກຮອບ --</option>
+                  {deliveryRounds.map((r) => (
+                    <option key={r.code} value={r.code}>
+                      {r.name} {r.time_label ? `(${r.time_label})` : ""}
+                    </option>
+                  ))}
+                </select>
+              )}
+              {bulkAction === "set_date" && (
+                <input
+                  type="date"
+                  value={bulkDate}
+                  min={FIXED_YEAR_START}
+                  max={FIXED_YEAR_END}
+                  onChange={(e) => setBulkDate(e.target.value)}
+                  className="rounded-lg border border-teal-200 bg-white px-2 py-1 text-xs dark:border-teal-700 dark:bg-slate-900"
+                />
+              )}
+              <button
+                type="button"
+                onClick={() => void applyBulkAction()}
+                disabled={
+                  bulkSaving ||
+                  !bulkAction ||
+                  (bulkAction === "set_round" && !bulkRound) ||
+                  (bulkAction === "set_date" && !bulkDate)
+                }
+                className="px-3 py-1 rounded-lg bg-teal-600 hover:bg-teal-700 text-white text-xs font-semibold disabled:opacity-50 inline-flex items-center gap-1"
+              >
+                {bulkSaving ? <FaSpinner className="animate-spin" size={10} /> : <FaCheck size={10} />}
+                ນຳໃຊ້
+              </button>
+            </div>
+          )}
+
           {/* Timeline */}
           <div className="relative pl-7 sm:pl-10">
             <div className="absolute left-[10px] sm:left-[14px] top-2 bottom-2 w-px bg-gradient-to-b from-teal-500/40 via-slate-300/40 dark:via-white/10 to-transparent" aria-hidden />
@@ -901,6 +1009,18 @@ export default function BillsPendingClient() {
                         >
                           {/* Main row */}
                           <div className="flex items-stretch">
+                            <label
+                              className="flex items-center px-3 py-2.5 cursor-pointer hover:bg-slate-500/5 border-r border-slate-200/40 dark:border-white/5"
+                              onClick={(e) => e.stopPropagation()}
+                              title="ເລືອກສຳລັບ bulk action"
+                            >
+                              <input
+                                type="checkbox"
+                                checked={selectedBillNos.has(bill.doc_no)}
+                                onChange={() => toggleSelectBill(bill.doc_no)}
+                                className="rounded border-slate-300 text-teal-600 focus:ring-teal-500"
+                              />
+                            </label>
                             <button
                               onClick={() => void toggleProducts(bill.doc_no)}
                               className="flex items-center gap-2 px-3 py-2.5 hover:bg-slate-500/5 transition-colors flex-shrink-0 border-r border-slate-200/40 dark:border-white/5"
@@ -1349,7 +1469,7 @@ export default function BillsPendingClient() {
                 </label>
                 <select value={selectedTransport} onChange={(e) => setSelectedTransport(e.target.value)} className={inputCls}>
                   <option value="">-- ເລືອກ --</option>
-                  {transports.map((t) => <option key={t.code} value={t.code}>{t.name_1}</option>)}
+                  {(allBranches.length > 0 ? allBranches : transports).map((t) => <option key={t.code} value={t.code}>{t.name_1}</option>)}
                 </select>
               </div>
             </div>
@@ -1376,7 +1496,7 @@ export default function BillsPendingClient() {
                 </div>
                 <div>
                   <h3 className="text-sm font-bold text-slate-800 dark:text-slate-100">ເພີ່ມບິນເຂົ້າລໍຖ້າຈັດຖ້ຽວ</h3>
-                  <p className="text-[11px] text-slate-500">ຄົ້ນຈາກ ic_trans 56/72 ແລະ odservice.tb_product</p>
+                  <p className="text-[11px] text-slate-500">ຄົ້ນຈາກ ic_trans 56/72/44/48 ແລະ odservice.tb_product</p>
                 </div>
               </div>
               <button onClick={closeManualModal} className="p-1.5 text-slate-400 hover:text-slate-600 hover:bg-white rounded-lg transition-colors">
