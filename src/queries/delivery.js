@@ -94,6 +94,15 @@ async function ensureDeliveryWorkflowSchemaInternal(db) {
     WHERE parent_bill_no IS NOT NULL
   `);
 
+  // Same parent_bill_no on the draft table so when the dispatcher adds a
+  // bill to the draft (search → addBillToDraft) and later saves the job
+  // (createJob reading from the draft), the parent link is preserved.
+  // Without this, only direct data.bills[] submissions can carry parent_bill_no.
+  await safeDdl(db, `
+    ALTER TABLE public.odg_tms_listbill_draft
+    ADD COLUMN IF NOT EXISTS parent_bill_no character varying
+  `);
+
   // checkin_at — moment the driver tapped "Check in" at the destination.
   // sent_start used to double as both "dispatch start" and "checkin time",
   // which conflated two different events. We keep sent_start as a backward-
@@ -184,26 +193,26 @@ async function ensureDeliveryWorkflowSchema(client) {
   // this short-circuit each mobile API request was re-running ~10 DDL
   // statements, which can stall under concurrent load while ALTER TABLE waits
   // for an ACCESS EXCLUSIVE lock.
-  if (deliveryCache.__tmsDeliverySchemaReady_v4) return;
+  if (deliveryCache.__tmsDeliverySchemaReady_v5) return;
 
   const isSharedPool = !client || client === pool;
   if (!isSharedPool) {
     await ensureDeliveryWorkflowSchemaInternal(client);
-    deliveryCache.__tmsDeliverySchemaReady_v4 = true;
+    deliveryCache.__tmsDeliverySchemaReady_v5 = true;
     return;
   }
 
-  if (!deliveryCache.__tmsDeliverySchemaPromise_v4) {
-    deliveryCache.__tmsDeliverySchemaPromise_v4 = ensureDeliveryWorkflowSchemaInternal(pool)
+  if (!deliveryCache.__tmsDeliverySchemaPromise_v5) {
+    deliveryCache.__tmsDeliverySchemaPromise_v5 = ensureDeliveryWorkflowSchemaInternal(pool)
       .then(() => {
-        deliveryCache.__tmsDeliverySchemaReady_v4 = true;
+        deliveryCache.__tmsDeliverySchemaReady_v5 = true;
       })
       .catch((err) => {
-        deliveryCache.__tmsDeliverySchemaPromise_v4 = null;
+        deliveryCache.__tmsDeliverySchemaPromise_v5 = null;
         throw err;
       });
   }
-  await deliveryCache.__tmsDeliverySchemaPromise_v4;
+  await deliveryCache.__tmsDeliverySchemaPromise_v5;
 }
 
 async function ensureJobDeliveryItems(docNo, client) {

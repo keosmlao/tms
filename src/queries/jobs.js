@@ -140,10 +140,14 @@ async function createJob(session, data) {
   await ensureTmsWorkerTable();
   await ensureTmsDetailItemTable();
   await ensureForwardBranchColumn();
+  // parent_bill_no lives on both odg_tms_detail (write target) and
+  // odg_tms_listbill_draft (read source below). Ensure the schema before
+  // the SELECT references it.
+  await ensureDeliveryWorkflowSchema(pool);
 
   const billsList = data.bills && data.bills.length > 0
     ? data.bills
-    : await query(`SELECT bill_date, bill_no, cust_code, count_item, telephone FROM odg_tms_listbill_draft WHERE user_create=$1 AND ${getFixedYearSqlFilter("bill_date")}`, [session.usercode]);
+    : await query(`SELECT bill_date, bill_no, cust_code, count_item, telephone, parent_bill_no FROM odg_tms_listbill_draft WHERE user_create=$1 AND ${getFixedYearSqlFilter("bill_date")}`, [session.usercode]);
 
   const normalizedBills = await Promise.all(
     billsList.map(async (bill) => {
@@ -1017,11 +1021,12 @@ async function closeJob(session, docNo) {
 
 async function getJobInit(session) {
   await ensurePendingBillSchema();
+  await ensureDeliveryWorkflowSchema(pool);
   const fixedToday = getFixedTodayDate();
   const fixedMonth = fixedToday.slice(0, 7);
   const result = await queryOne("SELECT max(doc_no) as doc_no FROM public.odg_tms WHERE to_char(doc_date,'YYYY-MM')=$1", [fixedMonth]);
   const doc_no = nextJobDocNoFromMax(result?.doc_no, fixedMonth);
-  const drafts = await query(`SELECT bill_date, to_char(bill_date,'DD-MM-YYYY') as bill_date_display, bill_no, cust_code, telephone, count_item FROM odg_tms_listbill_draft WHERE user_create=$1 AND ${getFixedYearSqlFilter("bill_date")}`, [session.usercode]);
+  const drafts = await query(`SELECT bill_date, to_char(bill_date,'DD-MM-YYYY') as bill_date_display, bill_no, cust_code, telephone, count_item, COALESCE(parent_bill_no, '') as parent_bill_no FROM odg_tms_listbill_draft WHERE user_create=$1 AND ${getFixedYearSqlFilter("bill_date")}`, [session.usercode]);
   const scope = getBranchScope(session);
   const bills = await query(`SELECT a.doc_no, t.doc_date, to_char(t.doc_date,'DD-MM-YYYY') as doc_date_display, a.cust_code, b.telephone, (SELECT count(item_code) FROM ic_trans_detail WHERE doc_no=a.doc_no) as count_item FROM ic_trans_shipment a LEFT JOIN ic_trans t ON t.doc_no=a.doc_no LEFT JOIN ar_customer b ON b.code=a.cust_code INNER JOIN public.odg_tms_pending_bill pb ON pb.bill_no = a.doc_no AND pb.scheduled_date IS NOT NULL AND COALESCE(NULLIF(TRIM(pb.delivery_round_code), ''), NULL) IS NOT NULL WHERE a.trans_flag=44 AND a.check_status=0 AND a.doc_no NOT IN (SELECT bill_no FROM odg_tms_listbill_draft) ${branchFilterShipment(scope, "a")} AND ${getFixedYearSqlFilter("a.doc_date")}`);
   return { doc_no, drafts, bills };
@@ -1196,24 +1201,32 @@ async function getJobBillsWithProducts(docNo) {
 
 async function addBillToDraft(session, data) {
   await ensurePendingBillSchema();
+  // ensureDeliveryWorkflowSchema owns the parent_bill_no column on
+  // odg_tms_listbill_draft. Call it so a fresh DB has the column before the
+  // INSERT below references it. Idempotent + process-cached.
+  await ensureDeliveryWorkflowSchema(pool);
   const fixedDocDate = coerceDateToFixedYear(data.ref_doc_date);
+  const parentBillNo = data.parent_bill_no && String(data.parent_bill_no).trim()
+    ? String(data.parent_bill_no).trim()
+    : null;
   await queryOne(
-    "INSERT INTO odg_tms_listbill_draft(bill_date, bill_no, cust_code, user_create, count_item, telephone) VALUES($1,$2,$3,$4,$5,$6)",
-    [fixedDocDate, data.ref_doc_no, data.ref_cust_code, session.usercode, data.count_item, data.telephone]
+    "INSERT INTO odg_tms_listbill_draft(bill_date, bill_no, cust_code, user_create, count_item, telephone, parent_bill_no) VALUES($1,$2,$3,$4,$5,$6,$7)",
+    [fixedDocDate, data.ref_doc_no, data.ref_cust_code, session.usercode, data.count_item, data.telephone, parentBillNo]
   );
   await queryOne(`UPDATE ic_trans_shipment SET check_status=1 WHERE doc_no=$1 AND ${getFixedYearSqlFilter("doc_date")}`, [data.ref_doc_no]);
   const scope = getBranchScope(session);
-  const drafts = await query(`SELECT bill_date, to_char(bill_date,'DD-MM-YYYY') as bill_date_display, bill_no, cust_code, telephone, count_item FROM odg_tms_listbill_draft WHERE user_create=$1 AND ${getFixedYearSqlFilter("bill_date")}`, [session.usercode]);
+  const drafts = await query(`SELECT bill_date, to_char(bill_date,'DD-MM-YYYY') as bill_date_display, bill_no, cust_code, telephone, count_item, COALESCE(parent_bill_no, '') as parent_bill_no FROM odg_tms_listbill_draft WHERE user_create=$1 AND ${getFixedYearSqlFilter("bill_date")}`, [session.usercode]);
   const bills = await query(`SELECT a.doc_no, t.doc_date, to_char(t.doc_date,'DD-MM-YYYY') as doc_date_display, a.cust_code, b.telephone, (SELECT count(item_code) FROM ic_trans_detail WHERE doc_no=a.doc_no) as count_item FROM ic_trans_shipment a LEFT JOIN ic_trans t ON t.doc_no=a.doc_no LEFT JOIN ar_customer b ON b.code=a.cust_code INNER JOIN public.odg_tms_pending_bill pb ON pb.bill_no = a.doc_no AND pb.scheduled_date IS NOT NULL AND COALESCE(NULLIF(TRIM(pb.delivery_round_code), ''), NULL) IS NOT NULL WHERE a.trans_flag=44 AND a.check_status=0 AND a.doc_no NOT IN (SELECT bill_no FROM odg_tms_listbill_draft) ${branchFilterShipment(scope, "a")} AND ${getFixedYearSqlFilter("a.doc_date")}`);
   return { drafts, bills };
 }
 
 async function removeBillFromDraft(session, billNo) {
   await ensurePendingBillSchema();
+  await ensureDeliveryWorkflowSchema(pool);
   await queryOne(`DELETE FROM odg_tms_listbill_draft WHERE bill_no=$1 AND ${getFixedYearSqlFilter("bill_date")}`, [billNo]);
   await queryOne(`UPDATE ic_trans_shipment SET check_status=0 WHERE doc_no=$1 AND ${getFixedYearSqlFilter("doc_date")}`, [billNo]);
   const scope = getBranchScope(session);
-  const drafts = await query(`SELECT bill_date, to_char(bill_date,'DD-MM-YYYY') as bill_date_display, bill_no, cust_code, telephone, count_item FROM odg_tms_listbill_draft WHERE user_create=$1 AND ${getFixedYearSqlFilter("bill_date")}`, [session.usercode]);
+  const drafts = await query(`SELECT bill_date, to_char(bill_date,'DD-MM-YYYY') as bill_date_display, bill_no, cust_code, telephone, count_item, COALESCE(parent_bill_no, '') as parent_bill_no FROM odg_tms_listbill_draft WHERE user_create=$1 AND ${getFixedYearSqlFilter("bill_date")}`, [session.usercode]);
   const bills = await query(`SELECT a.doc_no, t.doc_date, to_char(t.doc_date,'DD-MM-YYYY') as doc_date_display, a.cust_code, b.telephone, (SELECT count(item_code) FROM ic_trans_detail WHERE doc_no=a.doc_no) as count_item FROM ic_trans_shipment a LEFT JOIN ic_trans t ON t.doc_no=a.doc_no LEFT JOIN ar_customer b ON b.code=a.cust_code INNER JOIN public.odg_tms_pending_bill pb ON pb.bill_no = a.doc_no AND pb.scheduled_date IS NOT NULL AND COALESCE(NULLIF(TRIM(pb.delivery_round_code), ''), NULL) IS NOT NULL WHERE a.trans_flag=44 AND a.check_status=0 AND a.doc_no NOT IN (SELECT bill_no FROM odg_tms_listbill_draft) ${branchFilterShipment(scope, "a")} AND ${getFixedYearSqlFilter("a.doc_date")}`);
   return { drafts, bills };
 }
