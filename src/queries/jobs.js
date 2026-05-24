@@ -228,10 +228,13 @@ async function createJob(session, data) {
       const pickupCode = bill.pickup_transport_code && String(bill.pickup_transport_code).trim()
         ? String(bill.pickup_transport_code).trim()
         : null;
+      const parentBillNo = bill.parent_bill_no && String(bill.parent_bill_no).trim()
+        ? String(bill.parent_bill_no).trim()
+        : null;
       await client.query(
-        `INSERT INTO public.odg_tms_detail(doc_no, doc_date, car, bill_no, bill_date, cust_code, create_date_time_now, date_logistic, count_item, telephone, forward_transport_code, pickup_transport_code)
-         VALUES ($1,$2,$3,$4,$5,$6,LOCALTIMESTAMP(0),$7,$8,$9,$10,$11)`,
-        [docNo, fixedDocDate, data.car, bill.bill_no, coerceDateToFixedYear(bill.bill_date), bill.cust_code, fixedDateLog, bill.count_item, bill.telephone, forwardCode, pickupCode]
+        `INSERT INTO public.odg_tms_detail(doc_no, doc_date, car, bill_no, bill_date, cust_code, create_date_time_now, date_logistic, count_item, telephone, forward_transport_code, pickup_transport_code, parent_bill_no)
+         VALUES ($1,$2,$3,$4,$5,$6,LOCALTIMESTAMP(0),$7,$8,$9,$10,$11,$12)`,
+        [docNo, fixedDocDate, data.car, bill.bill_no, coerceDateToFixedYear(bill.bill_date), bill.cust_code, fixedDateLog, bill.count_item, bill.telephone, forwardCode, pickupCode, parentBillNo]
       );
       if (bill.items && bill.items.length > 0) {
         for (const item of bill.items) {
@@ -892,12 +895,16 @@ async function updateJob(session, docNo, data) {
         bill.pickup_transport_code && String(bill.pickup_transport_code).trim()
           ? String(bill.pickup_transport_code).trim()
           : null;
+      const parentBillNo =
+        bill.parent_bill_no && String(bill.parent_bill_no).trim()
+          ? String(bill.parent_bill_no).trim()
+          : null;
       await client.query(
         `INSERT INTO public.odg_tms_detail
          (doc_no, doc_date, car, bill_no, bill_date, cust_code,
           create_date_time_now, date_logistic, count_item, telephone,
-          forward_transport_code, pickup_transport_code)
-         VALUES ($1,$2,$3,$4,$5,$6,LOCALTIMESTAMP(0),$7,$8,$9,$10,$11)`,
+          forward_transport_code, pickup_transport_code, parent_bill_no)
+         VALUES ($1,$2,$3,$4,$5,$6,LOCALTIMESTAMP(0),$7,$8,$9,$10,$11,$12)`,
         [
           docNo,
           fixedDocDate,
@@ -910,6 +917,7 @@ async function updateJob(session, docNo, data) {
           bill.telephone,
           forwardCode,
           pickupCode,
+          parentBillNo,
         ]
       );
       for (const item of bill.items) {

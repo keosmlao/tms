@@ -1172,6 +1172,10 @@ async function mobileJobAction(body) {
 }
 
 async function mobileBills({ docNo, billNo, type, driverId }) {
+  // The bill SELECT below references parent_bill_no (added via auto-DDL).
+  // Run the schema check first so a fresh DB doesn't blow up on missing column.
+  // Cached after first call so this is effectively a no-op afterwards.
+  await ensureDeliveryWorkflowSchema(pool);
   const cleanDriver = asText(driverId);
   if (!cleanDriver) {
     const err = new Error("Unauthorized");
@@ -1266,6 +1270,10 @@ async function mobileBills({ docNo, billNo, type, driverId }) {
         -- Delivery type: forward_transport_code NULL = ສົ່ງລູກຄ້າ; ມີຄ່າ = ສົ່ງສາຂາ
         COALESCE(NULLIF(TRIM(a.forward_transport_code), ''), '') as forward_transport_code,
         COALESCE(NULLIF(TRIM(fwd.name_1), ''), '') as forward_transport_name,
+        -- Parent sale bill: when one customer order was split across multiple
+        -- warehouses, each sub-bill carries the same parent_bill_no so the
+        -- driver app can group them together. Empty string = standalone bill.
+        COALESCE(NULLIF(TRIM(a.parent_bill_no), ''), '') as parent_bill_no,
         -- Image bytes are excluded from the list response — they were causing
         -- huge JSON payloads (each image is 3-5MB base64) which timed out the
         -- mobile request when a bill had photos. The app uses the boolean

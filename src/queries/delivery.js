@@ -78,6 +78,22 @@ async function ensureDeliveryWorkflowSchemaInternal(db) {
     ADD COLUMN IF NOT EXISTS pickup_transport_code character varying
   `);
 
+  // Parent sale bill key — when one customer order is split across multiple
+  // warehouses (or branches), each sub-bill gets its own bill_no but shares
+  // the parent_bill_no so the driver app can group them in the UI and (later)
+  // offer a single signature/photo at the customer for all sub-bills.
+  // NULL = standalone bill (no parent), preserves backward compat for upstream
+  // systems that don't populate this field.
+  await safeDdl(db, `
+    ALTER TABLE public.odg_tms_detail
+    ADD COLUMN IF NOT EXISTS parent_bill_no character varying
+  `);
+  await safeDdl(db, `
+    CREATE INDEX IF NOT EXISTS idx_odg_tms_detail_parent_bill_no
+    ON public.odg_tms_detail (parent_bill_no)
+    WHERE parent_bill_no IS NOT NULL
+  `);
+
   // checkin_at — moment the driver tapped "Check in" at the destination.
   // sent_start used to double as both "dispatch start" and "checkin time",
   // which conflated two different events. We keep sent_start as a backward-
@@ -168,26 +184,26 @@ async function ensureDeliveryWorkflowSchema(client) {
   // this short-circuit each mobile API request was re-running ~10 DDL
   // statements, which can stall under concurrent load while ALTER TABLE waits
   // for an ACCESS EXCLUSIVE lock.
-  if (deliveryCache.__tmsDeliverySchemaReady_v3) return;
+  if (deliveryCache.__tmsDeliverySchemaReady_v4) return;
 
   const isSharedPool = !client || client === pool;
   if (!isSharedPool) {
     await ensureDeliveryWorkflowSchemaInternal(client);
-    deliveryCache.__tmsDeliverySchemaReady_v3 = true;
+    deliveryCache.__tmsDeliverySchemaReady_v4 = true;
     return;
   }
 
-  if (!deliveryCache.__tmsDeliverySchemaPromise_v3) {
-    deliveryCache.__tmsDeliverySchemaPromise_v3 = ensureDeliveryWorkflowSchemaInternal(pool)
+  if (!deliveryCache.__tmsDeliverySchemaPromise_v4) {
+    deliveryCache.__tmsDeliverySchemaPromise_v4 = ensureDeliveryWorkflowSchemaInternal(pool)
       .then(() => {
-        deliveryCache.__tmsDeliverySchemaReady_v3 = true;
+        deliveryCache.__tmsDeliverySchemaReady_v4 = true;
       })
       .catch((err) => {
-        deliveryCache.__tmsDeliverySchemaPromise_v3 = null;
+        deliveryCache.__tmsDeliverySchemaPromise_v4 = null;
         throw err;
       });
   }
-  await deliveryCache.__tmsDeliverySchemaPromise_v3;
+  await deliveryCache.__tmsDeliverySchemaPromise_v4;
 }
 
 async function ensureJobDeliveryItems(docNo, client) {
