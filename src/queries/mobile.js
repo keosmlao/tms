@@ -340,7 +340,10 @@ async function mobileJobAction(body) {
           await client.query("COMMIT");
           return { success: true, already_started: true };
         }
-        if (currentJobStatus !== 1) throw new Error("ກະລຸນາຮັບຖ້ຽວກ່ອນ");
+        if (currentJobStatus > 2) throw new Error("ຖ້ຽວນີ້ປິດແລ້ວ ບໍ່ສາມາດເລີ່ມຈັດສົ່ງ");
+        // Auto-receive when the driver skipped tapping "ຮັບຖ້ຽວ" — starting
+        // dispatch implies the trip is in hand, so don't block on a missing
+        // intermediate step.
 
         await client.query(
           `UPDATE odg_tms
@@ -398,7 +401,10 @@ async function mobileJobAction(body) {
         const currentDocNo = currentBill?.doc_no;
         if (!currentDocNo) throw new Error("Bill was not found");
         if (Number(currentBill.approve_status ?? 0) !== 1) throw new Error("ຖ້ຽວນີ້ຍັງບໍ່ຖືກອະນຸມັດ");
-        if (Number(currentBill.job_status ?? 0) < 1) throw new Error("ກະລຸນາຮັບຖ້ຽວກ່ອນ");
+        if (Number(currentBill.job_status ?? 0) >= 3) throw new Error("ຖ້ຽວນີ້ປິດແລ້ວ ບໍ່ສາມາດ checkin");
+        // Auto-receive + auto-dispatch: the UPDATE below sets job_status=2
+        // regardless of current value, so a driver who jumped straight to
+        // check-in (skipped "ຮັບຖ້ຽວ" / "ເລີ່ມຈັດສົ່ງ") still progresses cleanly.
         // Pickup-at-customer flow collapses pickup + delivery into one stop:
         // the driver arrives at the customer, hands over the freshly received
         // goods, and that single checkin counts as both. Skip the recipt_job
@@ -463,6 +469,26 @@ async function mobileJobAction(body) {
            WHERE doc_no = $1 AND ${getFixedYearSqlFilter("doc_date")}`,
           [currentDocNo]
         );
+
+        // When dispatch is auto-started here (driver skipped start_dispatch),
+        // cascade sent_start for sibling bills picked up at the trip's origin
+        // warehouse — same rule as start_dispatch. Without this, those bills
+        // would have sent_start IS NULL until they themselves get completed.
+        if (dispatchAutoStarted) {
+          await client.query(
+            `UPDATE public.odg_tms_detail d
+             SET sent_start = COALESCE(d.sent_start, j.dispatch_started_at)
+             FROM odg_tms j
+             WHERE d.doc_no = $1
+               AND j.doc_no = d.doc_no
+               AND d.sent_start IS NULL
+               AND COALESCE(d.pickup_transport_code,
+                            (SELECT s.transport_code FROM public.ic_trans_shipment s WHERE s.doc_no = d.bill_no LIMIT 1),
+                            '') = COALESCE(j.origin_transport_code, '')
+               AND ${getFixedYearSqlFilter("d.doc_date")}`,
+            [currentDocNo]
+          );
+        }
 
         // Backfill the customer's location if it's missing. Only updates when
         // the existing latitude/longitude is NULL/empty/zero so we don't
@@ -605,8 +631,13 @@ async function mobileJobAction(body) {
           };
         }
         if (Number(currentBill.approve_status ?? 0) !== 1) throw new Error("ຖ້ຽວນີ້ຍັງບໍ່ຖືກອະນຸມັດ");
-        if (Number(currentBill.job_status ?? 0) !== 2) throw new Error("ກະລຸນາເລີ່ມຈັດສົ່ງກ່ອນ");
+        if (Number(currentBill.job_status ?? 0) >= 3) throw new Error("ຖ້ຽວນີ້ປິດແລ້ວ ບໍ່ສາມາດສຳເລັດ");
         if (!currentBill.recipt_job) throw new Error("ກະລຸນາເບີກເຄື່ອງກ່ອນ");
+        // Auto-progress through receive + dispatch when the driver skipped
+        // those steps. The two UPDATE odg_tms statements below already bump
+        // job_status to 2; we also backfill dispatch_started_at so the
+        // timeline + LINE notification reflect a real start time.
+        const dispatchAutoStarted = Number(currentBill.job_status ?? 0) < 2;
 
         const forwardToBranch = currentBill.forward_transport_code
           ? String(currentBill.forward_transport_code).trim()
@@ -638,14 +669,34 @@ async function mobileJobAction(body) {
 
           await client.query(
             `UPDATE odg_tms
-             SET job_status = CASE WHEN COALESCE(job_status, 0) < 2 THEN 2 ELSE job_status END
+             SET job_status = CASE WHEN COALESCE(job_status, 0) < 2 THEN 2 ELSE job_status END,
+                 dispatch_started_at = COALESCE(dispatch_started_at, LOCALTIMESTAMP(0))
              WHERE doc_no = $1 AND ${getFixedYearSqlFilter("doc_date")}`,
             [currentDocNo]
           );
 
+          // Cascade sent_start for sibling bills picked up at the trip's
+          // origin warehouse when dispatch was auto-started here.
+          if (dispatchAutoStarted) {
+            await client.query(
+              `UPDATE public.odg_tms_detail d
+               SET sent_start = COALESCE(d.sent_start, j.dispatch_started_at)
+               FROM odg_tms j
+               WHERE d.doc_no = $1
+                 AND j.doc_no = d.doc_no
+                 AND d.sent_start IS NULL
+                 AND COALESCE(d.pickup_transport_code,
+                              (SELECT s.transport_code FROM public.ic_trans_shipment s WHERE s.doc_no = d.bill_no LIMIT 1),
+                              '') = COALESCE(j.origin_transport_code, '')
+                 AND ${getFixedYearSqlFilter("d.doc_date")}`,
+              [currentDocNo]
+            );
+          }
+
           const openBillCount = await getOpenBillCount(currentDocNo, client);
 
           await client.query("COMMIT");
+          if (dispatchAutoStarted) void notifyJobDispatchStarted(currentDocNo);
           return {
             success: true,
             doc_no: currentDocNo,
@@ -734,10 +785,30 @@ async function mobileJobAction(body) {
 
         await client.query(
           `UPDATE odg_tms
-           SET job_status = CASE WHEN COALESCE(job_status, 0) < 2 THEN 2 ELSE job_status END
+           SET job_status = CASE WHEN COALESCE(job_status, 0) < 2 THEN 2 ELSE job_status END,
+               dispatch_started_at = COALESCE(dispatch_started_at, LOCALTIMESTAMP(0))
            WHERE doc_no = $1 AND ${getFixedYearSqlFilter("doc_date")}`,
           [currentDocNo]
         );
+
+        // Cascade sent_start for sibling bills picked up at the trip's origin
+        // warehouse when dispatch was auto-started here — same rule as
+        // start_dispatch / checkin_bill.
+        if (dispatchAutoStarted) {
+          await client.query(
+            `UPDATE public.odg_tms_detail d
+             SET sent_start = COALESCE(d.sent_start, j.dispatch_started_at)
+             FROM odg_tms j
+             WHERE d.doc_no = $1
+               AND j.doc_no = d.doc_no
+               AND d.sent_start IS NULL
+               AND COALESCE(d.pickup_transport_code,
+                            (SELECT s.transport_code FROM public.ic_trans_shipment s WHERE s.doc_no = d.bill_no LIMIT 1),
+                            '') = COALESCE(j.origin_transport_code, '')
+               AND ${getFixedYearSqlFilter("d.doc_date")}`,
+            [currentDocNo]
+          );
+        }
 
         const summary = await getBillDeliveryItemSummary(billNo, client);
         const remainingItems = Number(summary?.remaining_item_count ?? 0);
@@ -745,6 +816,7 @@ async function mobileJobAction(body) {
         const openBillCount = await getOpenBillCount(currentDocNo, client);
 
         await client.query("COMMIT");
+        if (dispatchAutoStarted) void notifyJobDispatchStarted(currentDocNo);
         void notifyBillStatus(billNo, "✅ ຈັດສົ່ງສຳເລັດ");
         return {
           success: true,

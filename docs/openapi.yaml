@@ -67,6 +67,17 @@ paths:
     post:
       tags: [jobs]
       summary: Perform a job action (state transition, image attach, fuel refill, etc.).
+      description: |
+        Workflow actions (`receive`, `pickup_bill`, `start_dispatch`, `checkin_bill`,
+        `complete_bill`, `complete_job`) auto-progress `job_status` so the driver
+        doesn't have to call them in strict order. Tapping `complete_bill` on a
+        fresh trip (job_status=0) will silently set job_status=2 and backfill
+        `dispatch_started_at`. The only hard preconditions are:
+
+          - `approve_status = 1` (trip approved by dispatcher)
+          - `recipt_job IS NOT NULL` for checkin/complete on warehouse-pickup
+            bills — driver must have picked up the goods first
+          - `job_status < 3` — once the trip is closed, no edits are accepted
       requestBody:
         required: true
         content:
