@@ -576,6 +576,7 @@ async function getBillsPending(session, fromDate, toDate, transportCode) {
         COALESCE(NULLIF(TRIM(acd.longitude::text), ''), '') as cust_lng,
         to_char(b.send_date,'YYYY-MM-DD') as send_date,
         to_char(b.send_date,'DD-MM-YYYY') as send_date_display,
+        COALESCE(b.doc_format_code, '') as source_format,
         c.name_1 as sale, COALESCE(dep.name_1::text, c.department::text, '') as department,
         d.name_1 as transport, to_char(a.create_date_time_now,'DD-MM-YYYY HH24:MI') as time_open,
         now() - a.create_date_time_now as time_use
@@ -653,6 +654,13 @@ async function getBillsPending(session, fromDate, toDate, transportCode) {
       const sched = scheduleMap.get(bill.doc_no) ?? null;
       const todo = todoMap.get(bill.doc_no) ?? null;
       const cancelled = cancelledMap.get(bill.doc_no) ?? null;
+      // CAKAP = POS receipt from web_sale_order's cashier/settle. The customer
+      // has already paid, so the "ຕ້ອງໂທຫາລູກຄ້າ" gate doesn't apply — auto-
+      // promote to contacted_ready and treat send_date as the planned delivery
+      // day so dispatchers don't see freshly-paid bills sitting in the call
+      // queue. The auto-defaults only apply when admin hasn't manually touched
+      // the bill (no odg_tms_pending_bill row) — any explicit override wins.
+      const isPosSettled = (bill.source_format ?? "").trim() === "CAKAP";
       // Default delivery date is the bill's send_date from ic_trans; admins can
       // override it via odg_tms_pending_bill when reschedule is needed.
       const effectiveDate = sched?.scheduled_date ?? bill.send_date ?? null;
@@ -673,7 +681,17 @@ async function getBillsPending(session, fromDate, toDate, transportCode) {
         "contacted_ready",
       ];
       const rawStatus = sched?.action_status ?? "";
-      const actionStatus = allowedStatuses.includes(rawStatus) ? rawStatus : "";
+      const normalisedStatus = allowedStatuses.includes(rawStatus) ? rawStatus : "";
+      // POS bills with no admin override default to "ready" — payment is proof
+      // the customer is committed. Dispatchers can still flip the status later
+      // (e.g. ລູກຄ້າເລື່ອນວັນຮັບ) and that override is preserved.
+      const actionStatus =
+        normalisedStatus || (isPosSettled && !sched ? "contacted_ready" : "");
+      // scheduled_date_overridden controls whether the bill counts as "admin
+      // has acted on this" (used by isDispatchReady on the UI). For POS bills
+      // we treat the auto-default as an override so they don't get stuck in
+      // missing_date — admin only has to pick route+round.
+      const scheduledOverridden = Boolean(sched?.scheduled_date) || (isPosSettled && !sched);
       return {
         ...bill,
         remaining_count: summary.remaining_count,
@@ -682,7 +700,7 @@ async function getBillsPending(session, fromDate, toDate, transportCode) {
           detailItemBills.has(bill.doc_no) && summary.remaining_count > 0,
         scheduled_date: effectiveDate,
         scheduled_date_display: effectiveDisplay,
-        scheduled_date_overridden: Boolean(sched?.scheduled_date),
+        scheduled_date_overridden: scheduledOverridden,
         schedule_remark: sched?.remark ?? "",
         action_status: actionStatus,
         delivery_route_code: sched?.delivery_route_code ?? "",
@@ -699,6 +717,7 @@ async function getBillsPending(session, fromDate, toDate, transportCode) {
         todo_earliest_deadline_display: todo?.earliest_deadline_display ?? null,
         planned_lat: sched?.planned_lat ?? "",
         planned_lng: sched?.planned_lng ?? "",
+        is_pos_settled: isPosSettled,
       };
     })
     // Service bills (tb_product) can be re-delivered for repeat servicing,

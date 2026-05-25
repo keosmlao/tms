@@ -241,9 +241,115 @@ async function remindUnstartedDispatches({ minMinutesSincePickup = 5 } = {}) {
   return { scanned: rows.length, pushed };
 }
 
+// Send to sales-app employees (app_sale_order Flutter app). Tokens live in
+// the shared `app_fcm_token` table owned by web_sale_order, keyed by
+// employee_code. Reuses firebase-admin already initialised above — both apps
+// share the same Firebase project, so the same service account can push to
+// either token store.
+async function pushToEmployees(employeeCodes, title, body, data = {}) {
+  const codes = Array.from(
+    new Set(
+      (Array.isArray(employeeCodes) ? employeeCodes : [])
+        .map((c) => (c == null ? "" : String(c).trim()))
+        .filter(Boolean)
+    )
+  );
+  if (codes.length === 0) return;
+  if (!initFirebaseIfNeeded()) return;
+
+  let tokenRows;
+  try {
+    tokenRows = await query(
+      `SELECT id, token, employee_code
+       FROM public.app_fcm_token
+       WHERE employee_code = ANY($1::varchar[])`,
+      [codes]
+    );
+  } catch (err) {
+    console.warn("[push] pushToEmployees lookup failed:", err?.message ?? err);
+    return;
+  }
+  if (tokenRows.length === 0) return;
+
+  const tokens = tokenRows.map((r) => r.token);
+  const tag = data.doc_no ? `sales_${data.doc_no}_${data.type ?? "default"}` : undefined;
+  const message = {
+    notification: { title, body },
+    data: Object.fromEntries(
+      Object.entries(data)
+        .filter(([, v]) => v != null)
+        .map(([k, v]) => [k, String(v)])
+    ),
+    android: {
+      priority: "high",
+      notification: {
+        channelId: "default",
+        defaultSound: true,
+        defaultVibrateTimings: true,
+        tag,
+      },
+    },
+    apns: {
+      payload: {
+        aps: {
+          alert: { title, body },
+          sound: "default",
+          "thread-id": data.doc_no ? `sales_${data.doc_no}` : undefined,
+        },
+      },
+    },
+    tokens,
+  };
+
+  try {
+    const res = await admin.messaging().sendEachForMulticast(message);
+    const staleIds = [];
+    res.responses.forEach((r, i) => {
+      if (r.success) return;
+      const code = r.error?.code ?? "";
+      if (
+        code.includes("registration-token-not-registered") ||
+        code.includes("invalid-registration-token") ||
+        code.includes("invalid-argument")
+      ) {
+        staleIds.push(tokenRows[i].id);
+      }
+    });
+    if (staleIds.length > 0) {
+      await query(
+        `DELETE FROM public.app_fcm_token WHERE id = ANY($1::bigint[])`,
+        [staleIds]
+      );
+    }
+    try {
+      const { recordAudit } = require("./audit-log");
+      await recordAudit({
+        action: "push.sent",
+        entityType: "sales_employee",
+        entityId: codes.join(","),
+        userCode: "system",
+        changes: {
+          title,
+          body,
+          data,
+          token_count: tokens.length,
+          sent: res.successCount,
+          failed: res.failureCount,
+        },
+      });
+    } catch (_) {
+      // audit log unavailable must not break push
+    }
+    return { sent: res.successCount, failed: res.failureCount };
+  } catch (err) {
+    console.error("[push] pushToEmployees send failed:", err);
+  }
+}
+
 module.exports = {
   saveToken,
   deleteToken,
   pushToDriver,
+  pushToEmployees,
   remindUnstartedDispatches,
 };

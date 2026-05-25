@@ -317,6 +317,87 @@ async function notifyJobCreated(docNo) {
   }
 }
 
+// FCM push to the app_sale_order Flutter app for every salesperson, head and
+// manager linked to bills on this job. Salesperson = ic_trans.sale_code on
+// each bill; head/manager = anyone in the same department flagged as 'head'
+// or 'manager' (via odg_employee.app_role, with position_code 11/12 as the
+// legacy fallback when app_role is NULL).
+//
+// Fire-and-forget — caller (createJob) should `void` it. Errors are logged
+// but never thrown so a push failure can't roll back a job that's already
+// committed.
+async function notifyJobCreatedToSales(docNo) {
+  if (!docNo) return;
+  try {
+    const job = await queryOne(
+      `SELECT to_char(date_logistic,'DD-MM-YYYY') AS date_logistic,
+              (SELECT COUNT(*) FROM public.odg_tms_detail WHERE doc_no = $1) AS bill_count
+       FROM public.odg_tms WHERE doc_no = $1`,
+      [docNo]
+    );
+    if (!job) return;
+
+    // Resolve recipients in a single round-trip: salespersons of every bill
+    // on the job, then heads + managers sharing each salesperson's department.
+    const recipientRows = await query(
+      `WITH sales AS (
+         SELECT DISTINCT NULLIF(TRIM(ic.sale_code), '') AS sale_code
+         FROM public.odg_tms_detail d
+         INNER JOIN public.ic_trans ic ON ic.doc_no = d.bill_no
+         WHERE d.doc_no = $1
+       ),
+       sales_emps AS (
+         SELECT e.employee_code, e.department_code
+         FROM public.odg_employee e
+         INNER JOIN sales s ON s.sale_code = e.employee_code
+         WHERE e.employee_code IS NOT NULL
+           AND COALESCE(e.employment_status, 'ACTIVE') = 'ACTIVE'
+       )
+       SELECT employee_code, role FROM (
+         SELECT employee_code, 'salesperson' AS role FROM sales_emps
+         UNION
+         SELECT e.employee_code,
+                CASE
+                  WHEN COALESCE(NULLIF(TRIM(e.app_role), ''), '') = 'manager' THEN 'manager'
+                  WHEN COALESCE(NULLIF(TRIM(e.app_role), ''), '') = 'head' THEN 'head'
+                  WHEN e.app_role IS NULL AND e.position_code = '11' THEN 'manager'
+                  WHEN e.app_role IS NULL AND e.position_code = '12' THEN 'head'
+                  ELSE NULL
+                END AS role
+         FROM public.odg_employee e
+         INNER JOIN sales_emps se ON se.department_code = e.department_code
+         WHERE e.employee_code IS NOT NULL
+           AND COALESCE(e.employment_status, 'ACTIVE') = 'ACTIVE'
+           AND (
+             COALESCE(NULLIF(TRIM(e.app_role), ''), '') IN ('manager', 'head')
+             OR (e.app_role IS NULL AND e.position_code IN ('11', '12'))
+           )
+       ) t
+       WHERE role IS NOT NULL`,
+      [docNo]
+    );
+
+    const codes = Array.from(
+      new Set(recipientRows.map((r) => r.employee_code).filter(Boolean))
+    );
+    if (codes.length === 0) return;
+
+    const { pushToEmployees } = require("./push");
+    const body = job.date_logistic
+      ? `ຖ້ຽວ ${docNo} · ${job.bill_count} ບິນ · ສົ່ງ ${job.date_logistic}`
+      : `ຖ້ຽວ ${docNo} · ${job.bill_count} ບິນ`;
+    await pushToEmployees(codes, "📦 ບິນຖືກຈັດເຂົ້າຖ້ຽວແລ້ວ", body, {
+      type: "job_created",
+      doc_no: docNo,
+    });
+  } catch (err) {
+    console.warn(
+      "[notify] notifyJobCreatedToSales failed:",
+      err?.message ?? err
+    );
+  }
+}
+
 // Fan-out a status update to both the sales OA and the customer LINE in one
 // call so mobile.js doesn't have to remember both.
 async function notifyBillStatus(billNo, statusLabel, options = {}) {
@@ -491,6 +572,7 @@ async function markAllActivityNotificationsRead(session, limit = 80) {
 
 module.exports = {
   notifyJobCreated,
+  notifyJobCreatedToSales,
   notifyBillStatus,
   notifyCustomerLine,
   notifySalesLine,

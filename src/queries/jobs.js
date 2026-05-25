@@ -17,7 +17,7 @@ const {
   getRemainingSummaryMap,
 } = require("./helpers");
 const { pushToDriver } = require("./push");
-const { notifyJobCreated } = require("./notifications");
+const { notifyJobCreated, notifyJobCreatedToSales } = require("./notifications");
 const { ensurePendingBillSchema } = require("./pending-bill");
 
 function nextJobDocNoFromMax(maxDocNo, fixedMonth) {
@@ -313,6 +313,10 @@ async function createJob(session, data) {
 
   // Fire-and-forget: WhatsApp customers + LINE sales for every bill on the job.
   void notifyJobCreated(docNo);
+  // Fire-and-forget: FCM push to the bill's salesperson + their head + manager
+  // (app_sale_order Flutter app). Failures are swallowed inside the helper so
+  // a push outage can't roll back a committed job.
+  void notifyJobCreatedToSales(docNo);
   return { doc_no: docNo };
 }
 

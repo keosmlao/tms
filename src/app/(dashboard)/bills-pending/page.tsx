@@ -88,6 +88,8 @@ export interface Bill {
   cust_name?: string | null;
   cust_lat?: string | null;
   cust_lng?: string | null;
+  source_format?: string;
+  is_pos_settled?: boolean;
 }
 
 interface DeliveryRound {
@@ -157,11 +159,29 @@ function formatRoutePath(route: DeliveryRoute) {
     .join(" → ");
 }
 
-const CONTACT_KEYS = ["sales_not_notified", "contact_failed", "customer_postponed", "customer_cancelled", "contacted_ready"] as const;
-type ContactKey = (typeof CONTACT_KEYS)[number];
+// Streamlined work queue. The contact-state / scheduling-state subdivisions
+// still live in action_status + delivery_round_code, but for queue filtering
+// the dispatcher only cares about three buckets:
+//   need_action — anything not dispatch-ready that's inside the contact window
+//                 (replaces old call/uncontacted/problem/cancelled_job tabs)
+//   ready       — fully scheduled, contacted, route + round assigned
+//   future      — send_date is more than N days away
+//   all         — escape hatch
+type QueueFilter = "need_action" | "ready" | "future" | "all";
 
-type QueueFilter = "call" | "uncontacted" | "ready" | "problem" | "future" | "cancelled_job" | "all";
-type WorkflowKey = "ready" | "missing_date" | "missing_route" | "missing_round" | "missing_contact" | "not_ready";
+// Three workflow states surfaced on the bill card. Anything missing data
+// (date / route / round / contact) collapses to "in_progress" — the editable
+// chips below the status pill show what's still missing.
+type WorkflowKey = "ready" | "in_progress" | "problem";
+
+// The dispatcher's mental model of the bill journey:
+//   1)    not_contacted   — first touch hasn't happened yet (or failed/postponed)
+//   2.1)  sales_pending   — contacted, but salesperson hasn't supplied delivery date
+//   2.2)  scheduled_wait  — date+route+round set, but the date is still in the future
+//   2.3)  ready           — date+route+round set, scheduled_date is today or earlier
+//   problem               — bill was cancelled (driver or customer); off the happy path
+// The "all" key is a UI escape hatch to show every bill regardless of step.
+type StepKey = "not_contacted" | "sales_pending" | "scheduled_wait" | "ready" | "problem";
 
 export interface Transport {
   code: string;
@@ -202,14 +222,13 @@ export default function BillsPendingClient() {
   const [updating, setUpdating] = useState(false);
   const [tick, setTick] = useState(0);
   const [sortOrder, setSortOrder] = useState<"asc" | "desc">("asc");
-  const [currentPage, setCurrentPage] = useState(1);
   const [expandedDoc, setExpandedDoc] = useState<string | null>(null);
   const [productsByDoc, setProductsByDoc] = useState<Record<string, Product[]>>({});
   const [loadingDoc, setLoadingDoc] = useState<string | null>(null);
   const [scheduleBill, setScheduleBill] = useState<{ billNo: string; defaults: PendingScheduleDefaults } | null>(null);
   const [locationBill, setLocationBill] = useState<{ billNo: string; defaults: PendingLocationDefaults } | null>(null);
   const [todoOpen, setTodoOpen] = useState<{ billNo: string; anchor: HTMLElement } | null>(null);
-  const [queueFilter, setQueueFilter] = useState<QueueFilter>("call");
+  const [queueFilter] = useState<QueueFilter>("all");
   const [statusMenu, setStatusMenu] = useState<{ billNo: string; anchor: HTMLElement } | null>(null);
   const [routeMenu, setRouteMenu] = useState<{ billNo: string; anchor: HTMLElement } | null>(null);
   const [roundMenu, setRoundMenu] = useState<{ billNo: string; anchor: HTMLElement } | null>(null);
@@ -233,7 +252,13 @@ export default function BillsPendingClient() {
   const [bulkRound, setBulkRound] = useState("");
   const [bulkDate, setBulkDate] = useState(getFixedTodayDate());
   const [bulkSaving, setBulkSaving] = useState(false);
-  const perPage = 20;
+  // Kanban view mode + drag state. The "happy" view shows the 4 workflow
+  // steps as columns; the "problem" view collapses to a single column for
+  // cancelled / rejected bills.
+  const [viewMode, setViewMode] = useState<"happy" | "problem">("happy");
+  const [dragBill, setDragBill] = useState<string | null>(null);
+  const [dragOverStep, setDragOverStep] = useState<StepKey | null>(null);
+  const [collapsedSteps, setCollapsedSteps] = useState<Set<StepKey>>(new Set());
   const today = getFixedTodayDate();
   const addDays = (date: string, days: number) => {
     const d = new Date(date + "T00:00:00");
@@ -297,17 +322,6 @@ export default function BillsPendingClient() {
 
   const deptList = [...new Set(bills.map((b) => b.department).filter(Boolean))].sort();
 
-  // Contact window: overdue, today, tomorrow, or missing date.
-  // This page is for calling customers one day before delivery and deciding
-  // whether each pending bill is ready, postponed, cancelled, or unreachable.
-  const isContactWindow = (b: Bill): boolean => {
-    // ບິນທີ່ເຄີຍຖືກຍົກເລີກຈາກຖ້ຽວ ອາດຍັງມີຄ້າງສົ່ງ ແຕ່ວັນພ້ອມຮັບຖືກຕັ້ງໄປໄກ — ຍັງຕ້ອງຢູ່ໃນຄິວໂທ/ຕິດຕາມ
-    if (b.cancelled_delivery) return true;
-    const d = b.scheduled_date;
-    if (!d) return true; // no date → treat as due (admin should set)
-    return d <= tomorrow;
-  };
-
   const isNotYetTime = (b: Bill): boolean => {
     const d = b.send_date;
     if (!d) return false;
@@ -349,108 +363,60 @@ export default function BillsPendingClient() {
     });
   };
 
+  // "problem" status reasons — bill is in a known bad state the dispatcher
+  // has to follow up on, distinct from "just missing data" (in_progress).
+  const PROBLEM_STATUSES: ReadonlySet<string> = new Set([
+    "contact_failed",
+    "customer_postponed",
+    "customer_cancelled",
+  ]);
+
   const workflowKey = (b: Bill): WorkflowKey => {
     if (isDispatchReady(b)) return "ready";
-    if (b.action_status !== "contacted_ready") {
-      return b.action_status ? "not_ready" : "missing_contact";
-    }
-    if (!b.scheduled_date_display) return "missing_date";
-    if (!b.delivery_route_code?.trim()) return "missing_route";
-    if (!b.delivery_round_code?.trim()) return "missing_round";
-    return "not_ready";
+    if (b.cancelled_delivery) return "problem";
+    if (b.action_status && PROBLEM_STATUSES.has(b.action_status)) return "problem";
+    return "in_progress";
   };
 
-  const workflowCopy: Record<WorkflowKey, { title: string; detail: string; tone: string }> = {
-    ready: {
-      title: "ພ້ອມຈັດຖ້ຽວ",
-      detail: "ລູກຄ້າພ້ອມຮັບໃນວັນທີ່ກຳນົດ ແລະເລືອກຮອບສົ່ງແລ້ວ",
-      tone: "emerald",
-    },
-    missing_date: {
-      title: "ພ້ອມຮັບແລ້ວ: ຕ້ອງກຳນົດວັນຮັບ",
-      detail: "ກຳນົດວັນຮັບຫຼັງຈາກສະຖານະເປັນ “ພ້ອມຮັບ” ແລ້ວ",
-      tone: "amber",
-    },
-    missing_route: {
-      title: "ພ້ອມຮັບແລ້ວ: ຕ້ອງເລືອກເສັ້ນທາງ",
-      detail: "ເລືອກເສັ້ນທາງກ່ອນ ເພື່ອໃຫ້ບິນນີ້ໄປສະແດງໃນຖ້ຽວຈັດສົ່ງ",
-      tone: "sky",
-    },
-    missing_round: {
-      title: "ພ້ອມຮັບແລ້ວ: ຕ້ອງເລືອກຮອບສົ່ງ",
-      detail: "ກຳນົດຮອບສົ່ງຫຼັງຈາກມີວັນຮັບ ແລະເສັ້ນທາງແລ້ວ",
-      tone: "sky",
-    },
-    missing_contact: {
-      title: "ຕ້ອງບັນທຶກຜົນຕິດຕໍ່",
-      detail: "ບັນທຶກວ່າລູກຄ້າພ້ອມຮັບ, ເລື່ອນ, ປະຕິເສດ ຫຼືຕິດຕໍ່ບໍ່ໄດ້",
-      tone: "slate",
-    },
-    not_ready: {
-      title: "ບໍ່ໄດ້ກຳນົດວັນ/ຮອບ",
-      detail: "ກຳນົດວັນຮັບ ແລະຮອບສົ່ງໄດ້ສະເພາະບິນທີ່ສະຖານະເປັນ “ພ້ອມຮັບ”",
-      tone: "rose",
-    },
+  const workflowCopy: Record<WorkflowKey, { title: string; tone: string }> = {
+    ready: { title: "ພ້ອມຈັດຖ້ຽວ", tone: "emerald" },
+    in_progress: { title: "ກຳລັງດຳເນີນການ", tone: "amber" },
+    problem: { title: "ຕ້ອງຕິດຕາມ", tone: "rose" },
   };
 
-  // Counts for the contact workflow hierarchy.
-  const dueCounts = bills.reduce(
-    (acc, b) => {
-      if (isContactWindow(b)) acc.due += 1;
-      if (isNotYetTime(b)) acc.future += 1;
-      return acc;
-    },
-    { due: 0, future: 0 } as Record<"due" | "future", number>
-  );
+  // Progress checklist shown under in-progress bills so dispatchers can see
+  // at a glance what's still missing (contact / date / route / round).
+  type ChecklistKey = "contact" | "date" | "route" | "round";
+  const workflowChecklist = (b: Bill): Record<ChecklistKey, boolean> => ({
+    contact: b.action_status === "contacted_ready",
+    date: Boolean(b.scheduled_date_overridden),
+    route: Boolean(b.delivery_route_code?.trim()),
+    round: Boolean(b.delivery_round_code?.trim()),
+  });
 
-  // Within the contact window — split by contact-state bucket.
-  const dueBills = bills.filter(isContactWindow);
-  const contactCounts = dueBills.reduce(
-    (acc, b) => {
-      const k = (CONTACT_KEYS as readonly string[]).includes(b.action_status ?? "")
-        ? (b.action_status as ContactKey)
-        : "uncontacted";
-      acc[k] = (acc[k] ?? 0) + 1;
-      return acc;
-    },
-    {
-      uncontacted: 0,
-      sales_not_notified: 0,
-      contact_failed: 0,
-      customer_postponed: 0,
-      customer_cancelled: 0,
-      contacted_ready: 0,
-    } as Record<"uncontacted" | ContactKey, number>
-  );
-  const needsFollowUp = (b: Bill): boolean => {
-    if (!isContactWindow(b)) return false;
-    if (b.cancelled_delivery && !isDispatchReady(b)) return true;
-    if (
-      b.action_status === "sales_not_notified" ||
-      b.action_status === "contact_failed" ||
-      b.action_status === "customer_postponed" ||
-      b.action_status === "customer_cancelled"
-    ) {
-      return true;
-    }
-    return b.action_status === "contacted_ready" && !isDispatchReady(b);
+  // Future bills sit outside the action queue — the dispatcher will pick them
+  // up closer to send_date.
+  const futureCount = bills.filter(isNotYetTime).length;
+
+  // "need_action" = anything in the contact window that isn't dispatch-ready
+  // (combines old call/uncontacted/problem/cancelled_job tabs). Bills with
+  // send_date far in the future stay parked under "future" instead.
+  const needsAction = (b: Bill): boolean => {
+    if (isNotYetTime(b)) return false;
+    return !isDispatchReady(b);
   };
-  const problemCount = bills.filter(needsFollowUp).length;
-  const cancelledJobCount = bills.filter((b) => b.cancelled_delivery).length;
+  const needActionCount = bills.filter(needsAction).length;
 
   const kw = searchText.trim().toLowerCase();
   const filtered = bills.filter((b) => {
     if (departmentFilter !== "all" && b.department !== departmentFilter) return false;
 
-    const inWindow = isContactWindow(b);
-    if (queueFilter === "call" && !inWindow) return false;
-    if (queueFilter === "uncontacted" && (!inWindow || (CONTACT_KEYS as readonly string[]).includes(b.action_status ?? ""))) return false;
+    // Column-based filtering happens at render time (Kanban grid). queueFilter
+    // kept as legacy for the existing manual-add code path; new code uses
+    // focusCol to optionally narrow to a single column on small screens.
+    if (queueFilter === "need_action" && !needsAction(b)) return false;
     if (queueFilter === "ready" && !isDispatchReady(b)) return false;
-    if (queueFilter === "problem" && !needsFollowUp(b)) {
-      return false;
-    }
     if (queueFilter === "future" && !isNotYetTime(b)) return false;
-    if (queueFilter === "cancelled_job" && !b.cancelled_delivery) return false;
 
     if (!kw) return true;
     return [
@@ -469,9 +435,8 @@ export default function BillsPendingClient() {
     ].filter(Boolean).join(" ").toLowerCase().includes(kw);
   });
 
-  // Group/sort by the delivery date (scheduled_date — overridden value or
-  // send_date fallback). Bills missing a date go to the end of the list.
-  const groupKey = (b: Bill) => b.scheduled_date_display ?? "—";
+  // Sort by delivery date (scheduled_date — overridden value or send_date
+  // fallback). Bills missing a date sink to the end.
   const sortKey = (b: Bill) => b.scheduled_date ?? "9999-12-31";
 
   const sorted = [...filtered].sort((a, b) => {
@@ -481,23 +446,9 @@ export default function BillsPendingClient() {
     if (dateCmp !== 0) return dateCmp;
     return sortOrder === "asc" ? baseSec(a.time_use) - baseSec(b.time_use) : baseSec(b.time_use) - baseSec(a.time_use);
   });
-  const pages = Math.max(1, Math.ceil(sorted.length / perPage));
-  const paged = sorted.slice((currentPage - 1) * perPage, currentPage * perPage);
-
-  // Per-date totals across the full filtered set, so the group header shows
-  // meaningful numbers even when a date spans multiple pages.
-  const dateTotals = filtered.reduce<Record<string, { count: number; qty: number }>>((acc, b) => {
-    const key = groupKey(b);
-    const prev = acc[key] ?? { count: 0, qty: 0 };
-    acc[key] = {
-      count: prev.count + (Number(b.remaining_count) || 0),
-      qty: prev.qty + (Number(b.remaining_qty_total) || 0),
-    };
-    return acc;
-  }, {});
 
   const fetchBills = async () => {
-    setLoading(true); setTick(0); setCurrentPage(1);
+    setLoading(true); setTick(0);
     try {
       const data = await Actions.getBillsPending(fromDate, toDate, transportCode);
       setBills((data.trans || []) as Bill[]);
@@ -581,7 +532,7 @@ export default function BillsPendingClient() {
         remark: manualRemark,
         source_type: manualSelected.source_type ?? null,
       });
-      setQueueFilter("ready");
+      setViewMode("happy");
       setManualModalOpen(false);
       setManualSelected(null);
       await fetchBills();
@@ -652,50 +603,144 @@ export default function BillsPendingClient() {
 
   const inputCls = "w-full px-3 py-2 glass-input rounded-lg text-xs text-slate-700 dark:text-slate-200 transition-all";
 
-  // ── Timeline groups ──
-  type TimelineStatus = "overdue" | "today" | "future" | "none";
-  type TimelineGroup = {
-    key: string;
-    date: string | null;
-    status: TimelineStatus;
-    bills: Bill[];
-    totalCount: number;
-    totalQty: number;
+  // ── Workflow steps ──
+  // Step labels and tone for the workflow stepper. The numeric prefixes ("1",
+  // "2.1", ...) mirror the dispatcher's documented process so the UI maps 1:1
+  // to how they think about the queue.
+  const STEP_META: Record<StepKey, { number: string; title: string; description: string; color: string; ring: string; headBg: string; headText: string; dot: string }> = {
+    not_contacted: {
+      number: "1",
+      title: "ຍັງບໍ່ຕິດຕໍ່",
+      description: "ຕ້ອງໂທຫາລູກຄ້າ",
+      color: "rose",
+      ring: "ring-rose-500/40",
+      headBg: "bg-rose-500/10",
+      headText: "text-rose-700 dark:text-rose-400",
+      dot: "bg-rose-500",
+    },
+    sales_pending: {
+      number: "2.1",
+      title: "ພະນັກຂາຍຍັງບໍ່ບອກວັນສົ່ງ",
+      description: "ຕິດຕໍ່ແລ້ວ ແຕ່ຍັງບໍ່ມີວັນ/ເສັ້ນທາງ/ຮອບ",
+      color: "amber",
+      ring: "ring-amber-500/40",
+      headBg: "bg-amber-500/10",
+      headText: "text-amber-700 dark:text-amber-400",
+      dot: "bg-amber-500",
+    },
+    scheduled_wait: {
+      number: "2.2",
+      title: "ຍັງບໍ່ຮອດວັນສົ່ງ",
+      description: "ກຳນົດຄົບ ລໍຖ້າວັນຮັບ",
+      color: "sky",
+      ring: "ring-sky-500/40",
+      headBg: "bg-sky-500/10",
+      headText: "text-sky-700 dark:text-sky-400",
+      dot: "bg-sky-500",
+    },
+    ready: {
+      number: "2.3",
+      title: "ພ້ອມຈັດຖ້ຽວ",
+      description: "ຮອດວັນແລ້ວ ພ້ອມສົ່ງ",
+      color: "emerald",
+      ring: "ring-emerald-500/40",
+      headBg: "bg-emerald-500/10",
+      headText: "text-emerald-700 dark:text-emerald-400",
+      dot: "bg-emerald-500",
+    },
+    problem: {
+      number: "!",
+      title: "ມີບັນຫາ",
+      description: "ຍົກເລີກ / ປະຕິເສດ",
+      color: "slate",
+      ring: "ring-slate-500/40",
+      headBg: "bg-slate-500/10",
+      headText: "text-slate-700 dark:text-slate-300",
+      dot: "bg-slate-500",
+    },
+  };
+  // STEP_ORDER drives the visible stepper. "problem" is appended after so it
+  // reads as a side-channel rather than a step on the happy path.
+  const STEP_ORDER: StepKey[] = ["not_contacted", "sales_pending", "scheduled_wait", "ready"];
+
+  // Map a bill to its current workflow step. The order matters — earlier
+  // checks override later ones (e.g., a cancelled bill is "problem" even
+  // if it also has a scheduled date).
+  const billStep = (b: Bill): StepKey => {
+    if (b.cancelled_delivery) return "problem";
+    if (b.action_status === "customer_cancelled") return "problem";
+    if (!b.action_status || b.action_status === "contact_failed" || b.action_status === "customer_postponed") {
+      return "not_contacted";
+    }
+    if (b.action_status === "sales_not_notified") return "sales_pending";
+    if (b.action_status === "contacted_ready") {
+      const planComplete = !!b.scheduled_date_overridden && !!b.delivery_route_code?.trim() && !!b.delivery_round_code?.trim();
+      if (!planComplete) return "sales_pending";
+      if (b.scheduled_date && b.scheduled_date > today) return "scheduled_wait";
+      return "ready";
+    }
+    return "not_contacted";
   };
 
-  const timelineGroups: TimelineGroup[] = [];
-  for (const b of paged) {
-    const key = groupKey(b);
-    let g = timelineGroups[timelineGroups.length - 1];
-    if (!g || g.key !== key) {
-      const date = b.scheduled_date ?? null;
-      let status: TimelineStatus = "none";
-      if (date) {
-        if (date < today) status = "overdue";
-        else if (date === today) status = "today";
-        else status = "future";
-      }
-      g = { key, date, status, bills: [], totalCount: 0, totalQty: 0 };
-      timelineGroups.push(g);
-    }
-    g.bills.push(b);
-  }
-  for (const g of timelineGroups) {
-    const t = dateTotals[g.key] ?? { count: 0, qty: 0 };
-    g.totalCount = t.count;
-    g.totalQty = t.qty;
+  const billsByStep: Record<StepKey, Bill[]> = {
+    not_contacted: [],
+    sales_pending: [],
+    scheduled_wait: [],
+    ready: [],
+    problem: [],
+  };
+  for (const b of sorted) {
+    billsByStep[billStep(b)].push(b);
   }
 
-  const relativeLabel = (date: string | null, status: TimelineStatus): string | null => {
-    if (status === "today") return "ມື້ນີ້";
-    if (status === "none" || !date) return null;
-    const d1 = new Date(date + "T00:00:00").getTime();
-    const d0 = new Date(today + "T00:00:00").getTime();
-    const diff = Math.round((d1 - d0) / 86400000);
-    if (status === "overdue") return `ຊ້າ ${Math.abs(diff)} ມື້`;
-    if (diff === 1) return "ມື້ອື່ນ";
-    if (diff <= 7) return `ອີກ ${diff} ມື້`;
-    return null;
+  const stepTotals: Record<StepKey, { count: number; qty: number }> = {
+    not_contacted: { count: 0, qty: 0 },
+    sales_pending: { count: 0, qty: 0 },
+    scheduled_wait: { count: 0, qty: 0 },
+    ready: { count: 0, qty: 0 },
+    problem: { count: 0, qty: 0 },
+  };
+  for (const key of [...STEP_ORDER, "problem" as StepKey]) {
+    for (const b of billsByStep[key]) {
+      stepTotals[key].count += Number(b.remaining_count) || 0;
+      stepTotals[key].qty += Number(b.remaining_qty_total) || 0;
+    }
+  }
+
+  // Drop handler: maps the destination step to a backend action.
+  //   not_contacted: clear action_status — resets the bill to its initial state.
+  //   sales_pending: open StatusMenu so the dispatcher records the sub-status
+  //                  (sales_not_notified vs contacted_ready w/o full plan).
+  //   ready:         open StatusMenu — forces date/route/round capture before
+  //                  the bill flips to "contacted_ready".
+  //   scheduled_wait / problem: read-only — derived from data, not drop targets.
+  const handleDropOnStep = async (billNo: string, step: StepKey, anchor: HTMLElement) => {
+    const bill = bills.find((b) => b.doc_no === billNo);
+    if (!bill) return;
+    const currentStep = billStep(bill);
+    if (currentStep === step) return;
+    if (step === "scheduled_wait" || step === "problem") return;
+    if (step === "sales_pending" || step === "ready") {
+      setStatusMenu({ billNo, anchor });
+      return;
+    }
+    if (step === "not_contacted") {
+      try {
+        await Actions.upsertPendingBillSchedule({ bill_no: billNo, action_status: null });
+        await fetchBills();
+      } catch (e) {
+        console.error("[handleDropOnStep]", e);
+      }
+    }
+  };
+
+  const toggleCollapsedStep = (step: StepKey) => {
+    setCollapsedSteps((prev) => {
+      const next = new Set(prev);
+      if (next.has(step)) next.delete(step);
+      else next.add(step);
+      return next;
+    });
   };
 
   return (
@@ -709,9 +754,9 @@ export default function BillsPendingClient() {
 
       <StatusStatGrid
         stats={[
-          { label: "ຕ້ອງໂທຫາ", value: dueCounts.due, icon: <FaPhone />, tone: "teal" },
-          { label: "ຍັງບໍ່ຕິດຕໍ່", value: contactCounts.uncontacted, icon: <FaExclamationTriangle />, tone: "amber" },
+          { label: "ຕ້ອງດຳເນີນການ", value: needActionCount, icon: <FaExclamationTriangle />, tone: "teal" },
           { label: "ພ້ອມຈັດຖ້ຽວ", value: dispatchReadyCount, icon: <FaCheckSquare />, tone: "sky" },
+          { label: "ລ່ວງໜ້າ", value: futureCount, icon: <FaCalendar />, tone: "amber" },
           { label: "ຈຳນວນເຫຼືອ", value: fmtQty(totalQty), icon: <FaBoxOpen />, tone: "orange" },
         ]}
       />
@@ -723,7 +768,7 @@ export default function BillsPendingClient() {
             <label className="block text-[10px] font-semibold text-slate-500 uppercase tracking-wider mb-1">ຄົ້ນຫາ</label>
             <div className="relative">
               <FaSearch className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" size={10} />
-              <input type="text" value={searchText} onChange={(e) => { setSearchText(e.target.value); setCurrentPage(1); }} placeholder="ເລກບິນ, ລູກຄ້າ, ຂາຍ..." className={`${inputCls} pl-8`} />
+              <input type="text" value={searchText} onChange={(e) => setSearchText(e.target.value)} placeholder="ເລກບິນ, ລູກຄ້າ, ຂາຍ..." className={`${inputCls} pl-8`} />
             </div>
           </div>
           <div>
@@ -743,7 +788,7 @@ export default function BillsPendingClient() {
           </div>
           <div>
             <label className="block text-[10px] font-semibold text-slate-500 uppercase tracking-wider mb-1">ພະແນກ</label>
-            <select value={departmentFilter} onChange={(e) => { setDepartmentFilter(e.target.value); setCurrentPage(1); }} className={inputCls}>
+            <select value={departmentFilter} onChange={(e) => setDepartmentFilter(e.target.value)} className={inputCls}>
               <option value="all">ທັງໝົດ</option>
               {deptList.map((d) => <option key={d} value={d}>{d}</option>)}
             </select>
@@ -757,51 +802,55 @@ export default function BillsPendingClient() {
         </form>
       </div>
 
-      {/* ── Work queue filter ── */}
-      <div className="glass rounded-lg p-1.5 flex flex-wrap gap-1 items-center">
-        <span className="px-2 text-[10px] font-semibold uppercase tracking-wider text-slate-400">
-          ມຸມມອງ:
+      {/* ── Toolbar: count + happy/problem view switch + sort + add ── */}
+      <div className="glass rounded-lg p-1.5 flex flex-wrap gap-1.5 items-center">
+        <span className="px-2 text-[11px] font-semibold text-slate-500 dark:text-slate-300">
+          ພົບ <span className="font-bold text-slate-700 dark:text-slate-100">{filtered.length}</span> ບິນ
         </span>
-        {(
-          [
-            { key: "call", label: "ຄິວໂທ", count: dueCounts.due, color: "rose" },
-            { key: "uncontacted", label: "ຍັງບໍ່ໂທ", count: contactCounts.uncontacted, color: "amber" },
-            { key: "ready", label: "ພ້ອມຈັດຖ້ຽວ", count: dispatchReadyCount, color: "emerald" },
-            { key: "problem", label: "ຕ້ອງຕິດຕາມ", count: problemCount, color: "slate" },
-            { key: "cancelled_job", label: "ຍົກເລີກຈັດສົ່ງ", count: cancelledJobCount, color: "rose" },
-            { key: "future", label: `ຍັງບໍ່ເຖິງເວລາ > ${notYetDays} ມື້`, count: dueCounts.future, color: "sky" },
-            { key: "all", label: "ທັງໝົດ", count: bills.length, color: "slate" },
-          ] as const
-        ).map((tab) => {
-          const active = queueFilter === tab.key;
-          const colorMap: Record<string, string> = {
-            slate: active ? "bg-slate-700 text-white" : "text-slate-600 dark:text-slate-300 hover:bg-slate-500/10",
-            sky: active ? "bg-sky-600 text-white" : "text-sky-600 dark:text-sky-400 hover:bg-sky-500/10",
-            rose: active ? "bg-rose-600 text-white" : "text-rose-600 dark:text-rose-400 hover:bg-rose-500/10",
-            amber: active ? "bg-amber-600 text-white" : "text-amber-700 dark:text-amber-400 hover:bg-amber-500/10",
-            emerald: active ? "bg-emerald-600 text-white" : "text-emerald-700 dark:text-emerald-400 hover:bg-emerald-500/10",
-          };
-          return (
-            <button
-              key={tab.key}
-              type="button"
-              onClick={() => {
-                setQueueFilter(tab.key as QueueFilter);
-                setCurrentPage(1);
-              }}
-              className={`px-3 py-1.5 rounded-md text-[11px] font-semibold transition-colors inline-flex items-center gap-1.5 ${colorMap[tab.color]}`}
-            >
-              {tab.label}
-              <span className={`min-w-[18px] h-[18px] px-1 rounded-full text-[10px] font-bold flex items-center justify-center ${active ? "bg-white/25 text-white" : "bg-slate-500/10"}`}>
-                {tab.count}
-              </span>
-            </button>
-          );
-        })}
+        <span className="text-slate-300 dark:text-slate-600">·</span>
+        <button
+          type="button"
+          onClick={() => setViewMode("happy")}
+          className={`px-2.5 py-1 rounded-md text-[11px] font-semibold transition-colors inline-flex items-center gap-1.5 ${
+            viewMode === "happy"
+              ? "bg-slate-700 text-white dark:bg-slate-200 dark:text-slate-900"
+              : "text-slate-600 dark:text-slate-300 hover:bg-slate-500/10"
+          }`}
+          title="ສະແດງ 4 ຂັ້ນຕອນຫຼັກ"
+        >
+          ຂັ້ນຕອນຫຼັກ
+          <span className={`min-w-[16px] h-[16px] px-1 rounded-full text-[10px] font-bold flex items-center justify-center ${viewMode === "happy" ? "bg-white/25" : "bg-slate-500/15"}`}>
+            {STEP_ORDER.reduce((s, k) => s + billsByStep[k].length, 0)}
+          </span>
+        </button>
+        <button
+          type="button"
+          onClick={() => setViewMode("problem")}
+          className={`px-2.5 py-1 rounded-md text-[11px] font-semibold transition-colors inline-flex items-center gap-1.5 ${
+            viewMode === "problem"
+              ? "bg-slate-700 text-white dark:bg-slate-200 dark:text-slate-900"
+              : "text-slate-600 dark:text-slate-300 hover:bg-slate-500/10"
+          }`}
+          title="ບິນຍົກເລີກ / ປະຕິເສດ"
+        >
+          <FaExclamationTriangle size={9} />
+          ມີບັນຫາ
+          <span className={`min-w-[16px] h-[16px] px-1 rounded-full text-[10px] font-bold flex items-center justify-center ${viewMode === "problem" ? "bg-white/25" : "bg-slate-500/15"}`}>
+            {billsByStep.problem.length}
+          </span>
+        </button>
+        <button
+          type="button"
+          onClick={() => setSortOrder(sortOrder === "asc" ? "desc" : "asc")}
+          className="ml-auto inline-flex items-center gap-1.5 rounded-md glass px-2.5 py-1 text-[11px] font-medium text-slate-600 dark:text-slate-300 hover:bg-white/30 dark:hover:bg-white/5 transition-colors"
+          title="ປ່ຽນລຳດັບການຈັດຮຽງ"
+        >
+          {sortOrder === "asc" ? <><FaSortAmountUp size={10} /> ໃກ້ສຸດກ່ອນ</> : <><FaSortAmountDown size={10} /> ໄກສຸດກ່ອນ</>}
+        </button>
         <button
           type="button"
           onClick={openManualModal}
-          className="ml-auto inline-flex items-center gap-1.5 rounded-md bg-teal-600 px-3 py-1.5 text-[11px] font-semibold text-white transition-colors hover:bg-teal-700 dark:bg-teal-500 dark:hover:bg-teal-600"
+          className="inline-flex items-center gap-1.5 rounded-md bg-teal-600 px-3 py-1 text-[11px] font-semibold text-white transition-colors hover:bg-teal-700 dark:bg-teal-500 dark:hover:bg-teal-600"
         >
           <FaPlus size={10} />
           ເພີ່ມບິນ 56/72
@@ -823,14 +872,6 @@ export default function BillsPendingClient() {
         </div>
       ) : (
         <>
-          {/* Sort + count */}
-          <div className="flex items-center justify-between">
-            <p className="text-xs text-slate-500">ພົບ <span className="font-bold text-slate-700 dark:text-slate-200">{filtered.length}</span> ລາຍການ · {timelineGroups.length} ວັນ</p>
-            <button onClick={() => { setSortOrder(sortOrder === "asc" ? "desc" : "asc"); setCurrentPage(1); }} className="flex items-center gap-1.5 px-3 py-1.5 glass rounded-lg text-[11px] font-medium text-slate-600 dark:text-slate-300 hover:bg-white/30 dark:hover:bg-white/5 transition-colors">
-              {sortOrder === "asc" ? <><FaSortAmountUp size={11} /> ໃກ້ສຸດກ່ອນ</> : <><FaSortAmountDown size={11} /> ໄກສຸດກ່ອນ</>}
-            </button>
-          </div>
-
           {/* Bulk-action toolbar (visible when bills are selected) */}
           {selectedBillNos.size > 0 && (
             <div className="sticky top-2 z-20 flex flex-wrap items-center gap-2 rounded-lg border border-teal-200 bg-teal-50 px-3 py-2 shadow-md dark:border-teal-800 dark:bg-teal-950/50">
@@ -895,59 +936,88 @@ export default function BillsPendingClient() {
             </div>
           )}
 
-          {/* Timeline */}
-          <div className="relative pl-7 sm:pl-10">
-            <div className="absolute left-[10px] sm:left-[14px] top-2 bottom-2 w-px bg-gradient-to-b from-teal-500/40 via-slate-300/40 dark:via-white/10 to-transparent" aria-hidden />
-
-            {timelineGroups.map((g) => {
-              const markerBg =
-                g.status === "overdue" ? "bg-rose-500"
-                : g.status === "today" ? "bg-emerald-500"
-                : g.status === "future" ? "bg-teal-500"
-                : "bg-slate-400";
-              const headLabelColor =
-                g.status === "overdue" ? "text-rose-700 dark:text-rose-400"
-                : g.status === "today" ? "text-emerald-700 dark:text-emerald-400"
-                : g.status === "none" ? "text-slate-500 dark:text-slate-400"
-                : "text-slate-800 dark:text-slate-100";
-              const relPillCls =
-                g.status === "overdue" ? "bg-rose-500/15 text-rose-700 dark:text-rose-400 ring-1 ring-rose-500/30"
-                : g.status === "today" ? "bg-emerald-500/15 text-emerald-700 dark:text-emerald-400 ring-1 ring-emerald-500/30"
-                : "bg-teal-500/10 text-teal-700 dark:text-teal-400 ring-1 ring-teal-500/20";
-              const rel = relativeLabel(g.date, g.status);
-
+          {/* Kanban grid */}
+          {/* In "happy" mode each workflow step (1, 2.1, 2.2, 2.3) is a column. */}
+          {/* In "problem" mode one full-width column lists cancelled/rejected. */}
+          <div className={`grid gap-3 ${
+            viewMode === "happy" ? "grid-cols-1 md:grid-cols-2 xl:grid-cols-4" : "grid-cols-1"
+          }`}>
+            {(viewMode === "happy" ? STEP_ORDER : ["problem" as StepKey]).map((step) => {
+              const meta = STEP_META[step];
+              const stepBills = billsByStep[step];
+              const collapsed = collapsedSteps.has(step);
+              const isDropTarget = dragOverStep === step;
+              const dropDisabled = step === "scheduled_wait" || step === "problem";
+              const totals = stepTotals[step];
               return (
-                <section key={g.key} className="relative pb-6 last:pb-0">
-                  {/* Marker */}
-                  <span className={`absolute left-[2px] sm:left-[6px] top-1 w-4 h-4 sm:w-5 sm:h-5 rounded-full ring-4 ring-white dark:ring-slate-900 flex items-center justify-center shadow ${markerBg}`}>
-                    {g.status === "overdue" && <FaExclamationTriangle size={8} className="text-white" />}
-                    {g.status === "today" && (
-                      <span className="absolute inset-0 rounded-full bg-emerald-400/50 animate-ping" aria-hidden />
-                    )}
-                  </span>
-
-                  {/* Group header */}
-                  <header className="mb-2.5 flex items-baseline gap-x-3 gap-y-1 flex-wrap">
-                    <h3 className={`text-sm font-bold ${headLabelColor}`}>
-                      {g.key === "—" ? "ບໍ່ໄດ້ກຳນົດວັນພ້ອມຮັບ" : `ວັນພ້ອມຮັບ/ຈັດສົ່ງ ${g.key}`}
-                    </h3>
-                    {rel && (
-                      <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold ${relPillCls}`}>
-                        {rel}
-                      </span>
-                    )}
-                    <span className="text-[11px] text-slate-500 dark:text-slate-400 ml-auto sm:ml-0">
-                      <span className="font-bold text-amber-700 dark:text-amber-400">{fmtQty(g.totalQty)} qty</span>
-                      <span className="mx-1.5 text-slate-300 dark:text-slate-600">·</span>
-                      <span className="font-semibold text-slate-700 dark:text-slate-200">{g.totalCount} ລາຍການ</span>
-                      <span className="mx-1.5 text-slate-300 dark:text-slate-600">·</span>
-                      <span className="font-medium">{g.bills.length} ບິນ</span>
+                <section
+                  key={step}
+                  onDragOver={(e) => {
+                    if (dropDisabled || !dragBill) return;
+                    e.preventDefault();
+                    e.dataTransfer.dropEffect = "move";
+                    if (dragOverStep !== step) setDragOverStep(step);
+                  }}
+                  onDragLeave={(e) => {
+                    if (!e.currentTarget.contains(e.relatedTarget as Node | null)) {
+                      setDragOverStep((prev) => (prev === step ? null : prev));
+                    }
+                  }}
+                  onDrop={(e) => {
+                    if (dropDisabled || !dragBill) return;
+                    e.preventDefault();
+                    const billNo = dragBill;
+                    setDragBill(null);
+                    setDragOverStep(null);
+                    void handleDropOnStep(billNo, step, e.currentTarget);
+                  }}
+                  className={`flex flex-col rounded-lg border transition-colors ${
+                    isDropTarget && !dropDisabled
+                      ? `ring-2 ${meta.ring} border-transparent ${meta.headBg}`
+                      : "border-slate-200/50 dark:border-white/5 bg-white/30 dark:bg-white/[0.02]"
+                  }`}
+                >
+                  {/* Column header */}
+                  <header className={`flex items-center gap-2 px-3 py-2 rounded-t-lg border-b border-slate-200/40 dark:border-white/5 ${meta.headBg}`}>
+                    <span className={`text-[10px] font-mono font-bold rounded px-1.5 py-0.5 ${meta.headText} bg-white/40 dark:bg-white/[0.05]`}>
+                      {meta.number}
                     </span>
+                    <button
+                      type="button"
+                      onClick={() => toggleCollapsedStep(step)}
+                      className="flex items-center gap-1.5 min-w-0 flex-1 text-left"
+                    >
+                      {collapsed ? <FaChevronRight size={9} className="text-slate-400" /> : <FaChevronDown size={9} className="text-slate-400" />}
+                      <div className="min-w-0">
+                        <p className={`text-[12px] font-bold leading-tight truncate ${meta.headText}`}>
+                          {meta.title}
+                        </p>
+                        <p className="text-[9px] text-slate-500 dark:text-slate-400 leading-tight truncate">
+                          {meta.description}
+                        </p>
+                      </div>
+                    </button>
+                    <div className="text-right shrink-0">
+                      <div className="text-[12px] font-extrabold leading-none text-slate-700 dark:text-slate-100">
+                        {stepBills.length}
+                      </div>
+                      <div className="text-[9px] text-amber-700 dark:text-amber-400 font-bold leading-tight">
+                        {fmtQty(totals.qty)} qty
+                      </div>
+                    </div>
                   </header>
 
-                  {/* Bill cards */}
-                  <div className="space-y-2">
-                    {g.bills.map((bill) => {
+                  {/* Column body */}
+                  {!collapsed && (
+                    <div className="flex-1 p-2 space-y-2 min-h-[120px] max-h-[calc(100vh-340px)] overflow-y-auto">
+                      {stepBills.length === 0 ? (
+                        <div className="flex flex-col items-center justify-center py-8 text-center text-[11px] text-slate-400">
+                          <FaBoxOpen size={20} className="mb-1 opacity-40" />
+                          <p>{dropDisabled ? "ບໍ່ມີບິນ" : (dragBill ? "ວາງທີ່ນີ້ເພື່ອປ່ຽນຂັ້ນຕອນ" : "ບໍ່ມີບິນ")}</p>
+                        </div>
+                      ) : (
+                        <>
+                          {stepBills.map((bill) => {
                       const exp = expandedDoc === bill.doc_no;
                       const prods = productsByDoc[bill.doc_no] ?? [];
                       const overdue = !!bill.scheduled_date && bill.scheduled_date < today;
@@ -992,10 +1062,24 @@ export default function BillsPendingClient() {
                         }
                       };
                       const canPlanDelivery = true;
+                      const checklist = workflowChecklist(bill);
+                      const workflowToneCls = workflowTone[workflowMeta.tone];
                       return (
                         <article
                           key={bill.doc_no}
-                          className={`rounded-lg border transition-all overflow-hidden ${
+                          draggable
+                          onDragStart={(e) => {
+                            e.dataTransfer.effectAllowed = "move";
+                            e.dataTransfer.setData("text/plain", bill.doc_no);
+                            setDragBill(bill.doc_no);
+                          }}
+                          onDragEnd={() => {
+                            setDragBill(null);
+                            setDragOverStep(null);
+                          }}
+                          className={`rounded-lg border transition-all overflow-hidden cursor-grab active:cursor-grabbing ${
+                            dragBill === bill.doc_no ? "opacity-50" : ""
+                          } ${
                             exp
                               ? wasDeliveryCancelled
                                 ? "border-rose-500/50 ring-1 ring-rose-500/30 bg-rose-500/[0.06]"
@@ -1007,10 +1091,10 @@ export default function BillsPendingClient() {
                               : "border-slate-200/50 dark:border-white/5 bg-white/40 dark:bg-white/[0.02] hover:border-teal-300/50 hover:bg-white/60 dark:hover:bg-white/[0.04] hover:shadow-sm"
                           }`}
                         >
-                          {/* Main row */}
-                          <div className="flex items-stretch">
+                          {/* Header row — ID, status, qty, actions. Customer/sale moves to its own line below. */}
+                          <div className="flex items-center gap-2 px-3 py-2">
                             <label
-                              className="flex items-center px-3 py-2.5 cursor-pointer hover:bg-slate-500/5 border-r border-slate-200/40 dark:border-white/5"
+                              className="flex items-center cursor-pointer"
                               onClick={(e) => e.stopPropagation()}
                               title="ເລືອກສຳລັບ bulk action"
                             >
@@ -1021,51 +1105,45 @@ export default function BillsPendingClient() {
                                 className="rounded border-slate-300 text-teal-600 focus:ring-teal-500"
                               />
                             </label>
+
                             <button
                               onClick={() => void toggleProducts(bill.doc_no)}
-                              className="flex items-center gap-2 px-3 py-2.5 hover:bg-slate-500/5 transition-colors flex-shrink-0 border-r border-slate-200/40 dark:border-white/5"
+                              className="flex items-center gap-1.5 min-w-0 hover:opacity-80 transition-opacity"
                             >
-                              {exp ? <FaChevronDown size={9} style={{ color: T.primary }} /> : <FaChevronRight size={9} className="text-slate-400" />}
-                              <span className="text-left">
-                                <span className="block text-[12px] font-bold leading-tight" style={{ color: exp ? T.primary : undefined }}>
-                                  {bill.doc_no}
-                                </span>
-                                <span className="block text-[9px] text-slate-500 leading-tight mt-0.5">
-                                  Send {bill.send_date_display ?? bill.doc_date}
-                                </span>
+                              {exp ? <FaChevronDown size={10} style={{ color: T.primary }} /> : <FaChevronRight size={10} className="text-slate-400" />}
+                              <span className="text-sm font-bold text-slate-800 dark:text-slate-100 truncate" style={{ color: exp ? T.primary : undefined }}>
+                                {bill.doc_no}
                               </span>
                             </button>
 
-                            <div className="flex-1 min-w-0 px-3 py-2 self-center">
-                              <p className="text-[12px] font-semibold text-slate-700 dark:text-slate-200 truncate" title={bill.transport_name}>
-                                {bill.transport_name}
-                              </p>
-                              <p className="text-[10px] text-slate-500 dark:text-slate-400 truncate mt-0.5 flex items-center gap-1.5">
-                                {bill.sale && <span>{bill.sale}</span>}
-                                {bill.department && (
-                                  <>
-                                    {bill.sale && <span className="text-slate-300 dark:text-slate-600">·</span>}
-                                    <span className="px-1.5 py-px rounded-full bg-slate-500/10 text-[9px]">{bill.department}</span>
-                                  </>
-                                )}
-                                {bill.transport && (
-                                  <>
-                                    <span className="text-slate-300 dark:text-slate-600">·</span>
-                                    <span className="inline-flex items-center gap-1 truncate"><FaTruck size={8} className="text-slate-400" /> {bill.transport}</span>
-                                  </>
-                                )}
-                              </p>
+                            {bill.is_pos_settled && (
+                              <span
+                                className="inline-flex items-center rounded-md bg-emerald-500/15 px-1.5 py-0.5 text-[10px] font-bold text-emerald-700 dark:text-emerald-400"
+                                title="ບິນຈາກ POS — ຮັບເງິນແລ້ວ"
+                              >
+                                POS
+                              </span>
+                            )}
+
+                            <div
+                              className={`inline-flex items-center gap-1 rounded-md border px-2 py-0.5 text-[10px] font-bold ${workflowToneCls}`}
+                              title={workflowMeta.title}
+                            >
+                              {workflow === "ready" ? <FaCheckSquare size={9} /> : workflow === "problem" ? <FaExclamationTriangle size={9} /> : <FaClock size={9} />}
+                              <span>{workflowMeta.title}</span>
                             </div>
 
-                            <div className="flex items-center gap-2 px-3 py-2 self-center flex-shrink-0">
+                            <div className="ml-auto flex items-center gap-2">
                               <div className="text-right hidden sm:block">
-                                <div className="text-[11px] font-bold text-amber-700 dark:text-amber-400 leading-tight">{fmtQty(bill.remaining_qty_total)} qty</div>
-                                <div className="text-[9px] text-slate-500 leading-tight mt-0.5">{bill.remaining_count} ລາຍການ</div>
+                                <div className="text-xs font-bold text-amber-700 dark:text-amber-400 leading-tight">
+                                  {fmtQty(bill.remaining_qty_total)} <span className="text-[10px] font-medium">qty</span>
+                                </div>
+                                <div className="text-[10px] text-slate-500 leading-tight">{bill.remaining_count} ລາຍການ</div>
                               </div>
 
                               {bill.time_use && (
                                 <span
-                                  className={`hidden md:inline-flex items-center justify-center w-7 h-7 rounded-lg text-[10px] font-bold border ${durColor(bill.time_use)}`}
+                                  className={`hidden md:inline-flex items-center justify-center w-7 h-7 rounded-md border ${durColor(bill.time_use)}`}
                                   title={`ຄ້າງ ${fmtDur(bill.time_use)}`}
                                 >
                                   <FaClock size={11} />
@@ -1074,7 +1152,7 @@ export default function BillsPendingClient() {
 
                               <button
                                 onClick={(e) => setTodoOpen({ billNo: bill.doc_no, anchor: e.currentTarget })}
-                                className={`relative inline-flex items-center justify-center w-7 h-7 rounded-lg transition-colors ${
+                                className={`relative inline-flex items-center justify-center w-7 h-7 rounded-md transition-colors ${
                                   bill.todo_pending_count && bill.todo_earliest_deadline && bill.todo_earliest_deadline < today
                                     ? "text-rose-600 bg-rose-500/10 hover:bg-rose-500/20"
                                     : bill.todo_pending_count && bill.todo_earliest_deadline === today
@@ -1087,7 +1165,7 @@ export default function BillsPendingClient() {
                               >
                                 <FaStickyNote size={11} />
                                 {(bill.todo_pending_count ?? 0) > 0 && (
-                                  <span className="absolute -top-1 -right-1 min-w-[14px] h-[14px] px-0.5 rounded-full bg-rose-500 text-white text-[8px] font-bold flex items-center justify-center">
+                                  <span className="absolute -top-1 -right-1 min-w-[14px] h-[14px] px-0.5 rounded-full bg-rose-500 text-white text-[9px] font-bold flex items-center justify-center">
                                     {bill.todo_pending_count}
                                   </span>
                                 )}
@@ -1095,7 +1173,7 @@ export default function BillsPendingClient() {
 
                               <button
                                 onClick={() => openModal(bill)}
-                                className="inline-flex items-center justify-center w-7 h-7 rounded-lg text-white transition-colors bg-teal-600 hover:bg-teal-700 dark:bg-teal-500"
+                                className="inline-flex items-center justify-center w-7 h-7 rounded-md text-white transition-colors bg-teal-600 hover:bg-teal-700 dark:bg-teal-500"
                                 title="ປ່ຽນສາຍສົ່ງ"
                               >
                                 <FaExchangeAlt size={10} />
@@ -1106,7 +1184,7 @@ export default function BillsPendingClient() {
                                   type="button"
                                   onClick={() => void removeManualBill(bill.doc_no)}
                                   disabled={removingManualBillNo === bill.doc_no}
-                                  className="inline-flex items-center justify-center w-7 h-7 rounded-lg text-rose-600 transition-colors hover:bg-rose-500/10 disabled:cursor-not-allowed disabled:opacity-50 dark:text-rose-400"
+                                  className="inline-flex items-center justify-center w-7 h-7 rounded-md text-rose-600 transition-colors hover:bg-rose-500/10 disabled:cursor-not-allowed disabled:opacity-50 dark:text-rose-400"
                                   title="ລົບອອກຈາກລາຍການລໍຖ້າຈັດຖ້ຽວ"
                                 >
                                   {removingManualBillNo === bill.doc_no ? (
@@ -1116,8 +1194,32 @@ export default function BillsPendingClient() {
                                   )}
                                 </button>
                               )}
-
                             </div>
+                          </div>
+
+                          {/* Customer line — name, salesperson, department, transport, send date in one calm row. */}
+                          <div className="px-3 pb-2 -mt-0.5 text-xs text-slate-600 dark:text-slate-300 truncate" title={bill.transport_name}>
+                            <span className="font-semibold text-slate-700 dark:text-slate-200">{bill.transport_name}</span>
+                            <span className="text-slate-400 dark:text-slate-500"> · </span>
+                            <span>Send {bill.send_date_display ?? bill.doc_date}</span>
+                            {bill.sale && (
+                              <>
+                                <span className="text-slate-400 dark:text-slate-500"> · </span>
+                                <span>{bill.sale}</span>
+                              </>
+                            )}
+                            {bill.department && (
+                              <>
+                                <span className="text-slate-400 dark:text-slate-500"> · </span>
+                                <span className="text-slate-500">{bill.department}</span>
+                              </>
+                            )}
+                            {bill.transport && (
+                              <>
+                                <span className="text-slate-400 dark:text-slate-500"> · </span>
+                                <span className="inline-flex items-center gap-1"><FaTruck size={9} className="text-slate-400" /> {bill.transport}</span>
+                              </>
+                            )}
                           </div>
 
                           {wasDeliveryCancelled && (
@@ -1149,21 +1251,33 @@ export default function BillsPendingClient() {
                             </div>
                           )}
 
-                          {/* Workflow panel — makes the next action explicit and keeps every step editable. */}
+                          {/* Workflow panel — progress checklist + editable scheduling chips. */}
                           <div className="border-t border-slate-200/30 bg-white/30 px-3 py-2 dark:border-white/5 dark:bg-white/[0.02]">
-                            <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
-                              <div className="min-w-0">
-                                <div className={`inline-flex max-w-full items-center gap-1.5 rounded-md border px-2 py-1 text-[10px] font-bold ${workflowTone[workflowMeta.tone]}`}>
-                                  {workflow === "ready" ? <FaCheckSquare size={10} /> : <FaExclamationTriangle size={10} />}
-                                  <span className="truncate">{workflowMeta.title}</span>
-                                </div>
-                                <p className="mt-1 text-[10px] leading-snug text-slate-500 dark:text-slate-400">
-                                  {workflowMeta.detail}
-                                </p>
+                            {workflow !== "ready" && (
+                              <div className="mb-1.5 flex flex-wrap items-center gap-1 text-[10px]">
+                                <span className="font-semibold uppercase tracking-wider text-slate-400">ຄົງເຫຼືອ:</span>
+                                {([
+                                  { key: "contact" as const, label: "ຕິດຕໍ່", done: checklist.contact },
+                                  { key: "date" as const, label: "ວັນຮັບ", done: checklist.date },
+                                  { key: "route" as const, label: "ເສັ້ນທາງ", done: checklist.route },
+                                  { key: "round" as const, label: "ຮອບ", done: checklist.round },
+                                ]).map((step) => (
+                                  <span
+                                    key={step.key}
+                                    className={`inline-flex items-center gap-1 rounded-full px-1.5 py-0.5 ${
+                                      step.done
+                                        ? "bg-emerald-500/15 text-emerald-700 dark:text-emerald-400"
+                                        : "bg-slate-500/10 text-slate-500"
+                                    }`}
+                                  >
+                                    {step.done ? <FaCheck size={7} /> : <span className="w-1.5 h-1.5 rounded-full bg-current opacity-60" />}
+                                    {step.label}
+                                  </span>
+                                ))}
                               </div>
-                            </div>
+                            )}
 
-                            <div className="mt-2 flex flex-wrap gap-1.5">
+                            <div className="flex flex-wrap gap-1.5">
                               <button
                                 type="button"
                                 onClick={(e) => setStatusMenu({ billNo: bill.doc_no, anchor: e.currentTarget })}
@@ -1319,39 +1433,36 @@ export default function BillsPendingClient() {
                             </div>
                           </div>
 
-                          {/* Footer row */}
-                          <div className="flex items-center flex-wrap gap-2 px-3 py-1.5 border-t border-slate-200/30 dark:border-white/5 bg-slate-500/[0.03] dark:bg-white/[0.015]">
-                            {bill.partial_delivery && (
-                              <span className="inline-flex items-center rounded-full border border-orange-500/20 bg-orange-500/10 px-2 py-0.5 text-[10px] font-semibold text-orange-600 dark:text-orange-400">
-                                ກຳລັງທະຍອຍສົ່ງ
+                          {/* Footer — only render when there's something worth saying. */}
+                          {(bill.partial_delivery || bill.manual_pending_bill || bill.schedule_remark) && (
+                            <div className="flex items-center flex-wrap gap-2 px-3 py-1.5 border-t border-slate-200/30 dark:border-white/5 bg-slate-500/[0.03] dark:bg-white/[0.015]">
+                              {bill.partial_delivery && (
+                                <span className="inline-flex items-center rounded-full border border-orange-500/20 bg-orange-500/10 px-2 py-0.5 text-[10px] font-semibold text-orange-600 dark:text-orange-400">
+                                  ກຳລັງທະຍອຍສົ່ງ
+                                </span>
+                              )}
+
+                              {bill.manual_pending_bill && (
+                                <span className="inline-flex items-center rounded-full border border-teal-500/20 bg-teal-500/10 px-2 py-0.5 text-[10px] font-semibold text-teal-700 dark:text-teal-400">
+                                  {bill.source_type === "odservice.tb_product"
+                                    ? "ສູນບໍລິການ"
+                                    : `ic_trans flag ${bill.source_trans_flag ?? "56/72"}`}
+                                </span>
+                              )}
+
+                              {bill.schedule_remark && (
+                                <span className="inline-flex items-center gap-1 text-[10px] text-slate-600 dark:text-slate-300" title={bill.schedule_remark}>
+                                  <FaStickyNote size={9} className="text-amber-500 shrink-0" />
+                                  <span className="truncate max-w-[260px]">{bill.schedule_remark}</span>
+                                </span>
+                              )}
+
+                              {/* Mobile-only qty fallback */}
+                              <span className="sm:hidden inline-flex items-center gap-1 text-[10px] font-bold text-amber-700 dark:text-amber-400 ml-auto">
+                                {fmtQty(bill.remaining_qty_total)} qty · {bill.remaining_count} ລາຍການ
                               </span>
-                            )}
-
-                            {bill.manual_pending_bill && (
-                              <span className="inline-flex items-center rounded-full border border-teal-500/20 bg-teal-500/10 px-2 py-0.5 text-[10px] font-semibold text-teal-700 dark:text-teal-400">
-                                {bill.source_type === "odservice.tb_product"
-                                  ? "ສູນບໍລິການ"
-                                  : `ic_trans flag ${bill.source_trans_flag ?? "56/72"}`}
-                              </span>
-                            )}
-
-                            {bill.schedule_remark && (
-                              <span className="inline-flex items-center gap-1 text-[10px] text-slate-600 dark:text-slate-300" title={bill.schedule_remark}>
-                                <FaStickyNote size={9} className="text-amber-500 shrink-0" />
-                                <span className="truncate max-w-[260px]">{bill.schedule_remark}</span>
-                              </span>
-                            )}
-
-                            {/* Mobile-only qty fallback */}
-                            <span className="sm:hidden inline-flex items-center gap-1 text-[10px] font-bold text-amber-700 dark:text-amber-400">
-                              {fmtQty(bill.remaining_qty_total)} qty · {bill.remaining_count} ລາຍການ
-                            </span>
-
-                            <span className="ml-auto inline-flex items-center gap-1 text-[10px] text-slate-500 dark:text-slate-400">
-                              <FaFileInvoice size={9} />
-                              {workflow === "ready" ? "ເຂົ້າຂັ້ນຈັດຖ້ຽວໄດ້" : "ຍັງຕ້ອງດຳເນີນການຕໍ່"}
-                            </span>
-                          </div>
+                            </div>
+                          )}
 
                           {/* Expanded products */}
                           {exp && (
@@ -1407,33 +1518,15 @@ export default function BillsPendingClient() {
                           )}
                         </article>
                       );
-                    })}
-                  </div>
+                          })}
+                        </>
+                      )}
+                    </div>
+                  )}
                 </section>
               );
             })}
           </div>
-
-          {/* Pagination */}
-          {pages > 1 && (
-            <div className="glass rounded-lg flex items-center justify-between px-4 py-2.5">
-              <p className="text-[11px] text-slate-500">
-                {(currentPage - 1) * perPage + 1}-{Math.min(currentPage * perPage, sorted.length)} / {sorted.length}
-              </p>
-              <div className="flex items-center gap-1">
-                <button onClick={() => setCurrentPage((v) => Math.max(1, v - 1))} disabled={currentPage === 1} className="px-2.5 py-1 text-[11px] font-medium rounded glass text-slate-600 dark:text-slate-300 hover:bg-white/30 dark:hover:bg-white/5 disabled:opacity-40 disabled:cursor-not-allowed">ກ່ອນ</button>
-                {Array.from({ length: pages }, (_, i) => i + 1)
-                  .filter((p) => p === 1 || p === pages || Math.abs(p - currentPage) <= 2)
-                  .map((p, i, arr) => (
-                    <span key={p}>
-                      {i > 0 && arr[i - 1] !== p - 1 && <span className="px-1 text-slate-400">...</span>}
-                      <button onClick={() => setCurrentPage(p)} className={`px-2.5 py-1 text-[11px] font-medium rounded transition-colors ${p === currentPage ? "text-white bg-teal-600 dark:bg-teal-500" : "glass text-slate-600 dark:text-slate-300 hover:bg-white/30 dark:hover:bg-white/5"}`}>{p}</button>
-                    </span>
-                  ))}
-                <button onClick={() => setCurrentPage((v) => Math.min(pages, v + 1))} disabled={currentPage === pages} className="px-2.5 py-1 text-[11px] font-medium rounded glass text-slate-600 dark:text-slate-300 hover:bg-white/30 dark:hover:bg-white/5 disabled:opacity-40 disabled:cursor-not-allowed">ຕໍ່ໄປ</button>
-              </div>
-            </div>
-          )}
         </>
       )}
 
