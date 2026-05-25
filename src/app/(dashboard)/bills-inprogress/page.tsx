@@ -158,12 +158,12 @@ function formatDuration(isoString: string | null, now: Date): string {
   const seconds = Math.floor((diffMs % (1000 * 60)) / 1000);
   
   if (hours > 0) {
-    return `${hours}h ${minutes}m ${seconds}s`;
+    return `${hours}ຊ ${minutes}ນ ${seconds}ວ`;
   }
   if (minutes > 0) {
-    return `${minutes}m ${seconds}s`;
+    return `${minutes}ນ ${seconds}ວ`;
   }
-  return `${seconds}s`;
+  return `${seconds}ວ`;
 }
 
 function LiveDuration({ startTime }: { startTime: string | null }) {
@@ -411,7 +411,7 @@ export default function BillsInProgressClient({
     <div className="space-y-5">
       <StatusPageHeader
         title="ກຳລັງຈັດສົ່ງ"
-        subtitle="ຖ້ຽວທີ່ເລີ່ມຈັດສົ່ງແລ້ວ ແລະຍັງມີບິນທີ່ກຳລັງ active"
+        subtitle="ຖ້ຽວທີ່ເລີ່ມຈັດສົ່ງແລ້ວ ແລະຍັງມີບິນທີ່ກຳລັງດຳເນີນການ"
         icon={<FaTruckMoving />}
         tone="sky"
       />
@@ -419,7 +419,7 @@ export default function BillsInProgressClient({
       <StatusStatGrid
         columns={5}
         stats={[
-          { label: "ຖ້ຽວ active", value: summary.jobs, icon: <FaTruckMoving />, tone: "slate" },
+          { label: "ຖ້ຽວດຳເນີນການ", value: summary.jobs, icon: <FaTruckMoving />, tone: "slate" },
           { label: "ບິນກຳລັງສົ່ງ", value: summary.inprogress, icon: <FaRoute />, tone: "sky" },
           { label: "ບິນລໍຖ້າຕໍ່", value: summary.waiting, icon: <FaClock />, tone: "amber" },
           { label: "ບິນສົ່ງແລ້ວ", value: summary.completed, icon: <FaCheckCircle />, tone: "emerald" },
@@ -521,7 +521,7 @@ export default function BillsInProgressClient({
                   <tr className="bg-white/30 dark:bg-white/5 border-b border-slate-200/30 dark:border-white/5">
                     <th className="px-4 py-3 text-left font-semibold text-slate-600">ເລກທີ / ວັນທີ</th>
                     <th className="px-4 py-3 text-left font-semibold text-slate-600">ເລີ່ມສົ່ງ</th>
-                    <th className="px-4 py-3 text-left font-semibold text-slate-600">Mile / ເວລາ</th>
+                    <th className="px-4 py-3 text-left font-semibold text-slate-600">ໄມລ / ເວລາ</th>
                     <th className="px-4 py-3 text-left font-semibold text-slate-600">ຕຳແໜ່ງ</th>
                     <th className="px-4 py-3 text-left font-semibold text-slate-600">ລົດ / ຄົນຂັບ</th>
                     <th className="px-4 py-3 text-left font-semibold text-slate-600">ຄວາມຄືບໜ້າບິນ</th>
@@ -561,7 +561,7 @@ export default function BillsInProgressClient({
                           <td className="px-4 py-3 text-slate-600">
                             <div className="space-y-1">
                               {job.miles_start ? (
-                                <p className="font-medium text-slate-800">{job.miles_start} km</p>
+                                <p className="font-medium text-slate-800">{job.miles_start} ກມ</p>
                               ) : (
                                 <p className="text-slate-400">-</p>
                               )}

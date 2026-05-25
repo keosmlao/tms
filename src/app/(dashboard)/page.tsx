@@ -199,10 +199,10 @@ function formatAgingSeconds(value: CountValue) {
   const minutes = Math.floor((totalSeconds % 3600) / 60);
   const seconds = totalSeconds % 60;
   const parts = [
-    days > 0 ? `${days}d` : null,
-    days > 0 || hours > 0 ? `${hours}h` : null,
-    days > 0 || hours > 0 || minutes > 0 ? `${minutes}m` : null,
-    `${seconds}s`,
+    days > 0 ? `${days}ມ` : null,
+    days > 0 || hours > 0 ? `${hours}ຊ` : null,
+    days > 0 || hours > 0 || minutes > 0 ? `${minutes}ນ` : null,
+    `${seconds}ວ`,
   ].filter(Boolean);
   return parts.join(" ");
 }
@@ -223,7 +223,7 @@ const quickActions = [
   { href: "/approve", label: "ກວດອະນຸມັດ", description: "ຄຳຂໍລໍອະນຸມັດ", icon: <FaClipboardCheck />, color: "bg-teal-700" },
   { href: "/jobs", label: "ຈັດຖ້ຽວ", description: "ວາງແຜນການຈັດສົ່ງ", icon: <FaRoute />, color: "bg-slate-800" },
   { href: "/tracking", label: "ຕິດຕາມບິນ", description: "ກວດສະຖານະຂົນສົ່ງ", icon: <FaMapMarkedAlt />, color: "bg-sky-700" },
-  { href: "/tracking/cars-map", label: "ແຜນທີ່ລົດ", description: "GPS live tracking", icon: <FaBroadcastTower />, color: "bg-emerald-700" },
+  { href: "/tracking/cars-map", label: "ແຜນທີ່ລົດ", description: "ຕິດຕາມ GPS ສົດ", icon: <FaBroadcastTower />, color: "bg-emerald-700" },
   { href: "/reports/daily", label: "ລາຍງານ", description: "ສະຫຼຸບປະຈຳວັນ", icon: <FaChartLine />, color: "bg-amber-600" },
 ];
 
@@ -502,7 +502,7 @@ function PendingList({ items, emptyMessage, agingTick }: {
             <div className="shrink-0 text-right">
               <span className={`inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-[11px] font-medium ring-1 ${getAgingClassName(liveAging)}`}>
                 <span className="h-1.5 w-1.5 rounded-full bg-current animate-pulse" />
-                {liveAging == null ? item.time_use || "Pending" : formatAgingSeconds(liveAging)}
+                {liveAging == null ? item.time_use || "ລໍຖ້າ" : formatAgingSeconds(liveAging)}
               </span>
               {item.time_open && (
                 <p className="mt-0.5 text-[10px] text-slate-400">ເປີດ {item.time_open}</p>
@@ -810,9 +810,9 @@ function formatKpiDuration(seconds: number | null) {
   const h = Math.floor(total / 3600);
   const m = Math.floor((total % 3600) / 60);
   const s = total % 60;
-  if (h > 0) return `${h}h ${m}m`;
-  if (m > 0) return `${m}m ${s}s`;
-  return `${s}s`;
+  if (h > 0) return `${h}ຊ ${m}ນ`;
+  if (m > 0) return `${m}ນ ${s}ວ`;
+  return `${s}ວ`;
 }
 
 function Sparkline({ values, color, label, targetLine }: {
@@ -978,7 +978,7 @@ function DeliveryKpiCard({ kpi }: { kpi: DeliveryKpi }) {
           <p className="text-[10px] text-slate-500 dark:text-slate-400 mt-0.5">
             {formatNumber(period.on_time)} / {formatNumber(period.total)} ບິນ
           </p>
-          <Sparkline values={onTimeSeries} color="#059669" label="on-time" targetLine={targets.on_time_rate} />
+          <Sparkline values={onTimeSeries} color="#059669" label="ທັນເວລາ" targetLine={targets.on_time_rate} />
         </div>
 
         <div className="rounded-lg bg-rose-50 dark:bg-rose-950/30 p-3">
@@ -992,7 +992,7 @@ function DeliveryKpiCard({ kpi }: { kpi: DeliveryKpi }) {
             {formatNumber(period.breach)}
           </p>
           <p className="text-[10px] text-slate-500 dark:text-slate-400 mt-0.5">{breachRate}% ຂອງທີ່ສົ່ງ</p>
-          <Sparkline values={breachSeries} color="#e11d48" label="breach" />
+          <Sparkline values={breachSeries} color="#e11d48" label="ຊ້າ" />
         </div>
 
         <div className="rounded-lg bg-sky-50 dark:bg-sky-950/30 p-3">
@@ -1009,7 +1009,7 @@ function DeliveryKpiCard({ kpi }: { kpi: DeliveryKpi }) {
             {formatKpiDuration(period.avg_delivery_seconds)}
           </p>
           <p className="text-[10px] text-slate-500 dark:text-slate-400 mt-0.5">ຮັບຖ້ຽວ → ສົ່ງສຳເລັດ</p>
-          <Sparkline values={avgDeliverySeries} color="#0284c7" label="avg delivery" targetLine={targets.avg_delivery_minutes} />
+          <Sparkline values={avgDeliverySeries} color="#0284c7" label="ສະເລ່ຍສົ່ງ" targetLine={targets.avg_delivery_minutes} />
         </div>
 
         <div className="rounded-lg bg-amber-50 dark:bg-amber-950/30 p-3">
@@ -1026,11 +1026,11 @@ function DeliveryKpiCard({ kpi }: { kpi: DeliveryKpi }) {
             {formatKpiDuration(period.avg_close_seconds)}
           </p>
           <p className="text-[10px] text-slate-500 dark:text-slate-400 mt-0.5">ສົ່ງສຳເລັດ → ປິດຖ້ຽວ</p>
-          <Sparkline values={avgCloseSeries} color="#d97706" label="avg close" targetLine={targets.avg_close_minutes} />
+          <Sparkline values={avgCloseSeries} color="#d97706" label="ສະເລ່ຍປິດ" targetLine={targets.avg_close_minutes} />
         </div>
       </div>
 
-      <p className="mt-2 text-[9px] text-slate-400">trend 30 ມື້ຫຼ້າສຸດ · ເສັ້ນປະ = ເປົ້າໝາຍ</p>
+      <p className="mt-2 text-[9px] text-slate-400">ແນວໂນ້ມ 30 ມື້ຫຼ້າສຸດ · ເສັ້ນປະ = ເປົ້າໝາຍ</p>
 
       {branches.length > 0 && (
         <div className="mt-4 border-t border-slate-200/60 dark:border-white/10 pt-3">
@@ -1460,7 +1460,7 @@ export default function DashboardPage() {
             <div className="w-7 h-7 rounded-lg bg-sky-500/10 flex items-center justify-center">
               <FaRoute className="text-sky-500" size={12} />
             </div>
-            <h2 className="text-sm font-bold text-slate-800 dark:text-white">Carrier Mix</h2>
+            <h2 className="text-sm font-bold text-slate-800 dark:text-white">ສັດສ່ວນຂົນສົ່ງ</h2>
           </div>
           <p className="text-[11px] text-slate-400 dark:text-gray-500">
             {formatNumber(logistic)} ບິນ · {logisticRate}% ຂອງທັງໝົດ

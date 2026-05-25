@@ -122,9 +122,9 @@ function formatDurationSeconds(value: number | string | null | undefined) {
   const m = Math.floor((total % 3600) / 60);
   const s = total % 60;
   const parts: string[] = [];
-  if (h > 0) parts.push(`${h}h`);
-  if (m > 0) parts.push(`${m}m`);
-  if (h === 0) parts.push(`${s}s`);
+  if (h > 0) parts.push(`${h}ຊ`);
+  if (m > 0) parts.push(`${m}ນ`);
+  if (h === 0) parts.push(`${s}ວ`);
   return parts.join(" ");
 }
 
@@ -133,7 +133,7 @@ function formatDistanceKm(value: number | string | null | undefined) {
   const num = Number(value);
   if (!Number.isFinite(num) || num === 0) return "-";
   if (num < 1) return `${Math.round(num * 1000)} m`;
-  return `${num.toFixed(2)} km`;
+  return `${num.toFixed(2)} ກມ`;
 }
 
 interface Product {

@@ -485,7 +485,7 @@ export default function BillsWaitingRoutesPage() {
                                       </span>
                                       {distanceKm != null && (
                                         <span className="rounded-full bg-emerald-500/10 px-2 py-0.5 text-[10px] font-semibold text-emerald-700 dark:text-emerald-400">
-                                          {distanceKm < 1 ? `${Math.round(distanceKm * 1000)} m` : `${distanceKm.toFixed(1)} km`}
+                                          {distanceKm < 1 ? `${Math.round(distanceKm * 1000)} m` : `${distanceKm.toFixed(1)} ກມ`}
                                         </span>
                                       )}
                                       {bill.incoming_forwarded && (

@@ -746,7 +746,7 @@ export default function BillsPendingClient() {
   return (
     <div className="space-y-5">
       <StatusPageHeader
-        title="Pending ຕິດຕໍ່ລູກຄ້າ"
+        title="ບິນຄ້າງຕິດຕໍ່ລູກຄ້າ"
         subtitle="ກວດບິນຄ້າງສົ່ງທີ່ຮອດກຳນົດ ຫຼືລ່ວງໜ້າ 1 ວັນ ເພື່ອບັນທຶກຜົນຕິດຕໍ່, ວັນພ້ອມຮັບ ແລະຮອບສົ່ງ"
         icon={<FaFileInvoice />}
         tone="teal"
@@ -772,11 +772,11 @@ export default function BillsPendingClient() {
             </div>
           </div>
           <div>
-            <label className="block text-[10px] font-semibold text-slate-500 uppercase tracking-wider mb-1">Send date ຈາກ</label>
+            <label className="block text-[10px] font-semibold text-slate-500 uppercase tracking-wider mb-1">ວັນສົ່ງຈາກ</label>
             <input type="date" value={fromDate} min={FIXED_YEAR_START} max={FIXED_YEAR_END} onChange={(e) => setFromDate(e.target.value)} className={inputCls} />
           </div>
           <div>
-            <label className="block text-[10px] font-semibold text-slate-500 uppercase tracking-wider mb-1">Send date ຫາ</label>
+            <label className="block text-[10px] font-semibold text-slate-500 uppercase tracking-wider mb-1">ວັນສົ່ງຫາ</label>
             <input type="date" value={toDate} min={FIXED_YEAR_START} max={FIXED_YEAR_END} onChange={(e) => setToDate(e.target.value)} className={inputCls} />
           </div>
           <div>
@@ -1002,7 +1002,7 @@ export default function BillsPendingClient() {
                         {stepBills.length}
                       </div>
                       <div className="text-[9px] text-amber-700 dark:text-amber-400 font-bold leading-tight">
-                        {fmtQty(totals.qty)} qty
+                        {fmtQty(totals.qty)} ໜ່ວຍ
                       </div>
                     </div>
                   </header>
@@ -1096,7 +1096,7 @@ export default function BillsPendingClient() {
                             <label
                               className="flex items-center cursor-pointer"
                               onClick={(e) => e.stopPropagation()}
-                              title="ເລືອກສຳລັບ bulk action"
+                              title="ເລືອກຫຼາຍບິນເພື່ອປະຕິບັດການພ້ອມກັນ"
                             >
                               <input
                                 type="checkbox"
@@ -1136,7 +1136,7 @@ export default function BillsPendingClient() {
                             <div className="ml-auto flex items-center gap-2">
                               <div className="text-right hidden sm:block">
                                 <div className="text-xs font-bold text-amber-700 dark:text-amber-400 leading-tight">
-                                  {fmtQty(bill.remaining_qty_total)} <span className="text-[10px] font-medium">qty</span>
+                                  {fmtQty(bill.remaining_qty_total)} <span className="text-[10px] font-medium">ໜ່ວຍ</span>
                                 </div>
                                 <div className="text-[10px] text-slate-500 leading-tight">{bill.remaining_count} ລາຍການ</div>
                               </div>
@@ -1201,7 +1201,7 @@ export default function BillsPendingClient() {
                           <div className="px-3 pb-2 -mt-0.5 text-xs text-slate-600 dark:text-slate-300 truncate" title={bill.transport_name}>
                             <span className="font-semibold text-slate-700 dark:text-slate-200">{bill.transport_name}</span>
                             <span className="text-slate-400 dark:text-slate-500"> · </span>
-                            <span>Send {bill.send_date_display ?? bill.doc_date}</span>
+                            <span>ສົ່ງ {bill.send_date_display ?? bill.doc_date}</span>
                             {bill.sale && (
                               <>
                                 <span className="text-slate-400 dark:text-slate-500"> · </span>
@@ -1326,7 +1326,7 @@ export default function BillsPendingClient() {
                                     type="button"
                                     onClick={() => void clearScheduleField(bill.doc_no, "scheduled_date")}
                                     className={chipClear}
-                                    title="ລົບວັນທີ່ກຳນົດ — ກັບໄປໃຊ້ send_date ຂອງບິນ"
+                                    title="ລົບວັນທີ່ກຳນົດ — ກັບໄປໃຊ້ວັນສົ່ງເດີມຂອງບິນ"
                                   >
                                     <FaTimes size={8} />
                                   </button>
@@ -1419,7 +1419,7 @@ export default function BillsPendingClient() {
                                             custName: bill.cust_name ?? null,
                                             lat,
                                             lng,
-                                          }).catch((e) => alert(e instanceof Error ? e.message : "Print ບໍ່ສຳເລັດ"));
+                                          }).catch((e) => alert(e instanceof Error ? e.message : "ພິມບໍ່ສຳເລັດ"));
                                         }}
                                         className="inline-flex items-center justify-center rounded-md border border-slate-300/40 bg-white/60 px-1.5 py-1 text-slate-700 hover:bg-white dark:border-white/10 dark:bg-white/[0.04] dark:text-slate-200 dark:hover:bg-white/10"
                                         title="ພິມ QR ຈຸດສົ່ງ ເພື່ອແນບກັບບິນ"
@@ -1446,7 +1446,7 @@ export default function BillsPendingClient() {
                                 <span className="inline-flex items-center rounded-full border border-teal-500/20 bg-teal-500/10 px-2 py-0.5 text-[10px] font-semibold text-teal-700 dark:text-teal-400">
                                   {bill.source_type === "odservice.tb_product"
                                     ? "ສູນບໍລິການ"
-                                    : `ic_trans flag ${bill.source_trans_flag ?? "56/72"}`}
+                                    : `ບິນປະເພດ ${bill.source_trans_flag ?? "56/72"}`}
                                 </span>
                               )}
 
@@ -1459,7 +1459,7 @@ export default function BillsPendingClient() {
 
                               {/* Mobile-only qty fallback */}
                               <span className="sm:hidden inline-flex items-center gap-1 text-[10px] font-bold text-amber-700 dark:text-amber-400 ml-auto">
-                                {fmtQty(bill.remaining_qty_total)} qty · {bill.remaining_count} ລາຍການ
+                                {fmtQty(bill.remaining_qty_total)} ໜ່ວຍ · {bill.remaining_count} ລາຍການ
                               </span>
                             </div>
                           )}
@@ -1470,7 +1470,7 @@ export default function BillsPendingClient() {
                               <div className="px-3 py-1.5 flex items-center justify-between bg-teal-500/10 border-b border-slate-200/30 dark:border-white/5">
                                 <span className="text-[11px] font-bold flex items-center gap-1.5 text-teal-600 dark:text-teal-400">
                                   <FaBox size={10} />
-                                  ສິນຄ້າ ({fmtQty(bill.remaining_qty_total)} qty / {prods.length} ລາຍການ)
+                                  ສິນຄ້າ ({fmtQty(bill.remaining_qty_total)} ໜ່ວຍ / {prods.length} ລາຍການ)
                                 </span>
                                 <button
                                   onClick={() => setExpandedDoc(null)}
@@ -1589,7 +1589,7 @@ export default function BillsPendingClient() {
                 </div>
                 <div>
                   <h3 className="text-sm font-bold text-slate-800 dark:text-slate-100">ເພີ່ມບິນເຂົ້າລໍຖ້າຈັດຖ້ຽວ</h3>
-                  <p className="text-[11px] text-slate-500">ຄົ້ນຈາກ ic_trans 56/72/44/48 ແລະ odservice.tb_product</p>
+                  <p className="text-[11px] text-slate-500">ຄົ້ນຫາບິນປະເພດ 56/72/44/48 ແລະ ບິນສູນບໍລິການ</p>
                 </div>
               </div>
               <button onClick={closeManualModal} className="p-1.5 text-slate-400 hover:text-slate-600 hover:bg-white rounded-lg transition-colors">
@@ -1630,7 +1630,7 @@ export default function BillsPendingClient() {
                   {manualResults.length === 0 ? (
                     <div className="flex h-full min-h-[200px] flex-col items-center justify-center text-center text-slate-400">
                       <FaFileInvoice className="mb-2 text-xl opacity-60" />
-                      <p className="text-xs">ຄົ້ນຫາບິນ ic_trans 56/72 ຫຼືບິນສູນບໍລິການ</p>
+                      <p className="text-xs">ຄົ້ນຫາບິນປະເພດ 56/72 ຫຼືບິນສູນບໍລິການ</p>
                     </div>
                   ) : (
                     <div className="max-h-[300px] space-y-2 overflow-y-auto">
@@ -1656,7 +1656,7 @@ export default function BillsPendingClient() {
                             <div className="flex items-center gap-2">
                               <span className="font-mono text-xs font-bold text-slate-800 dark:text-slate-100">{bill.doc_no}</span>
                               <span className="rounded-full bg-slate-500/10 px-1.5 py-0.5 text-[9px] font-bold text-slate-500">
-                                {bill.source_type === "odservice.tb_product" ? "service" : `flag ${bill.source_trans_flag}`}
+                                {bill.source_type === "odservice.tb_product" ? "ບໍລິການ" : `ປະເພດ ${bill.source_trans_flag}`}
                               </span>
                               <span className="ml-auto text-[10px] text-slate-500">{bill.count_item} ລາຍການ</span>
                             </div>
@@ -2221,7 +2221,7 @@ function StatusMenu({
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
       <button
         type="button"
-        aria-label="Close status modal"
+        aria-label="ປິດ"
         onClick={onClose}
         className="absolute inset-0 bg-slate-950/45 backdrop-blur-sm"
       />

@@ -210,7 +210,7 @@ function JobRow({
             className={`w-6 h-6 rounded-md flex items-center justify-center transition-colors ${
               expanded ? "bg-teal-500/10 text-teal-600 dark:text-teal-400" : "text-slate-400 hover:bg-teal-500/10 hover:text-teal-600 dark:hover:text-teal-400"
             }`}
-            aria-label="Toggle"
+            aria-label="ສະຫຼັບ"
           >
             {expanded ? <FaChevronDown size={9} /> : <FaChevronRight size={9} />}
           </button>
@@ -725,7 +725,7 @@ export default function JobsClient({ initialJobs = [] as Job[] }: { initialJobs?
                 type="button"
                 onClick={() => setSearchText("")}
                 className="absolute right-2 top-1/2 -translate-y-1/2 rounded p-1 text-slate-400 hover:text-slate-600"
-                aria-label="Clear"
+                aria-label="ລ້າງ"
               >
                 <FaTimes size={10} />
               </button>
@@ -792,7 +792,7 @@ export default function JobsClient({ initialJobs = [] as Job[] }: { initialJobs?
             <table className="w-full text-xs">
               <thead>
                 <tr className="bg-white/30 dark:bg-white/5 border-b border-slate-200/30 dark:border-white/5 font-semibold text-slate-600 dark:text-slate-300">
-                  <th className="px-4 py-3 w-8" aria-label="Expand" />
+                  <th className="px-4 py-3 w-8" aria-label="ຂະຫຍາຍ" />
                   <th className="px-4 py-3 text-left">ເລກທີ / ວັນທີ</th>
                   <th className="px-4 py-3 text-left">ວັນຈັດສົ່ງ</th>
                   <th className="px-4 py-3 text-left">ລົດ</th>

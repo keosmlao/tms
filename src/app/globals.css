@@ -5,7 +5,8 @@
 :root {
   --background: #f6f8f7;
   --foreground: #13212c;
-  --font-lao-sans: "Noto Sans Lao", system-ui, sans-serif;
+  /* --font-lao-sans is injected by next/font in layout.tsx; do not redefine */
+  /* here or it would silently override the bundled Noto Sans Lao face.      */
   --font-geist-mono: "Geist Mono", ui-monospace, monospace;
 
   --glass-bg: rgba(255, 255, 255, 0.82);
