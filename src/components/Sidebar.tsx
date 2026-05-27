@@ -31,6 +31,7 @@ import {
   FaGasPump,
   FaRoute,
   FaHistory,
+  FaTools,
 } from "react-icons/fa";
 
 interface NavItem {
@@ -108,6 +109,14 @@ const navSections: NavSection[] = [
     key: "fuel",
     items: [
       { label: "ບັນທຶກເຕີມນ້ຳມັນ", href: "/fuel", icon: <FaGasPump size={13} /> },
+    ],
+  },
+  {
+    title: "ກວດລົດ/ສ້ອມ",
+    icon: <FaTools size={16} />,
+    key: "vehicle-care",
+    items: [
+      { label: "ຕິດຕາມການກວດເຊັກສະພາບລົດ", href: "/inspection", icon: <FaClipboardCheck size={13} /> },
     ],
   },
   {
