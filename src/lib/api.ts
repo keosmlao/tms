@@ -7,6 +7,7 @@ import * as dashboard from "@/actions/dashboard";
 import * as deliveryRound from "@/actions/delivery-round";
 import * as deliveryRoute from "@/actions/delivery-route";
 import * as fuel from "@/actions/fuel";
+import * as geofence from "@/actions/geofence";
 import * as gps from "@/actions/gps";
 import * as jobs from "@/actions/jobs";
 import * as masterData from "@/actions/master-data";
@@ -127,6 +128,12 @@ export const Actions = {
   getGpsRealtimeAllLive: tracking.getGpsRealtimeAllLive,
   getGpsRealtimeAllLean: tracking.getGpsRealtimeAllLean,
   getLocations: tracking.getLocations,
+  getPhoneTrackingJobs: tracking.getPhoneTrackingJobs,
+  getPhoneTrail: tracking.getPhoneTrail,
+
+  // Geofence (per-branch start/end points)
+  getGeofences: geofence.getGeofences,
+  saveGeofenceConfig: geofence.saveGeofenceConfig,
 
   // GPS
   getGpsObjectList: gps.getGpsObjectList,

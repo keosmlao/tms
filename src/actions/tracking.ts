@@ -7,6 +7,8 @@ import {
   getGpsRealtime as svcGetGpsRealtime,
   getGpsRealtimeAll as svcGetGpsRealtimeAllLive,
   getLocations as svcGetLocations,
+  getPhoneTrackingJobs as svcGetPhoneTrackingJobs,
+  getPhoneTrail as svcGetPhoneTrail,
 } from "@/queries/tracking.js";
 import {
   getCurrentAll as svcGetCurrentAll,
@@ -50,4 +52,16 @@ export async function getGpsRealtimeAllLean() {
 export async function getLocations(search?: string) {
   const s = await requireSession();
   return svcGetLocations(s, search);
+}
+
+// Phone-collected tracking: list trips that have device GPS points.
+export async function getPhoneTrackingJobs() {
+  const s = await requireSession();
+  return svcGetPhoneTrackingJobs(s);
+}
+
+// Full ordered trail + telemetry + device info for one trip.
+export async function getPhoneTrail(docNo: string) {
+  const s = await requireSession();
+  return svcGetPhoneTrail(s, docNo);
 }

@@ -30,6 +30,7 @@ import {
   FaBroadcastTower,
   FaGasPump,
   FaRoute,
+  FaMobileAlt,
   FaHistory,
   FaPlug,
   FaTruckLoading,
@@ -56,6 +57,7 @@ const navSections: NavSection[] = [
     items: [
       { label: "ຕິດຕາມສິນຄ້າ", href: "/tracking", icon: <FaMapMarkerAlt size={13} /> },
       { label: "ແຜນທີ່ລົດ", href: "/tracking/cars-map", icon: <FaBroadcastTower size={13} /> },
+      { label: "ເສັ້ນທາງມືຖືຄົນຂັບ", href: "/tracking/phone", icon: <FaMobileAlt size={13} /> },
       { label: "ສະຫຼຸບ GPS ປະຈຳວັນ", href: "/tracking/gps-usage", icon: <FaChartArea size={13} /> },
       // { label: "ດຶງຂໍ້ມູນ GPS ຍ້ອນຫຼັງ", href: "/tracking/gps-backfill", icon: <FaCloudDownloadAlt size={13} /> },
     ],
