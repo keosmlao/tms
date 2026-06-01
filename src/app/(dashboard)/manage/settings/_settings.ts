@@ -7,6 +7,10 @@ export interface NotifySettings {
   "whatsapp.test_to": string;
   "pending.not_yet_days": string;
   "app.qr_scan_verify_enabled": string;
+  "app.mobile.min_version": string;
+  "app.mobile.latest_version": string;
+  "app.mobile.update_url_android": string;
+  "app.mobile.update_url_ios": string;
   "kpi.target_on_time_rate": string;
   "kpi.target_avg_delivery_minutes": string;
   "kpi.target_avg_close_minutes": string;
@@ -23,6 +27,10 @@ export const EMPTY_SETTINGS: NotifySettings = {
   "whatsapp.test_to": "",
   "pending.not_yet_days": "3",
   "app.qr_scan_verify_enabled": "1",
+  "app.mobile.min_version": "",
+  "app.mobile.latest_version": "",
+  "app.mobile.update_url_android": "",
+  "app.mobile.update_url_ios": "",
   "kpi.target_on_time_rate": "90",
   "kpi.target_avg_delivery_minutes": "120",
   "kpi.target_avg_close_minutes": "30",

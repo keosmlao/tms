@@ -32,6 +32,9 @@ import {
   FaRoute,
   FaHistory,
   FaTools,
+  FaPlug,
+  FaTruckLoading,
+
 } from "react-icons/fa";
 
 interface NavItem {
@@ -112,11 +115,21 @@ const navSections: NavSection[] = [
     ],
   },
   {
+
     title: "ກວດລົດ/ສ້ອມ",
     icon: <FaTools size={16} />,
     key: "vehicle-care",
     items: [
       { label: "ຕິດຕາມການກວດເຊັກສະພາບລົດ", href: "/inspection", icon: <FaClipboardCheck size={13} /> },
+
+    title: "ທັນໃຈ Express",
+    icon: <FaPlug size={16} />,
+    key: "thunjai",
+    items: [
+      { label: "ທັນໃຈຂົນສົ່ງ", href: "/thunjai/shipping", icon: <FaShippingFast size={13} /> },
+      { label: "ສ້າງ Order", href: "/thunjai/orders/create", icon: <FaBox size={13} /> },
+      { label: "ລະບົບ ThunJai", href: "/thunjai", icon: <FaTruckLoading size={13} /> },
+
     ],
   },
   {

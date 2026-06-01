@@ -13,6 +13,7 @@ import * as masterData from "@/actions/master-data";
 import * as notifications from "@/actions/notifications";
 import * as reports from "@/actions/reports";
 import * as settings from "@/actions/settings";
+import * as thunjai from "@/actions/thunjai";
 import * as tracking from "@/actions/tracking";
 
 export const Actions = {
@@ -155,6 +156,28 @@ export const Actions = {
   // Settings (notification test mode etc.)
   getNotifySettings: settings.getNotifySettings,
   saveNotifySettings: settings.saveNotifySettings,
+
+  // ThunJai Express integration
+  getThunJaiSettings: thunjai.getThunJaiSettings,
+  saveThunJaiSettings: thunjai.saveThunJaiSettings,
+  testThunJaiToken: thunjai.testThunJaiToken,
+  listThunJaiOrders: thunjai.listThunJaiOrders,
+  listThunJaiSenderAddresses: thunjai.listThunJaiSenderAddresses,
+  listThunJaiPackaging: thunjai.listThunJaiPackaging,
+  listThunJaiProvinces: thunjai.listThunJaiProvinces,
+  listThunJaiDistricts: thunjai.listThunJaiDistricts,
+  listThunJaiVillages: thunjai.listThunJaiVillages,
+  searchThunJaiSourceProducts: thunjai.searchThunJaiSourceProducts,
+  checkThunJaiServiceType: thunjai.checkThunJaiServiceType,
+  estimateThunJaiPrice: thunjai.estimateThunJaiPrice,
+  createThunJaiOrder: thunjai.createThunJaiOrder,
+  deleteThunJaiOrder: thunjai.deleteThunJaiOrder,
+  getThunJaiOrderDetail: thunjai.getThunJaiOrderDetail,
+  getThunJaiOrderTracking: thunjai.getThunJaiOrderTracking,
+  getThunJaiOrderLabel: thunjai.getThunJaiOrderLabel,
+  listThunJaiPickups: thunjai.listThunJaiPickups,
+  requestThunJaiPickup: thunjai.requestThunJaiPickup,
+  getThunJaiPickupDetail: thunjai.getThunJaiPickupDetail,
 
   // Notifications
   getActivityNotifications: notifications.getActivityNotifications,
