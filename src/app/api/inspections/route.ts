@@ -146,9 +146,9 @@ export async function GET(request: Request) {
   if (!session) return Response.json({ error: "Unauthorized" }, { status: 401 });
 
   const { searchParams } = new URL(request.url);
-  const dateFrom = searchParams.get("dateFrom") ?? null;
-  const dateTo = searchParams.get("dateTo") ?? null;
-  const search = searchParams.get("search")?.trim() ?? null;
+  const dateFrom = searchParams.get("dateFrom")?.trim() || null;
+  const dateTo = searchParams.get("dateTo")?.trim() || null;
+  const search = searchParams.get("search")?.trim() || null;
 
   try {
     const data = await query(

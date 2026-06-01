@@ -117,6 +117,7 @@ const navSections: NavSection[] = [
     key: "vehicle-care",
     items: [
       { label: "ຕິດຕາມການກວດເຊັກສະພາບລົດ", href: "/inspection", icon: <FaClipboardCheck size={13} /> },
+      { label: "ປະຫວັດການສ້ອມແປງ", href: "/maint-log", icon: <FaTools size={13} /> },
     ],
   },
   {
