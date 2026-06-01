@@ -127,7 +127,10 @@ const AttachBillImage = z.object({
 });
 const FuelRefill = z.object({
   action: z.literal("fuel_refill"),
-  user_code: NonEmptyString,
+  // The route injects user_code from the authenticated session, so it's
+  // optional in the body — requiring it here would 400 a perfectly valid
+  // refill just because the client omitted a field the server overrides.
+  user_code: OptionalString,
   driver_name: OptionalString,
   car: OptionalString,
   doc_no: OptionalString,

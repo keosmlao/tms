@@ -377,6 +377,24 @@ async function mobileJobAction(body) {
           [docNo]
         );
 
+        // ເບີກເຄື່ອງ is implicit for bills picked up at the trip's origin
+        // warehouse — they leave with the driver the moment dispatch starts —
+        // so backfill recipt_job here too. Bills picked up at another warehouse
+        // keep recipt_job NULL until the driver taps "ຮັບເຄື່ອງ" there.
+        await client.query(
+          `UPDATE public.odg_tms_detail d
+           SET recipt_job = COALESCE(d.recipt_job, j.dispatch_started_at, LOCALTIMESTAMP(0))
+           FROM odg_tms j
+           WHERE d.doc_no = $1
+             AND j.doc_no = d.doc_no
+             AND d.recipt_job IS NULL
+             AND COALESCE(d.pickup_transport_code,
+                          (SELECT s.transport_code FROM public.ic_trans_shipment s WHERE s.doc_no = d.bill_no LIMIT 1),
+                          '') = COALESCE(j.origin_transport_code, '')
+             AND ${getFixedYearSqlFilter("d.doc_date")}`,
+          [docNo]
+        );
+
         await client.query("COMMIT");
         void notifyJobDispatchStarted(docNo);
         return { success: true };
@@ -388,7 +406,11 @@ async function mobileJobAction(body) {
 
         const billRow = await client.query(
           `SELECT d.doc_no, d.cust_code, t.approve_status, t.job_status, d.recipt_job,
-                  d.pickup_transport_code, t.dispatch_started_at
+                  d.pickup_transport_code, t.dispatch_started_at,
+                  COALESCE(t.origin_transport_code, '') AS origin_transport_code,
+                  COALESCE(d.pickup_transport_code,
+                           (SELECT s.transport_code FROM public.ic_trans_shipment s WHERE s.doc_no = d.bill_no LIMIT 1),
+                           '') AS effective_pickup_code
            FROM public.odg_tms_detail d
            INNER JOIN odg_tms t ON t.doc_no = d.doc_no
            WHERE d.bill_no = $1 AND ${getFixedYearSqlFilter("d.doc_date")}
@@ -405,12 +427,19 @@ async function mobileJobAction(body) {
         // Auto-receive + auto-dispatch: the UPDATE below sets job_status=2
         // regardless of current value, so a driver who jumped straight to
         // check-in (skipped "ຮັບຖ້ຽວ" / "ເລີ່ມຈັດສົ່ງ") still progresses cleanly.
-        // Pickup-at-customer flow collapses pickup + delivery into one stop:
-        // the driver arrives at the customer, hands over the freshly received
-        // goods, and that single checkin counts as both. Skip the recipt_job
-        // gate — we backfill it below in the same UPDATE.
+        // ເບີກເຄື່ອງ (goods receipt) is automatic in two cases, so we skip the
+        // gate and backfill recipt_job in the UPDATE below:
+        //   1. Pickup-at-customer — the driver arrives at the customer, hands
+        //      over the freshly received goods; one checkin counts as both.
+        //   2. Pickup at the trip's origin warehouse — the goods left that
+        //      warehouse with the driver, so receiving is implicit.
+        // Bills picked up at a *different* warehouse still require the driver to
+        // tap "ຮັບເຄື່ອງ" at that location first.
         const pickupAtCustomer = currentBill.pickup_transport_code === "__CUSTOMER__";
-        if (!pickupAtCustomer && !currentBill.recipt_job) {
+        const pickupAtOrigin =
+          (currentBill.effective_pickup_code ?? "") === (currentBill.origin_transport_code ?? "");
+        const autoReceive = pickupAtCustomer || pickupAtOrigin;
+        if (!autoReceive && !currentBill.recipt_job) {
           throw new Error("ກະລຸນາເບີກເຄື່ອງກ່ອນ");
         }
         // Driver may skip the explicit "ເລີ່ມຈັດສົ່ງ" button (older trips, or
@@ -448,7 +477,7 @@ async function mobileJobAction(body) {
           `UPDATE public.odg_tms_detail
            SET checkin_at = COALESCE(checkin_at, LOCALTIMESTAMP(0)),
                recipt_job = CASE
-                 WHEN pickup_transport_code = '__CUSTOMER__'
+                 WHEN $4::boolean
                    THEN COALESCE(recipt_job, LOCALTIMESTAMP(0))
                  ELSE recipt_job
                END,
@@ -459,7 +488,7 @@ async function mobileJobAction(body) {
                END,
                lat = COALESCE($2, lat), lng = COALESCE($3, lng)
            WHERE bill_no = $1 AND ${getFixedYearSqlFilter("doc_date")}`,
-          [billNo, lat, lng]
+          [billNo, lat, lng, autoReceive]
         );
 
         await client.query(
@@ -606,6 +635,11 @@ async function mobileJobAction(body) {
 
         const billRow = await client.query(
           `SELECT d.doc_no, t.approve_status, t.job_status, d.recipt_job, d.forward_transport_code,
+                  d.pickup_transport_code,
+                  COALESCE(t.origin_transport_code, '') AS origin_transport_code,
+                  COALESCE(d.pickup_transport_code,
+                           (SELECT s.transport_code FROM public.ic_trans_shipment s WHERE s.doc_no = d.bill_no LIMIT 1),
+                           '') AS effective_pickup_code,
                   COALESCE(d.status, 0) AS status
            FROM public.odg_tms_detail d
            INNER JOIN odg_tms t ON t.doc_no = d.doc_no
@@ -632,7 +666,22 @@ async function mobileJobAction(body) {
         }
         if (Number(currentBill.approve_status ?? 0) !== 1) throw new Error("ຖ້ຽວນີ້ຍັງບໍ່ຖືກອະນຸມັດ");
         if (Number(currentBill.job_status ?? 0) >= 3) throw new Error("ຖ້ຽວນີ້ປິດແລ້ວ ບໍ່ສາມາດສຳເລັດ");
-        if (!currentBill.recipt_job) throw new Error("ກະລຸນາເບີກເຄື່ອງກ່ອນ");
+        // Same origin-aware ເບີກເຄື່ອງ rule as checkin_bill: auto-receive when
+        // the goods came from the trip's origin warehouse or from the customer;
+        // otherwise the driver must still tap "ຮັບເຄື່ອງ" first.
+        const pickupAtCustomer = currentBill.pickup_transport_code === "__CUSTOMER__";
+        const pickupAtOrigin =
+          (currentBill.effective_pickup_code ?? "") === (currentBill.origin_transport_code ?? "");
+        const autoReceive = pickupAtCustomer || pickupAtOrigin;
+        if (!currentBill.recipt_job) {
+          if (!autoReceive) throw new Error("ກະລຸນາເບີກເຄື່ອງກ່ອນ");
+          await client.query(
+            `UPDATE public.odg_tms_detail
+             SET recipt_job = COALESCE(recipt_job, LOCALTIMESTAMP(0))
+             WHERE bill_no = $1 AND ${getFixedYearSqlFilter("doc_date")}`,
+            [billNo]
+          );
+        }
         // Auto-progress through receive + dispatch when the driver skipped
         // those steps. The two UPDATE odg_tms statements below already bump
         // job_status to 2; we also backfill dispatch_started_at so the

@@ -76,6 +76,7 @@ export function Field({
   placeholder,
   icon,
   disabled,
+  type = "text",
 }: {
   label: string;
   hint?: string;
@@ -84,6 +85,7 @@ export function Field({
   placeholder?: string;
   icon?: React.ReactNode;
   disabled?: boolean;
+  type?: "text" | "password" | "url";
 }) {
   return (
     <div className={disabled ? "opacity-50" : ""}>
@@ -97,7 +99,7 @@ export function Field({
           </span>
         )}
         <input
-          type="text"
+          type={type}
           value={value}
           onChange={(e) => onChange(e.target.value)}
           disabled={disabled}

@@ -279,14 +279,22 @@ export function FuelEntryDialog({
     e.preventDefault();
     setError(null);
 
-    const litersN = Number(liters);
-    const amountN = Number(amount);
-    if (!Number.isFinite(litersN) || litersN <= 0) {
-      setError("ກະລຸນາໃສ່ຈຳນວນລິດ");
+    // Match the backend rule: liters OR amount is enough (not both). Validate
+    // only what was filled in; require at least one positive value.
+    const litersRaw = liters.trim();
+    const amountRaw = amount.trim();
+    const litersN = litersRaw === "" ? null : Number(litersRaw);
+    const amountN = amountRaw === "" ? null : Number(amountRaw);
+    if (litersN !== null && (!Number.isFinite(litersN) || litersN < 0)) {
+      setError("ຈຳນວນລິດບໍ່ຖືກຕ້ອງ");
       return;
     }
-    if (!Number.isFinite(amountN) || amountN <= 0) {
-      setError("ກະລຸນາໃສ່ຈຳນວນເງິນ");
+    if (amountN !== null && (!Number.isFinite(amountN) || amountN < 0)) {
+      setError("ຈຳນວນເງິນບໍ່ຖືກຕ້ອງ");
+      return;
+    }
+    if ((litersN === null || litersN <= 0) && (amountN === null || amountN <= 0)) {
+      setError("ກະລຸນາໃສ່ຈຳນວນລິດ ຫຼື ຈຳນວນເງິນ");
       return;
     }
 
@@ -299,8 +307,8 @@ export function FuelEntryDialog({
         user_code: driverCode || undefined,
         driver_name: driver?.name_1 || undefined,
         car: carCode || undefined,
-        liters: litersN,
-        amount: amountN,
+        liters: litersN ?? undefined,
+        amount: amountN ?? undefined,
         odometer: odometer ? Number(odometer) : undefined,
         station: station.trim() || undefined,
         note: note.trim() || undefined,
@@ -392,7 +400,7 @@ export function FuelEntryDialog({
             <div>
               <label className="block text-xs font-medium text-slate-600 dark:text-slate-300 mb-1.5">
                 <FaGasPump className="inline mr-1.5 text-amber-500" size={11} />
-                ຈຳນວນລິດ <span className="text-rose-500">*</span>
+                ຈຳນວນລິດ
               </label>
               <input
                 type="number"
@@ -402,7 +410,6 @@ export function FuelEntryDialog({
                 onChange={(e) => setLiters(e.target.value)}
                 className="w-full glass-input rounded-lg px-3 py-2 text-sm font-bold text-slate-700 dark:text-slate-200"
                 placeholder="0.00"
-                required
               />
             </div>
             <div>
@@ -411,7 +418,7 @@ export function FuelEntryDialog({
                   className="inline mr-1.5 text-emerald-500"
                   size={11}
                 />
-                ຈຳນວນເງິນ <span className="text-rose-500">*</span>
+                ຈຳນວນເງິນ
               </label>
               <input
                 type="number"
@@ -421,9 +428,11 @@ export function FuelEntryDialog({
                 onChange={(e) => setAmount(e.target.value)}
                 className="w-full glass-input rounded-lg px-3 py-2 text-sm font-bold text-slate-700 dark:text-slate-200"
                 placeholder="0"
-                required
               />
             </div>
+            <p className="col-span-2 -mt-1 text-[11px] text-slate-400 dark:text-slate-500">
+              ໃສ່ຢ່າງໜ້ອຍ 1 ຢ່າງ — ຈຳນວນລິດ ຫຼື ຈຳນວນເງິນ
+            </p>
           </div>
 
           <div className="grid grid-cols-2 gap-3">

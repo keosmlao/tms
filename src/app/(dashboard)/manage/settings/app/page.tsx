@@ -2,10 +2,10 @@
 
 import Link from "next/link";
 import { useEffect, useState } from "react";
-import { FaArrowLeft, FaCog, FaQrcode } from "react-icons/fa";
+import { FaArrowLeft, FaCog, FaMobileAlt, FaQrcode } from "react-icons/fa";
 import { Actions } from "@/lib/api";
 import { StatusPageHeader } from "@/components/status-page-shell";
-import { PageLoading, SaveBar, SectionCard, Toggle } from "../_components";
+import { Field, PageLoading, SaveBar, SectionCard, Toggle } from "../_components";
 import { EMPTY_SETTINGS, type NotifySettings } from "../_settings";
 
 export default function AppSettingsPage() {
@@ -34,6 +34,10 @@ export default function AppSettingsPage() {
     try {
       await Actions.saveNotifySettings({
         "app.qr_scan_verify_enabled": data["app.qr_scan_verify_enabled"],
+        "app.mobile.min_version": data["app.mobile.min_version"].trim(),
+        "app.mobile.latest_version": data["app.mobile.latest_version"].trim(),
+        "app.mobile.update_url_android": data["app.mobile.update_url_android"].trim(),
+        "app.mobile.update_url_ios": data["app.mobile.update_url_ios"].trim(),
       });
       setSavedAt(Date.now());
     } catch (e) {
@@ -78,6 +82,44 @@ export default function AppSettingsPage() {
               description="ເມື່ອເປີດ: ປຸ່ມ Scan QR ປະກົດໃນບີນຕອນຈັດສົ່ງ ໃຫ້ຄົນຂັບ scan ບີນເພື່ອກວດສອບໄລຍະ. ປິດເພື່ອເຊື່ອງ."
               checked={qrScanEnabled}
               onChange={(v) => setData((d) => ({ ...d, "app.qr_scan_verify_enabled": v ? "1" : "0" }))}
+            />
+          </SectionCard>
+
+          <SectionCard
+            title="ບັງຄັບອັບເດດ App"
+            subtitle="ກຳນົດເວີຊັນຕ່ຳສຸດ — app ທີ່ເກົ່າກວ່ານີ້ຈະຖືກບັງຄັບໃຫ້ອັບເດດກ່ອນໃຊ້ງານ"
+            icon={<FaMobileAlt className="text-teal-600" />}
+            tone="teal"
+          >
+            <Field
+              label="ເວີຊັນຕ່ຳສຸດທີ່ອະນຸຍາດ (min version)"
+              hint="ຕົວຢ່າງ 1.4.0 — app ທີ່ຕ່ຳກວ່ານີ້ (ຫຼືບໍ່ສົ່ງເວີຊັນ) ຈະຖືກບັງຄັບໃຫ້ອັບເດດ. ປ່ອຍຫວ່າງ = ປິດການບັງຄັບ."
+              value={data["app.mobile.min_version"]}
+              onChange={(v) => setData((d) => ({ ...d, "app.mobile.min_version": v }))}
+              placeholder="1.4.0"
+            />
+            <Field
+              label="ເວີຊັນຫຼ້າສຸດ (latest version)"
+              hint="ໃຊ້ສຳລັບແຈ້ງເຕືອນແບບບໍ່ບັງຄັບ ('ມີເວີຊັນໃໝ່'). ປ່ອຍຫວ່າງໄດ້."
+              value={data["app.mobile.latest_version"]}
+              onChange={(v) => setData((d) => ({ ...d, "app.mobile.latest_version": v }))}
+              placeholder="1.4.0"
+            />
+            <Field
+              label="ລິ້ງອັບເດດ Android"
+              type="url"
+              hint="ລິ້ງ Play Store ຫຼື APK ສຳລັບ Android"
+              value={data["app.mobile.update_url_android"]}
+              onChange={(v) => setData((d) => ({ ...d, "app.mobile.update_url_android": v }))}
+              placeholder="https://play.google.com/store/apps/details?id=..."
+            />
+            <Field
+              label="ລິ້ງອັບເດດ iOS"
+              type="url"
+              hint="ລິ້ງ App Store ສຳລັບ iOS"
+              value={data["app.mobile.update_url_ios"]}
+              onChange={(v) => setData((d) => ({ ...d, "app.mobile.update_url_ios": v }))}
+              placeholder="https://apps.apple.com/app/..."
             />
           </SectionCard>
 

@@ -1,5 +1,6 @@
 import type { NextRequest } from "next/server";
 import { verifyToken } from "@/lib/auth";
+import { assertMobileAppVersion } from "@/lib/app-version";
 
 export interface MobileSession {
   usercode: string;
@@ -33,6 +34,10 @@ export async function requireMobileSession(
     (error as Error & { status?: number }).status = 401;
     throw error;
   }
+  // Force a client update before any protected work when the app version is
+  // below the admin-set minimum. Throws a 426 that mobileErrorResponse turns
+  // into a force_update payload.
+  await assertMobileAppVersion(request);
   return {
     usercode,
     username,
@@ -43,7 +48,12 @@ export async function requireMobileSession(
 }
 
 export function mobileErrorResponse(error: unknown): Response {
-  const err = error as { status?: number; message?: string; issues?: unknown };
+  const err = error as {
+    status?: number;
+    message?: string;
+    issues?: unknown;
+    details?: Record<string, unknown>;
+  };
   const status = typeof err?.status === "number" ? err.status : 500;
   const message = err?.message ?? "Internal server error";
   if (status === 500) console.error("Mobile API error:", error);
@@ -51,5 +61,8 @@ export function mobileErrorResponse(error: unknown): Response {
   // add per-field UI feedback later.
   const body: Record<string, unknown> = { error: message };
   if (err?.issues) body.issues = err.issues;
+  // Merge any structured details (e.g. the force_update / app_update payload
+  // from a 426) so the client can read them straight off the error body.
+  if (err?.details && typeof err.details === "object") Object.assign(body, err.details);
   return Response.json(body, { status });
 }

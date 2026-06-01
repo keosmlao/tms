@@ -19,6 +19,15 @@ const REALTIME_PROVIDER_MIN_GAP_MS = Math.max(
     10
   ) || 1200
 );
+const REALTIME_PROVIDER_429_COOLDOWN_MS = Math.max(
+  5_000,
+  Number.parseInt(
+    process.env.GPS_TRACKER_REALTIME_429_COOLDOWN_MS ??
+      process.env.GPS_TRACKER_429_COOLDOWN_MS ??
+      "30000",
+    10
+  ) || 30_000
+);
 const REALTIME_DB_FRESH_MS = Math.max(
   5_000,
   Number.parseInt(
@@ -850,6 +859,13 @@ async function runRealtimeProviderRequest(task) {
   const scheduled = previous
     .catch(() => undefined)
     .then(async () => {
+      const cooldownUntil = trackingCache.__tmsGpsRealtimeCooldownUntil ?? 0;
+      if (Date.now() < cooldownUntil) {
+        const error = new Error("GPS realtime provider is cooling down after HTTP 429");
+        error.code = "GPS_PROVIDER_RATE_LIMIT";
+        error.cooldownMs = cooldownUntil - Date.now();
+        throw error;
+      }
       const lastAt = trackingCache.__tmsGpsRealtimeLastAt ?? 0;
       const waitMs = Math.max(
         0,
@@ -864,6 +880,28 @@ async function runRealtimeProviderRequest(task) {
     });
   trackingCache.__tmsGpsRealtimeQueue = scheduled.catch(() => undefined);
   return scheduled;
+}
+
+function parseRetryAfterMs(headerValue) {
+  const raw = String(headerValue ?? "").trim();
+  if (!raw) return null;
+  const seconds = Number(raw);
+  if (Number.isFinite(seconds)) return Math.max(0, seconds * 1000);
+  const dateMs = Date.parse(raw);
+  if (Number.isFinite(dateMs)) return Math.max(0, dateMs - Date.now());
+  return null;
+}
+
+function setRealtimeProviderCooldown(res) {
+  const retryAfterMs = parseRetryAfterMs(res?.headers?.get?.("retry-after"));
+  const cooldownMs = Math.max(
+    5_000,
+    retryAfterMs ?? REALTIME_PROVIDER_429_COOLDOWN_MS
+  );
+  trackingCache.__tmsGpsRealtimeCooldownUntil = Date.now() + cooldownMs;
+  console.warn(
+    `[gps-realtime] provider rate limit HTTP 429; using cached positions for ${Math.ceil(cooldownMs / 1000)}s`
+  );
 }
 
 function normalizeRealtimeTimestamp(value) {
@@ -932,7 +970,11 @@ async function fetchRealtimeJson(cleanImei, config) {
       });
 
       if (!res.ok) {
-        if (res.status === 429 || res.status >= 500) {
+        if (res.status === 429) {
+          setRealtimeProviderCooldown(res);
+          return null;
+        }
+        if (res.status >= 500) {
           if (attempt < MAX_ATTEMPTS) {
             const waitMs = 2000 * attempt;
             console.warn(
@@ -960,6 +1002,9 @@ async function fetchRealtimeJson(cleanImei, config) {
         throw error;
       }
     } catch (error) {
+      if (error?.code === "GPS_PROVIDER_RATE_LIMIT") {
+        return null;
+      }
       if (attempt < MAX_ATTEMPTS) {
         const waitMs = 2000 * attempt;
         console.warn(
@@ -1073,7 +1118,13 @@ async function fetchGpsForImei(imei, carCode, carName, config) {
     }
     return current;
   } catch (error) {
-    console.error(`GPS fetch failed for imei=${cleanImei}`, error);
+    if (error?.code === "GPS_PROVIDER_RATE_LIMIT") {
+      console.warn(
+        `[gps-realtime] rate limited imei=${cleanImei}; using cached position`
+      );
+    } else {
+      console.error(`GPS fetch failed for imei=${cleanImei}`, error);
+    }
     return getRealtimeCacheMap().get(cleanImei) ?? null;
   }
 }

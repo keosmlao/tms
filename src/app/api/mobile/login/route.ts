@@ -4,6 +4,7 @@ import { parseJsonBody } from "@/lib/validation";
 import { LoginSchema } from "@/lib/mobile-schemas";
 import { rateLimit, rateLimitResponse } from "@/lib/rate-limit";
 import { mobileErrorResponse } from "@/lib/mobile-auth";
+import { evaluateMobileAppVersion } from "@/lib/app-version";
 
 export async function POST(request: Request) {
   try {
@@ -19,7 +20,10 @@ export async function POST(request: Request) {
       logistic_code: user.logistic_code ?? "",
       title: user.title ?? "",
     });
-    return Response.json({ ...user, token });
+    // Surface the update policy on login (without blocking) so the app can show
+    // a forced-update screen immediately. Protected routes hard-block via 426.
+    const app_update = await evaluateMobileAppVersion(request);
+    return Response.json({ ...user, token, app_update });
   } catch (error) {
     return mobileErrorResponse(error);
   }

@@ -1,5 +1,6 @@
 import { getSettings } from "@/queries/settings.js";
 import { mobileErrorResponse, requireMobileSession } from "@/lib/mobile-auth";
+import { evaluateMobileAppVersion } from "@/lib/app-version";
 
 // Allow-list of settings safe to expose to the driver app. New mobile feature
 // flags belong here; nothing else from `odg_tms_setting` should leak.
@@ -13,8 +14,13 @@ export async function GET(request: Request) {
     // Empty string = no row in DB yet = treat as enabled.
     const isOn = (v: string | undefined) =>
       v === "1" || v === "true" || v === "" || v === undefined;
+    // requireMobileSession already 426s when a forced update is required, so
+    // reaching here means the version is allowed; include the policy anyway so
+    // the app can show a soft "update available" prompt.
+    const app_update = await evaluateMobileAppVersion(request);
     return Response.json({
       qr_scan_verify_enabled: isOn(raw["app.qr_scan_verify_enabled"]),
+      app_update,
     });
   } catch (error) {
     return mobileErrorResponse(error);
