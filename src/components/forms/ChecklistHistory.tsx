@@ -1,4 +1,4 @@
-"use client";
+﻿"use client";
 
 import { useEffect, useRef, useState } from "react";
 import { FaCheck, FaSpinner, FaTimes } from "react-icons/fa";
@@ -449,7 +449,7 @@ export function ChecklistHistory({ dateFrom, dateTo, search, version }: HistoryP
       {/* Approval / Rejection dialog */}
       {dialog && (
         <div
-          className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm"
+          className="fixed inset-0 z-[1100] flex items-center justify-center bg-black/40 backdrop-blur-sm"
           onClick={(e) => { if (e.target === e.currentTarget) closeDialog(); }}
         >
           <div className="w-full max-w-md rounded-2xl border border-slate-200 bg-white p-6 shadow-2xl dark:border-white/10 dark:bg-slate-900">
