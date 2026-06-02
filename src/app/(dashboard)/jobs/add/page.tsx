@@ -129,6 +129,26 @@ interface AddJobClientProps {
   initialJob?: JobForEdit;
 }
 
+const routePath = (route: {
+  origin?: string;
+  destination?: string;
+  waypoints?: Array<string | { name?: string }>;
+}) =>
+  [route.origin, ...(route.waypoints ?? []), route.destination]
+    .map((item) => String(item && typeof item === "object" ? item.name ?? "" : item ?? "").trim())
+    .filter(Boolean)
+    .join(" - ");
+
+const routeLabel = (route: {
+  name: string;
+  origin?: string;
+  destination?: string;
+  waypoints?: Array<string | { name?: string }>;
+}) => {
+  const path = routePath(route);
+  return route.name + (path ? ` (${path})` : "");
+};
+
 const SearchDropdown = ({
   refEl,
   show,
@@ -445,16 +465,20 @@ export default function AddJobClient({
   const [carSearch, setCarSearch] = useState("");
   const [driverSearch, setDriverSearch] = useState("");
   const [workerSearch, setWorkerSearch] = useState("");
+  const [routeSearch, setRouteSearch] = useState("");
   const [showCarDrop, setShowCarDrop] = useState(false);
   const [showDriverDrop, setShowDriverDrop] = useState(false);
   const [showWorkerDrop, setShowWorkerDrop] = useState(false);
+  const [showRouteDrop, setShowRouteDrop] = useState(false);
   const carRef = useRef<HTMLDivElement>(null);
   const driverRef = useRef<HTMLDivElement>(null);
   const workerRef = useRef<HTMLDivElement>(null);
+  const routeRef = useRef<HTMLDivElement>(null);
   const deferredSearchText = useDeferredValue(searchText);
   const deferredCarSearch = useDeferredValue(carSearch);
   const deferredDriverSearch = useDeferredValue(driverSearch);
   const deferredWorkerSearch = useDeferredValue(workerSearch);
+  const deferredRouteSearch = useDeferredValue(routeSearch);
 
   // Persist draft (create mode only — edit mode shouldn't pollute the create draft)
   useEffect(() => {
@@ -535,12 +559,21 @@ export default function AddJobClient({
     setSelectedWorkers((current) => current.filter((c) => c !== driver));
   }, [driver, drivers]);
 
+  // Keep the route search box showing the selected route's label (edit mode
+  // hydration + after the route list loads asynchronously).
+  useEffect(() => {
+    if (!deliveryRouteCode) return;
+    const selected = deliveryRoutes.find((r) => r.code === deliveryRouteCode);
+    if (selected) setRouteSearch(routeLabel(selected));
+  }, [deliveryRouteCode, deliveryRoutes]);
+
   useEffect(() => {
     const handler = (event: MouseEvent) => {
       const target = event.target as Node;
       if (!carRef.current?.contains(target)) setShowCarDrop(false);
       if (!driverRef.current?.contains(target)) setShowDriverDrop(false);
       if (!workerRef.current?.contains(target)) setShowWorkerDrop(false);
+      if (!routeRef.current?.contains(target)) setShowRouteDrop(false);
     };
     document.addEventListener("mousedown", handler);
     return () => document.removeEventListener("mousedown", handler);
@@ -753,6 +786,14 @@ export default function AddJobClient({
       item.name_1.toLowerCase().includes(deferredCarSearch.toLowerCase()) ||
       item.code.toLowerCase().includes(deferredCarSearch.toLowerCase())
   );
+  const filteredRoutes: Option[] = deliveryRoutes
+    .map((r) => ({ code: r.code, name_1: routeLabel(r) }))
+    .filter(
+      (item) =>
+        !deferredRouteSearch ||
+        item.name_1.toLowerCase().includes(deferredRouteSearch.toLowerCase()) ||
+        item.code.toLowerCase().includes(deferredRouteSearch.toLowerCase())
+    );
   const filteredDrivers = drivers.filter(
     (item) =>
       !deferredDriverSearch ||
@@ -879,7 +920,12 @@ export default function AddJobClient({
               setDateLog={setDateLog}
               deliveryRouteCode={deliveryRouteCode}
               setDeliveryRouteCode={setDeliveryRouteCode}
-              deliveryRoutes={deliveryRoutes}
+              filteredRoutes={filteredRoutes}
+              routeSearch={routeSearch}
+              setRouteSearch={setRouteSearch}
+              showRouteDrop={showRouteDrop}
+              setShowRouteDrop={setShowRouteDrop}
+              routeRef={routeRef}
               deliveryRoundCode={deliveryRoundCode}
               setDeliveryRoundCode={setDeliveryRoundCode}
               deliveryRounds={deliveryRounds}
@@ -1513,7 +1559,12 @@ function JobInfoStrip(props: {
   setDateLog: (v: string) => void;
   deliveryRouteCode: string;
   setDeliveryRouteCode: (v: string) => void;
-  deliveryRoutes: Array<{ code: string; name: string; origin?: string; destination?: string; waypoints?: Array<string | { name?: string }> }>;
+  filteredRoutes: Option[];
+  routeSearch: string;
+  setRouteSearch: (v: string) => void;
+  showRouteDrop: boolean;
+  setShowRouteDrop: (v: boolean) => void;
+  routeRef: React.RefObject<HTMLDivElement | null>;
   deliveryRoundCode: string;
   setDeliveryRoundCode: (v: string) => void;
   deliveryRounds: Array<{ code: string; name: string; time_label?: string }>;
@@ -1543,16 +1594,6 @@ function JobInfoStrip(props: {
   selectedWorkers: string[];
   setSelectedWorkers: React.Dispatch<React.SetStateAction<string[]>>;
 }) {
-  const routePath = (route: {
-    origin?: string;
-    destination?: string;
-    waypoints?: Array<string | { name?: string }>;
-  }) =>
-    [route.origin, ...(route.waypoints ?? []), route.destination]
-      .map((item) => String(item && typeof item === "object" ? item.name ?? "" : item ?? "").trim())
-      .filter(Boolean)
-      .join(" - ");
-
   return (
     <section className="overflow-visible rounded-2xl border border-slate-200 bg-white shadow-sm dark:border-slate-800 dark:bg-slate-900">
       <div className="flex flex-col gap-1 border-b border-slate-100 px-4 py-3 dark:border-slate-800 sm:flex-row sm:items-center sm:justify-between">
@@ -1590,22 +1631,25 @@ function JobInfoStrip(props: {
             </Field>
           </div>
           <Field label="ເສັ້ນທາງ" required icon={<FaRoute size={10} />}>
-            <select
+            <SearchDropdown
+              refEl={props.routeRef}
+              show={props.showRouteDrop}
+              setShow={props.setShowRouteDrop}
+              search={props.routeSearch}
+              setSearch={(v) => {
+                props.setRouteSearch(v);
+                props.setDeliveryRouteCode("");
+              }}
+              items={props.filteredRoutes}
               value={props.deliveryRouteCode}
-              onChange={(e) => props.setDeliveryRouteCode(e.target.value)}
-              className="h-10 w-full rounded-xl border border-slate-200 bg-white px-3 text-sm outline-none transition-all focus:border-teal-400 focus:ring-2 focus:ring-teal-500/20 dark:border-slate-800 dark:bg-slate-950"
-            >
-              <option value="">- ເລືອກເສັ້ນທາງ -</option>
-              {props.deliveryRoutes.map((r) => {
-                const path = routePath(r);
-                return (
-                  <option key={r.code} value={r.code}>
-                    {r.name}
-                    {path ? ` (${path})` : ""}
-                  </option>
-                );
-              })}
-            </select>
+              onSelect={(code, name) => {
+                props.setDeliveryRouteCode(code);
+                props.setRouteSearch(name);
+              }}
+              placeholder="ຄົ້ນຫາເສັ້ນທາງ..."
+              icon={<FaRoute className="text-xs" />}
+              compact
+            />
           </Field>
           <Field label="ຮອບການຈັດສົ່ງ" icon={<FaClock size={10} />}>
             <select

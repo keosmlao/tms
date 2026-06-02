@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
+import type { MouseEvent as ReactMouseEvent } from "react";
 import {
   FaBox,
   FaBoxOpen,
@@ -200,6 +201,166 @@ interface Product {
 
 // ── Theme ──
 // Theme variables no longer needed for inline accordion styling
+
+// One source of truth for the "set delivery point + print QR" actions.
+// Rendered in 4 visual variants so the table (desktop/mobile), kanban card
+// and detail drawer all share the same logic instead of copy-pasting it.
+function BillLocationActions({
+  bill,
+  variant,
+  onEdit,
+}: {
+  bill: Bill;
+  variant: "icon" | "label" | "chip" | "drawer";
+  onEdit: (bill: Bill) => void;
+}) {
+  const planned = Boolean(
+    (bill.planned_lat ?? "").toString().trim() && (bill.planned_lng ?? "").toString().trim()
+  );
+  const custLoc = Boolean(
+    (bill.cust_lat ?? "").toString().trim() && (bill.cust_lng ?? "").toString().trim()
+  );
+  const hasAnyLoc = planned || custLoc;
+  const editTitle = planned
+    ? "ແກ້ຈຸດຈັດສົ່ງ"
+    : custLoc
+    ? "ໃຊ້/ປ່ຽນຈຸດທີ່ບັນທຶກໄວ້ໃນຂໍ້ມູນລູກຄ້າ"
+    : "ກຳນົດຈຸດຈັດສົ່ງ";
+
+  const handleEdit = (e: ReactMouseEvent) => {
+    e.stopPropagation();
+    onEdit(bill);
+  };
+  const handlePrint = (e: ReactMouseEvent) => {
+    e.stopPropagation();
+    const lat = (planned ? bill.planned_lat : bill.cust_lat) ?? "";
+    const lng = (planned ? bill.planned_lng : bill.cust_lng) ?? "";
+    void printBillLocationQr({
+      billNo: bill.doc_no,
+      custName: bill.cust_name ?? null,
+      lat,
+      lng,
+    }).catch((err) => alert(err instanceof Error ? err.message : "ພິມບໍ່ສຳເລັດ"));
+  };
+
+  if (variant === "icon") {
+    return (
+      <>
+        <button
+          onClick={handleEdit}
+          className={`w-6 h-6 rounded flex items-center justify-center transition-colors cursor-pointer ${
+            planned
+              ? "text-emerald-600 bg-emerald-100/80 hover:bg-emerald-200 dark:bg-emerald-900/30"
+              : custLoc
+              ? "text-sky-600 bg-sky-100/80 hover:bg-sky-200 dark:bg-sky-900/30"
+              : "text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800"
+          }`}
+          title={editTitle}
+        >
+          <FaMapMarkerAlt size={10} />
+        </button>
+        {hasAnyLoc && (
+          <button
+            onClick={handlePrint}
+            className="w-6 h-6 rounded flex items-center justify-center text-slate-500 hover:bg-slate-100 dark:text-slate-300 dark:hover:bg-slate-800 transition-colors cursor-pointer"
+            title="ພິມ QR ຈຸດສົ່ງ"
+          >
+            <FaPrint size={10} />
+          </button>
+        )}
+      </>
+    );
+  }
+
+  if (variant === "label") {
+    return (
+      <>
+        <button
+          onClick={handleEdit}
+          className={`px-2 py-1 rounded border text-[9px] font-semibold cursor-pointer ${
+            planned
+              ? "border-emerald-500/30 bg-emerald-50 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-400"
+              : custLoc
+              ? "border-sky-500/30 bg-sky-50 text-sky-700 dark:bg-sky-900/30 dark:text-sky-400"
+              : "border-slate-200 dark:border-white/10 bg-white dark:bg-slate-800 text-slate-600 dark:text-slate-300"
+          }`}
+        >
+          <FaMapMarkerAlt size={8} className="inline mr-0.5" /> {planned ? "ຈຸດສົ່ງ" : custLoc ? "ຈຸດລູກຄ້າ" : "ຈຸດສົ່ງ"}
+        </button>
+        {hasAnyLoc && (
+          <button
+            onClick={handlePrint}
+            className="px-2 py-1 rounded border border-slate-200 dark:border-white/10 bg-white dark:bg-slate-800 text-[9px] font-semibold text-slate-600 dark:text-slate-300 cursor-pointer"
+          >
+            <FaPrint size={8} className="inline mr-0.5" /> QR
+          </button>
+        )}
+      </>
+    );
+  }
+
+  if (variant === "drawer") {
+    return (
+      <>
+        {hasAnyLoc && (
+          <button
+            type="button"
+            onClick={handlePrint}
+            className="flex-1 px-4 py-2 text-xs font-semibold rounded-lg border border-slate-300 dark:border-white/10 hover:bg-slate-100 dark:hover:bg-white/5 text-slate-700 dark:text-slate-200 flex items-center justify-center gap-1.5 transition-colors cursor-pointer"
+          >
+            <FaPrint size={12} />
+            ພິມ QR
+          </button>
+        )}
+        <button
+          type="button"
+          onClick={handleEdit}
+          className="flex-1 px-4 py-2 text-xs font-semibold rounded-lg bg-teal-600 hover:bg-teal-700 text-white flex items-center justify-center gap-1.5 transition-colors cursor-pointer"
+        >
+          <FaMapMarkerAlt size={12} />
+          ປັກໝຸດຈຸດຈັດສົ່ງ
+        </button>
+      </>
+    );
+  }
+
+  // variant === "chip" (kanban card)
+  const chipBase =
+    "inline-flex items-center gap-1.5 rounded-md border px-2 py-1 text-[10px] font-semibold transition-colors";
+  const chipDone =
+    "border-emerald-500/30 bg-emerald-500/10 text-emerald-700 dark:text-emerald-400 hover:bg-emerald-500/15";
+  const chipTodo =
+    "border-slate-300/50 bg-white/40 text-slate-600 hover:bg-slate-500/10 dark:border-white/10 dark:bg-white/5 dark:text-slate-300";
+  return (
+    <div className="flex gap-1.5" onClick={(e) => e.stopPropagation()}>
+      <button
+        type="button"
+        onClick={handleEdit}
+        className={`${chipBase} ${
+          planned
+            ? chipDone
+            : custLoc
+            ? "border-sky-500/30 bg-sky-500/10 text-sky-700 hover:bg-sky-500/15 dark:text-sky-400"
+            : chipTodo
+        } cursor-pointer`}
+        title={editTitle}
+      >
+        <FaMapMarkerAlt size={9} />
+        {planned ? "ຈຸດສົ່ງ" : custLoc ? "ຈຸດລູກຄ້າ" : "ກຳນົດຈຸດສົ່ງ"}
+      </button>
+      {hasAnyLoc && (
+        <button
+          type="button"
+          onClick={handlePrint}
+          className="inline-flex items-center justify-center rounded-md border border-slate-300/40 bg-white/60 px-1.5 py-1 text-slate-700 hover:bg-white dark:border-white/10 dark:bg-white/[0.04] dark:text-slate-200 dark:hover:bg-white/10 cursor-pointer"
+          title="ພິມ QR ຈຸດສົ່ງ"
+        >
+          <FaPrint size={10} />
+        </button>
+      )}
+    </div>
+  );
+}
 
 export default function BillsPendingClient() {
   const [bills, setBills] = useState<Bill[]>([]);
@@ -1079,7 +1240,7 @@ export default function BillsPendingClient() {
                     {!collapsed && (
                       <div className="overflow-x-auto">
                         {/* Table header */}
-                        <div className="hidden md:grid grid-cols-[40px_1fr_1.2fr_140px_100px_100px_110px_100px_80px_120px] border-b border-slate-100 dark:border-white/[0.04] bg-slate-50/50 dark:bg-slate-800/30 text-[10px] font-bold uppercase tracking-wider text-slate-400 dark:text-slate-500">
+                        <div className="hidden md:grid grid-cols-[40px_1fr_1.2fr_140px_100px_100px_110px_100px_80px_170px] border-b border-slate-100 dark:border-white/[0.04] bg-slate-50/50 dark:bg-slate-800/30 text-[10px] font-bold uppercase tracking-wider text-slate-400 dark:text-slate-500">
                           <div className="px-3 py-2 flex items-center justify-center">☑</div>
                           <div className="px-3 py-2">ເລກບິນ</div>
                           <div className="px-3 py-2">ລູກຄ້າ</div>
@@ -1119,7 +1280,7 @@ export default function BillsPendingClient() {
                               } hover:bg-teal-50/50 dark:hover:bg-teal-950/20`}
                             >
                               {/* Desktop row */}
-                              <div className="hidden md:grid grid-cols-[40px_1fr_1.2fr_140px_100px_100px_110px_100px_80px_120px] items-center min-h-[38px] border-b border-slate-100/80 dark:border-white/[0.03]">
+                              <div className="hidden md:grid grid-cols-[40px_1fr_1.2fr_140px_100px_100px_110px_100px_80px_170px] items-center min-h-[38px] border-b border-slate-100/80 dark:border-white/[0.03]">
                                 {/* Checkbox */}
                                 <div className="px-3 flex items-center justify-center" onClick={(e) => e.stopPropagation()}>
                                   <input
@@ -1280,6 +1441,7 @@ export default function BillsPendingClient() {
                                   >
                                     <FaExchangeAlt size={9} />
                                   </button>
+                                  <BillLocationActions bill={bill} variant="icon" onEdit={openLocationDialog} />
                                   {bill.manual_pending_bill && (
                                     <button
                                       type="button"
@@ -1360,6 +1522,7 @@ export default function BillsPendingClient() {
                                   >
                                     <FaStickyNote size={8} className="inline mr-0.5" /> ບັນທຶກ
                                   </button>
+                                  <BillLocationActions bill={bill} variant="label" onEdit={openLocationDialog} />
                                 </div>
                               </div>
                             </div>
@@ -1778,44 +1941,7 @@ export default function BillsPendingClient() {
                                           </button>
                                         )}
                                       </span>
-                                      {(() => {
-                                        const planned = (bill.planned_lat ?? "").toString().trim() && (bill.planned_lng ?? "").toString().trim();
-                                        const custLoc = (bill.cust_lat ?? "").toString().trim() && (bill.cust_lng ?? "").toString().trim();
-                                        const hasAnyLoc = Boolean(planned || custLoc);
-                                        return (
-                                          <div className="flex gap-1.5" onClick={(e) => e.stopPropagation()}>
-                                            <button
-                                              type="button"
-                                              onClick={(e) => { e.stopPropagation(); openLocationDialog(bill); }}
-                                              className={`${chipBase} ${planned ? chipDone : custLoc ? "border-sky-500/30 bg-sky-500/10 text-sky-700 hover:bg-sky-500/15 dark:text-sky-400" : chipTodo} cursor-pointer`}
-                                              title={planned ? "ແກ້ຈຸດຈັດສົ່ງ" : custLoc ? "ໃຊ້/ປ່ຽນຈຸດທີ່ບັນທຶກໄວ້ໃນຂໍ້ມູນລູກຄ້າ" : "ກຳນົດຈຸດຈັດສົ່ງສຳລັບໃຫ້ຄົນຂັບນຳທາງ"}
-                                            >
-                                              <FaMapMarkerAlt size={9} />
-                                              {planned ? "ຈຸດສົ່ງ" : custLoc ? "ຈຸດລູກຄ້າ" : "ກຳນົດຈຸດສົ່ງ"}
-                                            </button>
-                                            {hasAnyLoc && (
-                                              <button
-                                                type="button"
-                                                onClick={(e) => {
-                                                  e.stopPropagation();
-                                                  const lat = (planned ? bill.planned_lat : bill.cust_lat) ?? "";
-                                                  const lng = (planned ? bill.planned_lng : bill.cust_lng) ?? "";
-                                                  void printBillLocationQr({
-                                                    billNo: bill.doc_no,
-                                                    custName: bill.cust_name ?? null,
-                                                    lat,
-                                                    lng,
-                                                  }).catch((printErr) => alert(printErr instanceof Error ? printErr.message : "ພິມບໍ່ສຳເລັດ"));
-                                                }}
-                                                className="inline-flex items-center justify-center rounded-md border border-slate-300/40 bg-white/60 px-1.5 py-1 text-slate-700 hover:bg-white dark:border-white/10 dark:bg-white/[0.04] dark:text-slate-200 dark:hover:bg-white/10 cursor-pointer"
-                                                title="ພິມ QR ຈຸດສົ່ງ"
-                                              >
-                                                <FaPrint size={10} />
-                                              </button>
-                                            )}
-                                          </div>
-                                        );
-                                      })()}
+                                      <BillLocationActions bill={bill} variant="chip" onEdit={openLocationDialog} />
                                     </div>
                                   </div>
 
@@ -2395,44 +2521,9 @@ export default function BillsPendingClient() {
                   </div>
                 </div>
 
-                {/* Footer buttons */}
+                {/* Footer buttons: print QR + set delivery point */}
                 <div className="px-6 py-4 bg-slate-50 dark:bg-white/[0.01] border-t border-slate-200/50 dark:border-white/5 flex gap-2">
-                  {/* Print QR */}
-                  {(() => {
-                    const planned = (drawerBill.planned_lat ?? "").toString().trim() && (drawerBill.planned_lng ?? "").toString().trim();
-                    const custLoc = (drawerBill.cust_lat ?? "").toString().trim() && (drawerBill.cust_lng ?? "").toString().trim();
-                    const hasAnyLoc = Boolean(planned || custLoc);
-                    if (!hasAnyLoc) return null;
-                    return (
-                      <button
-                        type="button"
-                        onClick={() => {
-                          const lat = (planned ? drawerBill.planned_lat : drawerBill.cust_lat) ?? "";
-                          const lng = (planned ? drawerBill.planned_lng : drawerBill.cust_lng) ?? "";
-                          void printBillLocationQr({
-                            billNo: drawerBill.doc_no,
-                            custName: drawerBill.cust_name ?? null,
-                            lat,
-                            lng,
-                          }).catch((e) => alert(e instanceof Error ? e.message : "ພິມບໍ່ສຳເລັດ"));
-                        }}
-                        className="flex-1 px-4 py-2 text-xs font-semibold rounded-lg border border-slate-300 dark:border-white/10 hover:bg-slate-100 dark:hover:bg-white/5 text-slate-700 dark:text-slate-200 flex items-center justify-center gap-1.5 transition-colors cursor-pointer"
-                      >
-                        <FaPrint size={12} />
-                        ພິມ QR
-                      </button>
-                    );
-                  })()}
-                  
-                  {/* Edit Location */}
-                  <button
-                    type="button"
-                    onClick={() => openLocationDialog(drawerBill)}
-                    className="flex-1 px-4 py-2 text-xs font-semibold rounded-lg bg-teal-600 hover:bg-teal-700 text-white flex items-center justify-center gap-1.5 transition-colors cursor-pointer"
-                  >
-                    <FaMapMarkerAlt size={12} />
-                    ປັກໝຸດຈຸດຈັດສົ່ງ
-                  </button>
+                  <BillLocationActions bill={drawerBill} variant="drawer" onEdit={openLocationDialog} />
                 </div>
 
               </div>
