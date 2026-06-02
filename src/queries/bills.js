@@ -34,6 +34,8 @@ const SCHEDULED_BILL_FIELDS = `
   COALESCE(dr.time_label, '') as delivery_round_time_label`;
 
 const MANUAL_IC_TRANS_FLAGS = [56, 72, 44, 48];
+// ບິນໂອນ (transfer bills) — when scheduling a trip we only surface this flag.
+const TRANSFER_BILL_FLAG = 72;
 const SERVICE_SOURCE_TYPE = "odservice.tb_product";
 
 function manualFlagListSql() {
@@ -255,7 +257,7 @@ async function searchManualPendingBills(q) {
      LEFT JOIN ar_customer b ON b.code = a.cust_code
      LEFT JOIN public.odg_tms_pending_bill pb ON pb.bill_no = a.doc_no
      LEFT JOIN public.odg_tms_delivery_round dr ON dr.code = pb.delivery_round_code
-     WHERE a.trans_flag IN (${manualFlagListSql()})
+     WHERE a.trans_flag = ${TRANSFER_BILL_FLAG}
        AND (
          a.doc_no ILIKE $1
          OR a.cust_code ILIKE $1
@@ -341,7 +343,7 @@ async function addManualPendingBill({ billNo, scheduledDate, deliveryRoundCode, 
   const icBill = requestedSource === SERVICE_SOURCE_TYPE ? null : await queryOne(
     `SELECT doc_no FROM ic_trans
      WHERE doc_no = $1
-       AND trans_flag IN (${manualFlagListSql()})`,
+       AND trans_flag = ${TRANSFER_BILL_FLAG}`,
     [code]
   );
   const serviceBill = icBill ? null : await queryB(
@@ -349,7 +351,7 @@ async function addManualPendingBill({ billNo, scheduledDate, deliveryRoundCode, 
     [code]
   );
   if (!icBill && serviceBill.length === 0) {
-    throw new Error("Bill not found in ic_trans trans_flag 56/72/44/48 or odservice.tb_product");
+    throw new Error("Bill not found in ic_trans trans_flag 72 or odservice.tb_product");
   }
   const { upsertPendingBillSchedule } = require("./pending-bill");
   await upsertPendingBillSchedule({
@@ -417,6 +419,7 @@ async function getManualReadyBills() {
     `SELECT pb.bill_no,
             to_char(pb.scheduled_date,'YYYY-MM-DD') as scheduled_date,
             to_char(pb.scheduled_date,'DD-MM-YYYY') as scheduled_date_display,
+            COALESCE(pb.delivery_route_code, '') as delivery_route_code,
             pb.delivery_round_code,
             COALESCE(dr.name, '') as delivery_round_name,
             COALESCE(dr.time_label, '') as delivery_round_time_label

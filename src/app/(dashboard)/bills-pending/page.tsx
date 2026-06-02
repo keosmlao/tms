@@ -907,7 +907,7 @@ export default function BillsPendingClient() {
           className="inline-flex items-center gap-1.5 rounded-md bg-teal-600 px-3 py-1 text-[11px] font-semibold text-white transition-colors hover:bg-teal-700 dark:bg-teal-500 dark:hover:bg-teal-600 cursor-pointer"
         >
           <FaPlus size={10} />
-          ເພີ່ມບິນ 56/72
+          ເພີ່ມບິນໂອນ (72)
         </button>
       </div>
 
@@ -1919,7 +1919,7 @@ export default function BillsPendingClient() {
                 </div>
                 <div>
                   <h3 className="text-sm font-bold text-slate-800 dark:text-slate-100">ເພີ່ມບິນເຂົ້າລໍຖ້າຈັດຖ້ຽວ</h3>
-                  <p className="text-[11px] text-slate-500">ຄົ້ນຫາບິນປະເພດ 56/72/44/48 ແລະ ບິນສູນບໍລິການ</p>
+                  <p className="text-[11px] text-slate-500">ຄົ້ນຫາບິນໂອນ (72) ແລະ ບິນສູນບໍລິການ</p>
                 </div>
               </div>
               <button onClick={closeManualModal} className="p-1.5 text-slate-400 hover:text-slate-600 hover:bg-white rounded-lg transition-colors">
@@ -1960,7 +1960,7 @@ export default function BillsPendingClient() {
                   {manualResults.length === 0 ? (
                     <div className="flex h-full min-h-[200px] flex-col items-center justify-center text-center text-slate-400">
                       <FaFileInvoice className="mb-2 text-xl opacity-60" />
-                      <p className="text-xs">ຄົ້ນຫາບິນປະເພດ 56/72 ຫຼືບິນສູນບໍລິການ</p>
+                      <p className="text-xs">ຄົ້ນຫາບິນໂອນ (72) ຫຼືບິນສູນບໍລິການ</p>
                     </div>
                   ) : (
                     <div className="max-h-[300px] space-y-2 overflow-y-auto">
