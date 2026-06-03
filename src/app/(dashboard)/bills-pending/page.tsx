@@ -129,6 +129,12 @@ interface ManualPendingBill {
   transport_code?: string;
 }
 
+// Transport code that marks a bill as "customer picks up themselves" — no
+// delivery dispatch needed. Master data already treats '02-0004' this way: the
+// dashboard counts it as a pickup (not logistic) and getBillsPending excludes
+// it from the contact queue, so assigning it here drops the bill off this list.
+const SELF_PICKUP_TRANSPORT_CODE = "02-0004";
+
 // Flat state model — action_status combines contact result + reason:
 //   ຍັງບໍ່ເຖິງເວລາ uses send_date more than 3 days from today.
 //   ຕ້ອງໂທຫາລູກຄ້າ uses missing/overdue/today/tomorrow scheduled_date.
@@ -655,8 +661,14 @@ export default function BillsPendingClient() {
     setUpdating(true);
     try {
       await Actions.updateBillTransport(selectedBill.doc_no, selectedTransport);
-      const name = transports.find((t) => t.code === selectedTransport)?.name_1 ?? selectedBill.transport;
-      const remove = transportCode !== "all" && selectedTransport !== transportCode;
+      const selfPickup = selectedTransport === SELF_PICKUP_TRANSPORT_CODE;
+      const name = selfPickup
+        ? "ລູກຄ້າຮັບເອງ"
+        : transports.find((t) => t.code === selectedTransport)?.name_1 ?? selectedBill.transport;
+      // Self-pickup bills leave the contact queue entirely (getBillsPending
+      // filters out '02-0004'), so drop the row locally to match a refetch
+      // instead of leaving a stale entry behind.
+      const remove = selfPickup || (transportCode !== "all" && selectedTransport !== transportCode);
       setBills((c) => c.map((b) => b.doc_no === selectedBill.doc_no ? { ...b, transport: name } : b).filter((b) => !remove || b.doc_no !== selectedBill.doc_no));
       closeModal();
     } finally { setUpdating(false); }
@@ -2018,7 +2030,10 @@ export default function BillsPendingClient() {
                 </label>
                 <select value={selectedTransport} onChange={(e) => setSelectedTransport(e.target.value)} className={inputCls}>
                   <option value="">-- ເລືອກ --</option>
-                  {(allBranches.length > 0 ? allBranches : transports).map((t) => <option key={t.code} value={t.code}>{t.name_1}</option>)}
+                  {(allBranches.length > 0 ? allBranches : transports)
+                    .filter((t) => t.code !== SELF_PICKUP_TRANSPORT_CODE)
+                    .map((t) => <option key={t.code} value={t.code}>🚚 {t.name_1}</option>)}
+                  <option value={SELF_PICKUP_TRANSPORT_CODE}>🙋 ລູກຄ້າຮັບເອງ</option>
                 </select>
               </div>
             </div>
