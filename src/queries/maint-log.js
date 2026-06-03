@@ -49,6 +49,7 @@ async function ensureMaintSchemaInternal(db) {
   await safeDdl(db, `ALTER TABLE public.odg_tms_maint_log ADD COLUMN IF NOT EXISTS repair_shop character varying`);
   await safeDdl(db, `ALTER TABLE public.odg_tms_maint_log ADD COLUMN IF NOT EXISTS created_by character varying`);
   await safeDdl(db, `ALTER TABLE public.odg_tms_maint_log ADD COLUMN IF NOT EXISTS receipt_files jsonb DEFAULT '[]'::jsonb`);
+  await safeDdl(db, `ALTER TABLE public.odg_tms_maint_log ADD COLUMN IF NOT EXISTS payment_files jsonb DEFAULT '[]'::jsonb`);
   await safeDdl(db, `ALTER TABLE public.odg_tms_maint_log ADD COLUMN IF NOT EXISTS payment_status character varying NOT NULL DEFAULT 'pending'`);
   await safeDdl(db, `ALTER TABLE public.odg_tms_maint_log ADD COLUMN IF NOT EXISTS created_at timestamp without time zone DEFAULT LOCALTIMESTAMP(0)`);
   await safeDdl(db, `ALTER TABLE public.odg_tms_maint_log DROP CONSTRAINT IF EXISTS fk_maint_log_item`);
@@ -133,6 +134,7 @@ async function saveMaintLog(payload) {
     : asNullableText(payload?.item_code);
 
   const receiptFiles = Array.isArray(payload?.receipt_files) ? payload.receipt_files : [];
+  const paymentFiles = Array.isArray(payload?.payment_files) ? payload.payment_files : [];
   const maintDate = asNullableText(payload?.maint_date);
 
   const client = await pool.connect();
@@ -148,11 +150,11 @@ async function saveMaintLog(payload) {
       INSERT INTO public.odg_tms_maint_log
         (car_code, maint_date, odometer, inspect_code,
          item_code, maint_note, cost_amount, currency, invoice_no,
-         repair_shop, created_by, receipt_files, payment_status)
+         repair_shop, created_by, receipt_files, payment_status, payment_files)
       VALUES (
         $1,
         COALESCE($2::date, CURRENT_DATE),
-        $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13
+        $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14
       )
       RETURNING id
     `;
@@ -170,6 +172,7 @@ async function saveMaintLog(payload) {
       asNullableText(payload?.created_by),
       JSON.stringify(receiptFiles),
       paymentStatus,
+      JSON.stringify(paymentFiles),
     ];
 
     const result = await client.query(insertSql, insertParams);
@@ -250,6 +253,7 @@ async function getMaintLogs({ fromDate, toDate, carCode, search } = {}) {
        ml.repair_shop,
        ml.created_by,
        ml.receipt_files,
+       ml.payment_files,
        ml.payment_status,
        TO_CHAR(ml.created_at, 'YYYY-MM-DD HH24:MI') AS created_at,
        (SELECT COALESCE(json_agg(
@@ -397,6 +401,27 @@ async function searchItemCodes(q) {
   return rows.map((r) => ({ item_code: r.item_code, cnt: r.cnt }));
 }
 
+async function updatePaymentStatus(id, status, newFiles) {
+  await ensureMaintSchema();
+  const valid = ["pending", "paid"];
+  if (!valid.includes(status)) throw new Error("Invalid payment_status");
+  if (newFiles && newFiles.length > 0) {
+    await pool.query(
+      `UPDATE public.odg_tms_maint_log
+       SET payment_status = $1,
+           payment_files  = COALESCE(payment_files, '[]'::jsonb) || $2::jsonb
+       WHERE id = $3`,
+      [status, JSON.stringify(newFiles), id]
+    );
+  } else {
+    await pool.query(
+      `UPDATE public.odg_tms_maint_log SET payment_status = $1 WHERE id = $2`,
+      [status, id]
+    );
+  }
+  return { success: true };
+}
+
 module.exports = {
   ensureMaintSchema,
   saveMaintLog,
@@ -406,4 +431,5 @@ module.exports = {
   searchItemCodes,
   getHandledInspectCodes,
   getLatestRuleOdometers,
+  updatePaymentStatus,
 };

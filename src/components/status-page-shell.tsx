@@ -9,27 +9,24 @@ export type StatusTone =
   | "emerald"
   | "rose"
   | "teal"
-  | "orange";
+  | "orange"
+  | "violet";
 
-export const STATUS_TONES: Record<StatusTone, { bg: string; text: string }> = {
-  slate: { bg: "bg-slate-500/10", text: "text-slate-600 dark:text-slate-400" },
-  amber: { bg: "bg-amber-500/10", text: "text-amber-600 dark:text-amber-400" },
-  sky: { bg: "bg-sky-500/10", text: "text-sky-600 dark:text-sky-400" },
-  emerald: {
-    bg: "bg-emerald-500/10",
-    text: "text-emerald-600 dark:text-emerald-400",
-  },
-  rose: { bg: "bg-rose-500/10", text: "text-rose-600 dark:text-rose-400" },
-  teal: { bg: "bg-teal-500/10", text: "text-teal-600 dark:text-teal-400" },
-  orange: {
-    bg: "bg-orange-500/10",
-    text: "text-orange-600 dark:text-orange-400",
-  },
+export const STATUS_TONES: Record<StatusTone, { bg: string; text: string; border: string }> = {
+  slate:   { bg: "bg-slate-500/10",   text: "text-slate-600 dark:text-slate-400",   border: "border-l-slate-400" },
+  amber:   { bg: "bg-amber-500/10",   text: "text-amber-600 dark:text-amber-400",   border: "border-l-amber-400" },
+  sky:     { bg: "bg-sky-500/10",     text: "text-sky-600 dark:text-sky-400",       border: "border-l-sky-400" },
+  emerald: { bg: "bg-emerald-500/10", text: "text-emerald-600 dark:text-emerald-400", border: "border-l-emerald-500" },
+  rose:    { bg: "bg-rose-500/10",    text: "text-rose-600 dark:text-rose-400",     border: "border-l-rose-400" },
+  teal:    { bg: "bg-teal-500/10",    text: "text-teal-600 dark:text-teal-400",     border: "border-l-teal-400" },
+  orange:  { bg: "bg-orange-500/10",  text: "text-orange-600 dark:text-orange-400", border: "border-l-orange-400" },
+  violet:  { bg: "bg-violet-500/10",  text: "text-violet-600 dark:text-violet-400", border: "border-l-violet-400" },
 };
 
 export interface StatusStat {
   label: string;
-  value: number | string;
+  value: ReactNode;
+  sublabel?: string;
   icon?: ReactNode;
   tone?: StatusTone;
 }
@@ -90,7 +87,7 @@ export function StatusStatGrid({
         const t = STATUS_TONES[stat.tone ?? "slate"];
 
         return (
-          <div key={`${stat.label}-${index}`} className="glass rounded-lg p-4">
+          <div key={`${stat.label}-${index}`} className={`glass rounded-lg border-l-4 p-4 ${t.border}`}>
             <div className="flex items-center justify-between gap-3">
               <div className="min-w-0">
                 <p className="truncate text-[11px] font-medium text-slate-500 dark:text-slate-400">
@@ -99,6 +96,9 @@ export function StatusStatGrid({
                 <p className={`mt-1 text-2xl font-bold ${t.text}`}>
                   {stat.value}
                 </p>
+                {stat.sublabel && (
+                  <p className="mt-0.5 text-[11px] text-slate-400 dark:text-slate-500 truncate">{stat.sublabel}</p>
+                )}
               </div>
               {stat.icon && (
                 <div

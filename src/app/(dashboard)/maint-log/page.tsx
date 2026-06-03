@@ -10,6 +10,7 @@ import {
   FaFileInvoiceDollar,
   FaMoneyBillWave,
   FaPaperclip,
+  FaPen,
   FaPlus,
   FaSearch,
   FaSpinner,
@@ -70,6 +71,7 @@ interface MaintLog {
   payment_status: string;
   created_by: string | null;
   receipt_files: Array<{ name: string; data: string; type: string }> | null;
+  payment_files: Array<{ name: string; data: string; type: string }> | null;
   line_items: LineItemDetail[];
   created_at: string;
 }
@@ -331,6 +333,43 @@ const emptyForm = () => ({
   payment_status: "pending",
 });
 
+function FileThumbnails({
+  files,
+  onOpen,
+}: {
+  files: Array<{ name: string; data: string; type: string }> | null;
+  onOpen: () => void;
+}) {
+  if (!files || files.length === 0) return <span className="text-xs text-slate-300">—</span>;
+  const first = files[0];
+  const isImage = first.type.startsWith("image/");
+  return (
+    <button
+      type="button"
+      onClick={(e) => { e.stopPropagation(); onOpen(); }}
+      className="flex items-center gap-1 rounded hover:opacity-80"
+    >
+      {isImage ? (
+        // eslint-disable-next-line @next/next/no-img-element
+        <img
+          src={`data:${first.type};base64,${first.data}`}
+          alt={first.name}
+          className="h-8 w-8 rounded object-cover border border-slate-200 dark:border-slate-600"
+        />
+      ) : (
+        <span className="flex h-8 w-8 items-center justify-center rounded border border-slate-200 bg-slate-100 text-[10px] font-medium text-slate-500 dark:border-slate-600 dark:bg-slate-700 dark:text-slate-400">
+          {first.name.split(".").pop()?.toUpperCase() ?? "FILE"}
+        </span>
+      )}
+      {files.length > 1 && (
+        <span className="rounded-full bg-slate-200 px-1.5 py-0.5 text-[10px] font-semibold text-slate-600 dark:bg-slate-700 dark:text-slate-300">
+          +{files.length - 1}
+        </span>
+      )}
+    </button>
+  );
+}
+
 export default function MaintLogPage() {
   const [data, setData] = useState<MaintLogResponse>({ rows: [], totalByCurrency: {} });
   const [fromDate, setFromDate] = useState(getFixedTodayDate());
@@ -342,6 +381,13 @@ export default function MaintLogPage() {
   const [saving, setSaving] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
   const [deletingId, setDeletingId] = useState<number | null>(null);
+  const [updatingPaymentId, setUpdatingPaymentId] = useState<number | null>(null);
+  const [paymentPopoverId, setPaymentPopoverId] = useState<number | null>(null);
+  const [paymentFiles, setPaymentFiles] = useState<AttachedFile[]>([]);
+  const paymentFileRef = useRef<HTMLInputElement>(null);
+  const [receiptModalRow, setReceiptModalRow] = useState<MaintLog | null>(null);
+  const [receiptViewType, setReceiptViewType] = useState<"receipt" | "payment">("receipt");
+  const [receiptIndex, setReceiptIndex] = useState(0);
   const [expandedRows, setExpandedRows] = useState<Set<number>>(new Set());
   const [scheduleMap, setScheduleMap] = useState<Map<string, Map<string, ScheduleRow>>>(new Map());
   const [form, setForm] = useState(emptyForm());
@@ -351,8 +397,11 @@ export default function MaintLogPage() {
   const [lineItems, setLineItems] = useState<LineItem[]>([newLineItem()]);
   const [attachedFiles, setAttachedFiles] = useState<AttachedFile[]>([]);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const [formPaymentFiles, setFormPaymentFiles] = useState<AttachedFile[]>([]);
+  const formPaymentFileRef = useRef<HTMLInputElement>(null);
   const [lastServiceKm, setLastServiceKm] = useState<number | null>(null);
   const [rules, setRules] = useState<MaintRule[]>([]);
+  const [fromAlertPlan, setFromAlertPlan] = useState<MaintPlanAlert | null>(null);
   const [scheduleOpen, setScheduleOpen] = useState(true);
   const [rulesModalOpen, setRulesModalOpen] = useState(false);
   const [ruleForm, setRuleForm] = useState({ code: "", name: "", interval_km: "" });
@@ -643,6 +692,31 @@ export default function MaintLogPage() {
   );
 
   const stats = useMemo(() => {
+    const paidRows = data.rows.filter((r) => r.payment_status === "paid");
+    const pendingRows = data.rows.filter((r) => r.payment_status !== "paid");
+
+    const sumByCurrency = (rows: MaintLog[]) => {
+      const acc: Record<string, number> = {};
+      for (const r of rows) {
+        const amt = Number(r.cost_amount) || 0;
+        if (amt > 0) acc[r.currency] = (acc[r.currency] ?? 0) + amt;
+      }
+      return acc;
+    };
+    const fmtAmountsNode = (sums: Record<string, number>) => {
+      const entries = Object.entries(sums);
+      if (entries.length === 0) return <span>—</span>;
+      return (
+        <span className="flex flex-col gap-0.5">
+          {entries.map(([c, v]) => (
+            <span key={c} className="tabular-nums leading-tight">
+              {CURRENCY_SYMBOLS[c] ?? c} {formatNumber(v)}
+            </span>
+          ))}
+        </span>
+      );
+    };
+
     const base: StatusStat[] = [
       {
         label: "ລາຍການທັງໝົດ",
@@ -656,11 +730,23 @@ export default function MaintLogPage() {
         label: `ຍອດລວມ (${cur})`,
         value: `${CURRENCY_SYMBOLS[cur] ?? ""} ${formatNumber(info.total_cost)}`,
         icon: <FaMoneyBillWave />,
-        tone: (cur === "LAK" ? "emerald" : cur === "THB" ? "slate" : "orange") as StatusStat["tone"],
+        tone: (cur === "LAK" ? "emerald" : cur === "THB" ? "violet" : "orange") as StatusStat["tone"],
       });
     }
+    base.push({
+      label: `ຊຳລະແລ້ວ (${paidRows.length} ລາຍການ)`,
+      value: fmtAmountsNode(sumByCurrency(paidRows)),
+      icon: <FaMoneyBillWave />,
+      tone: "emerald",
+    });
+    base.push({
+      label: `ຍັງບໍ່ຊຳລະ (${pendingRows.length} ລາຍການ)`,
+      value: fmtAmountsNode(sumByCurrency(pendingRows)),
+      icon: <FaMoneyBillWave />,
+      tone: "orange",
+    });
     return base;
-  }, [data.totalByCurrency, totalEntries]);
+  }, [data.rows, data.totalByCurrency, totalEntries]);
 
   const updateLineItem = (key: string, updates: Partial<LineItem>) => {
     setLineItems((prev) => prev.map((it) => it._key === key ? { ...it, ...updates } : it));
@@ -714,6 +800,7 @@ export default function MaintLogPage() {
         payment_status: form.payment_status,
         line_items: builtLineItems,
         receipt_files: attachedFiles.map(({ name, data, type }) => ({ name, data, type })),
+        payment_files: formPaymentFiles.map(({ name, data, type }) => ({ name, data, type })),
       };
       const res = await fetch("/api/maint-log", {
         method: "POST",
@@ -725,14 +812,37 @@ export default function MaintLogPage() {
         throw new Error((err as { error?: string }).error ?? "ເກີດຂໍ້ຜິດພາດ");
       }
       const savedInspectCode = form.inspect_code;
+      const savedOdometer = form.odometer ? Number(form.odometer) : 0;
+      const alertPlan = fromAlertPlan;
       setAddOpen(false);
       setForm(emptyForm());
       setSelectedCar(null);
       setLineItems([newLineItem()]);
       setAttachedFiles([]);
+      setFormPaymentFiles([]);
       setLastServiceKm(null);
+      setFromAlertPlan(null);
       if (savedInspectCode) {
         setPendingInspections((prev) => prev.filter((p) => p.inspect_code !== savedInspectCode));
+      }
+      if (alertPlan) {
+        const rule = alertPlan.rule_code ? rules.find((r) => r.code === alertPlan.rule_code) : null;
+        const newNextDueKm = rule
+          ? savedOdometer + Number(rule.interval_km)
+          : alertPlan.next_due_km;
+        await fetch("/api/maint-plan", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            plan_code: alertPlan.plan_code,
+            car_code: alertPlan.car_code,
+            rule_code: alertPlan.rule_code ?? null,
+            next_due_km: newNextDueKm,
+            maint_note: alertPlan.maint_note ?? null,
+          }),
+        }).catch(console.error);
+        reloadPlanAlerts();
+        reloadPlans();
       }
       load();
     } catch (err) {
@@ -748,6 +858,7 @@ export default function MaintLogPage() {
     setInspectionDetails([]);
     setLineItems([newLineItem()]);
     setAttachedFiles([]);
+    setFormPaymentFiles([]);
     setSaveError(null);
     setAddOpen(true);
 
@@ -764,6 +875,39 @@ export default function MaintLogPage() {
         })));
       })
       .catch(console.error);
+  };
+
+  const openFormFromAlert = (alert: MaintPlanAlert) => {
+    const ruleName = alert.rule_code ? (rules.find((r) => r.code === alert.rule_code)?.name ?? null) : null;
+    setForm({ ...emptyForm(), maint_note: alert.maint_note ?? "" });
+    setSelectedCar({ id: alert.car_code, code: alert.car_code, name: alert.car_code });
+    setInspectionDetails([]);
+    setLineItems(ruleName ? [{ ...newLineItem(), item_name: ruleName }] : [newLineItem()]);
+    setAttachedFiles([]);
+    setFormPaymentFiles([]);
+    setSaveError(null);
+    setFromAlertPlan(alert);
+    setAddOpen(true);
+  };
+
+  const handleTogglePayment = async (id: number, newStatus: string, receiptFiles?: Array<{ name: string; data: string; type: string }>) => {
+    setUpdatingPaymentId(id);
+    try {
+      const res = await fetch("/api/maint-log", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ id, payment_status: newStatus, receipt_files: receiptFiles ?? [] }),
+      });
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({ error: "ເກີດຂໍ້ຜິດພາດ" }));
+        throw new Error((err as { error?: string }).error ?? "ເກີດຂໍ້ຜິດພາດ");
+      }
+      load();
+    } catch (err) {
+      console.error(err);
+    } finally {
+      setUpdatingPaymentId(null);
+    }
   };
 
   const handleDelete = async (id: number) => {
@@ -1200,8 +1344,13 @@ export default function MaintLogPage() {
                   <div className="min-w-0 flex-1">
                     <div className="flex flex-wrap items-baseline gap-x-2 gap-y-0.5">
                       <span className="text-sm font-bold text-slate-800 dark:text-slate-100">{alert.car_code}</span>
-                      {alert.maint_note && (
-                        <span className="text-xs text-slate-500 dark:text-slate-400">{alert.maint_note}</span>
+                      {(alert.rule_code || alert.maint_note) && (
+                        <span className="text-xs text-slate-500 dark:text-slate-400">
+                          {[
+                            alert.rule_code ? (rules.find((r) => r.code === alert.rule_code)?.name ?? alert.rule_code) : null,
+                            alert.maint_note,
+                          ].filter(Boolean).join(" · ")}
+                        </span>
                       )}
                       <span className={`rounded-full px-2 py-0.5 text-[11px] font-semibold ${
                         isOverdue
@@ -1220,6 +1369,13 @@ export default function MaintLogPage() {
                       <span className="tabular-nums font-semibold">{formatNumber(alert.next_due_km)} km</span>
                     </p>
                   </div>
+                  <button
+                    type="button"
+                    onClick={() => openFormFromAlert(alert)}
+                    className="shrink-0 flex items-center gap-1.5 rounded-lg border border-orange-200 bg-orange-50 px-3 py-1.5 text-xs font-semibold text-orange-600 hover:bg-orange-100 dark:border-orange-800 dark:bg-orange-950/30 dark:text-orange-300 dark:hover:bg-orange-900/40"
+                  >
+                    <FaPlus className="text-[10px]" /> ສ້າງໃບສ້ອນ
+                  </button>
                 </div>
               );
             })}
@@ -1249,26 +1405,33 @@ export default function MaintLogPage() {
           </div>
           <div className="max-h-72 overflow-auto">
             <table className="w-full text-sm">
+              <colgroup>
+                <col className="w-24" />
+                <col />
+                <col className="w-32" />
+                <col className="w-32" />
+                <col className="w-8" />
+              </colgroup>
               <thead>
                 <tr className="border-b border-slate-100 text-left text-xs text-slate-500 dark:border-slate-700">
                   <th className="px-4 py-2">ລົດ</th>
                   <th className="px-3 py-2">Rule</th>
-                  <th className="px-3 py-2 text-right">ຮອດ (km)</th>
+                  <th className="px-4 py-2 text-right">ຮອດ (km)</th>
                   <th className="px-3 py-2">ໝາຍເຫດ</th>
-                  <th className="w-8 px-2 py-2" />
+                  <th className="px-2 py-2" />
                 </tr>
               </thead>
               <tbody>
                 {maintPlans.map((p) => (
                   <tr key={p.plan_code} className="border-b border-slate-50 hover:bg-slate-50 dark:border-slate-800 dark:hover:bg-slate-800/30">
                     <td className="px-4 py-2.5 font-semibold text-slate-700 dark:text-slate-200">{p.car_code}</td>
-                    <td className="px-3 py-2.5 text-xs text-slate-500">
+                    <td className="px-3 py-2.5 text-xs text-slate-500 truncate">
                       {p.rule_code ? (rules.find((r) => r.code === p.rule_code)?.name ?? p.rule_code) : "—"}
                     </td>
-                    <td className="px-3 py-2.5 text-right tabular-nums font-bold text-orange-600 dark:text-orange-400">
+                    <td className="px-4 py-2.5 text-right tabular-nums font-bold text-orange-600 dark:text-orange-400">
                       {formatNumber(p.next_due_km)}
                     </td>
-                    <td className="max-w-[200px] truncate px-3 py-2.5 text-xs text-slate-400">{p.maint_note ?? "—"}</td>
+                    <td className="px-3 py-2.5 text-xs text-slate-400 truncate">{p.maint_note ?? "—"}</td>
                     <td className="px-2 py-2.5 text-center">
                       <button
                         type="button"
@@ -1289,7 +1452,7 @@ export default function MaintLogPage() {
         </div>
       )}
 
-      {scheduleCarCodes.length > 0 && rules.length > 0 && (
+      {false && scheduleCarCodes.length > 0 && rules.length > 0 && (
         <div className="overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm dark:border-slate-700 dark:bg-slate-900">
           <button
             type="button"
@@ -1397,7 +1560,7 @@ export default function MaintLogPage() {
                 </div>
               </div>
               <button
-                onClick={() => { setAddOpen(false); setSelectedCar(null); setInspectionDetails([]); setLineItems([newLineItem()]); setAttachedFiles([]); setLastServiceKm(null); }}
+                onClick={() => { setAddOpen(false); setSelectedCar(null); setInspectionDetails([]); setLineItems([newLineItem()]); setAttachedFiles([]); setFormPaymentFiles([]); setLastServiceKm(null); setFromAlertPlan(null); }}
                 className="flex h-8 w-8 items-center justify-center rounded-lg bg-white/20 hover:bg-white/30 transition-colors"
               >
                 <FaTimes className="text-sm" />
@@ -1666,6 +1829,52 @@ export default function MaintLogPage() {
                   </div>
                 </div>
 
+                {form.payment_status === "paid" && (
+                  <div className="flex flex-col gap-1.5 rounded-xl border border-emerald-200 bg-emerald-50 p-3 dark:border-emerald-800 dark:bg-emerald-950/30">
+                    <label className="text-xs font-semibold text-emerald-700 dark:text-emerald-300">ຮູບໃບຊຳລະ</label>
+                    <input
+                      ref={formPaymentFileRef}
+                      type="file"
+                      accept="image/*,application/pdf"
+                      multiple
+                      className="hidden"
+                      onChange={(e) => {
+                        for (const file of Array.from(e.target.files ?? [])) {
+                          const reader = new FileReader();
+                          reader.onload = (ev) => {
+                            const data64 = (ev.target?.result as string ?? "").split(",")[1] ?? "";
+                            setFormPaymentFiles((prev) => [...prev, { name: file.name, data: data64, type: file.type }]);
+                          };
+                          reader.readAsDataURL(file);
+                        }
+                        if (e.target) e.target.value = "";
+                      }}
+                    />
+                    {formPaymentFiles.length === 0 ? (
+                      <button
+                        type="button"
+                        onClick={() => formPaymentFileRef.current?.click()}
+                        className="flex w-full items-center justify-center gap-2 rounded-lg border-2 border-dashed border-emerald-300 py-3 text-xs font-semibold text-emerald-600 hover:border-emerald-400 hover:bg-emerald-100/50 dark:border-emerald-700 dark:text-emerald-400"
+                      >
+                        <FaPaperclip /> ແນບຮູບໃບຊຳລະ
+                      </button>
+                    ) : (
+                      <div className="flex flex-col gap-1.5">
+                        {formPaymentFiles.map((f, i) => (
+                          <div key={i} className="flex items-center gap-2 rounded-lg bg-white px-2 py-1.5 shadow-sm dark:bg-slate-800">
+                            {f.type.startsWith("image/")
+                              ? <img src={`data:${f.type};base64,${f.data}`} alt={f.name} className="h-8 w-8 rounded object-cover" />
+                              : <div className="flex h-8 w-8 items-center justify-center rounded bg-slate-100 dark:bg-slate-700"><FaPaperclip className="text-slate-400 text-xs" /></div>}
+                            <span className="min-w-0 flex-1 truncate text-[11px] text-slate-600 dark:text-slate-300">{f.name}</span>
+                            <button type="button" onClick={() => setFormPaymentFiles((prev) => prev.filter((_, j) => j !== i))} className="text-slate-300 hover:text-red-400"><FaTimes className="text-[10px]" /></button>
+                          </div>
+                        ))}
+                        <button type="button" onClick={() => formPaymentFileRef.current?.click()} className="text-[11px] text-emerald-500 hover:underline">+ ເພີ່ມໄຟລ໌</button>
+                      </div>
+                    )}
+                  </div>
+                )}
+
                 <div className="flex flex-col gap-3">
                   <div className="flex flex-col gap-1.5">
                     <label className="text-xs font-semibold text-slate-500 dark:text-slate-400">ໝາຍເຫດ / ຂໍ້ສັງເກດ</label>
@@ -1694,7 +1903,7 @@ export default function MaintLogPage() {
                 <div className="flex items-center gap-3">
                   <button
                     type="button"
-                    onClick={() => { setAddOpen(false); setSelectedCar(null); setInspectionDetails([]); setLineItems([newLineItem()]); setAttachedFiles([]); setLastServiceKm(null); }}
+                    onClick={() => { setAddOpen(false); setSelectedCar(null); setInspectionDetails([]); setLineItems([newLineItem()]); setAttachedFiles([]); setFormPaymentFiles([]); setLastServiceKm(null); setFromAlertPlan(null); }}
                     className="h-10 rounded-lg border border-slate-200 px-5 text-sm font-medium text-slate-600 hover:bg-slate-50 dark:border-slate-700 dark:text-slate-300"
                   >
                     ຍົກເລີກ
@@ -1717,18 +1926,20 @@ export default function MaintLogPage() {
       <StatusTableShell count={filtered.length}>
         <table className="w-full min-w-max text-sm">
           <thead>
-            <tr className="border-b text-left text-xs text-slate-500 dark:border-slate-700">
-              <th className="w-6 px-2 py-2" />
-              <th className="px-3 py-2">#</th>
-              <th className="px-3 py-2">ລົດ</th>
-              <th className="px-3 py-2">ວັນທີ</th>
-              <th className="px-3 py-2 text-right">Odo (km)</th>
-              <th className="px-3 py-2">ອູ່ສ້ອມ</th>
-              <th className="px-3 py-2">ໃບບິນ</th>
-              <th className="px-3 py-2 text-right">ຄ່າໃຊ້ຈ່າຍ</th>
-              <th className="px-3 py-2">ໝາຍເຫດ</th>
-              <th className="px-3 py-2">ການຊຳລະ</th>
-              <th className="px-3 py-2" />
+            <tr className="border-b bg-slate-50 text-left text-xs font-semibold text-slate-500 dark:border-slate-700 dark:bg-slate-800/60">
+              <th className="w-6 px-2 py-2.5" />
+              <th className="px-3 py-2.5">#</th>
+              <th className="px-3 py-2.5">ລົດ</th>
+              <th className="px-3 py-2.5">ວັນທີ</th>
+              <th className="px-3 py-2.5 text-right">Odo (km)</th>
+              <th className="px-3 py-2.5">ອູ່ສ້ອມ</th>
+              <th className="px-3 py-2.5">ໃບບິນ</th>
+              <th className="px-3 py-2.5">ຮູບໃບບິນ</th>
+              <th className="px-3 py-2.5">ຮູບໃບຊຳລະ</th>
+              <th className="px-3 py-2.5 text-right">ຄ່າໃຊ້ຈ່າຍ</th>
+              <th className="px-3 py-2.5">ໝາຍເຫດ</th>
+              <th className="px-3 py-2.5">ການຊຳລະ</th>
+              <th className="px-3 py-2.5" />
             </tr>
           </thead>
           <tbody>
@@ -1755,37 +1966,58 @@ export default function MaintLogPage() {
                         </button>
                       ) : <span className="block h-5 w-5" />}
                     </td>
-                    <td className="px-3 py-2 text-slate-400">{i + 1}</td>
-                    <td className="px-3 py-2 font-medium">
-                      {row.car_code}
+                    <td className="px-3 py-2 text-xs text-slate-300 dark:text-slate-600">{i + 1}</td>
+                    <td className="px-3 py-2">
+                      <span className="font-bold text-slate-800 dark:text-slate-100">{row.car_code}</span>
                       {row.created_by && (
                         <div className="text-[10px] text-slate-400">{row.created_by}</div>
                       )}
                     </td>
-                    <td className="px-3 py-2 text-slate-600 dark:text-slate-400">
+                    <td className="px-3 py-2 text-xs text-slate-400 dark:text-slate-500">
                       {row.maint_date}
                     </td>
-                    <td className="px-3 py-2 text-right tabular-nums">
+                    <td className="px-3 py-2 text-right tabular-nums text-xs text-slate-400">
                       {formatNumber(row.odometer)}
                     </td>
-                    <td className="px-3 py-2 text-xs text-slate-500">{row.repair_shop ?? "—"}</td>
-                    <td className="px-3 py-2 text-xs text-slate-500">{row.invoice_no ?? "—"}</td>
-                    <td className="px-3 py-2 text-right tabular-nums">
-                      <span className="font-medium">
-                        {CURRENCY_SYMBOLS[row.currency] ?? ""}{" "}
-                        {formatNumber(row.cost_amount)}
-                      </span>
-                      <div className="text-xs text-slate-400">{row.currency}</div>
+                    <td className="px-3 py-2 text-xs text-slate-400">{row.repair_shop ?? "—"}</td>
+                    <td className="px-3 py-2">
+                      {row.invoice_no
+                        ? <span className="rounded bg-slate-100 px-1.5 py-0.5 text-xs font-mono font-medium text-slate-600 dark:bg-slate-700 dark:text-slate-300">{row.invoice_no}</span>
+                        : <span className="text-xs text-slate-300">—</span>}
                     </td>
-                    <td className="max-w-[140px] truncate px-3 py-2 text-xs text-slate-500">
+                    {/* ຮູບໃບບິນ (repair invoice) */}
+                    <td className="px-3 py-1">
+                      <FileThumbnails files={row.receipt_files} onOpen={() => { setReceiptViewType("receipt"); setReceiptModalRow(row); setReceiptIndex(0); }} />
+                    </td>
+                    {/* ຮູບໃບຊຳລະ (payment receipt) */}
+                    <td className="px-3 py-1">
+                      <FileThumbnails files={row.payment_files} onOpen={() => { setReceiptViewType("payment"); setReceiptModalRow(row); setReceiptIndex(0); }} />
+                    </td>
+                    <td className="px-3 py-2 text-right whitespace-nowrap">
+                      <span className="tabular-nums font-bold text-slate-800 dark:text-slate-100">
+                        {CURRENCY_SYMBOLS[row.currency] ?? ""}{formatNumber(row.cost_amount)}
+                      </span>
+                      <span className="ml-1 text-[10px] text-slate-400">{row.currency}</span>
+                    </td>
+                    <td className="max-w-[140px] truncate px-3 py-2 text-xs text-slate-400">
                       {row.maint_note ?? "—"}
                     </td>
                     <td className="px-3 py-2">
-                      {row.payment_status === "paid" ? (
-                        <span className="inline-flex items-center rounded-full bg-emerald-100 px-2 py-0.5 text-[11px] font-semibold text-emerald-700 dark:bg-emerald-500/20 dark:text-emerald-300">ຊຳລະແລ້ວ</span>
-                      ) : (
-                        <span className="inline-flex items-center rounded-full bg-amber-100 px-2 py-0.5 text-[11px] font-semibold text-amber-700 dark:bg-amber-500/20 dark:text-amber-300">ຍັງບໍ່ຊຳລະ</span>
-                      )}
+                      <button
+                        type="button"
+                        disabled={updatingPaymentId === row.id}
+                        onClick={(e) => { e.stopPropagation(); setPaymentPopoverId(row.id); }}
+                        className="flex items-center gap-1.5 rounded-md px-1 py-0.5 hover:bg-slate-100 dark:hover:bg-slate-700 disabled:opacity-40"
+                      >
+                        {updatingPaymentId === row.id ? (
+                          <FaSpinner className="animate-spin text-[10px] text-slate-400" />
+                        ) : row.payment_status === "paid" ? (
+                          <span className="inline-flex items-center rounded-full bg-emerald-100 px-2 py-0.5 text-[11px] font-semibold text-emerald-700 dark:bg-emerald-500/20 dark:text-emerald-300">ຊຳລະແລ້ວ</span>
+                        ) : (
+                          <span className="inline-flex items-center rounded-full bg-amber-100 px-2 py-0.5 text-[11px] font-semibold text-amber-700 dark:bg-amber-500/20 dark:text-amber-300">ຍັງບໍ່ຊຳລະ</span>
+                        )}
+                        <FaPen className="text-[8px] text-slate-300" />
+                      </button>
                     </td>
                     <td className="px-3 py-2">
                       <button
@@ -1802,94 +2034,35 @@ export default function MaintLogPage() {
                     </td>
                   </tr>
                   {isExpanded && hasItems && (
-                    <tr className="border-b bg-amber-50/60 dark:border-slate-800 dark:bg-amber-950/10">
-                      <td colSpan={12} className="px-8 pb-3 pt-1">
-                        <div className="flex flex-wrap items-start gap-8">
-                          <div className="min-w-0 flex-1">
-                            <p className="mb-1.5 text-[10px] font-semibold uppercase tracking-wide text-amber-600 dark:text-amber-400">
-                              ລາຍການສ້ອມ
-                            </p>
-                            <table className="w-full max-w-lg text-xs">
-                              <thead>
-                                <tr className="text-left text-[10px] text-slate-400">
-                                  <th className="pb-1 pr-4">#</th>
-                                  <th className="pb-1 pr-4">ລາຍການ</th>
-                                  <th className="pb-1 pr-4 text-center">ຈຳນວນ</th>
-                                  <th className="pb-1 pr-4 text-right">ລາຄາ/ຫົວ</th>
-                                  <th className="pb-1 text-right">ລວມ</th>
-                                </tr>
-                              </thead>
-                              <tbody>
-                                {row.line_items.map((li, idx) => (
-                                  <tr key={li.id} className="border-t border-amber-100 dark:border-amber-900/30">
-                                    <td className="py-1 pr-4 text-slate-400">{idx + 1}</td>
-                                    <td className="py-1 pr-4 font-medium text-slate-700 dark:text-slate-200">
-                                      {li.item_name || li.item_code || "—"}
-                                      {li.item_code && li.item_name && (
-                                        <span className="ml-1 text-[10px] text-slate-400">({li.item_code})</span>
-                                      )}
-                                    </td>
-                                    <td className="py-1 pr-4 text-center tabular-nums text-slate-500">{formatNumber(li.qty)}</td>
-                                    <td className="py-1 pr-4 text-right tabular-nums text-slate-500">{formatNumber(li.unit_price)}</td>
-                                    <td className="py-1 text-right tabular-nums font-semibold text-amber-700 dark:text-amber-400">
-                                      {CURRENCY_SYMBOLS[row.currency] ?? ""} {formatNumber(li.subtotal)}
-                                    </td>
-                                  </tr>
-                                ))}
-                              </tbody>
-                            </table>
-                          </div>
-
-                          {rules.length > 0 && (
-                            <div className="shrink-0">
-                              <p className="mb-2 text-[10px] font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400">
-                                ກຳໜົດບຳລຸງຮັກສາ
-                              </p>
-                              <div className="grid grid-cols-2 gap-2">
-                                {rules.map((rule) => {
-                                  const scheduleEntry = scheduleMap.get(row.car_code)?.get(rule.code);
-                                  const nextDue = scheduleEntry ? Number(scheduleEntry.next_due_km) : null;
-                                  const currentOdo = Number(row.odometer);
-                                  const remaining = nextDue != null ? nextDue - currentOdo : null;
-                                  const overdue = remaining != null && remaining < 0;
-                                  const nearPct = remaining != null ? remaining / rule.interval_km : null;
-                                  const [bgColor, textColor, dotColor] =
-                                    remaining == null
-                                      ? ["bg-slate-50 border-slate-200 dark:bg-slate-800/50 dark:border-slate-700", "text-slate-400", "bg-slate-300"]
-                                      : overdue
-                                      ? ["bg-red-50 border-red-200 dark:bg-red-950/30 dark:border-red-900/40", "text-red-600 dark:text-red-400", "bg-red-500"]
-                                      : nearPct! < 0.1
-                                      ? ["bg-red-50 border-red-200 dark:bg-red-950/30 dark:border-red-900/40", "text-red-500 dark:text-red-400", "bg-red-400"]
-                                      : nearPct! < 0.25
-                                      ? ["bg-amber-50 border-amber-200 dark:bg-amber-950/30 dark:border-amber-900/40", "text-amber-600 dark:text-amber-400", "bg-amber-400"]
-                                      : ["bg-emerald-50 border-emerald-200 dark:bg-emerald-950/30 dark:border-emerald-900/40", "text-emerald-700 dark:text-emerald-400", "bg-emerald-500"];
-                                  return (
-                                    <div key={rule.code} className={`rounded-lg border px-3 py-2 ${bgColor}`}>
-                                      <p className="text-[10px] font-medium text-slate-600 dark:text-slate-300 leading-tight">
-                                        {rule.name}
-                                      </p>
-                                      <p className="text-[9px] text-slate-400 mb-1">ທຸກ {formatNumber(rule.interval_km)} km</p>
-                                      <div className="flex items-center gap-1">
-                                        <span className={`h-1.5 w-1.5 shrink-0 rounded-full ${dotColor}`} />
-                                        <span className={`text-xs font-bold tabular-nums ${textColor}`}>
-                                          {remaining == null
-                                            ? "ບໍ່ມີຂໍ້ມູນ"
-                                            : overdue
-                                            ? `ເກີນ ${formatNumber(Math.abs(remaining))} km`
-                                            : `ອີກ ${formatNumber(remaining)} km`}
-                                        </span>
-                                      </div>
-                                      {nextDue != null && (
-                                        <p className="mt-0.5 text-[9px] text-slate-400">
-                                          ຮອດ {formatNumber(nextDue)} km
-                                        </p>
-                                      )}
-                                    </div>
-                                  );
-                                })}
+                    <tr className="border-b dark:border-slate-800">
+                      <td colSpan={12} className="bg-slate-50/80 px-6 py-3 dark:bg-slate-800/30">
+                        <div className="flex flex-wrap gap-2">
+                          {row.line_items.map((li, idx) => (
+                            <div
+                              key={li.id}
+                              className="flex items-center gap-3 rounded-lg border border-slate-200 bg-white px-3 py-2 shadow-sm dark:border-slate-700 dark:bg-slate-800"
+                            >
+                              <span className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-amber-100 text-[10px] font-bold text-amber-600 dark:bg-amber-900/40 dark:text-amber-400">
+                                {idx + 1}
+                              </span>
+                              <div className="min-w-0">
+                                <p className="text-xs font-medium text-slate-700 dark:text-slate-200">
+                                  {li.item_name || li.item_code || "—"}
+                                </p>
+                                {li.item_code && li.item_name && (
+                                  <p className="text-[10px] text-slate-400">{li.item_code}</p>
+                                )}
+                              </div>
+                              <div className="ml-2 shrink-0 text-right">
+                                <p className="text-xs font-semibold tabular-nums text-amber-600 dark:text-amber-400">
+                                  {CURRENCY_SYMBOLS[row.currency] ?? ""} {formatNumber(li.subtotal)}
+                                </p>
+                                {li.qty > 1 && (
+                                  <p className="text-[10px] tabular-nums text-slate-400">×{li.qty}</p>
+                                )}
                               </div>
                             </div>
-                          )}
+                          ))}
                         </div>
                       </td>
                     </tr>
@@ -1924,6 +2097,194 @@ export default function MaintLogPage() {
           </div>
         )}
       </StatusTableShell>
+
+      {receiptModalRow && (() => {
+        const files = receiptModalRow.receipt_files ?? [];
+        const f = files[receiptIndex];
+        const src = f ? `data:${f.type};base64,${f.data}` : "";
+        const isImage = f?.type.startsWith("image/");
+        const isPdf = f?.type === "application/pdf";
+        const total = files.length;
+        const prev = () => setReceiptIndex((i) => (i - 1 + total) % total);
+        const next = () => setReceiptIndex((i) => (i + 1) % total);
+        return (
+          <div
+            className="fixed inset-0 z-[1100] flex flex-col items-center justify-center bg-black/80 backdrop-blur-sm"
+            onClick={() => setReceiptModalRow(null)}
+          >
+            {/* Header */}
+            <div className="flex w-full max-w-3xl items-center justify-between px-4 pb-3" onClick={(e) => e.stopPropagation()}>
+              <div>
+                <p className="text-sm font-bold text-white">
+                  {f?.name ?? "ໄຟລ໌"}
+                </p>
+                <p className="text-xs text-white/50">
+                  ລົດ {receiptModalRow.car_code} · {receiptModalRow.maint_date}
+                  {receiptModalRow.invoice_no && <> · <span className="font-mono">{receiptModalRow.invoice_no}</span></>}
+                </p>
+              </div>
+              <div className="flex items-center gap-2">
+                {f && (
+                  <a href={src} download={f.name} className="rounded-lg bg-white/10 px-3 py-1.5 text-xs font-semibold text-white hover:bg-white/20" onClick={(e) => e.stopPropagation()}>
+                    ດາວໂຫຼດ
+                  </a>
+                )}
+                <button type="button" onClick={() => setReceiptModalRow(null)} className="flex h-8 w-8 items-center justify-center rounded-lg bg-white/10 text-white hover:bg-white/20">
+                  <FaTimes />
+                </button>
+              </div>
+            </div>
+
+            {/* Viewer */}
+            <div className="relative flex w-full max-w-3xl flex-1 items-center justify-center px-4" style={{ maxHeight: "75vh" }} onClick={(e) => e.stopPropagation()}>
+              {total > 1 && (
+                <button type="button" onClick={prev} className="absolute left-4 z-10 flex h-10 w-10 items-center justify-center rounded-full bg-white/10 text-white hover:bg-white/25">
+                  <FaChevronRight className="rotate-180 text-sm" />
+                </button>
+              )}
+              <div className="flex h-full w-full items-center justify-center overflow-hidden rounded-xl bg-black/30">
+                {isImage && <img src={src} alt={f!.name} className="max-h-full max-w-full object-contain" />}
+                {isPdf && <iframe src={src} title={f!.name} className="h-full w-full" style={{ minHeight: "65vh" }} />}
+                {f && !isImage && !isPdf && (
+                  <div className="text-center text-white/60">
+                    <FaPaperclip className="mx-auto mb-2 text-3xl" />
+                    <p className="text-sm">ບໍ່ສາມາດ preview ໄດ້</p>
+                    <p className="text-xs opacity-60">{f.name}</p>
+                  </div>
+                )}
+                {!f && <p className="text-sm text-white/40">ບໍ່ມີໄຟລ໌</p>}
+              </div>
+              {total > 1 && (
+                <button type="button" onClick={next} className="absolute right-4 z-10 flex h-10 w-10 items-center justify-center rounded-full bg-white/10 text-white hover:bg-white/25">
+                  <FaChevronRight className="text-sm" />
+                </button>
+              )}
+            </div>
+
+            {/* Thumbnails / counter */}
+            {total > 1 && (
+              <div className="mt-3 flex items-center gap-2" onClick={(e) => e.stopPropagation()}>
+                {files.map((tf, idx) => (
+                  <button
+                    key={idx}
+                    type="button"
+                    onClick={() => setReceiptIndex(idx)}
+                    className={`h-2 rounded-full transition-all ${idx === receiptIndex ? "w-6 bg-white" : "w-2 bg-white/40 hover:bg-white/70"}`}
+                  />
+                ))}
+                <span className="ml-2 text-xs text-white/50">{receiptIndex + 1} / {total}</span>
+              </div>
+            )}
+          </div>
+        );
+      })()}
+
+      {paymentPopoverId !== null && (() => {
+        const target = data.rows.find((r) => r.id === paymentPopoverId);
+        if (!target) return null;
+        const isPaid = target.payment_status === "paid";
+        const canConfirm = paymentFiles.length > 0;
+        const handleFileAdd = (e: React.ChangeEvent<HTMLInputElement>) => {
+          const files = Array.from(e.target.files ?? []);
+          for (const file of files) {
+            const reader = new FileReader();
+            reader.onload = (ev) => {
+              const data64 = (ev.target?.result as string ?? "").split(",")[1] ?? "";
+              setPaymentFiles((prev) => [...prev, { name: file.name, data: data64, type: file.type }]);
+            };
+            reader.readAsDataURL(file);
+          }
+          if (e.target) e.target.value = "";
+        };
+        return (
+          <div className="fixed inset-0 z-[1100] flex items-center justify-center bg-black/40 backdrop-blur-sm" onClick={() => { setPaymentPopoverId(null); setPaymentFiles([]); }}>
+            <div className="w-96 overflow-hidden rounded-2xl bg-white shadow-2xl dark:bg-slate-900" onClick={(e) => e.stopPropagation()}>
+              <div className="border-b border-slate-100 px-5 py-4 dark:border-slate-800">
+                <p className="text-sm font-bold text-slate-800 dark:text-slate-100">ອັບເດດການຊຳລະ</p>
+                <p className="mt-0.5 text-xs text-slate-400">ລົດ {target.car_code} · {target.maint_date}</p>
+              </div>
+
+              <div className="flex flex-col gap-2 p-4">
+                {/* pending option */}
+                <button
+                  type="button"
+                  onClick={async () => {
+                    setPaymentPopoverId(null);
+                    setPaymentFiles([]);
+                    if (!isPaid) return;
+                    await handleTogglePayment(target.id, "pending", []);
+                  }}
+                  className={`flex items-center gap-3 rounded-xl border-2 px-4 py-3 text-left transition-all border-amber-200 bg-amber-50 dark:border-amber-800 dark:bg-amber-950/30 ${isPaid ? "opacity-60 hover:opacity-100" : "ring-2 ring-amber-400 ring-offset-1"}`}
+                >
+                  <span className="h-2.5 w-2.5 shrink-0 rounded-full bg-amber-400" />
+                  <div className="flex-1">
+                    <p className="text-sm font-bold text-amber-700 dark:text-amber-300">ຍັງບໍ່ຊຳລະ</p>
+                    <p className="text-[11px] text-slate-400">ຍັງລໍຖ້າການຊຳລະ</p>
+                  </div>
+                  {!isPaid && <span className="text-xs font-bold text-slate-400">✓ ປັດຈຸບັນ</span>}
+                </button>
+
+                {/* paid option — requires receipt upload */}
+                <div className={`rounded-xl border-2 transition-all border-emerald-200 bg-emerald-50 dark:border-emerald-800 dark:bg-emerald-950/30 ${isPaid ? "ring-2 ring-emerald-400 ring-offset-1" : ""}`}>
+                  <div className="flex items-center gap-3 px-4 pt-3 pb-2">
+                    <span className="h-2.5 w-2.5 shrink-0 rounded-full bg-emerald-500" />
+                    <div className="flex-1">
+                      <p className="text-sm font-bold text-emerald-700 dark:text-emerald-300">ຊຳລະແລ້ວ</p>
+                      <p className="text-[11px] text-slate-400">ຕ້ອງອັບໂຫຼດໃບບິນ / ໃບເສັດ</p>
+                    </div>
+                    {isPaid && <span className="text-xs font-bold text-slate-400">✓ ປັດຈຸບັນ</span>}
+                  </div>
+
+                  {!isPaid && (
+                    <div className="px-4 pb-3">
+                      <input ref={paymentFileRef} type="file" accept="image/*,application/pdf" multiple className="hidden" onChange={handleFileAdd} />
+                      {paymentFiles.length === 0 ? (
+                        <button
+                          type="button"
+                          onClick={() => paymentFileRef.current?.click()}
+                          className="flex w-full items-center justify-center gap-2 rounded-lg border-2 border-dashed border-emerald-300 py-3 text-xs font-semibold text-emerald-600 hover:border-emerald-400 hover:bg-emerald-100/50 dark:border-emerald-700 dark:text-emerald-400"
+                        >
+                          <FaPaperclip /> ແນບໃບບິນ / ໃບເສັດ
+                        </button>
+                      ) : (
+                        <div className="flex flex-col gap-1.5">
+                          {paymentFiles.map((f, i) => (
+                            <div key={i} className="flex items-center gap-2 rounded-lg bg-white px-2 py-1.5 shadow-sm dark:bg-slate-800">
+                              {f.type.startsWith("image/")
+                                ? <img src={`data:${f.type};base64,${f.data}`} alt={f.name} className="h-8 w-8 rounded object-cover" />
+                                : <div className="flex h-8 w-8 items-center justify-center rounded bg-slate-100"><FaPaperclip className="text-slate-400 text-xs" /></div>}
+                              <span className="min-w-0 flex-1 truncate text-[11px] text-slate-600 dark:text-slate-300">{f.name}</span>
+                              <button type="button" onClick={() => setPaymentFiles((prev) => prev.filter((_, j) => j !== i))} className="text-slate-300 hover:text-red-400"><FaTimes className="text-[10px]" /></button>
+                            </div>
+                          ))}
+                          <button type="button" onClick={() => paymentFileRef.current?.click()} className="text-[11px] text-emerald-500 hover:underline">+ ເພີ່ມໄຟລ໌</button>
+                        </div>
+                      )}
+                      <button
+                        type="button"
+                        disabled={!canConfirm || updatingPaymentId === target.id}
+                        onClick={async () => {
+                          setPaymentPopoverId(null);
+                          await handleTogglePayment(target.id, "paid", paymentFiles.map(({ name, data, type }) => ({ name, data, type })));
+                          setPaymentFiles([]);
+                        }}
+                        className="mt-2 flex w-full items-center justify-center gap-2 rounded-lg bg-emerald-500 py-2 text-xs font-bold text-white hover:bg-emerald-400 disabled:opacity-40"
+                      >
+                        {updatingPaymentId === target.id ? <FaSpinner className="animate-spin" /> : null}
+                        ຢືນຢັນການຊຳລະ
+                      </button>
+                    </div>
+                  )}
+                </div>
+              </div>
+
+              <div className="border-t border-slate-100 px-4 py-3 dark:border-slate-800">
+                <button type="button" onClick={() => { setPaymentPopoverId(null); setPaymentFiles([]); }} className="w-full rounded-lg py-2 text-xs text-slate-400 hover:bg-slate-50 dark:hover:bg-slate-800">ຍົກເລີກ</button>
+              </div>
+            </div>
+          </div>
+        );
+      })()}
     </div>
   );
 }
