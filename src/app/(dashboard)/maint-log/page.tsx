@@ -111,6 +111,7 @@ interface MaintPlan {
   maint_note: string | null;
   created_at: string;
   created_by: string | null;
+  current_odometer: number | null;
 }
 
 interface LineItem {
@@ -399,6 +400,7 @@ export default function MaintLogPage() {
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [formPaymentFiles, setFormPaymentFiles] = useState<AttachedFile[]>([]);
   const formPaymentFileRef = useRef<HTMLInputElement>(null);
+  const currencyPickedByUser = useRef(false);
   const [lastServiceKm, setLastServiceKm] = useState<number | null>(null);
   const [rules, setRules] = useState<MaintRule[]>([]);
   const [fromAlertPlan, setFromAlertPlan] = useState<MaintPlanAlert | null>(null);
@@ -462,7 +464,7 @@ export default function MaintLogPage() {
       .catch(console.error);
   };
 
-  const handleSavePlan = async (ev: React.FormEvent) => {
+  const handleSavePlan = async (ev: React.SyntheticEvent<HTMLFormElement>) => {
     ev.preventDefault();
     setPlanError(null);
     if (!planCarOption) { setPlanError("ກະລຸນາເລືອກລົດ"); return; }
@@ -486,7 +488,7 @@ export default function MaintLogPage() {
     setSavingPlan(true);
     try {
       await Promise.all(
-        entries.map(({ rule_code: rc, next_due_km: km }, i) => {
+        entries.map(async ({ rule_code: rc, next_due_km: km }, i) => {
           const planCode = entries.length === 1 ? base : `${base}-${i + 1}`;
           return fetch("/api/maint-plan", {
             method: "POST",
@@ -538,7 +540,7 @@ export default function MaintLogPage() {
       .catch(console.error);
   };
 
-  const handleSaveRule = async (ev: React.FormEvent) => {
+  const handleSaveRule = async (ev: React.SyntheticEvent<HTMLFormElement>) => {
     ev.preventDefault();
     setRuleError(null);
     const km = parseInt(ruleForm.interval_km, 10);
@@ -590,7 +592,7 @@ export default function MaintLogPage() {
         return json;
       }),
       fetch(`/api/maint-log?mode=inspect_codes`, { cache: "no-store" }).then((r) => r.json()),
-      (() => {
+      (async () => {
         const d = new Date();
         const to = d.toISOString().slice(0, 10);
         d.setDate(d.getDate() - 30);
@@ -658,7 +660,7 @@ export default function MaintLogPage() {
         setForm((f) => ({
           ...f,
           odometer: lastSvcKm != null ? String(lastSvcKm) : f.odometer,
-          currency: d.last_currency ?? f.currency,
+          currency: currencyPickedByUser.current ? f.currency : (d.last_currency ?? f.currency),
         }));
       })
       .catch(console.error);
@@ -770,7 +772,7 @@ export default function MaintLogPage() {
     if (e.target) e.target.value = "";
   };
 
-  const handleSubmit = async (ev: React.FormEvent) => {
+  const handleSubmit = async (ev: React.SyntheticEvent<HTMLFormElement>) => {
     ev.preventDefault();
     setSaveError(null);
     setSaving(true);
@@ -820,6 +822,7 @@ export default function MaintLogPage() {
       setLineItems([newLineItem()]);
       setAttachedFiles([]);
       setFormPaymentFiles([]);
+      currencyPickedByUser.current = false;
       setLastServiceKm(null);
       setFromAlertPlan(null);
       if (savedInspectCode) {
@@ -859,6 +862,7 @@ export default function MaintLogPage() {
     setLineItems([newLineItem()]);
     setAttachedFiles([]);
     setFormPaymentFiles([]);
+    currencyPickedByUser.current = false;
     setSaveError(null);
     setAddOpen(true);
 
@@ -885,6 +889,7 @@ export default function MaintLogPage() {
     setLineItems(ruleName ? [{ ...newLineItem(), item_name: ruleName }] : [newLineItem()]);
     setAttachedFiles([]);
     setFormPaymentFiles([]);
+    currencyPickedByUser.current = false;
     setSaveError(null);
     setFromAlertPlan(alert);
     setAddOpen(true);
@@ -1327,10 +1332,10 @@ export default function MaintLogPage() {
             </div>
             <div>
               <p className="text-sm font-bold text-orange-700 dark:text-orange-300">
-                ໃກ້ຮ�ດກໍານົດສ້ອມແປງ — {maintPlanAlerts.length} ລາຍການ
+                ໃກ້ຮອດກໍານົດສ້ອມແປງ — {maintPlanAlerts.length} ລາຍການ
               </p>
               <p className="text-xs text-orange-500/80 dark:text-orange-400/70">
-                ລົດຕໍ່ໄປນີ້ຄວນໄດ້ຮັບການສ້ອມ (ຕ່ຳກວ່າ 500 km ຈາກ odg_tms_inspect)
+                ລົດຕໍ່ໄປນີ້ຄວນໄດ້ຮັບການສ້ອມ (ຕ່ຳກວ່າ 500 km)
               </p>
             </div>
           </div>
@@ -1408,28 +1413,43 @@ export default function MaintLogPage() {
               <colgroup>
                 <col className="w-24" />
                 <col />
-                <col className="w-32" />
-                <col className="w-32" />
+                <col className="w-28" />
+                <col className="w-28" />
+                <col className="w-28" />
                 <col className="w-8" />
               </colgroup>
               <thead>
                 <tr className="border-b border-slate-100 text-left text-xs text-slate-500 dark:border-slate-700">
                   <th className="px-4 py-2">ລົດ</th>
                   <th className="px-3 py-2">Rule</th>
+                  <th className="px-4 py-2 text-right">ປັດຈຸບັນ (km)</th>
                   <th className="px-4 py-2 text-right">ຮອດ (km)</th>
                   <th className="px-3 py-2">ໝາຍເຫດ</th>
                   <th className="px-2 py-2" />
                 </tr>
               </thead>
               <tbody>
-                {maintPlans.map((p) => (
+                {maintPlans.map((p) => {
+                  const currentOdo = p.current_odometer != null ? Number(p.current_odometer) : null;
+                  const remaining = currentOdo != null ? p.next_due_km - currentOdo : null;
+                  return (
                   <tr key={p.plan_code} className="border-b border-slate-50 hover:bg-slate-50 dark:border-slate-800 dark:hover:bg-slate-800/30">
                     <td className="px-4 py-2.5 font-semibold text-slate-700 dark:text-slate-200">{p.car_code}</td>
                     <td className="px-3 py-2.5 text-xs text-slate-500 truncate">
                       {p.rule_code ? (rules.find((r) => r.code === p.rule_code)?.name ?? p.rule_code) : "—"}
                     </td>
-                    <td className="px-4 py-2.5 text-right tabular-nums font-bold text-orange-600 dark:text-orange-400">
-                      {formatNumber(p.next_due_km)}
+                    <td className="px-4 py-2.5 text-right tabular-nums text-slate-500 dark:text-slate-400">
+                      {currentOdo != null ? formatNumber(currentOdo) : <span className="text-slate-300">—</span>}
+                    </td>
+                    <td className="px-4 py-2.5 text-right tabular-nums">
+                      <span className={`font-bold ${remaining != null && remaining <= 0 ? "text-red-500 dark:text-red-400" : "text-orange-600 dark:text-orange-400"}`}>
+                        {formatNumber(p.next_due_km)}
+                      </span>
+                      {remaining != null && (
+                        <div className={`text-[10px] tabular-nums ${remaining <= 0 ? "text-red-400" : remaining <= 3000 ? "text-amber-500" : "text-slate-400"}`}>
+                          {remaining <= 0 ? `ເກີນ ${formatNumber(-remaining)} km` : `ເຫຼືອ ${formatNumber(remaining)} km`}
+                        </div>
+                      )}
                     </td>
                     <td className="px-3 py-2.5 text-xs text-slate-400 truncate">{p.maint_note ?? "—"}</td>
                     <td className="px-2 py-2.5 text-center">
@@ -1445,7 +1465,8 @@ export default function MaintLogPage() {
                       </button>
                     </td>
                   </tr>
-                ))}
+                  );
+                })}
               </tbody>
             </table>
           </div>
@@ -1681,7 +1702,7 @@ export default function MaintLogPage() {
                     <table className="w-full min-w-[480px] text-xs">
                       <thead>
                         <tr className="border-b border-slate-100 dark:border-slate-700 text-slate-400">
-                          <th className="w-7 px-2 py-1.5 text-center">#</th>
+                          <th className="w-7 px-2 py-1.5 text-center">ລຳດັບ</th>
                           <th className="px-2 py-1.5 text-left">ລາຍການສ້ອມ</th>
                           <th className="w-36 px-2 py-1.5 text-right">ລາຄາ</th>
                           <th className="w-8 px-1 py-1.5" />
@@ -1732,7 +1753,7 @@ export default function MaintLogPage() {
                     <div className="flex items-center gap-3">
                       <select
                         value={form.currency}
-                        onChange={(e) => setForm((f) => ({ ...f, currency: e.target.value }))}
+                        onChange={(e) => { currencyPickedByUser.current = true; setForm((f) => ({ ...f, currency: e.target.value })); }}
                         className="h-7 rounded border border-slate-200 bg-slate-50 px-2 text-xs focus:border-amber-400 focus:outline-none dark:border-slate-700 dark:bg-slate-800"
                       >
                         {CURRENCIES.map((c) => (
@@ -1928,7 +1949,7 @@ export default function MaintLogPage() {
           <thead>
             <tr className="border-b bg-slate-50 text-left text-xs font-semibold text-slate-500 dark:border-slate-700 dark:bg-slate-800/60">
               <th className="w-6 px-2 py-2.5" />
-              <th className="px-3 py-2.5">#</th>
+              <th className="px-3 py-2.5">ລຳດັບ</th>
               <th className="px-3 py-2.5">ລົດ</th>
               <th className="px-3 py-2.5">ວັນທີ</th>
               <th className="px-3 py-2.5 text-right">Odo (km)</th>
@@ -2099,7 +2120,9 @@ export default function MaintLogPage() {
       </StatusTableShell>
 
       {receiptModalRow && (() => {
-        const files = receiptModalRow.receipt_files ?? [];
+        const files = receiptViewType === "payment"
+          ? (receiptModalRow.payment_files ?? [])
+          : (receiptModalRow.receipt_files ?? []);
         const f = files[receiptIndex];
         const src = f ? `data:${f.type};base64,${f.data}` : "";
         const isImage = f?.type.startsWith("image/");
@@ -2164,7 +2187,7 @@ export default function MaintLogPage() {
             {/* Thumbnails / counter */}
             {total > 1 && (
               <div className="mt-3 flex items-center gap-2" onClick={(e) => e.stopPropagation()}>
-                {files.map((tf, idx) => (
+                {files.map((_, idx) => (
                   <button
                     key={idx}
                     type="button"

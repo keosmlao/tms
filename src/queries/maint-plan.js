@@ -46,10 +46,18 @@ async function ensureMaintPlanSchema() {
 async function getMaintPlans() {
   await ensureMaintPlanSchema();
   return query(
-    `SELECT plan_code, car_code, rule_code, next_due_km, maint_note,
-       TO_CHAR(created_at, 'YYYY-MM-DD') AS created_at, created_by
-     FROM public.odg_tms_maint_plan
-     ORDER BY car_code, next_due_km`,
+    `SELECT
+       mp.plan_code, mp.car_code, mp.rule_code, mp.next_due_km, mp.maint_note,
+       TO_CHAR(mp.created_at, 'YYYY-MM-DD') AS created_at, mp.created_by,
+       latest.odometer AS current_odometer
+     FROM public.odg_tms_maint_plan mp
+     LEFT JOIN (
+       SELECT car_code, MAX(odometer) AS odometer
+       FROM public.odg_tms_inspect
+       WHERE odometer IS NOT NULL
+       GROUP BY car_code
+     ) latest ON latest.car_code = mp.car_code
+     ORDER BY mp.car_code, mp.next_due_km`,
     []
   );
 }
