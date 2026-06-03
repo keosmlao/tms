@@ -6,6 +6,7 @@ import {
   FaChartLine,
   FaCog,
   FaLine,
+  FaMapMarkedAlt,
   FaQrcode,
   FaUserTie,
   FaWhatsapp,
@@ -20,6 +21,7 @@ const ICONS: Record<string, React.ReactNode> = {
   user: <FaUserTie className="text-emerald-600" />,
   line: <FaLine className="text-emerald-500" />,
   whatsapp: <FaWhatsapp className="text-emerald-500" />,
+  map: <FaMapMarkedAlt className="text-sky-600" />,
 };
 
 export default function SettingsMenuPage() {

@@ -47,6 +47,13 @@ export const SETTING_TOPICS = [
     tone: "teal",
   },
   {
+    key: "geofence",
+    title: "Geofence ຈຸດເລີ່ມ/ສິ້ນສຸດ",
+    subtitle: "ກຳນົດຈຸດ ແລະ ໄລຍະທີ່ຄົນຂັບຕ້ອງຢູ່ ຈຶ່ງເລີ່ມ/ປິດຖ້ຽວໄດ້ (ແຍກຕາມສາຂາ)",
+    icon: "map",
+    tone: "sky",
+  },
+  {
     key: "pending",
     title: "Pending ບິນ",
     subtitle: "ກຳນົດເກນວັນສຳລັບມຸມມອງ “ຍັງບໍ່ເຖິງເວລາ”",

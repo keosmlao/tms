@@ -16,6 +16,7 @@ const {
 const { saveToken: saveFcmToken, deleteToken: deleteFcmToken } = require("./push");
 const { saveFuelRefill, getFuelLogs, getFuelSummary } = require("./fuel");
 const { notifyBillStatus } = require("./notifications");
+const { assertJobGeofence } = require("./geofence");
 
 function asText(value) {
   return typeof value === "string" ? value.trim() : "";
@@ -341,6 +342,11 @@ async function mobileJobAction(body) {
           return { success: true, already_started: true };
         }
         if (currentJobStatus > 2) throw new Error("ຖ້ຽວນີ້ປິດແລ້ວ ບໍ່ສາມາດເລີ່ມຈັດສົ່ງ");
+        // Geofence: when the branch requires it, the driver must be at the
+        // configured start point (within radius) to begin dispatch. No-op when
+        // the branch hasn't enabled it. Runs before any write so a blocked
+        // start leaves no side effects.
+        await assertJobGeofence(client, { docNo, kind: "start", lat, lng });
         // Auto-receive when the driver skipped tapping "ຮັບຖ້ຽວ" — starting
         // dispatch implies the trip is in hand, so don't block on a missing
         // intermediate step.
@@ -1153,6 +1159,16 @@ async function mobileJobAction(body) {
         const openBillCount = await getOpenBillCount(docNo, client);
         if (openBillCount > 0) throw new Error("Still has pending bills");
 
+        // Geofence: when the branch requires it, the driver must be back at the
+        // configured end point (within radius) to close the trip. Uses the
+        // explicit end coords when sent, else the current lat/lng.
+        await assertJobGeofence(client, {
+          docNo,
+          kind: "end",
+          lat: latEnd ?? lat,
+          lng: lngEnd ?? lng,
+        });
+
         await client.query(
           `UPDATE odg_tms
            SET job_status = 3, job_close = LOCALTIMESTAMP(0),
@@ -1440,12 +1456,127 @@ async function fcmTokenDelete(token) {
   return { success: true };
 }
 
+// Bulk-ingest a buffered batch of device location points for one trip. The
+// driver app samples its GPS every ~3s and POSTs the accumulated points, so
+// this is one transaction + one multi-row INSERT regardless of batch size.
+// Points carry their own on-device `recorded_at`; we fall back to
+// LOCALTIMESTAMP only when the client omits it. doc_date is derived from each
+// point's timestamp (offline-buffered points can span past midnight) so it
+// matches the day the point was actually captured.
+async function mobileSaveLocations({ doc_no, driver_id, imei, device, points }) {
+  const docNo = asText(doc_no);
+  const cleanDriver = asText(driver_id);
+  const cleanImei = asNullableText(imei);
+  if (!docNo) throw new Error("doc_no is required");
+  if (!cleanDriver) {
+    const err = new Error("Unauthorized");
+    err.status = 401;
+    throw err;
+  }
+  if (!Array.isArray(points) || points.length === 0) {
+    throw new Error("at least one point is required");
+  }
+
+  const client = await pool.connect();
+  try {
+    await client.query("BEGIN");
+    await ensureDeliveryWorkflowSchema(client);
+
+    // Same ownership gate the job actions use: a driver may only log location
+    // against a trip that belongs to them in the active (fixed-year) window.
+    const allowedJob = await client.query(
+      `SELECT 1 FROM odg_tms
+       WHERE doc_no = $1 AND driver = $2 AND ${getFixedYearSqlFilter("doc_date")}
+       LIMIT 1`,
+      [docNo, cleanDriver]
+    );
+    if (allowedJob.rowCount === 0) {
+      const err = new Error("Forbidden");
+      err.status = 403;
+      throw err;
+    }
+
+    // Upsert the device identity, keyed by IMEI. Only when we actually have an
+    // IMEI — without it there's no stable key, and the per-point columns still
+    // capture everything we received. COALESCE keeps the last known value when
+    // a field is omitted on this batch.
+    const dev = device || {};
+    if (cleanImei) {
+      await client.query(
+        `INSERT INTO odg_tms_mobile_device
+           (imei, driver, model, os_version, app_version, carrier, sim_phone, last_doc_no, updated_at)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, LOCALTIMESTAMP(0))
+         ON CONFLICT (imei) DO UPDATE SET
+           driver = EXCLUDED.driver,
+           model = COALESCE(EXCLUDED.model, odg_tms_mobile_device.model),
+           os_version = COALESCE(EXCLUDED.os_version, odg_tms_mobile_device.os_version),
+           app_version = COALESCE(EXCLUDED.app_version, odg_tms_mobile_device.app_version),
+           carrier = COALESCE(EXCLUDED.carrier, odg_tms_mobile_device.carrier),
+           sim_phone = COALESCE(EXCLUDED.sim_phone, odg_tms_mobile_device.sim_phone),
+           last_doc_no = EXCLUDED.last_doc_no,
+           updated_at = LOCALTIMESTAMP(0)`,
+        [
+          cleanImei,
+          cleanDriver,
+          asNullableText(dev.model),
+          asNullableText(dev.os_version),
+          asNullableText(dev.app_version),
+          asNullableText(dev.carrier),
+          asNullableText(dev.sim_phone),
+          docNo,
+        ]
+      );
+    }
+
+    const today = new Date().toISOString().split("T")[0];
+    const rows = [];
+    const params = [];
+    let i = 1;
+    for (const p of points) {
+      const recordedAt = asNullableText(p.recorded_at);
+      const docDate = recordedAt ? recordedAt.slice(0, 10) : today;
+      rows.push(
+        `($${i++}, $${i++}::date, $${i++}, $${i++}, COALESCE($${i++}::timestamp, LOCALTIMESTAMP(0)),` +
+          ` $${i++}, $${i++}, $${i++}, $${i++}, $${i++}, $${i++})`
+      );
+      params.push(
+        docNo,
+        docDate,
+        asText(p.lat),
+        asText(p.lng),
+        recordedAt,
+        cleanImei,
+        asNullableText(p.speed),
+        asNullableText(p.heading),
+        asNullableText(p.accuracy),
+        asNullableText(p.battery),
+        asNullableText(p.signal)
+      );
+    }
+    await client.query(
+      `INSERT INTO odg_tms_travel_history
+         (doc_no, doc_date, lat, lng, recorded_at, imei, speed, heading, accuracy, battery, signal)
+       VALUES ${rows.join(", ")}`,
+      params
+    );
+
+    await client.query("COMMIT");
+    return { success: true, saved: points.length };
+  } catch (error) {
+    await client.query("ROLLBACK").catch(() => undefined);
+    throw error;
+  } finally {
+    client.release();
+  }
+}
+
 module.exports = {
   mobileLogin,
   mobileJobsList,
   mobileJobAction,
   mobileBills,
   mobileFuelLogs,
+  mobileSaveLocations,
   fcmTokenSave,
   fcmTokenDelete,
 };

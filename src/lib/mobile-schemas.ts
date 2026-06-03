@@ -164,3 +164,66 @@ export type JobActionInput = z.infer<typeof JobActionSchema>;
 export const PublicTrackSchema = z.object({
   bill_no: NonEmptyString.max(64),
 });
+
+// High-frequency device location ingest. The driver app collects its GPS
+// position every ~3s and pushes a buffered batch (one DB write per request
+// instead of ~20/min/driver). Coordinates are required here — unlike the
+// nullish `LatLng` used for one-off event lat/lng — because a point with no
+// position is meaningless. `recorded_at` is the on-device capture time so
+// points buffered while offline keep their real order/timestamp; omit it and
+// the server stamps LOCALTIMESTAMP at insert.
+const Coordinate = z
+  .string()
+  .trim()
+  .regex(/^-?\d+(\.\d+)?$/, "must be a number");
+const RecordedAt = z
+  .string()
+  .trim()
+  .regex(
+    /^\d{4}-\d{2}-\d{2}[ T]\d{2}:\d{2}:\d{2}(\.\d+)?(Z|[+-]\d{2}:?\d{2})?$/,
+    "must be an ISO-8601 date-time"
+  )
+  .nullish()
+  .transform((v) => (v ? v : undefined));
+
+// Static-ish device identity sent once per batch and upserted into
+// odg_tms_mobile_device. All fields optional — the app sends what the OS lets
+// it read (modern Android restricts IMEI/SIM access, so those may be absent).
+const DeviceInfo = z
+  .object({
+    model: OptionalString,
+    os_version: OptionalString,
+    app_version: OptionalString,
+    carrier: OptionalString,
+    sim_phone: OptionalString,
+  })
+  .nullish()
+  .transform((v) => v ?? undefined);
+
+export const LocationBatchSchema = z.object({
+  doc_no: NonEmptyString.max(64),
+  // Device identifier — same key the hardware GPS log uses, so a phone's track
+  // and its tracker's track align. Optional because newer Android blocks IMEI
+  // reads; points still store against doc_no without it.
+  imei: OptionalString,
+  device: DeviceInfo,
+  points: z
+    .array(
+      z.object({
+        lat: Coordinate,
+        lng: Coordinate,
+        recorded_at: RecordedAt,
+        // Per-fix telemetry from the phone's GPS + radios. All optional.
+        speed: OptionalString, // m/s or km/h — app's choice, stored verbatim
+        heading: OptionalString, // degrees 0–360
+        accuracy: OptionalString, // horizontal accuracy in meters
+        battery: OptionalString, // percent 0–100
+        signal: OptionalString, // network signal (dBm or bars — app's choice)
+      })
+    )
+    // At 3s cadence, 1000 points is ~50 min of buffered travel per request —
+    // a generous ceiling that still bounds payload + insert size.
+    .min(1, "at least one point is required")
+    .max(1000, "too many points in one batch"),
+});
+export type LocationBatchInput = z.infer<typeof LocationBatchSchema>;

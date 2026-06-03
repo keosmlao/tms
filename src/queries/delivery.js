@@ -137,6 +137,49 @@ async function ensureDeliveryWorkflowSchemaInternal(db) {
     CREATE INDEX IF NOT EXISTS idx_odg_tms_travel_history_doc_date
     ON public.odg_tms_travel_history (doc_date)
   `);
+  // Per-point telemetry captured alongside the phone's GPS fix. All nullable
+  // and varchar to match the lat/lng convention (mobile sends everything as
+  // strings; missing fields arrive as null). imei identifies which device
+  // produced the point — the same key the hardware GPS log (odg_tms_gps_
+  // realtime_log) uses, so phone + tracker data line up.
+  for (const col of [
+    "imei character varying",
+    "speed character varying",
+    "heading character varying",
+    "accuracy character varying",
+    "battery character varying",
+    "signal character varying",
+  ]) {
+    await safeDdl(db, `
+      ALTER TABLE public.odg_tms_travel_history
+      ADD COLUMN IF NOT EXISTS ${col}
+    `);
+  }
+  await safeDdl(db, `
+    CREATE INDEX IF NOT EXISTS idx_odg_tms_travel_history_imei
+    ON public.odg_tms_travel_history (imei)
+  `);
+
+  // Static-ish device identity, one row per phone keyed by IMEI. Upserted on
+  // each location batch so it always reflects the latest model/OS/app/SIM the
+  // app reported, plus who was driving and when we last heard from it.
+  await safeDdl(db, `
+    CREATE TABLE IF NOT EXISTS public.odg_tms_mobile_device (
+      imei character varying PRIMARY KEY,
+      driver character varying,
+      model character varying,
+      os_version character varying,
+      app_version character varying,
+      carrier character varying,
+      sim_phone character varying,
+      last_doc_no character varying,
+      updated_at timestamp without time zone DEFAULT LOCALTIMESTAMP(0)
+    )
+  `);
+  await safeDdl(db, `
+    CREATE INDEX IF NOT EXISTS idx_odg_tms_mobile_device_driver
+    ON public.odg_tms_mobile_device (driver)
+  `);
 
   await safeDdl(db, `
     ALTER TABLE public.odg_tms
@@ -193,26 +236,26 @@ async function ensureDeliveryWorkflowSchema(client) {
   // this short-circuit each mobile API request was re-running ~10 DDL
   // statements, which can stall under concurrent load while ALTER TABLE waits
   // for an ACCESS EXCLUSIVE lock.
-  if (deliveryCache.__tmsDeliverySchemaReady_v5) return;
+  if (deliveryCache.__tmsDeliverySchemaReady_v6) return;
 
   const isSharedPool = !client || client === pool;
   if (!isSharedPool) {
     await ensureDeliveryWorkflowSchemaInternal(client);
-    deliveryCache.__tmsDeliverySchemaReady_v5 = true;
+    deliveryCache.__tmsDeliverySchemaReady_v6 = true;
     return;
   }
 
-  if (!deliveryCache.__tmsDeliverySchemaPromise_v5) {
-    deliveryCache.__tmsDeliverySchemaPromise_v5 = ensureDeliveryWorkflowSchemaInternal(pool)
+  if (!deliveryCache.__tmsDeliverySchemaPromise_v6) {
+    deliveryCache.__tmsDeliverySchemaPromise_v6 = ensureDeliveryWorkflowSchemaInternal(pool)
       .then(() => {
-        deliveryCache.__tmsDeliverySchemaReady_v5 = true;
+        deliveryCache.__tmsDeliverySchemaReady_v6 = true;
       })
       .catch((err) => {
-        deliveryCache.__tmsDeliverySchemaPromise_v5 = null;
+        deliveryCache.__tmsDeliverySchemaPromise_v6 = null;
         throw err;
       });
   }
-  await deliveryCache.__tmsDeliverySchemaPromise_v5;
+  await deliveryCache.__tmsDeliverySchemaPromise_v6;
 }
 
 async function ensureJobDeliveryItems(docNo, client) {

@@ -30,6 +30,7 @@ import {
   FaBroadcastTower,
   FaGasPump,
   FaRoute,
+  FaMobileAlt,
   FaHistory,
   FaTools,
   FaPlug,
@@ -58,6 +59,7 @@ const navSections: NavSection[] = [
     items: [
       { label: "ຕິດຕາມສິນຄ້າ", href: "/tracking", icon: <FaMapMarkerAlt size={13} /> },
       { label: "ແຜນທີ່ລົດ", href: "/tracking/cars-map", icon: <FaBroadcastTower size={13} /> },
+      { label: "ເສັ້ນທາງມືຖືຄົນຂັບ", href: "/tracking/phone", icon: <FaMobileAlt size={13} /> },
       { label: "ສະຫຼຸບ GPS ປະຈຳວັນ", href: "/tracking/gps-usage", icon: <FaChartArea size={13} /> },
       // { label: "ດຶງຂໍ້ມູນ GPS ຍ້ອນຫຼັງ", href: "/tracking/gps-backfill", icon: <FaCloudDownloadAlt size={13} /> },
     ],
@@ -207,13 +209,14 @@ export default function Sidebar({
   };
 
   const toggleSection = (key: string) => {
-    if (isCollapsed) return;
+    if (isCollapsed && !mobileOpen) return;
     setOpenSection((prev) => (prev === key ? null : key));
   };
 
   const isActive = (href: string) => pathname === href;
   const isSectionActive = (section: NavSection) =>
     section.items.some((item) => pathname.startsWith(item.href));
+  const showCollapsed = isCollapsed && !mobileOpen;
 
   const sidebarWidth = isCollapsed
     ? "w-[min(288px,86vw)] md:w-[84px]"
@@ -223,9 +226,10 @@ export default function Sidebar({
     <>
       {/* Mobile toggle */}
       <button
-        className="fixed left-4 top-4 z-50 rounded-lg bg-[#0b1b18] p-2.5 text-white shadow-xl transition-all active:scale-95 md:hidden print:hidden"
+        className="fixed left-4 top-4 z-[1110] rounded-lg bg-[#0b1b18] p-2.5 text-white shadow-xl transition-all active:scale-95 md:hidden print:hidden"
         onClick={() => setMobileOpen(!mobileOpen)}
         aria-label="Toggle sidebar"
+        aria-expanded={mobileOpen}
       >
         {mobileOpen ? <FaTimes size={16} /> : <FaBars size={16} />}
       </button>
@@ -233,14 +237,14 @@ export default function Sidebar({
       {/* Mobile backdrop */}
       {mobileOpen && (
         <div
-          className="md:hidden fixed inset-0 bg-black/40 backdrop-blur-md z-30 transition-opacity duration-300 print:hidden"
+          className="fixed inset-0 z-[1090] bg-black/40 backdrop-blur-md transition-opacity duration-300 md:hidden print:hidden"
           onClick={() => setMobileOpen(false)}
         />
       )}
 
       {/* Sidebar */}
       <aside
-        className={`fixed top-0 z-40 flex h-screen shrink-0 flex-col bg-[#0a1514] text-slate-100 shadow-[0_24px_70px_rgba(2,8,13,0.28)] transition-all duration-300 ease-in-out print:hidden ${sidebarWidth}
+        className={`fixed top-0 z-[1100] flex h-dvh shrink-0 flex-col bg-[#0a1514] text-slate-100 shadow-[0_24px_70px_rgba(2,8,13,0.28)] transition-all duration-300 ease-in-out md:z-40 md:h-screen print:hidden ${sidebarWidth}
           border-r border-white/10
           ${mobileOpen ? "translate-x-0" : "-translate-x-full md:translate-x-0"}`}
       >
@@ -254,7 +258,7 @@ export default function Sidebar({
                 className="h-full w-full object-contain"
               />
             </div>
-            {!isCollapsed && (
+            {!showCollapsed && (
               <div className="animate-fadeIn">
                 <p className="text-sm font-bold leading-tight text-white">ODIEN GROUP</p>
                 <p className="text-[10px] uppercase tracking-[0.18em] text-slate-400">TMS Console</p>
@@ -280,17 +284,17 @@ export default function Sidebar({
               pathname === "/"
                 ? "bg-teal-400/14 text-white ring-1 ring-teal-300/20"
                 : "text-slate-400 hover:bg-white/8 hover:text-white"
-            } ${isCollapsed ? "justify-center" : ""}`}
+            } ${showCollapsed ? "justify-center" : ""}`}
             onClick={() => setMobileOpen(false)}
-            title={isCollapsed ? "Dashboard" : undefined}
+            title={showCollapsed ? "Dashboard" : undefined}
           >
             <FaTachometerAlt size={16} className={pathname === "/" ? "text-teal-200" : "transition-colors group-hover:text-teal-200"} />
-            {!isCollapsed && <span>Dashboard</span>}
+            {!showCollapsed && <span>Dashboard</span>}
           </Link>
         </div>
 
         {/* Section label */}
-        {!isCollapsed && (
+        {!showCollapsed && (
           <div className="px-5 pt-4 pb-1">
             <p className="text-[10px] font-semibold uppercase tracking-[0.2em] text-slate-500">
               ເມນູຫຼັກ
@@ -304,7 +308,7 @@ export default function Sidebar({
             const isOpen = openSection === section.key;
             const sectionActive = isSectionActive(section);
 
-            if (isCollapsed) {
+            if (showCollapsed) {
               return (
                 <div key={section.key} className="mb-1.5 group relative">
                   <div
@@ -379,13 +383,13 @@ export default function Sidebar({
         {/* Footer */}
         <div className="border-t border-white/10 px-3 py-3">
           <div className="flex items-center justify-between">
-            {!isCollapsed && (
+            {!showCollapsed && (
               <p className="text-[10px] text-slate-500">&copy; ODG Transport</p>
             )}
             <button
               onClick={toggleTheme}
               className={`rounded-lg p-2 transition-all hover:bg-white/8 ${
-                isCollapsed ? "mx-auto" : ""
+                showCollapsed ? "mx-auto" : ""
               }`}
               aria-label="Toggle theme"
             >

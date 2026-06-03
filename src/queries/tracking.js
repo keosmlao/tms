@@ -3,6 +3,7 @@ const { getFixedYearSqlFilter } = require("../lib/fixed-year");
 const {
   getBranchScope,
   branchFilterShipment,
+  branchFilterJob,
 } = require("./helpers");
 const { ensurePendingBillSchema } = require("./pending-bill");
 const { ensureDeliveryRouteSchema } = require("./delivery-route");
@@ -1182,6 +1183,102 @@ async function getLocations(session, search) {
   return query(`SELECT doc_no, to_char(doc_date,'DD-MM-YYYY') as doc_date, transport_name, destination, b.name_1 as log_name, latitude, longitude FROM ic_trans_shipment a LEFT JOIN public.transport_type b ON b.code=a.transport_code WHERE a.transport_code != '02-0004' AND ${getFixedYearSqlFilter("a.doc_date")} ${branchClause} ORDER BY a.doc_date DESC LIMIT 20`);
 }
 
+// List the trips that have phone-collected location points, newest activity
+// first. One row per job (doc_no) with a rollup of its travel_history points:
+// how many, when we last heard from the phone, and the latest battery / IMEI /
+// device model. Branch-scoped like the rest of the job views.
+async function getPhoneTrackingJobs(session) {
+  await ensureDeliveryWorkflowSchema();
+  const scope = getBranchScope(session);
+  return query(
+    `SELECT
+       t.doc_no,
+       to_char(t.doc_date,'DD-MM-YYYY') AS doc_date,
+       COALESCE(NULLIF(TRIM(c.name_1), ''), t.car, '-') AS car,
+       COALESCE(NULLIF(TRIM(d.name_1), ''), t.driver, '-') AS driver,
+       COALESCE(t.job_status, 0) AS job_status,
+       agg.point_count,
+       to_char(agg.last_at,'DD-MM-YYYY HH24:MI:SS') AS last_at,
+       COALESCE(agg.last_battery, '') AS last_battery,
+       COALESCE(agg.last_imei, '') AS last_imei,
+       COALESCE(dev.model, '') AS device_model
+     FROM public.odg_tms t
+     JOIN LATERAL (
+       SELECT
+         COUNT(*)::int AS point_count,
+         MAX(h.recorded_at) AS last_at,
+         (array_agg(h.battery ORDER BY h.recorded_at DESC))[1] AS last_battery,
+         (array_agg(h.imei ORDER BY h.recorded_at DESC))[1] AS last_imei
+       FROM public.odg_tms_travel_history h
+       WHERE h.doc_no = t.doc_no AND ${getFixedYearSqlFilter("h.doc_date")}
+     ) agg ON agg.point_count > 0
+     LEFT JOIN public.odg_tms_car c ON c.code = t.car
+     LEFT JOIN public.odg_tms_driver d ON d.code = t.driver
+     LEFT JOIN public.odg_tms_mobile_device dev ON dev.imei = agg.last_imei
+     WHERE ${getFixedYearSqlFilter("t.doc_date")} ${branchFilterJob(scope, "t")}
+     ORDER BY agg.last_at DESC NULLS LAST
+     LIMIT 200`
+  );
+}
+
+// Full ordered trail for one trip: every phone point with its telemetry, plus
+// the job header and the device identity. Returns null when the trip isn't in
+// the caller's branch scope (same gate trackBill uses), so a scoped user can't
+// read another branch's track by guessing a doc_no.
+async function getPhoneTrail(session, docNo) {
+  const clean = String(docNo ?? "").trim();
+  if (!clean) return null;
+  await ensureDeliveryWorkflowSchema();
+  const scope = getBranchScope(session);
+
+  const job = await queryOne(
+    `SELECT
+       t.doc_no,
+       to_char(t.doc_date,'DD-MM-YYYY') AS doc_date,
+       COALESCE(NULLIF(TRIM(c.name_1), ''), t.car, '-') AS car,
+       COALESCE(NULLIF(TRIM(d.name_1), ''), t.driver, '-') AS driver,
+       COALESCE(t.job_status, 0) AS job_status
+     FROM public.odg_tms t
+     LEFT JOIN public.odg_tms_car c ON c.code = t.car
+     LEFT JOIN public.odg_tms_driver d ON d.code = t.driver
+     WHERE t.doc_no = $1 AND ${getFixedYearSqlFilter("t.doc_date")} ${branchFilterJob(scope, "t")}
+     LIMIT 1`,
+    [clean]
+  );
+  if (!job) return null;
+
+  const points = await query(
+    `SELECT
+       lat, lng,
+       to_char(recorded_at,'DD-MM-YYYY HH24:MI:SS') AS recorded_at,
+       COALESCE(speed, '')    AS speed,
+       COALESCE(heading, '')  AS heading,
+       COALESCE(accuracy, '') AS accuracy,
+       COALESCE(battery, '')  AS battery,
+       COALESCE(signal, '')   AS signal,
+       COALESCE(imei, '')     AS imei
+     FROM public.odg_tms_travel_history
+     WHERE doc_no = $1 AND ${getFixedYearSqlFilter("doc_date")}
+     ORDER BY recorded_at ASC, roworder ASC`,
+    [clean]
+  );
+
+  // Device identity keyed by whichever IMEI the points carry.
+  const imei = points.find((p) => p.imei)?.imei ?? "";
+  const device = imei
+    ? await queryOne(
+        `SELECT imei, COALESCE(model,'') AS model, COALESCE(os_version,'') AS os_version,
+                COALESCE(app_version,'') AS app_version, COALESCE(carrier,'') AS carrier,
+                COALESCE(sim_phone,'') AS sim_phone,
+                to_char(updated_at,'DD-MM-YYYY HH24:MI:SS') AS updated_at
+         FROM public.odg_tms_mobile_device WHERE imei = $1`,
+        [imei]
+      )
+    : null;
+
+  return { job, device, points };
+}
+
 module.exports = {
   trackBill,
   trackBillPublic,
@@ -1189,4 +1286,6 @@ module.exports = {
   getGpsRealtime,
   getGpsRealtimeAll,
   getLocations,
+  getPhoneTrackingJobs,
+  getPhoneTrail,
 };

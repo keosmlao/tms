@@ -73,6 +73,12 @@ const endOfMonth = (month: string) => {
   return `${year}-${String(m).padStart(2, "0")}-${String(days).padStart(2, "0")}`;
 };
 
+const currentMonth = getFixedTodayMonth();
+const currentMonthRange = () => ({
+  fromDate: `${currentMonth}-01`,
+  toDate: endOfMonth(currentMonth),
+});
+
 const monthTitle = (month: string) => {
   const [year, m] = month.split("-");
   if (!year || !m) return monthTitle(getFixedTodayMonth());
@@ -80,11 +86,15 @@ const monthTitle = (month: string) => {
   return `ສັງລວມຄ່ານ້ຳມັນ ແຕ່ ວັນທີ 1-${lastDay}/${Number(m)}/${year}`;
 };
 
+interface Car {
+  code: string;
+  name_1: string;
+}
+
 interface MonthlyFuelRow {
   key: string;
-  driver: string;
-  code: string;
-  car: string;
+  carCode: string;
+  carName: string;
   station: string;
   days: Record<string, number>;
   totalAmount: number;
@@ -94,9 +104,10 @@ interface MonthlyFuelRow {
 export default function FuelPage() {
   const confirm = useConfirm();
   const [logs, setLogs] = useState<FuelLog[]>([]);
-  const [fromDate, setFromDate] = useState(getFixedTodayDate());
-  const [toDate, setToDate] = useState(getFixedTodayDate());
-  const [monthly, setMonthly] = useState(getFixedTodayMonth());
+  const [cars, setCars] = useState<Car[]>([]);
+  const [fromDate, setFromDate] = useState(currentMonthRange().fromDate);
+  const [toDate, setToDate] = useState(currentMonthRange().toDate);
+  const [monthly, setMonthly] = useState(currentMonth);
   const [searchText, setSearchText] = useState("");
   const [loading, setLoading] = useState(true);
   const [currentPage, setCurrentPage] = useState(1);
@@ -122,6 +133,11 @@ export default function FuelPage() {
 
   useEffect(() => {
     load();
+    // Car master list — anchors the monthly summary so every vehicle shows up,
+    // even ones with no refill in the selected month.
+    void Actions.getCars()
+      .then((data) => setCars((data ?? []) as Car[]))
+      .catch(() => setCars([]));
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -162,38 +178,66 @@ export default function FuelPage() {
   }, [monthly]);
 
   const monthlyRows = useMemo(() => {
-    const map = new Map<string, MonthlyFuelRow>();
+    // 1) Aggregate this month's refills keyed by the saved car code.
+    type CarAgg = {
+      days: Record<string, number>;
+      totalAmount: number;
+      totalLiters: number;
+      station: string;
+    };
+    const byCar = new Map<string, CarAgg>();
     for (const r of filtered) {
       if (!r.fuel_date.startsWith(`${monthly}-`)) continue;
-      const driver = r.driver_name || r.user_code || "-";
-      const code = r.user_code || "";
-      const car = r.car || "";
-      const station = r.station || "";
-      const key = `${code}::${driver}::${car}::${station}`;
-      const row =
-        map.get(key) ??
-        {
-          key,
-          driver,
-          code,
-          car,
-          station,
-          days: {},
-          totalAmount: 0,
-          totalLiters: 0,
-        };
+      const carCode = r.car || "";
+      const agg =
+        byCar.get(carCode) ??
+        { days: {}, totalAmount: 0, totalLiters: 0, station: "" };
       const amount = toNumber(r.amount);
-      row.days[r.fuel_date] = (row.days[r.fuel_date] ?? 0) + amount;
-      row.totalAmount += amount;
-      row.totalLiters += toNumber(r.liters);
-      map.set(key, row);
+      agg.days[r.fuel_date] = (agg.days[r.fuel_date] ?? 0) + amount;
+      agg.totalAmount += amount;
+      agg.totalLiters += toNumber(r.liters);
+      if (!agg.station) agg.station = r.station || "";
+      byCar.set(carCode, agg);
     }
-    return Array.from(map.values()).sort((a, b) => {
+
+    // 2) Drive the report off the car master list so every vehicle shows up,
+    //    even ones with no refill this month (zero totals).
+    const rows: MonthlyFuelRow[] = [];
+    const seen = new Set<string>();
+    for (const c of cars) {
+      seen.add(c.code);
+      const agg = byCar.get(c.code);
+      rows.push({
+        key: `car:${c.code}`,
+        carCode: c.code,
+        carName: c.name_1 || c.code,
+        station: agg?.station || "",
+        days: agg?.days ?? {},
+        totalAmount: agg?.totalAmount ?? 0,
+        totalLiters: agg?.totalLiters ?? 0,
+      });
+    }
+    // 3) Keep refills whose car code isn't in the master list (legacy /
+    //    free-text entries) so no fuel spend is silently dropped.
+    for (const [carCode, agg] of byCar) {
+      if (seen.has(carCode)) continue;
+      rows.push({
+        key: `car:${carCode || "unknown"}`,
+        carCode: carCode || "",
+        carName: carCode || "(ບໍ່ລະບຸລົດ)",
+        station: agg.station || "",
+        days: agg.days,
+        totalAmount: agg.totalAmount,
+        totalLiters: agg.totalLiters,
+      });
+    }
+
+    return rows.sort((a, b) => {
       const diff = b.totalAmount - a.totalAmount;
       if (diff !== 0) return diff;
-      return `${a.driver} ${a.car}`.localeCompare(`${b.driver} ${b.car}`);
+      return `${a.carName} ${a.carCode}`.localeCompare(`${b.carName} ${b.carCode}`);
     });
-  }, [filtered, monthly]);
+  }, [filtered, monthly, cars]);
 
   const monthlyTotals = useMemo(
     () =>
@@ -219,9 +263,8 @@ export default function FuelPage() {
     if (monthlyRows.length === 0) return;
     const header = [
       "ລ/ດ",
-      "ລາຍຊື່ຄົນຂັບຣົດປະຈຳ",
-      "ລະຫັດ",
       "ທະບຽນຣົດ",
+      "ລະຫັດລົດ",
       "ບ່ອນປະຈຳການ",
       ...monthlyDays.map(dateLabel),
       "ລວມເປັນເງິນ (ກີບ)",
@@ -229,9 +272,8 @@ export default function FuelPage() {
     ];
     const rows = monthlyRows.map((row, i) => [
       i + 1,
-      row.driver,
-      row.code,
-      row.car,
+      row.carName,
+      row.carCode,
       row.station,
       ...monthlyDays.map((day) => row.days[day] || ""),
       row.totalAmount,
@@ -240,7 +282,6 @@ export default function FuelPage() {
     const totalRow = [
       "",
       "ລວມທັງໝົດ",
-      "",
       "",
       "",
       ...monthlyDays.map((day) =>
@@ -263,8 +304,7 @@ export default function FuelPage() {
     ];
     sheet["!cols"] = [
       { wch: 6 },
-      { wch: 30 },
-      { wch: 12 },
+      { wch: 18 },
       { wch: 14 },
       { wch: 18 },
       ...monthlyDays.map(() => ({ wch: 11 })),
@@ -421,7 +461,7 @@ export default function FuelPage() {
               {monthTitle(monthly)}
             </p>
             <p className="text-[11px] text-slate-500 dark:text-slate-400">
-              ວັນທີໃສ່ນ້ຳມັນ PTT
+              ສັງລວມຕາມລົດ ແລະ ວັນທີໃສ່ນ້ຳມັນ PTT
             </p>
           </div>
           <div className="flex flex-wrap items-center gap-2 text-[11px]">
@@ -448,11 +488,10 @@ export default function FuelPage() {
                   <th className="sticky left-0 z-10 bg-white/90 dark:bg-[#13211f] px-3 py-2 text-center font-semibold text-slate-600 dark:text-slate-300">
                     ລ/ດ
                   </th>
-                  <th className="px-3 py-2 text-left font-semibold text-slate-600 dark:text-slate-300 min-w-[220px]">
-                    ລາຍຊື່ຄົນຂັບຣົດປະຈຳ
+                  <th className="px-3 py-2 text-left font-semibold text-slate-600 dark:text-slate-300 min-w-[180px]">
+                    ທະບຽນຣົດ
                   </th>
-                  <th className="px-3 py-2 text-left font-semibold text-slate-600 dark:text-slate-300">ລະຫັດ</th>
-                  <th className="px-3 py-2 text-left font-semibold text-slate-600 dark:text-slate-300">ທະບຽນຣົດ</th>
+                  <th className="px-3 py-2 text-left font-semibold text-slate-600 dark:text-slate-300">ລະຫັດລົດ</th>
                   <th className="px-3 py-2 text-left font-semibold text-slate-600 dark:text-slate-300 min-w-[130px]">
                     ບ່ອນປະຈຳການ
                   </th>
@@ -478,9 +517,8 @@ export default function FuelPage() {
                     <td className="sticky left-0 z-10 bg-white/90 dark:bg-[#13211f] px-3 py-2 text-center tabular-nums text-slate-500">
                       {index + 1}
                     </td>
-                    <td className="px-3 py-2 font-medium text-slate-800 dark:text-slate-100">{row.driver}</td>
-                    <td className="px-3 py-2 text-slate-600 dark:text-slate-300">{row.code || "-"}</td>
-                    <td className="px-3 py-2 text-slate-600 dark:text-slate-300">{row.car || "-"}</td>
+                    <td className="px-3 py-2 font-medium text-slate-800 dark:text-slate-100">{row.carName || "-"}</td>
+                    <td className="px-3 py-2 text-slate-600 dark:text-slate-300">{row.carCode || "-"}</td>
                     <td className="px-3 py-2 text-slate-600 dark:text-slate-300">{row.station || "-"}</td>
                     {monthlyDays.map((day) => (
                       <td key={day} className="px-3 py-2 text-right tabular-nums text-slate-600 dark:text-slate-300 whitespace-nowrap">
