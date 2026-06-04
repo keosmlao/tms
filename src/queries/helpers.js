@@ -205,6 +205,17 @@ async function getRemainingBillProducts(billNo) {
       WHERE item.bill_no = $1
         AND COALESCE(det.status, 0) IN (1, 2)
       GROUP BY item.item_code
+    ),
+    returned AS (
+      -- Goods returned via a credit-note doc (trans_flag=48) whose detail line
+      -- ref_doc_no points at this sale; subtract so returned items aren't re-dispatched.
+      SELECT rd.item_code,
+             COALESCE(SUM(ABS(COALESCE(rd.qty, 0))), 0)::numeric AS returned_qty
+      FROM ic_trans_detail rd
+      INNER JOIN ic_trans r ON r.doc_no = rd.doc_no AND r.trans_flag = 48
+      WHERE rd.ref_doc_no = $1
+        AND rd.item_code NOT LIKE '97%'
+      GROUP BY rd.item_code
     )
     SELECT
       bi.item_code,
@@ -212,17 +223,20 @@ async function getRemainingBillProducts(billNo) {
       GREATEST(
         bi.total_qty
         - COALESCE(al.locked_qty, 0)
-        - COALESCE(dl.delivered_qty, 0),
+        - COALESCE(dl.delivered_qty, 0)
+        - COALESCE(rt.returned_qty, 0),
         0
       )::numeric AS qty,
       bi.unit_code
     FROM bill_items bi
     LEFT JOIN active_locked al ON al.item_code = bi.item_code
     LEFT JOIN delivered dl ON dl.item_code = bi.item_code
+    LEFT JOIN returned rt ON rt.item_code = bi.item_code
     WHERE GREATEST(
       bi.total_qty
       - COALESCE(al.locked_qty, 0)
-      - COALESCE(dl.delivered_qty, 0),
+      - COALESCE(dl.delivered_qty, 0)
+      - COALESCE(rt.returned_qty, 0),
       0
     ) > 0
     ORDER BY bi.item_code`,
@@ -285,6 +299,21 @@ async function getRemainingSummaryMap(billNos) {
       WHERE item.bill_no = ANY($1::varchar[])
         AND COALESCE(det.status, 0) IN (1, 2)
       GROUP BY item.bill_no, item.item_code
+    ),
+    -- Goods returned / credit-noted against the sale bill. A return is its own
+    -- ic_trans doc (trans_flag=48) whose ref_doc_no points back at the sale's
+    -- doc_no; its detail lines carry the returned qty per item. Subtracting
+    -- these makes a fully-returned bill drop off the pending list, and a
+    -- partially-returned one show only the un-returned remainder. ABS() guards
+    -- against returns being stored as a negative qty.
+    returned AS (
+      SELECT rd.ref_doc_no AS bill_no, rd.item_code,
+             COALESCE(SUM(ABS(COALESCE(rd.qty, 0))), 0)::numeric AS returned_qty
+      FROM ic_trans_detail rd
+      INNER JOIN ic_trans r ON r.doc_no = rd.doc_no AND r.trans_flag = 48
+      WHERE rd.ref_doc_no = ANY($1::varchar[])
+        AND rd.item_code NOT LIKE '97%'
+      GROUP BY rd.ref_doc_no, rd.item_code
     )
     SELECT
       bi.bill_no,
@@ -292,7 +321,8 @@ async function getRemainingSummaryMap(billNos) {
         WHERE GREATEST(
           bi.total_qty
           - COALESCE(al.locked_qty, 0)
-          - COALESCE(dl.delivered_qty, 0),
+          - COALESCE(dl.delivered_qty, 0)
+          - COALESCE(rt.returned_qty, 0),
           0
         ) > 0
       )::int AS remaining_count,
@@ -300,27 +330,36 @@ async function getRemainingSummaryMap(billNos) {
         SUM(GREATEST(
           bi.total_qty
           - COALESCE(al.locked_qty, 0)
-          - COALESCE(dl.delivered_qty, 0),
+          - COALESCE(dl.delivered_qty, 0)
+          - COALESCE(rt.returned_qty, 0),
           0
         )), 0
-      )::numeric AS remaining_qty_total
+      )::numeric AS remaining_qty_total,
+      -- "Total" is net of returns (returned goods aren't to be delivered);
+      -- delivered = what already went out on finished attempts.
+      COALESCE(SUM(GREATEST(bi.total_qty - COALESCE(rt.returned_qty, 0), 0)), 0)::numeric AS total_qty_total,
+      COALESCE(SUM(COALESCE(dl.delivered_qty, 0)), 0)::numeric AS delivered_qty_total
     FROM bill_items bi
     LEFT JOIN active_locked al
       ON al.bill_no = bi.bill_no AND al.item_code = bi.item_code
     LEFT JOIN delivered dl
       ON dl.bill_no = bi.bill_no AND dl.item_code = bi.item_code
+    LEFT JOIN returned rt
+      ON rt.bill_no = bi.bill_no AND rt.item_code = bi.item_code
     GROUP BY bi.bill_no`,
     [billNos]
   );
 
   const result = new Map();
   for (const billNo of billNos) {
-    result.set(billNo, { remaining_count: 0, remaining_qty_total: 0 });
+    result.set(billNo, { remaining_count: 0, remaining_qty_total: 0, total_qty_total: 0, delivered_qty_total: 0 });
   }
   for (const row of rows) {
     result.set(row.bill_no, {
       remaining_count: Number(row.remaining_count ?? 0),
       remaining_qty_total: Number(row.remaining_qty_total ?? 0),
+      total_qty_total: Number(row.total_qty_total ?? 0),
+      delivered_qty_total: Number(row.delivered_qty_total ?? 0),
     });
   }
   return result;

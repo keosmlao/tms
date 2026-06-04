@@ -20,12 +20,14 @@ import {
 } from "@/queries/bills.js";
 import {
   getPendingBillSchedule as svcGetPendingBillSchedule,
+  getPendingBillScheduleHistory as svcGetPendingBillScheduleHistory,
   upsertPendingBillSchedule as svcUpsertPendingBillSchedule,
   bulkUpdatePendingBills as svcBulkUpdatePendingBills,
   upsertPendingBillLocation as svcUpsertPendingBillLocation,
 } from "@/queries/pending-bill.js";
 import {
   getBillTodos as svcGetBillTodos,
+  getAllBillTodos as svcGetAllBillTodos,
   createBillTodo as svcCreateBillTodo,
   setBillTodoDone as svcSetBillTodoDone,
   deleteBillTodo as svcDeleteBillTodo,
@@ -166,6 +168,11 @@ export async function getPendingBillSchedule(billNo: string) {
   return svcGetPendingBillSchedule(billNo);
 }
 
+export async function getPendingBillScheduleHistory(billNo: string) {
+  await requireSession();
+  return svcGetPendingBillScheduleHistory(billNo);
+}
+
 export async function upsertPendingBillSchedule(input: {
   bill_no: string;
   scheduled_date?: string | null;
@@ -248,6 +255,11 @@ export async function setPendingBillLocation(input: {
 export async function getBillTodos(billNo: string) {
   await requireSession();
   return svcGetBillTodos(billNo);
+}
+
+export async function getAllBillTodos(includeDone?: boolean) {
+  const s = await requireSession();
+  return svcGetAllBillTodos(s, includeDone ?? false);
 }
 
 export async function createBillTodo(input: {

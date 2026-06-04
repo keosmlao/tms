@@ -106,6 +106,127 @@ async function getReportMonthlyDriver(session, monthly) {
   return result;
 }
 
+// Monthly delivery completion-rate KPI ("ອັດຕາການຈັດສົ່ງສຳເລັດ / ເດືອນ").
+// For bills dispatched in the given month it measures how many were delivered
+// successfully vs still outstanding — the rate the ops team tracks.
+//
+// Universe = bills (odg_tms_detail) belonging to an APPROVED, non-admin-closed
+// job (approve_status=1, job_status<>4) whose job date (doc_date) falls in the
+// month. Month is keyed on doc_date for consistency with every other monthly
+// report + the fixed-year filter (sent_end is NULL for not-yet-delivered bills,
+// so it can't key the denominator). Cancelled bills (status=2) are EXCLUDED so
+// they neither help nor hurt the rate — total = delivered + pending exactly.
+//   delivered (ສົ່ງສຳເລັດ) : status=1 AND sent_end set       — canonical "done"
+//   pending   (ຄ້າງສົ່ງ)    : status NOT IN (1,2)             — waiting + in transit
+//   on_time                : delivered AND sent_end::date <= target date
+//                            (scheduled_date | send_date | bill_date) — the same
+//                            canonical on-time rule the dashboard/KPI-alert use.
+// One pass returns an overall rollup PLUS a per-branch (transport_code)
+// breakdown via GROUPING SETS; the rollup row is the one with branch_code NULL.
+async function getReportMonthlyDelivery(session, monthly) {
+  const scope = getBranchScope(session);
+  const branchClause = scope.scoped
+    ? `AND EXISTS (SELECT 1 FROM ic_trans_shipment __ts WHERE __ts.doc_no = d.bill_no AND __ts.transport_code = '${scope.branch}')`
+    : "";
+  const rows = await query(
+    `WITH base AS (
+       SELECT
+         COALESCE(s.transport_code, '') AS branch_code,
+         d.status,
+         d.sent_end,
+         CASE
+           WHEN d.status = 1 AND d.sent_end IS NOT NULL THEN
+             CASE
+               WHEN COALESCE(pb.scheduled_date::date, t.send_date::date, d.bill_date::date) IS NULL THEN NULL
+               WHEN d.sent_end::date <= COALESCE(pb.scheduled_date::date, t.send_date::date, d.bill_date::date) THEN true
+               ELSE false
+             END
+         END AS is_on_time
+       FROM public.odg_tms_detail d
+       INNER JOIN public.odg_tms a ON a.doc_no = d.doc_no
+       LEFT JOIN public.odg_tms_pending_bill pb ON pb.bill_no = d.bill_no
+       LEFT JOIN ic_trans t ON t.doc_no = d.bill_no
+       LEFT JOIN ic_trans_shipment s ON s.doc_no = d.bill_no
+       WHERE to_char(d.doc_date,'yyyy-MM') = $1
+         AND ${getFixedYearSqlFilter("d.doc_date")}
+         AND COALESCE(a.approve_status,0) = 1
+         AND COALESCE(a.job_status,0) <> 4
+         ${branchClause}
+     )
+     SELECT
+       branch_code,
+       COUNT(*) FILTER (WHERE status = 1 AND sent_end IS NOT NULL)::int AS delivered,
+       COUNT(*) FILTER (WHERE COALESCE(status,0) NOT IN (1,2))::int   AS pending,
+       COUNT(*) FILTER (WHERE status = 2)::int                        AS cancelled,
+       COUNT(*) FILTER (WHERE is_on_time = true)::int                 AS on_time,
+       COUNT(*) FILTER (WHERE is_on_time = false)::int                AS breach
+     FROM base
+     GROUP BY GROUPING SETS ((), (branch_code))`,
+    [monthly]
+  );
+
+  const branchNameRows = await query(
+    `SELECT code, COALESCE(NULLIF(TRIM(name_1), ''), code) AS name
+     FROM transport_type WHERE code IN ('02-0001','02-0002','02-0003')`
+  );
+  const branchNames = Object.fromEntries(branchNameRows.map((r) => [r.code, r.name]));
+
+  const toEntry = (r) => ({
+    delivered: Number(r.delivered) || 0,
+    pending: Number(r.pending) || 0,
+    cancelled: Number(r.cancelled) || 0,
+    on_time: Number(r.on_time) || 0,
+    breach: Number(r.breach) || 0,
+  });
+
+  let overall = { delivered: 0, pending: 0, cancelled: 0, on_time: 0, breach: 0 };
+  const branches = [];
+  for (const r of rows) {
+    // GROUPING SETS marks the all-branches rollup row with branch_code = NULL;
+    // the per-branch rows carry the (possibly empty) transport_code.
+    if (r.branch_code === null) {
+      overall = toEntry(r);
+    } else {
+      const code = String(r.branch_code || "").trim();
+      branches.push({
+        branch_code: code || "unknown",
+        branch_name: (code && branchNames[code]) || code || "ບໍ່ລະບຸສາຂາ",
+        ...toEntry(r),
+      });
+    }
+  }
+  branches.sort((a, b) => a.branch_code.localeCompare(b.branch_code));
+  return { month: monthly, overall, branches };
+}
+
+async function getMonthlyDeliveryKpi(session, monthly) {
+  const report = await getReportMonthlyDelivery(session, monthly);
+  return {
+    branches: report.branches.map((branch) => {
+      const opened = Number(branch.delivered) + Number(branch.pending);
+      return {
+        branch_code: branch.branch_code,
+        branch_name: branch.branch_name,
+        opened,
+        assigned: opened,
+        dispatched: opened,
+        delivered: Number(branch.delivered) || 0,
+        pending: Number(branch.pending) || 0,
+        kpi_success: Number(branch.on_time) || 0,
+        returns: 0,
+        failed_closed: Number(branch.cancelled) || 0,
+        avg_days_from_appt: null,
+      };
+    }),
+    fleet: {
+      active_vehicles: 0,
+      active_drivers: 0,
+      total_trips: 0,
+      vehicle_days: 0,
+    },
+  };
+}
+
 // Daily pending-bills report grouped by sale department + transport branch.
 // Reuses getBillsPending so the figures stay in sync with /bills-pending and
 // the dashboard's "ຄ້າງສົ່ງ" tile — no duplicated WHERE clauses to drift.
@@ -265,6 +386,8 @@ module.exports = {
   getReportByBill,
   getReportMonthlyCar,
   getReportMonthlyDriver,
+  getReportMonthlyDelivery,
+  getMonthlyDeliveryKpi,
   getReportPendingDaily,
   getReportDeliveredDaily,
   getReportCancelledDaily,

@@ -7,12 +7,9 @@ import {
   FaBoxOpen,
   FaCalendar,
   FaCheck,
-  FaCheckSquare,
   FaChevronDown,
-  FaChevronRight,
   FaClock,
   FaExchangeAlt,
-  FaExclamationTriangle,
   FaFileInvoice,
   FaMapMarkerAlt,
   FaPhone,
@@ -28,12 +25,9 @@ import {
   FaTrash,
   FaTruck,
   FaCopy,
-  FaTable,
-  FaList,
 } from "react-icons/fa";
 import { FIXED_YEAR_END, FIXED_YEAR_START, getFixedTodayDate } from "@/lib/fixed-year";
 import { Actions } from "@/lib/api";
-import { StatusPageHeader, StatusStatGrid } from "@/components/status-page-shell";
 import {
   PendingBillScheduleDialog,
   type PendingScheduleDefaults,
@@ -61,10 +55,14 @@ export interface Bill {
   sale: string;
   department: string;
   transport: string;
+  transport_code?: string;
   time_open: string;
   time_use: TimeUse | null;
+  time_use_send?: TimeUse | null;
   remaining_count: number;
   remaining_qty_total: number;
+  total_qty_total?: number;
+  delivered_qty_total?: number;
   partial_delivery?: boolean;
   scheduled_date?: string | null;
   scheduled_date_display?: string | null;
@@ -79,6 +77,9 @@ export interface Bill {
   cancelled_delivery_job?: string;
   cancelled_delivery_at?: string | null;
   cancelled_delivery_remark?: string;
+  cancelled_delivery_driver?: string;
+  cancelled_delivery_car?: string;
+  cancelled_secs_ago?: number;
   manual_pending_bill?: boolean;
   source_trans_flag?: number;
   source_type?: string;
@@ -160,6 +161,31 @@ const ACTION_STATUS_MAP: Record<string, { label: string; color: string }> = {
   contacted_ready: { label: "ພ້ອມຮັບ", color: "emerald" },
 };
 
+// Per-branch colour so each bill's delivery branch is scannable in the
+// "all branches" view. Falls back to neutral for unknown / extra codes.
+const BRANCH_BADGE: Record<string, string> = {
+  "02-0001": "bg-teal-100 text-teal-700 dark:bg-teal-900/40 dark:text-teal-300",
+  "02-0002": "bg-sky-100 text-sky-700 dark:bg-sky-900/40 dark:text-sky-300",
+  "02-0003": "bg-violet-100 text-violet-700 dark:bg-violet-900/40 dark:text-violet-300",
+};
+
+function BranchBadge({ code, name }: { code?: string; name?: string }) {
+  const label = (name || code || "").trim();
+  if (!label) return null;
+  const cls =
+    (code && BRANCH_BADGE[code]) ||
+    "bg-slate-100 text-slate-600 dark:bg-slate-800 dark:text-slate-300";
+  return (
+    <span
+      className={`inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-[9px] font-bold ${cls}`}
+      title={`ສາຂາ: ${label}`}
+    >
+      <FaTruck size={8} />
+      {label}
+    </span>
+  );
+}
+
 function formatRoutePath(route: DeliveryRoute) {
   return [route.origin, ...(route.waypoints ?? []), route.destination]
     .map((item) =>
@@ -182,8 +208,6 @@ type QueueFilter = "need_action" | "ready" | "future" | "all";
 // Three workflow states surfaced on the bill card. Anything missing data
 // (date / route / round / contact) collapses to "in_progress" — the editable
 // chips below the status pill show what's still missing.
-type WorkflowKey = "ready" | "in_progress" | "problem";
-
 // The dispatcher's mental model of the bill journey:
 //   1)    not_contacted   — first touch hasn't happened yet (or failed/postponed)
 //   2.1)  sales_pending   — contacted, but salesperson hasn't supplied delivery date
@@ -209,7 +233,7 @@ interface Product {
 // Theme variables no longer needed for inline accordion styling
 
 // One source of truth for the "set delivery point + print QR" actions.
-// Rendered in 4 visual variants so the table (desktop/mobile), kanban card
+// Rendered in 3 visual variants so the table (desktop/mobile)
 // and detail drawer all share the same logic instead of copy-pasting it.
 function BillLocationActions({
   bill,
@@ -217,7 +241,7 @@ function BillLocationActions({
   onEdit,
 }: {
   bill: Bill;
-  variant: "icon" | "label" | "chip" | "drawer";
+  variant: "icon" | "label" | "drawer";
   onEdit: (bill: Bill) => void;
 }) {
   const planned = Boolean(
@@ -330,50 +354,27 @@ function BillLocationActions({
     );
   }
 
-  // variant === "chip" (kanban card)
-  const chipBase =
-    "inline-flex items-center gap-1.5 rounded-md border px-2 py-1 text-[10px] font-semibold transition-colors";
-  const chipDone =
-    "border-emerald-500/30 bg-emerald-500/10 text-emerald-700 dark:text-emerald-400 hover:bg-emerald-500/15";
-  const chipTodo =
-    "border-slate-300/50 bg-white/40 text-slate-600 hover:bg-slate-500/10 dark:border-white/10 dark:bg-white/5 dark:text-slate-300";
-  return (
-    <div className="flex gap-1.5" onClick={(e) => e.stopPropagation()}>
-      <button
-        type="button"
-        onClick={handleEdit}
-        className={`${chipBase} ${
-          planned
-            ? chipDone
-            : custLoc
-            ? "border-sky-500/30 bg-sky-500/10 text-sky-700 hover:bg-sky-500/15 dark:text-sky-400"
-            : chipTodo
-        } cursor-pointer`}
-        title={editTitle}
-      >
-        <FaMapMarkerAlt size={9} />
-        {planned ? "ຈຸດສົ່ງ" : custLoc ? "ຈຸດລູກຄ້າ" : "ກຳນົດຈຸດສົ່ງ"}
-      </button>
-      {hasAnyLoc && (
-        <button
-          type="button"
-          onClick={handlePrint}
-          className="inline-flex items-center justify-center rounded-md border border-slate-300/40 bg-white/60 px-1.5 py-1 text-slate-700 hover:bg-white dark:border-white/10 dark:bg-white/[0.04] dark:text-slate-200 dark:hover:bg-white/10 cursor-pointer"
-          title="ພິມ QR ຈຸດສົ່ງ"
-        >
-          <FaPrint size={10} />
-        </button>
-      )}
-    </div>
-  );
+  // No other variants — "chip" (the old kanban card) was removed with the
+  // kanban view; the table and drawer cover every render path now.
+  return null;
+}
+
+interface ScheduleHistoryRow {
+  scheduled_date_display: string;
+  remark: string;
+  action_status: string;
+  delivery_route_code: string;
+  delivery_round_code: string;
+  changed_by: string;
+  changed_at: string;
 }
 
 export default function BillsPendingClient() {
   const [bills, setBills] = useState<Bill[]>([]);
   const [transports, setTransports] = useState<Transport[]>([]);
   const [allBranches, setAllBranches] = useState<Transport[]>([]);
-  const [fromDate, setFromDate] = useState(FIXED_YEAR_START);
-  const [toDate, setToDate] = useState(FIXED_YEAR_END);
+  const [fromDate] = useState(FIXED_YEAR_START);
+  const [toDate] = useState(FIXED_YEAR_END);
   const [transportCode, setTransportCode] = useState("all");
   const [searchText, setSearchText] = useState("");
   const [departmentFilter, setDepartmentFilter] = useState("all");
@@ -413,16 +414,12 @@ export default function BillsPendingClient() {
   const [bulkRound, setBulkRound] = useState("");
   const [bulkDate, setBulkDate] = useState(getFixedTodayDate());
   const [bulkSaving, setBulkSaving] = useState(false);
-  // Kanban view mode + drag state. The "happy" view shows the 4 workflow
-  // steps as columns; the "problem" view collapses to a single column for
-  // cancelled / rejected bills.
-  const [viewMode, setViewMode] = useState<"table" | "happy" | "problem">("table");
-  const [dragBill, setDragBill] = useState<string | null>(null);
-  const [dragOverStep, setDragOverStep] = useState<StepKey | null>(null);
-  const [collapsedSteps, setCollapsedSteps] = useState<Set<StepKey>>(new Set());
-  const [activeMobileStep, setActiveMobileStep] = useState<StepKey>("not_contacted");
+  const [activeStep, setActiveStep] = useState<StepKey>("not_contacted");
+  const didInitStepRef = useRef(false);
   const [quickFilter, setQuickFilter] = useState<"all" | "pos" | "partial" | "manual">("all");
   const [drawerBill, setDrawerBill] = useState<Bill | null>(null);
+  const [scheduleHistory, setScheduleHistory] = useState<ScheduleHistoryRow[]>([]);
+  const [historyLoading, setHistoryLoading] = useState(false);
   const today = getFixedTodayDate();
   const addDays = (date: string, days: number) => {
     const d = new Date(date + "T00:00:00");
@@ -449,6 +446,30 @@ export default function BillsPendingClient() {
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [bills]);
+
+  // Load the schedule change history whenever a different bill's drawer opens.
+  useEffect(() => {
+    const billNo = drawerBill?.doc_no;
+    if (!billNo) {
+      setScheduleHistory([]);
+      return;
+    }
+    let active = true;
+    setHistoryLoading(true);
+    Actions.getPendingBillScheduleHistory(billNo)
+      .then((rows) => {
+        if (active) setScheduleHistory((rows ?? []) as ScheduleHistoryRow[]);
+      })
+      .catch(() => {
+        if (active) setScheduleHistory([]);
+      })
+      .finally(() => {
+        if (active) setHistoryLoading(false);
+      });
+    return () => {
+      active = false;
+    };
+  }, [drawerBill?.doc_no]);
 
   // Load delivery rounds once for the round selector + filter chips
   useEffect(() => {
@@ -497,6 +518,19 @@ export default function BillsPendingClient() {
     return p.join(" ");
   };
 
+  // Live elapsed string from a raw seconds base (e.g. seconds since a bill was
+  // cancelled). Adds the 1s `tick` so it counts up in real time like fmtDur.
+  const fmtElapsed = (baseSecs: number) => {
+    const s = Math.max(0, Math.floor(baseSecs)) + tick;
+    const d = Math.floor(s / 86400), h = Math.floor((s % 86400) / 3600), m = Math.floor((s % 3600) / 60), sec = s % 60;
+    const p = [];
+    if (d > 0) p.push(`${d}d`);
+    if (h > 0) p.push(`${h}h`);
+    if (m > 0) p.push(`${m}m`);
+    p.push(`${sec.toString().padStart(2, "0")}s`);
+    return p.join(" ");
+  };
+
   const deptList = [...new Set(bills.map((b) => b.department).filter(Boolean))].sort();
 
   const isNotYetTime = (b: Bill): boolean => {
@@ -514,7 +548,6 @@ export default function BillsPendingClient() {
     if (!b.delivery_round_code?.trim()) return false;
     return b.action_status === "contacted_ready";
   };
-  const dispatchReadyCount = bills.filter(isDispatchReady).length;
 
   const openScheduleDialog = (b: Bill) => {
     setScheduleBill({
@@ -540,41 +573,6 @@ export default function BillsPendingClient() {
     });
   };
 
-  // "problem" status reasons — bill is in a known bad state the dispatcher
-  // has to follow up on, distinct from "just missing data" (in_progress).
-  const PROBLEM_STATUSES: ReadonlySet<string> = new Set([
-    "contact_failed",
-    "customer_postponed",
-    "customer_cancelled",
-  ]);
-
-  const workflowKey = (b: Bill): WorkflowKey => {
-    if (isDispatchReady(b)) return "ready";
-    if (b.cancelled_delivery) return "problem";
-    if (b.action_status && PROBLEM_STATUSES.has(b.action_status)) return "problem";
-    return "in_progress";
-  };
-
-  const workflowCopy: Record<WorkflowKey, { title: string; tone: string }> = {
-    ready: { title: "ພ້ອມຈັດຖ້ຽວ", tone: "emerald" },
-    in_progress: { title: "ກຳລັງດຳເນີນການ", tone: "amber" },
-    problem: { title: "ຕ້ອງຕິດຕາມ", tone: "rose" },
-  };
-
-  // Progress checklist shown under in-progress bills so dispatchers can see
-  // at a glance what's still missing (contact / date / route / round).
-  type ChecklistKey = "contact" | "date" | "route" | "round";
-  const workflowChecklist = (b: Bill): Record<ChecklistKey, boolean> => ({
-    contact: b.action_status === "contacted_ready",
-    date: Boolean(b.scheduled_date_overridden),
-    route: Boolean(b.delivery_route_code?.trim()),
-    round: Boolean(b.delivery_round_code?.trim()),
-  });
-
-  // Future bills sit outside the action queue — the dispatcher will pick them
-  // up closer to send_date.
-  const futureCount = bills.filter(isNotYetTime).length;
-
   // "need_action" = anything in the contact window that isn't dispatch-ready
   // (combines old call/uncontacted/problem/cancelled_job tabs). Bills with
   // send_date far in the future stay parked under "future" instead.
@@ -582,15 +580,13 @@ export default function BillsPendingClient() {
     if (isNotYetTime(b)) return false;
     return !isDispatchReady(b);
   };
-  const needActionCount = bills.filter(needsAction).length;
 
   const kw = searchText.trim().toLowerCase();
   const filtered = bills.filter((b) => {
     if (departmentFilter !== "all" && b.department !== departmentFilter) return false;
 
-    // Column-based filtering happens at render time (Kanban grid). queueFilter
-    // kept as legacy for the existing manual-add code path; new code uses
-    // focusCol to optionally narrow to a single column on small screens.
+    // queueFilter is legacy (kept for the manual-add code path, fixed to
+    // "all"); the visible status filtering is now the tab bar (activeStep).
     if (queueFilter === "need_action" && !needsAction(b)) return false;
     if (queueFilter === "ready" && !isDispatchReady(b)) return false;
     if (queueFilter === "future" && !isNotYetTime(b)) return false;
@@ -721,7 +717,6 @@ export default function BillsPendingClient() {
         remark: manualRemark,
         source_type: manualSelected.source_type ?? null,
       });
-      setViewMode("happy");
       setManualModalOpen(false);
       setManualSelected(null);
       await fetchBills();
@@ -779,15 +774,6 @@ export default function BillsPendingClient() {
     } finally {
       setRemovingManualBillNo(null);
     }
-  };
-
-  // ── Summary counts ──
-  const totalQty = filtered.reduce((s, b) => s + (Number(b.remaining_qty_total) || 0), 0);
-  const durColor = (t: TimeUse | null) => {
-    const s = baseSec(t) + tick;
-    if (s >= 4 * 3600) return "bg-red-500/10 text-red-600 dark:text-red-400 border-red-500/20";
-    if (s >= 2 * 3600) return "bg-amber-500/10 text-amber-600 dark:text-amber-400 border-amber-500/20";
-    return "bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border-emerald-500/20";
   };
 
   const inputCls = "w-full px-3 py-2 glass-input rounded-lg text-xs text-slate-700 dark:text-slate-200 transition-all";
@@ -896,214 +882,136 @@ export default function BillsPendingClient() {
     }
   }
 
-  // Drop handler: maps the destination step to a backend action.
-  //   not_contacted: clear action_status — resets the bill to its initial state.
-  //   sales_pending: open StatusMenu so the dispatcher records the sub-status
-  //                  (sales_not_notified vs contacted_ready w/o full plan).
-  //   ready:         open StatusMenu — forces date/route/round capture before
-  //                  the bill flips to "contacted_ready".
-  //   scheduled_wait / problem: read-only — derived from data, not drop targets.
-  const handleDropOnStep = async (billNo: string, step: StepKey, anchor: HTMLElement) => {
-    const bill = bills.find((b) => b.doc_no === billNo);
-    if (!bill) return;
-    const currentStep = billStep(bill);
-    if (currentStep === step) return;
-    if (step === "scheduled_wait" || step === "problem") return;
-    if (step === "sales_pending" || step === "ready") {
-      setStatusMenu({ billNo, anchor });
-      return;
+  // On first data load, jump to the first status tab that actually has bills
+  // so the dispatcher doesn't land on an empty tab.
+  useEffect(() => {
+    if (didInitStepRef.current || bills.length === 0) return;
+    const firstWithBills = [...STEP_ORDER, "problem" as StepKey].find(
+      (s) => billsByStep[s].length > 0
+    );
+    if (firstWithBills) {
+      setActiveStep(firstWithBills);
+      didInitStepRef.current = true;
     }
-    if (step === "not_contacted") {
-      try {
-        await Actions.upsertPendingBillSchedule({ bill_no: billNo, action_status: null });
-        await fetchBills();
-      } catch (e) {
-        console.error("[handleDropOnStep]", e);
-      }
-    }
-  };
-
-  const toggleCollapsedStep = (step: StepKey) => {
-    setCollapsedSteps((prev) => {
-      const next = new Set(prev);
-      if (next.has(step)) next.delete(step);
-      else next.add(step);
-      return next;
-    });
-  };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [bills]);
 
   return (
     <div className="space-y-5">
-      <StatusPageHeader
-        title="ບິນຄ້າງຕິດຕໍ່ລູກຄ້າ"
-        subtitle="ກວດບິນຄ້າງສົ່ງທີ່ຮອດກຳນົດ ຫຼືລ່ວງໜ້າ 1 ວັນ ເພື່ອບັນທຶກຜົນຕິດຕໍ່, ວັນພ້ອມຮັບ ແລະຮອບສົ່ງ"
-        icon={<FaFileInvoice />}
-        tone="teal"
-      />
+      {/* ── Header + filters (consolidated control card) ── */}
+      <div className="glass rounded-xl overflow-hidden">
+        {/* Title strip + summary + actions */}
+        <div className="flex flex-wrap items-center gap-3 px-4 py-3 border-b border-slate-200/40 dark:border-white/5 bg-gradient-to-r from-teal-500/10 to-transparent">
+          <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-teal-500/15 text-teal-600 dark:text-teal-400 shrink-0">
+            <FaFileInvoice size={15} />
+          </div>
+          <div className="min-w-0">
+            <h1 className="text-sm font-bold text-slate-800 dark:text-white leading-tight truncate">ບິນຄ້າງຕິດຕໍ່ລູກຄ້າ</h1>
+            <p className="hidden sm:block text-[11px] text-slate-500 dark:text-slate-400 truncate">
+              ກວດບິນຄ້າງສົ່ງທີ່ຮອດກຳນົດ/ລ່ວງໜ້າ ເພື່ອບັນທຶກຜົນຕິດຕໍ່, ວັນຮັບ ແລະຮອບສົ່ງ
+            </p>
+          </div>
+          <div className="ml-auto flex flex-wrap items-center gap-2">
+            <span className="rounded-full bg-slate-500/10 px-2.5 py-1 text-[11px] font-semibold text-slate-600 dark:text-slate-300 whitespace-nowrap">
+              ພົບ <span className="font-bold text-teal-600 dark:text-teal-400">{filtered.length}</span> ບິນ
+            </span>
+            <button
+              type="button"
+              onClick={() => setSortOrder(sortOrder === "asc" ? "desc" : "asc")}
+              className="inline-flex items-center gap-1.5 rounded-lg border border-slate-200/60 dark:border-white/10 bg-white/60 dark:bg-white/5 px-2.5 py-1.5 text-[11px] font-medium text-slate-600 dark:text-slate-300 hover:bg-white dark:hover:bg-white/10 transition-colors cursor-pointer"
+              title="ປ່ຽນລຳດັບການຈັດຮຽງ"
+            >
+              {sortOrder === "asc" ? <><FaSortAmountUp size={10} /> ໃກ້ສຸດກ່ອນ</> : <><FaSortAmountDown size={10} /> ໄກສຸດກ່ອນ</>}
+            </button>
+            <button
+              type="button"
+              onClick={openManualModal}
+              className="inline-flex items-center gap-1.5 rounded-lg bg-teal-600 px-3 py-1.5 text-[11px] font-semibold text-white transition-colors hover:bg-teal-700 dark:bg-teal-500 dark:hover:bg-teal-600 cursor-pointer"
+            >
+              <FaPlus size={10} />
+              ເພີ່ມບິນໂອນ (72)
+            </button>
+          </div>
+        </div>
 
-      <StatusStatGrid
-        stats={[
-          { label: "ຕ້ອງດຳເນີນການ", value: needActionCount, icon: <FaExclamationTriangle />, tone: "teal" },
-          { label: "ພ້ອມຈັດຖ້ຽວ", value: dispatchReadyCount, icon: <FaCheckSquare />, tone: "sky" },
-          { label: "ລ່ວງໜ້າ", value: futureCount, icon: <FaCalendar />, tone: "amber" },
-          { label: "ຈຳນວນເຫຼືອ", value: fmtQty(totalQty), icon: <FaBoxOpen />, tone: "orange" },
-        ]}
-      />
-
-      {/* ── Filters ── */}
-      <div className="glass rounded-lg p-4">
-        <form onSubmit={(e) => { e.preventDefault(); void fetchBills(); }} className="grid grid-cols-2 md:grid-cols-4 xl:grid-cols-7 gap-3 items-end">
-          <div className="col-span-2 md:col-span-4 xl:col-span-2">
-            <label className="block text-[10px] font-semibold text-slate-500 uppercase tracking-wider mb-1">ຄົ້ນຫາ</label>
-            <div className="relative">
-              <FaSearch className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" size={10} />
-              <input type="text" value={searchText} onChange={(e) => setSearchText(e.target.value)} placeholder="ເລກບິນ, ລູກຄ້າ, ຂາຍ..." className={`${inputCls} pl-8`} />
+        {/* Filter row + quick chips */}
+        <div className="p-3 space-y-2.5">
+          <form onSubmit={(e) => { e.preventDefault(); void fetchBills(); }} className="flex flex-col sm:flex-row gap-2">
+            <div className="relative flex-1 min-w-0">
+              <FaSearch className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" size={11} />
+              <input type="text" value={searchText} onChange={(e) => setSearchText(e.target.value)} placeholder="ຄົ້ນຫາ ເລກບິນ, ລູກຄ້າ, ຂາຍ..." className={`${inputCls} pl-8`} />
             </div>
-          </div>
-          <div>
-            <label className="block text-[10px] font-semibold text-slate-500 uppercase tracking-wider mb-1">ວັນສົ່ງຈາກ</label>
-            <input type="date" value={fromDate} min={FIXED_YEAR_START} max={FIXED_YEAR_END} onChange={(e) => setFromDate(e.target.value)} className={inputCls} />
-          </div>
-          <div>
-            <label className="block text-[10px] font-semibold text-slate-500 uppercase tracking-wider mb-1">ວັນສົ່ງຫາ</label>
-            <input type="date" value={toDate} min={FIXED_YEAR_START} max={FIXED_YEAR_END} onChange={(e) => setToDate(e.target.value)} className={inputCls} />
-          </div>
-          <div>
-            <label className="block text-[10px] font-semibold text-slate-500 uppercase tracking-wider mb-1">ຂົນສົ່ງ</label>
-            <select value={transportCode} onChange={(e) => setTransportCode(e.target.value)} className={inputCls}>
-              <option value="all">ທັງໝົດ</option>
+            <select value={transportCode} onChange={(e) => setTransportCode(e.target.value)} className={`${inputCls} sm:w-44`}>
+              <option value="all">ຂົນສົ່ງ: ທັງໝົດ</option>
               {transports.map((t) => <option key={t.code} value={t.code}>{t.name_1}</option>)}
             </select>
-          </div>
-          <div>
-            <label className="block text-[10px] font-semibold text-slate-500 uppercase tracking-wider mb-1">ພະແນກ</label>
-            <select value={departmentFilter} onChange={(e) => setDepartmentFilter(e.target.value)} className={inputCls}>
-              <option value="all">ທັງໝົດ</option>
+            <select value={departmentFilter} onChange={(e) => setDepartmentFilter(e.target.value)} className={`${inputCls} sm:w-44`}>
+              <option value="all">ພະແນກ: ທັງໝົດ</option>
               {deptList.map((d) => <option key={d} value={d}>{d}</option>)}
             </select>
-          </div>
-          <div>
-            <button type="submit" disabled={loading} className="w-full px-4 py-2 text-white rounded-lg text-xs font-semibold disabled:opacity-60 transition-colors flex items-center justify-center gap-2 bg-teal-600 hover:bg-teal-700 dark:bg-teal-500 cursor-pointer">
+            <button type="submit" disabled={loading} className="inline-flex items-center justify-center gap-2 rounded-lg px-4 py-2 text-xs font-semibold text-white disabled:opacity-60 transition-colors bg-teal-600 hover:bg-teal-700 dark:bg-teal-500 cursor-pointer shrink-0">
               {loading ? <FaSpinner className="animate-spin" size={11} /> : <FaSearch size={11} />}
               ຄົ້ນຫາ
             </button>
-          </div>
-        </form>
+          </form>
 
-        {/* Quick Filter Chips */}
-        <div className="mt-3 pt-3 border-t border-slate-200/20 dark:border-white/5 flex flex-wrap gap-2 items-center">
-          <span className="text-[10px] font-semibold text-slate-400 uppercase tracking-wider">ຕົວແກ້ໄຂດ່ວນ:</span>
-          {([
-            { key: "all" as const, label: "ທັງໝົດ" },
-            { key: "pos" as const, label: "ບິນ POS" },
-            { key: "partial" as const, label: "ທະຍອຍສົ່ງ (Partial)" },
-            { key: "manual" as const, label: "ບິນເພີ່ມພິເສດ" },
-          ]).map((chip) => (
-            <button
-              key={chip.key}
-              type="button"
-              onClick={() => setQuickFilter(chip.key)}
-              className={`px-2.5 py-1 rounded-full text-[10px] font-bold transition-all border cursor-pointer ${
-                quickFilter === chip.key
-                  ? "bg-teal-500/15 border-teal-500/30 text-teal-600 dark:text-teal-400"
-                  : "bg-white/30 dark:bg-white/5 border-slate-200/50 dark:border-white/5 text-slate-500 hover:bg-slate-500/10 dark:text-slate-400"
-              }`}
-            >
-              {chip.label}
-            </button>
-          ))}
+          <div className="flex flex-wrap gap-1.5 items-center">
+            <span className="text-[10px] font-semibold text-slate-400 uppercase tracking-wider">ດ່ວນ:</span>
+            {([
+              { key: "all" as const, label: "ທັງໝົດ" },
+              { key: "pos" as const, label: "ບິນ POS" },
+              { key: "partial" as const, label: "ທະຍອຍສົ່ງ" },
+              { key: "manual" as const, label: "ບິນເພີ່ມພິເສດ" },
+            ]).map((chip) => (
+              <button
+                key={chip.key}
+                type="button"
+                onClick={() => setQuickFilter(chip.key)}
+                className={`px-2.5 py-1 rounded-full text-[10px] font-bold transition-all border cursor-pointer ${
+                  quickFilter === chip.key
+                    ? "bg-teal-500/15 border-teal-500/30 text-teal-600 dark:text-teal-400"
+                    : "bg-white/30 dark:bg-white/5 border-slate-200/50 dark:border-white/5 text-slate-500 hover:bg-slate-500/10 dark:text-slate-400"
+                }`}
+              >
+                {chip.label}
+              </button>
+            ))}
+          </div>
         </div>
       </div>
 
-      {/* ── Toolbar: count + view switch + sort + add ── */}
-      <div className="rounded-lg border border-slate-200/60 dark:border-white/[0.06] bg-white dark:bg-slate-900 p-1.5 flex flex-wrap gap-1.5 items-center">
-        <span className="px-2 text-[11px] font-semibold text-slate-500 dark:text-slate-300">
-          ພົບ <span className="font-bold text-slate-700 dark:text-slate-100">{filtered.length}</span> ບິນ
-        </span>
-        <span className="text-slate-300 dark:text-slate-600">·</span>
-        <button
-          type="button"
-          onClick={() => setViewMode("table")}
-          className={`px-2.5 py-1 rounded-md text-[11px] font-semibold transition-colors inline-flex items-center gap-1.5 cursor-pointer ${
-            viewMode === "table"
-              ? "bg-slate-700 text-white dark:bg-slate-200 dark:text-slate-900"
-              : "text-slate-600 dark:text-slate-300 hover:bg-slate-500/10"
-          }`}
-          title="ສະແດງແບບຕາຕະລາງ"
-        >
-          <FaTable size={10} />
-          ຕາຕະລາງ
-        </button>
-        <button
-          type="button"
-          onClick={() => setViewMode("happy")}
-          className={`px-2.5 py-1 rounded-md text-[11px] font-semibold transition-colors inline-flex items-center gap-1.5 cursor-pointer ${
-            viewMode === "happy"
-              ? "bg-slate-700 text-white dark:bg-slate-200 dark:text-slate-900"
-              : "text-slate-600 dark:text-slate-300 hover:bg-slate-500/10"
-          }`}
-          title="ສະແດງ 4 ຂັ້ນຕອນຫຼັກ"
-        >
-          <FaList size={10} />
-          Kanban
-          <span className={`min-w-[16px] h-[16px] px-1 rounded-full text-[10px] font-bold flex items-center justify-center ${viewMode === "happy" ? "bg-white/25" : "bg-slate-500/15"}`}>
-            {STEP_ORDER.reduce((s, k) => s + billsByStep[k].length, 0)}
-          </span>
-        </button>
-        <button
-          type="button"
-          onClick={() => setViewMode("problem")}
-          className={`px-2.5 py-1 rounded-md text-[11px] font-semibold transition-colors inline-flex items-center gap-1.5 cursor-pointer ${
-            viewMode === "problem"
-              ? "bg-slate-700 text-white dark:bg-slate-200 dark:text-slate-900"
-              : "text-slate-600 dark:text-slate-300 hover:bg-slate-500/10"
-          }`}
-          title="ບິນຍົກເລີກ / ປະຕິເສດ"
-        >
-          <FaExclamationTriangle size={9} />
-          ມີບັນຫາ
-          <span className={`min-w-[16px] h-[16px] px-1 rounded-full text-[10px] font-bold flex items-center justify-center ${viewMode === "problem" ? "bg-white/25" : "bg-slate-500/15"}`}>
-            {billsByStep.problem.length}
-          </span>
-        </button>
-        <button
-          type="button"
-          onClick={() => setSortOrder(sortOrder === "asc" ? "desc" : "asc")}
-          className="ml-auto inline-flex items-center gap-1.5 rounded-md border border-slate-200/60 dark:border-white/[0.06] bg-white dark:bg-slate-900 px-2.5 py-1 text-[11px] font-medium text-slate-600 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-white/5 transition-colors cursor-pointer"
-          title="ປ່ຽນລຳດັບການຈັດຮຽງ"
-        >
-          {sortOrder === "asc" ? <><FaSortAmountUp size={10} /> ໃກ້ສຸດກ່ອນ</> : <><FaSortAmountDown size={10} /> ໄກສຸດກ່ອນ</>}
-        </button>
-        <button
-          type="button"
-          onClick={openManualModal}
-          className="inline-flex items-center gap-1.5 rounded-md bg-teal-600 px-3 py-1 text-[11px] font-semibold text-white transition-colors hover:bg-teal-700 dark:bg-teal-500 dark:hover:bg-teal-600 cursor-pointer"
-        >
-          <FaPlus size={10} />
-          ເພີ່ມບິນໂອນ (72)
-        </button>
-      </div>
-
-      {/* Mobile steps tab bar — shown for table + happy views */}
-      {viewMode !== "problem" && filtered.length > 0 && !loading && (
-        <div className="flex md:hidden border border-slate-200/50 dark:border-white/5 bg-white dark:bg-slate-900 rounded-lg p-1 gap-1 overflow-x-auto">
-          {STEP_ORDER.map((step) => {
+      {/* Status tabs — pick one status to view (replaces the stacked sections) */}
+      {filtered.length > 0 && !loading && (
+        <div className="flex border border-slate-200/50 dark:border-white/5 bg-white dark:bg-slate-900 rounded-lg p-1 gap-1 overflow-x-auto">
+          {[...STEP_ORDER, "problem" as StepKey].map((step) => {
             const meta = STEP_META[step];
-            const isActive = activeMobileStep === step;
+            const isActive = activeStep === step;
             const count = billsByStep[step].length;
             return (
               <button
                 key={step}
                 type="button"
-                onClick={() => setActiveMobileStep(step)}
-                className={`flex-1 min-w-[75px] py-2 px-1 rounded-md text-[10px] font-bold text-center transition-all cursor-pointer ${
+                onClick={() => setActiveStep(step)}
+                className={`flex-1 min-w-[110px] py-1.5 px-2 rounded-md text-center transition-all cursor-pointer ${
                   isActive
                     ? `${meta.headBg} ${meta.headText} ring-1 ring-current/25 shadow-xs`
                     : "text-slate-500 hover:bg-slate-500/10"
                 }`}
               >
-                <div className="truncate">{meta.title}</div>
-                <div className="text-[11px] font-extrabold mt-0.5">{count}</div>
+                <div className="flex items-center justify-center gap-1.5">
+                  <span className={`w-1.5 h-1.5 rounded-full ${meta.dot}`} />
+                  <span className="truncate text-[11px] font-bold">{meta.title}</span>
+                  <span
+                    className={`rounded-full px-1.5 text-[10px] font-extrabold tabular-nums ${
+                      isActive ? "bg-white/60 dark:bg-black/20" : "bg-slate-500/10 text-slate-500"
+                    }`}
+                  >
+                    {count}
+                  </span>
+                </div>
+                <div className="hidden sm:block text-[9px] font-medium opacity-60 mt-0.5 truncate">
+                  {meta.description}
+                </div>
               </button>
             );
           })}
@@ -1190,14 +1098,12 @@ export default function BillsPendingClient() {
           )}
 
           {/* ═══════ TABLE VIEW ═══════ */}
-          {viewMode === "table" && (
-            <div className="space-y-3">
-              {[...STEP_ORDER, "problem" as StepKey].map((step) => {
+          <div className="space-y-3">
+              {(() => {
+                const step = activeStep;
                 const meta = STEP_META[step];
                 const stepBills = billsByStep[step];
-                const collapsed = collapsedSteps.has(step);
                 const totals = stepTotals[step];
-                const isMobileHidden = activeMobileStep !== step;
 
                 // Step color map for left-border
                 const borderColor: Record<string, string> = {
@@ -1215,60 +1121,48 @@ export default function BillsPendingClient() {
                   problem: "bg-slate-400",
                 };
 
-                if (stepBills.length === 0) return null;
-
                 return (
-                  <section
-                    key={step}
-                    className={`rounded-xl border border-slate-200/60 dark:border-white/[0.06] bg-white dark:bg-slate-900 overflow-hidden ${
-                      isMobileHidden ? "hidden md:block" : "block"
-                    }`}
-                  >
-                    {/* Group header */}
-                    <button
-                      type="button"
-                      onClick={() => toggleCollapsedStep(step)}
-                      className="w-full flex items-center gap-3 px-4 py-2.5 border-b border-slate-100 dark:border-white/[0.04] bg-slate-50/80 dark:bg-slate-800/50 hover:bg-slate-100/80 dark:hover:bg-slate-800/80 transition-colors cursor-pointer text-left"
-                    >
+                  <section className="rounded-xl border border-slate-200/60 dark:border-white/[0.06] bg-white dark:bg-slate-900 overflow-hidden">
+                    {/* Active status header — coloured to match the active tab */}
+                    <div className={`w-full flex items-center gap-2.5 px-4 py-3 border-b border-slate-100 dark:border-white/[0.04] ${meta.headBg}`}>
                       <span className={`w-2.5 h-2.5 rounded-full ${dotColor[step] ?? "bg-slate-400"}`} />
-                      {collapsed ? <FaChevronRight size={9} className="text-slate-400" /> : <FaChevronDown size={9} className="text-slate-400" />}
-                      <span className="text-[12px] font-bold text-slate-700 dark:text-slate-200">
-                        {meta.title}
-                      </span>
-                      <span className="text-[10px] text-slate-400 dark:text-slate-500">
+                      <span className={`text-sm font-bold ${meta.headText}`}>{meta.title}</span>
+                      <span className="hidden sm:inline text-[10px] text-slate-400 dark:text-slate-500">
                         {meta.description}
                       </span>
-                      <span className="ml-auto flex items-center gap-3 text-right">
-                        <span className="text-[12px] font-extrabold text-slate-700 dark:text-slate-100">
-                          {stepBills.length}
+                      <span className="ml-auto flex items-center gap-2">
+                        <span className="rounded-full bg-white/70 dark:bg-black/25 px-2 py-0.5 text-[11px] font-extrabold text-slate-700 dark:text-slate-100 tabular-nums">
+                          {stepBills.length} ບິນ
                         </span>
-                        <span className="text-[10px] font-bold text-amber-600 dark:text-amber-400 tabular-nums">
+                        <span className="rounded-full bg-amber-500/15 px-2 py-0.5 text-[10px] font-bold text-amber-700 dark:text-amber-400 tabular-nums">
                           {fmtQty(totals.qty)} ໜ່ວຍ
                         </span>
                       </span>
-                    </button>
+                    </div>
 
-                    {/* Table body */}
-                    {!collapsed && (
-                      <div className="overflow-x-auto">
+                    <div className="overflow-x-auto">
                         {/* Table header */}
-                        <div className="hidden md:grid grid-cols-[40px_1fr_1.2fr_140px_100px_100px_110px_100px_80px_170px] border-b border-slate-100 dark:border-white/[0.04] bg-slate-50/50 dark:bg-slate-800/30 text-[10px] font-bold uppercase tracking-wider text-slate-400 dark:text-slate-500">
+                        <div className="hidden md:grid grid-cols-[40px_minmax(180px,1fr)_minmax(220px,2fr)_140px_150px_110px_100px_120px_170px] border-b border-slate-200 dark:border-white/[0.06] bg-slate-50 dark:bg-slate-800/40 text-[10px] font-bold uppercase tracking-wider text-slate-500 dark:text-slate-400">
                           <div className="px-3 py-2 flex items-center justify-center">☑</div>
                           <div className="px-3 py-2">ເລກບິນ</div>
                           <div className="px-3 py-2">ລູກຄ້າ</div>
                           <div className="px-3 py-2">ສະຖານະ</div>
-                          <div className="px-3 py-2">ວັນສົ່ງ</div>
-                          <div className="px-3 py-2">ວັນຮັບ</div>
+                          <div className="px-3 py-2">ເປີດບິນ / ຮັບ</div>
                           <div className="px-3 py-2">ເສັ້ນທາງ</div>
                           <div className="px-3 py-2">ຮອບສົ່ງ</div>
                           <div className="px-3 py-2 text-right">ຈຳນວນ</div>
                           <div className="px-3 py-2 text-center">ຄຳສັ່ງ</div>
                         </div>
 
+                        {/* Empty state when this status has no bills */}
+                        {stepBills.length === 0 && (
+                          <div className="px-4 py-12 text-center text-xs text-slate-400 dark:text-slate-500">
+                            ບໍ່ມີບິນໃນສະຖານະນີ້
+                          </div>
+                        )}
+
                         {/* Rows */}
                         {stepBills.map((bill, idx) => {
-                          const workflow = workflowKey(bill);
-                          const workflowMeta = workflowCopy[workflow];
                           const contactMeta = bill.action_status ? ACTION_STATUS_MAP[bill.action_status] : null;
                           const roundName = bill.delivery_round_code
                             ? deliveryRounds.find((r) => r.code === bill.delivery_round_code)?.name ?? bill.delivery_round_code
@@ -1283,16 +1177,16 @@ export default function BillsPendingClient() {
                             <div
                               key={bill.doc_no}
                               onClick={() => void toggleProducts(bill.doc_no)}
-                              className={`border-l-[3px] ${borderColor[step] ?? "border-l-slate-300"} cursor-pointer transition-all duration-150 ${
+                              className={`border-l-[3px] ${borderColor[step] ?? "border-l-slate-300"} cursor-pointer transition-colors duration-150 ${
                                 isActive
-                                  ? "bg-teal-50/80 dark:bg-teal-950/30 border-l-teal-500"
+                                  ? "bg-teal-50 dark:bg-teal-950/40 border-l-teal-500"
                                   : isEven
                                   ? "bg-white dark:bg-slate-900"
-                                  : "bg-slate-50/50 dark:bg-slate-800/20"
-                              } hover:bg-teal-50/50 dark:hover:bg-teal-950/20`}
+                                  : "bg-slate-50/40 dark:bg-white/[0.015]"
+                              } hover:bg-teal-50/60 dark:hover:bg-teal-950/25`}
                             >
                               {/* Desktop row */}
-                              <div className="hidden md:grid grid-cols-[40px_1fr_1.2fr_140px_100px_100px_110px_100px_80px_170px] items-center min-h-[38px] border-b border-slate-100/80 dark:border-white/[0.03]">
+                              <div className="hidden md:grid grid-cols-[40px_minmax(180px,1fr)_minmax(220px,2fr)_140px_150px_110px_100px_120px_170px] items-center min-h-[46px] border-b border-slate-100/80 dark:border-white/[0.03]">
                                 {/* Checkbox */}
                                 <div className="px-3 flex items-center justify-center" onClick={(e) => e.stopPropagation()}>
                                   <input
@@ -1303,11 +1197,14 @@ export default function BillsPendingClient() {
                                   />
                                 </div>
                                 {/* Bill No */}
-                                <div className="px-3 py-1.5 min-w-0">
-                                  <div className="flex items-center gap-1.5">
-                                    <span className={`text-xs font-mono font-bold truncate ${
+                                <div className="px-3 py-1.5">
+                                  <div className="flex flex-wrap items-center gap-1.5">
+                                    <span
+                                      title={bill.doc_no}
+                                      className={`shrink-0 whitespace-nowrap text-xs font-mono font-bold ${
                                       isActive ? "text-teal-600 dark:text-teal-400" : "text-slate-800 dark:text-slate-100"
-                                    }`}>
+                                    }`}
+                                    >
                                       {bill.doc_no}
                                     </span>
                                     {bill.is_pos_settled && (
@@ -1325,20 +1222,38 @@ export default function BillsPendingClient() {
                                         ພິເສດ
                                       </span>
                                     )}
+                                    {transportCode === "all" && (
+                                      <BranchBadge code={bill.transport_code} name={bill.transport} />
+                                    )}
+                                    {bill.cancelled_delivery && (
+                                      <span
+                                        className="inline-flex items-center rounded bg-rose-100 dark:bg-rose-900/30 px-1 py-0.5 text-[9px] font-bold text-rose-600 dark:text-rose-400"
+                                        title={`ຍົກເລີກ${bill.cancelled_delivery_at ? ` ${bill.cancelled_delivery_at}` : ""}${bill.cancelled_delivery_remark ? ` · ${bill.cancelled_delivery_remark}` : ""}`}
+                                      >
+                                        ຍົກເລີກ
+                                      </span>
+                                    )}
                                   </div>
-                                  {bill.time_use && (
-                                    <span className={`text-[10px] tabular-nums ${
-                                      baseSec(bill.time_use) + tick >= 4 * 3600 ? "text-red-500" :
-                                      baseSec(bill.time_use) + tick >= 2 * 3600 ? "text-amber-500" :
-                                      "text-slate-400"
-                                    }`}>
-                                      ⏱ {fmtDur(bill.time_use)}
-                                    </span>
-                                  )}
+                                  <div className="flex flex-wrap items-center gap-x-2 gap-y-0.5 text-[10px] tabular-nums">
+                                    {bill.time_use && (
+                                      <span className={`${
+                                        baseSec(bill.time_use) + tick >= 4 * 3600 ? "text-red-500" :
+                                        baseSec(bill.time_use) + tick >= 2 * 3600 ? "text-amber-500" :
+                                        "text-slate-400"
+                                      }`} title="ນັບຈາກວັນເປີດບິນ">
+                                        ⏱ ເປີດ {fmtDur(bill.time_use)}
+                                      </span>
+                                    )}
+                                    {bill.time_use_send && baseSec(bill.time_use_send) >= 0 && (
+                                      <span className="text-sky-600 dark:text-sky-400" title="ນັບຈາກວັນສົ່ງ">
+                                        📦 ສົ່ງ {fmtDur(bill.time_use_send)}
+                                      </span>
+                                    )}
+                                  </div>
                                 </div>
                                 {/* Customer */}
                                 <div className="px-3 py-1.5 min-w-0">
-                                  <div className="text-xs font-semibold text-slate-700 dark:text-slate-200 truncate">
+                                  <div className="text-xs font-semibold text-slate-700 dark:text-slate-200 truncate" title={bill.transport_name}>
                                     {bill.transport_name}
                                   </div>
                                   <div className="text-[10px] text-slate-400 dark:text-slate-500 truncate">
@@ -1372,12 +1287,11 @@ export default function BillsPendingClient() {
                                     <FaChevronDown size={7} className="opacity-50 shrink-0" />
                                   </button>
                                 </div>
-                                {/* Send Date */}
-                                <div className="px-3 py-1.5 text-xs text-slate-600 dark:text-slate-300 tabular-nums">
-                                  {bill.send_date_display ?? bill.doc_date}
-                                </div>
-                                {/* Scheduled Date */}
+                                {/* Send date + scheduled (receive) date together */}
                                 <div className="px-3 py-1.5" onClick={(e) => e.stopPropagation()}>
+                                  <div className="text-[10px] text-slate-400 tabular-nums">
+                                    ເປີດ: {bill.time_open || bill.doc_date}
+                                  </div>
                                   <button
                                     type="button"
                                     onClick={(e) => { e.stopPropagation(); openScheduleDialog(bill); }}
@@ -1387,7 +1301,7 @@ export default function BillsPendingClient() {
                                         : "text-slate-400 hover:text-teal-600 dark:hover:text-teal-400"
                                     }`}
                                   >
-                                    {bill.scheduled_date_display || "—"}
+                                    ຮັບ: {bill.scheduled_date_display || "—"}
                                     {bill.scheduled_date_overridden && <span className="text-amber-500 ml-0.5">*</span>}
                                   </button>
                                 </div>
@@ -1419,12 +1333,18 @@ export default function BillsPendingClient() {
                                     {roundName || "—"}
                                   </button>
                                 </div>
-                                {/* Qty */}
+                                {/* Qty — remaining headline; for partials show total + already-sent */}
                                 <div className="px-3 py-1.5 text-right">
                                   <span className="text-xs font-bold text-amber-700 dark:text-amber-400 tabular-nums">
                                     {fmtQty(bill.remaining_qty_total)}
                                   </span>
-                                  <span className="block text-[9px] text-slate-400">{bill.remaining_count} ລາຍການ</span>
+                                  <span className="block text-[9px] text-slate-400">ເຫຼືອ · {bill.remaining_count} ລາຍການ</span>
+                                  {bill.partial_delivery && (bill.total_qty_total ?? 0) > 0 && (
+                                    <div className="mt-0.5 border-t border-slate-200/60 dark:border-white/5 pt-0.5 text-[9px] leading-tight text-slate-400 tabular-nums">
+                                      <div>ທັງໝົດ <span className="font-semibold text-slate-500 dark:text-slate-300">{fmtQty(bill.total_qty_total ?? 0)}</span></div>
+                                      <div>ສົ່ງແລ້ວ <span className="font-semibold text-emerald-600 dark:text-emerald-400">{fmtQty(bill.delivered_qty_total ?? 0)}</span></div>
+                                    </div>
+                                  )}
                                 </div>
                                 {/* Actions */}
                                 <div className="px-3 py-1.5 flex items-center justify-center gap-1" onClick={(e) => e.stopPropagation()}>
@@ -1470,7 +1390,7 @@ export default function BillsPendingClient() {
 
                               {/* Mobile row */}
                               <div className="md:hidden px-3 py-2.5 border-b border-slate-100/80 dark:border-white/[0.03] space-y-1">
-                                <div className="flex items-center gap-2">
+                                <div className="flex flex-wrap items-center gap-2">
                                   <label onClick={(e) => e.stopPropagation()} className="flex items-center">
                                     <input
                                       type="checkbox"
@@ -1479,13 +1399,22 @@ export default function BillsPendingClient() {
                                       className="rounded border-slate-300 text-teal-600 focus:ring-teal-500 cursor-pointer"
                                     />
                                   </label>
-                                  <span className={`text-xs font-mono font-bold ${isActive ? "text-teal-600" : "text-slate-800 dark:text-slate-100"}`}>
+                                  <span
+                                    title={bill.doc_no}
+                                    className={`shrink-0 whitespace-nowrap text-xs font-mono font-bold ${isActive ? "text-teal-600" : "text-slate-800 dark:text-slate-100"}`}
+                                  >
                                     {bill.doc_no}
                                   </span>
                                   {bill.is_pos_settled && (
                                     <span className="rounded bg-emerald-100 dark:bg-emerald-900/40 px-1 py-0.5 text-[9px] font-bold text-emerald-700 dark:text-emerald-400">POS</span>
                                   )}
-                                  <span className="ml-auto text-xs font-bold text-amber-700 dark:text-amber-400 tabular-nums">
+                                  {transportCode === "all" && (
+                                    <BranchBadge code={bill.transport_code} name={bill.transport} />
+                                  )}
+                                  {bill.cancelled_delivery && (
+                                    <span className="rounded bg-rose-100 dark:bg-rose-900/30 px-1 py-0.5 text-[9px] font-bold text-rose-600 dark:text-rose-400">ຍົກເລີກ</span>
+                                  )}
+                                  <span className="ml-auto shrink-0 text-xs font-bold text-amber-700 dark:text-amber-400 tabular-nums">
                                     {fmtQty(bill.remaining_qty_total)} <span className="text-[10px] font-medium text-slate-400">ໜ່ວຍ</span>
                                   </span>
                                 </div>
@@ -1541,460 +1470,10 @@ export default function BillsPendingClient() {
                           );
                         })}
                       </div>
-                    )}
                   </section>
                 );
-              })}
+              })()}
             </div>
-          )}
-
-          {/* ═══════ KANBAN VIEW (happy/problem) ═══════ */}
-          {(viewMode === "happy" || viewMode === "problem") && (
-            <div className={`grid gap-3 ${
-              viewMode === "happy" ? "grid-cols-1 md:grid-cols-2 xl:grid-cols-4" : "grid-cols-1"
-            }`}>
-              {(viewMode === "happy" ? STEP_ORDER : ["problem" as StepKey]).map((step) => {
-                const meta = STEP_META[step];
-                const stepBills = billsByStep[step];
-                const collapsed = collapsedSteps.has(step);
-                const isDropTarget = dragOverStep === step;
-                const dropDisabled = step === "scheduled_wait" || step === "problem";
-                const totals = stepTotals[step];
-                const isMobileHidden = viewMode === "happy" && activeMobileStep !== step;
-                return (
-                  <section
-                    key={step}
-                    onDragOver={(e) => {
-                      if (dropDisabled || !dragBill) return;
-                      e.preventDefault();
-                      e.dataTransfer.dropEffect = "move";
-                      if (dragOverStep !== step) setDragOverStep(step);
-                    }}
-                    onDragLeave={(e) => {
-                      if (!e.currentTarget.contains(e.relatedTarget as Node | null)) {
-                        setDragOverStep((prev) => (prev === step ? null : prev));
-                      }
-                    }}
-                    onDrop={(e) => {
-                      if (dropDisabled || !dragBill) return;
-                      e.preventDefault();
-                      const billNo = dragBill;
-                      setDragBill(null);
-                      setDragOverStep(null);
-                      void handleDropOnStep(billNo, step, e.currentTarget);
-                    }}
-                    className={`flex flex-col rounded-xl border transition-all duration-200 ${
-                      isMobileHidden ? "hidden md:flex" : "flex"
-                    } ${
-                      isDropTarget && !dropDisabled
-                        ? `ring-2 ${meta.ring} border-transparent bg-teal-500/[0.03] dark:bg-teal-500/[0.01] shadow-[inset_0_0_20px_rgba(14,124,107,0.1)]`
-                        : dragBill && !dropDisabled
-                        ? "border-dashed border-teal-500/35 bg-teal-500/[0.01] dark:bg-transparent animate-pulse"
-                        : "border-slate-200/50 dark:border-white/5 bg-white/30 dark:bg-white/[0.02]"
-                    }`}
-                  >
-                    {/* Column header */}
-                    <header className={`flex items-center gap-2 px-3 py-2 rounded-t-lg border-b border-slate-200/40 dark:border-white/5 ${meta.headBg}`}>
-                      <span className={`text-[10px] font-mono font-bold rounded px-1.5 py-0.5 ${meta.headText} bg-white/40 dark:bg-white/[0.05]`}>
-                        {meta.number}
-                      </span>
-                      <button
-                        type="button"
-                        onClick={() => toggleCollapsedStep(step)}
-                        className="flex items-center gap-1.5 min-w-0 flex-1 text-left cursor-pointer"
-                      >
-                        {collapsed ? <FaChevronRight size={9} className="text-slate-400" /> : <FaChevronDown size={9} className="text-slate-400" />}
-                        <div className="min-w-0">
-                          <p className={`text-[12px] font-bold leading-tight truncate ${meta.headText}`}>
-                            {meta.title}
-                          </p>
-                          <p className="text-[9px] text-slate-500 dark:text-slate-400 leading-tight truncate">
-                            {meta.description}
-                          </p>
-                        </div>
-                      </button>
-                      <div className="text-right shrink-0">
-                        <div className="text-[12px] font-extrabold leading-none text-slate-700 dark:text-slate-100">
-                          {stepBills.length}
-                        </div>
-                        <div className="text-[9px] text-amber-700 dark:text-amber-400 font-bold leading-tight">
-                          {fmtQty(totals.qty)} ໜ່ວຍ
-                        </div>
-                      </div>
-                    </header>
-
-                    {/* Column body */}
-                    {!collapsed && (
-                      <div className="flex-1 p-2 space-y-2 min-h-[120px] max-h-[calc(100vh-340px)] overflow-y-auto">
-                        {stepBills.length === 0 ? (
-                          <div className="flex flex-col items-center justify-center py-8 text-center text-[11px] text-slate-400">
-                            <FaBoxOpen size={20} className="mb-1 opacity-40" />
-                            <p>{dropDisabled ? "ບໍ່ມີບິນ" : (dragBill ? "ວາງທີ່ນີ້ເພື່ອປ່ຽນຂັ້ນຕອນ" : "ບໍ່ມີບິນ")}</p>
-                          </div>
-                        ) : (
-                          <>
-                            {stepBills.map((bill) => {
-                              const wasDeliveryCancelled = Boolean(bill.cancelled_delivery);
-                              const workflow = workflowKey(bill);
-                              const workflowMeta = workflowCopy[workflow];
-                              const contactMeta = bill.action_status ? ACTION_STATUS_MAP[bill.action_status] : null;
-                              const roundName = bill.delivery_round_code
-                                ? deliveryRounds.find((r) => r.code === bill.delivery_round_code)?.name ?? bill.delivery_round_code
-                                : "";
-                              const routeName = bill.delivery_route_code
-                                ? deliveryRoutes.find((r) => r.code === bill.delivery_route_code)?.name ?? bill.delivery_route_code
-                                : "";
-                              const workflowTone: Record<string, string> = {
-                                emerald: "border-emerald-500/25 bg-emerald-500/10 text-emerald-700 dark:text-emerald-400",
-                                amber: "border-amber-500/25 bg-amber-500/10 text-amber-700 dark:text-amber-400",
-                                sky: "border-sky-500/25 bg-sky-500/10 text-sky-700 dark:text-sky-400",
-                                slate: "border-slate-500/20 bg-slate-500/10 text-slate-700 dark:text-slate-300",
-                                rose: "border-rose-500/25 bg-rose-500/10 text-rose-700 dark:text-rose-400",
-                              };
-                              const chipBase = "inline-flex items-center gap-1.5 rounded-md border px-2 py-1 text-[10px] font-semibold transition-colors";
-                              const chipDone = "border-emerald-500/30 bg-emerald-500/10 text-emerald-700 dark:text-emerald-400 hover:bg-emerald-500/15";
-                              const chipTodo = "border-slate-300/50 bg-white/40 text-slate-600 hover:bg-slate-500/10 dark:border-white/10 dark:bg-white/5 dark:text-slate-300";
-                              const chipClear =
-                                "inline-flex items-center justify-center rounded-r-md border border-l-0 border-rose-300/40 bg-rose-50/40 px-1.5 py-1 text-rose-500 hover:bg-rose-500/15 hover:text-rose-600 dark:border-rose-500/30 dark:bg-rose-500/[0.06] dark:text-rose-400";
-                              const clearScheduleField = async (
-                                billNo: string,
-                                field: "delivery_route_code" | "delivery_round_code" | "scheduled_date"
-                              ) => {
-                                try {
-                                  await Actions.upsertPendingBillSchedule({
-                                    bill_no: billNo,
-                                    [field]: null,
-                                  });
-                                  await fetchBills();
-                                } catch (e) {
-                                  console.error("[clearScheduleField]", e);
-                                }
-                              };
-                              const canPlanDelivery = true;
-                              const checklist = workflowChecklist(bill);
-                              const workflowToneCls = workflowTone[workflowMeta.tone];
-                              return (
-                                <article
-                                  key={bill.doc_no}
-                                  draggable
-                                  onDragStart={(e) => {
-                                    e.dataTransfer.effectAllowed = "move";
-                                    e.dataTransfer.setData("text/plain", bill.doc_no);
-                                    setDragBill(bill.doc_no);
-                                  }}
-                                  onDragEnd={() => {
-                                    setDragBill(null);
-                                    setDragOverStep(null);
-                                  }}
-                                  onClick={() => void toggleProducts(bill.doc_no)}
-                                  className={`rounded-xl border transition-all duration-300 overflow-hidden cursor-pointer hover:-translate-y-0.5 ${
-                                    dragBill === bill.doc_no ? "opacity-35 scale-95" : ""
-                                  } ${
-                                    wasDeliveryCancelled
-                                      ? "border-rose-500/50 bg-rose-500/[0.04] hover:shadow-[0_0_15px_rgba(239,68,68,0.15)]"
-                                      : drawerBill?.doc_no === bill.doc_no
-                                      ? "border-teal-500 dark:border-teal-400 ring-1 ring-teal-500/30 shadow-[0_0_15px_rgba(14,124,107,0.15)] bg-teal-500/[0.02]"
-                                      : step === "not_contacted"
-                                      ? "hover:shadow-[0_0_15px_rgba(239,68,68,0.12)] hover:border-rose-500/30 border-slate-200/50 dark:border-white/5 bg-white/40 dark:bg-white/[0.02]"
-                                      : step === "sales_pending"
-                                      ? "hover:shadow-[0_0_15px_rgba(245,158,11,0.12)] hover:border-amber-500/30 border-slate-200/50 dark:border-white/5 bg-white/40 dark:bg-white/[0.02]"
-                                      : step === "scheduled_wait"
-                                      ? "hover:shadow-[0_0_15px_rgba(59,130,246,0.12)] hover:border-sky-500/30 border-slate-200/50 dark:border-white/5 bg-white/40 dark:bg-white/[0.02]"
-                                      : step === "ready"
-                                      ? "hover:shadow-[0_0_15px_rgba(16,185,129,0.12)] hover:border-emerald-500/30 border-slate-200/50 dark:border-white/5 bg-white/40 dark:bg-white/[0.02]"
-                                      : "hover:shadow-[0_0_15px_rgba(100,116,139,0.12)] hover:border-slate-500/30 border-slate-200/50 dark:border-white/5 bg-white/40 dark:bg-white/[0.02]"
-                                  } glass-subtle`}
-                                >
-                                  {/* Header row */}
-                                  <div className="flex items-center gap-2 px-3 py-2">
-                                    <label
-                                      className="flex items-center cursor-pointer"
-                                      onClick={(e) => e.stopPropagation()}
-                                      title="ເລືອກຫຼາຍບິນເພື່ອປະຕິບັດການພ້ອມກັນ"
-                                    >
-                                      <input
-                                        type="checkbox"
-                                        checked={selectedBillNos.has(bill.doc_no)}
-                                        onChange={() => toggleSelectBill(bill.doc_no)}
-                                        className="rounded border-slate-300 text-teal-600 focus:ring-teal-500"
-                                      />
-                                    </label>
-                                    <div className="flex items-center gap-1.5 min-w-0">
-                                      <span className={`text-xs font-mono font-bold text-slate-800 dark:text-slate-100 truncate ${
-                                        drawerBill?.doc_no === bill.doc_no ? "text-teal-600 dark:text-teal-400" : ""
-                                      }`}>
-                                        {bill.doc_no}
-                                      </span>
-                                    </div>
-                                    {bill.is_pos_settled && (
-                                      <span className="inline-flex items-center rounded-md bg-emerald-500/15 px-1.5 py-0.5 text-[10px] font-bold text-emerald-700 dark:text-emerald-400" title="ບິນຈາກ POS — ຮັບເງິນແລ້ວ">
-                                        POS
-                                      </span>
-                                    )}
-                                    <div className={`inline-flex items-center gap-1 rounded-md border px-2 py-0.5 text-[10px] font-bold ${workflowToneCls}`} title={workflowMeta.title}>
-                                      {workflow === "ready" ? <FaCheckSquare size={9} /> : workflow === "problem" ? <FaExclamationTriangle size={9} /> : <FaClock size={9} />}
-                                      <span>{workflowMeta.title}</span>
-                                    </div>
-                                    <div className="ml-auto flex items-center gap-2" onClick={(e) => e.stopPropagation()}>
-                                      <div className="text-right hidden sm:block">
-                                        <div className="text-xs font-bold text-amber-700 dark:text-amber-400 leading-tight">
-                                          {fmtQty(bill.remaining_qty_total)} <span className="text-[10px] font-medium">ໜ່ວຍ</span>
-                                        </div>
-                                        <div className="text-[10px] text-slate-500 leading-tight">{bill.remaining_count} ລາຍການ</div>
-                                      </div>
-                                      {bill.time_use && (
-                                        <span className={`hidden md:inline-flex items-center justify-center w-7 h-7 rounded-md border ${durColor(bill.time_use)}`} title={`ຄ້າງ ${fmtDur(bill.time_use)}`}>
-                                          <FaClock size={11} />
-                                        </span>
-                                      )}
-                                      <button
-                                        onClick={(e) => { e.stopPropagation(); setTodoOpen({ billNo: bill.doc_no, anchor: e.currentTarget }); }}
-                                        className={`relative inline-flex items-center justify-center w-7 h-7 rounded-md transition-colors cursor-pointer ${
-                                          bill.todo_pending_count && bill.todo_earliest_deadline && bill.todo_earliest_deadline < today
-                                            ? "text-rose-600 bg-rose-500/10 hover:bg-rose-500/20"
-                                            : bill.todo_pending_count && bill.todo_earliest_deadline === today
-                                            ? "text-amber-600 bg-amber-500/10 hover:bg-amber-500/20"
-                                            : bill.todo_pending_count
-                                            ? "text-emerald-600 bg-emerald-500/10 hover:bg-emerald-500/20"
-                                            : "text-slate-400 hover:bg-slate-500/10"
-                                        }`}
-                                        title="ກິດຈະກຳ"
-                                      >
-                                        <FaStickyNote size={11} />
-                                        {(bill.todo_pending_count ?? 0) > 0 && (
-                                          <span className="absolute -top-1 -right-1 min-w-[14px] h-[14px] px-0.5 rounded-full bg-rose-500 text-white text-[9px] font-bold flex items-center justify-center">
-                                            {bill.todo_pending_count}
-                                          </span>
-                                        )}
-                                      </button>
-                                      <button
-                                        onClick={(e) => { e.stopPropagation(); openModal(bill); }}
-                                        className="inline-flex items-center justify-center w-7 h-7 rounded-md text-white transition-colors bg-teal-600 hover:bg-teal-700 dark:bg-teal-500 cursor-pointer"
-                                        title="ປ່ຽນສາຍສົ່ງ"
-                                      >
-                                        <FaExchangeAlt size={10} />
-                                      </button>
-                                      {bill.manual_pending_bill && (
-                                        <button
-                                          type="button"
-                                          onClick={(e) => { e.stopPropagation(); void removeManualBill(bill.doc_no); }}
-                                          disabled={removingManualBillNo === bill.doc_no}
-                                          className="inline-flex items-center justify-center w-7 h-7 rounded-md text-rose-600 transition-colors hover:bg-rose-500/10 disabled:cursor-not-allowed disabled:opacity-50 dark:text-rose-400 cursor-pointer"
-                                          title="ລົບອອກຈາກລາຍການລໍຖ້າຈັດຖ້ຽວ"
-                                        >
-                                          {removingManualBillNo === bill.doc_no ? (
-                                            <FaSpinner className="animate-spin" size={10} />
-                                          ) : (
-                                            <FaTrash size={10} />
-                                          )}
-                                        </button>
-                                      )}
-                                    </div>
-                                  </div>
-
-                                  {/* Customer line */}
-                                  <div className="px-3 pb-2 -mt-0.5 text-xs text-slate-600 dark:text-slate-300 truncate" title={bill.transport_name}>
-                                    <span className="font-semibold text-slate-700 dark:text-slate-200">{bill.transport_name}</span>
-                                    <span className="text-slate-400 dark:text-slate-500"> · </span>
-                                    <span>ສົ່ງ {bill.send_date_display ?? bill.doc_date}</span>
-                                    {bill.sale && (<><span className="text-slate-400 dark:text-slate-500"> · </span><span>{bill.sale}</span></>)}
-                                    {bill.department && (<><span className="text-slate-400 dark:text-slate-500"> · </span><span className="text-slate-500">{bill.department}</span></>)}
-                                    {bill.transport && (<><span className="text-slate-400 dark:text-slate-500"> · </span><span className="inline-flex items-center gap-1"><FaTruck size={9} className="text-slate-400" /> {bill.transport}</span></>)}
-                                  </div>
-
-                                  {wasDeliveryCancelled && (
-                                    <div className="border-t border-rose-500/20 bg-rose-500/10 px-3 py-2">
-                                      <div className="flex flex-wrap items-start gap-2 text-[10px] text-rose-700 dark:text-rose-300">
-                                        <span className="inline-flex items-center gap-1 rounded-md border border-rose-500/30 bg-rose-600 px-2 py-1 font-bold text-white">
-                                          <FaExclamationTriangle size={9} />
-                                          ເຄີຍຖືກຍົກເລີກຈັດສົ່ງ
-                                        </span>
-                                        {bill.cancelled_delivery_at && (
-                                          <span className="rounded-md bg-rose-500/10 px-2 py-1 font-semibold">
-                                            {bill.cancelled_delivery_at}
-                                          </span>
-                                        )}
-                                        {bill.cancelled_delivery_job && (
-                                          <span className="rounded-md bg-rose-500/10 px-2 py-1 font-semibold">
-                                            ຖ້ຽວ {bill.cancelled_delivery_job}
-                                          </span>
-                                        )}
-                                        {bill.cancelled_delivery_remark && (
-                                          <span className="flex min-w-0 items-start gap-1 rounded-md bg-white/50 px-2 py-1 font-semibold dark:bg-white/5">
-                                            <FaStickyNote size={9} className="mt-0.5 shrink-0" />
-                                            <span className="truncate" title={bill.cancelled_delivery_remark}>
-                                              {bill.cancelled_delivery_remark}
-                                            </span>
-                                          </span>
-                                        )}
-                                      </div>
-                                    </div>
-                                  )}
-
-                                  {/* Workflow panel */}
-                                  <div className="border-t border-slate-200/30 bg-white/30 px-3 py-2 dark:border-white/5 dark:bg-white/[0.02]">
-                                    {workflow !== "ready" && (
-                                      <div className="mb-1.5 flex flex-wrap items-center gap-1 text-[10px]">
-                                        <span className="font-semibold uppercase tracking-wider text-slate-400">ຄົງເຫຼືອ:</span>
-                                        {([
-                                          { key: "contact" as const, label: "ຕິດຕໍ່", done: checklist.contact },
-                                          { key: "date" as const, label: "ວັນຮັບ", done: checklist.date },
-                                          { key: "route" as const, label: "ເສັ້ນທາງ", done: checklist.route },
-                                          { key: "round" as const, label: "ຮອບ", done: checklist.round },
-                                        ]).map((checkStep) => (
-                                          <span
-                                            key={checkStep.key}
-                                            className={`inline-flex items-center gap-1 rounded-full px-1.5 py-0.5 ${
-                                              checkStep.done
-                                                ? "bg-emerald-500/15 text-emerald-700 dark:text-emerald-400"
-                                                : "bg-slate-500/10 text-slate-500"
-                                            }`}
-                                          >
-                                            {checkStep.done ? <FaCheck size={7} /> : <span className="w-1.5 h-1.5 rounded-full bg-current opacity-60" />}
-                                            {checkStep.label}
-                                          </span>
-                                        ))}
-                                      </div>
-                                    )}
-
-                                    <div className="flex flex-wrap gap-1.5">
-                                      <button
-                                        type="button"
-                                        onClick={(e) => { e.stopPropagation(); setStatusMenu({ billNo: bill.doc_no, anchor: e.currentTarget }); }}
-                                        className={`${chipBase} ${
-                                          contactMeta?.color === "emerald" ? chipDone
-                                            : contactMeta?.color === "rose" ? "border-rose-500/30 bg-rose-500/10 text-rose-700 hover:bg-rose-500/15 dark:text-rose-400"
-                                            : contactMeta?.color === "amber" ? "border-amber-500/30 bg-amber-500/10 text-amber-700 hover:bg-amber-500/15 dark:text-amber-400"
-                                            : contactMeta ? "border-slate-500/30 bg-slate-500/10 text-slate-700 hover:bg-slate-500/15 dark:text-slate-300"
-                                            : chipTodo
-                                        } cursor-pointer`}
-                                        title="ບັນທຶກ ຫຼືແກ້ຜົນການຕິດຕໍ່"
-                                      >
-                                        <FaPhone size={9} />
-                                        {contactMeta?.label ?? "ຍັງບໍ່ບັນທຶກການຕິດຕໍ່"}
-                                        <FaChevronDown size={7} className="opacity-60" />
-                                      </button>
-                                      <span className="inline-flex" onClick={(e) => e.stopPropagation()}>
-                                        <button
-                                          type="button"
-                                          disabled={!canPlanDelivery}
-                                          onClick={(e) => { e.stopPropagation(); if (canPlanDelivery) openScheduleDialog(bill); }}
-                                          className={`${chipBase} ${bill.scheduled_date_overridden ? "rounded-r-none" : ""} ${
-                                            !canPlanDelivery ? "cursor-not-allowed border-slate-200/60 bg-slate-100/60 text-slate-400 dark:border-white/5 dark:bg-white/[0.03]"
-                                              : bill.scheduled_date_display ? chipDone : chipTodo
-                                          } cursor-pointer`}
-                                          title={canPlanDelivery ? "ກຳນົດ ຫຼືແກ້ວັນທີ່ລູກຄ້າພ້ອມຮັບ" : "ຕ້ອງຕັ້ງສະຖານະເປັນ ພ້ອມຮັບ ກ່ອນ"}
-                                        >
-                                          <FaCalendar size={9} />
-                                          {canPlanDelivery
-                                            ? bill.scheduled_date_display ? bill.scheduled_date_display : "ກຳນົດວັນຮັບ"
-                                            : "ວັນຮັບ: ລໍຖ້າພ້ອມຮັບ"}
-                                          {bill.scheduled_date_overridden && <span className="text-amber-600 dark:text-amber-400">(ແກ້)</span>}
-                                          {canPlanDelivery && !bill.scheduled_date_overridden && <FaChevronDown size={7} className="opacity-60" />}
-                                        </button>
-                                        {bill.scheduled_date_overridden && canPlanDelivery && (
-                                          <button
-                                            type="button"
-                                            onClick={(e) => { e.stopPropagation(); void clearScheduleField(bill.doc_no, "scheduled_date"); }}
-                                            className={`${chipClear} cursor-pointer`}
-                                            title="ລົບວັນທີ່ກຳນົດ"
-                                          >
-                                            <FaTimes size={8} />
-                                          </button>
-                                        )}
-                                      </span>
-                                      <span className="inline-flex" onClick={(e) => e.stopPropagation()}>
-                                        <button
-                                          type="button"
-                                          onClick={(e) => { e.stopPropagation(); setRouteMenu({ billNo: bill.doc_no, anchor: e.currentTarget }); }}
-                                          className={`${chipBase} ${bill.delivery_route_code ? "rounded-r-none" : ""} ${
-                                            bill.delivery_route_code ? chipDone : chipTodo
-                                          } cursor-pointer`}
-                                          title="ກຳນົດ ຫຼືແກ້ເສັ້ນທາງຂົນສົ່ງ"
-                                        >
-                                          <FaRoute size={9} />
-                                          {routeName || "ເລືອກເສັ້ນທາງ"}
-                                          {!bill.delivery_route_code && <FaChevronDown size={7} className="opacity-60" />}
-                                        </button>
-                                        {bill.delivery_route_code && (
-                                          <button
-                                            type="button"
-                                            onClick={(e) => { e.stopPropagation(); void clearScheduleField(bill.doc_no, "delivery_route_code"); }}
-                                            className={`${chipClear} cursor-pointer`}
-                                            title="ລົບເສັ້ນທາງທີ່ກຳນົດ"
-                                          >
-                                            <FaTimes size={8} />
-                                          </button>
-                                        )}
-                                      </span>
-                                      <span className="inline-flex" onClick={(e) => e.stopPropagation()}>
-                                        <button
-                                          type="button"
-                                          disabled={!canPlanDelivery}
-                                          onClick={(e) => { e.stopPropagation(); if (canPlanDelivery) setRoundMenu({ billNo: bill.doc_no, anchor: e.currentTarget }); }}
-                                          className={`${chipBase} ${bill.delivery_round_code && canPlanDelivery ? "rounded-r-none" : ""} ${
-                                            !canPlanDelivery ? "cursor-not-allowed border-slate-200/60 bg-slate-100/60 text-slate-400 dark:border-white/5 dark:bg-white/[0.03]"
-                                              : bill.delivery_round_code ? chipDone : chipTodo
-                                          } cursor-pointer`}
-                                          title={canPlanDelivery ? "ກຳນົດ ຫຼືແກ້ຮອບສົ່ງ" : "ຕ້ອງຕັ້ງສະຖານະເປັນ ພ້ອມຮັບ ກ່ອນ"}
-                                        >
-                                          <FaClock size={9} />
-                                          {canPlanDelivery ? roundName || "ເລືອກຮອບສົ່ງ" : "ຮອບ: ລໍຖ້າພ້ອມຮັບ"}
-                                          {canPlanDelivery && !bill.delivery_round_code && <FaChevronDown size={7} className="opacity-60" />}
-                                        </button>
-                                        {bill.delivery_round_code && canPlanDelivery && (
-                                          <button
-                                            type="button"
-                                            onClick={(e) => { e.stopPropagation(); void clearScheduleField(bill.doc_no, "delivery_round_code"); }}
-                                            className={`${chipClear} cursor-pointer`}
-                                            title="ລົບຮອບສົ່ງທີ່ກຳນົດ"
-                                          >
-                                            <FaTimes size={8} />
-                                          </button>
-                                        )}
-                                      </span>
-                                      <BillLocationActions bill={bill} variant="chip" onEdit={openLocationDialog} />
-                                    </div>
-                                  </div>
-
-                                  {/* Footer */}
-                                  {(bill.partial_delivery || bill.manual_pending_bill || bill.schedule_remark) && (
-                                    <div className="flex items-center flex-wrap gap-2 px-3 py-1.5 border-t border-slate-200/30 dark:border-white/5 bg-slate-500/[0.03] dark:bg-white/[0.015]">
-                                      {bill.partial_delivery && (
-                                        <span className="inline-flex items-center rounded-full border border-orange-500/20 bg-orange-500/10 px-2 py-0.5 text-[10px] font-semibold text-orange-600 dark:text-orange-400">
-                                          ກຳລັງທະຍອຍສົ່ງ
-                                        </span>
-                                      )}
-                                      {bill.manual_pending_bill && (
-                                        <span className="inline-flex items-center rounded-full border border-teal-500/20 bg-teal-500/10 px-2 py-0.5 text-[10px] font-semibold text-teal-700 dark:text-teal-400">
-                                          {bill.source_type === "odservice.tb_product"
-                                            ? "ສູນບໍລິການ"
-                                            : `ບິນປະເພດ ${bill.source_trans_flag ?? "56/72"}`}
-                                        </span>
-                                      )}
-                                      {bill.schedule_remark && (
-                                        <span className="inline-flex items-center gap-1 text-[10px] text-slate-600 dark:text-slate-300" title={bill.schedule_remark}>
-                                          <FaStickyNote size={9} className="text-amber-500 shrink-0" />
-                                          <span className="truncate max-w-[260px]">{bill.schedule_remark}</span>
-                                        </span>
-                                      )}
-                                      <span className="sm:hidden inline-flex items-center gap-1 text-[10px] font-bold text-amber-700 dark:text-amber-400 ml-auto">
-                                        {fmtQty(bill.remaining_qty_total)} ໜ່ວຍ · {bill.remaining_count} ລາຍການ
-                                      </span>
-                                    </div>
-                                  )}
-                                </article>
-                              );
-                            })}
-                          </>
-                        )}
-                      </div>
-                    )}
-                  </section>
-                );
-              })}
-            </div>
-          )}
         </>
       )}
 
@@ -2363,31 +1842,75 @@ export default function BillsPendingClient() {
                       <FaTruck size={12} className="text-teal-600 dark:text-teal-400" />
                       ຂໍ້ມູນລູກຄ້າ & ການຂົນສົ່ງ
                     </h3>
-                    <div className="grid grid-cols-2 gap-x-4 gap-y-2 text-xs">
+                    <div className="grid grid-cols-2 gap-x-4 gap-y-2.5 text-xs">
+                      <div className="col-span-2">
+                        <span className="text-slate-400 block mb-0.5">ເລກບິນ</span>
+                        <span className="font-mono font-bold text-teal-700 dark:text-teal-400">{drawerBill.doc_no}</span>
+                      </div>
                       <div>
                         <span className="text-slate-400 block mb-0.5">ລະຫັດລູກຄ້າ</span>
                         <span className="font-semibold text-slate-800 dark:text-slate-200">{drawerBill.cust_code || "-"}</span>
                       </div>
                       <div>
-                        <span className="text-slate-400 block mb-0.5">ຊື່ລູກຄ້າ</span>
-                        <span className="font-semibold text-slate-800 dark:text-slate-200">{drawerBill.transport_name || "-"}</span>
-                      </div>
-                      <div>
-                        <span className="text-slate-400 block mb-0.5">ເບີໂທລະສັບ</span>
+                        <span className="text-slate-400 block mb-0.5">ສາຍສົ່ງ / ສາຂາ</span>
                         <span className="font-semibold text-slate-800 dark:text-slate-200 flex items-center gap-1">
-                          <FaPhone size={10} className="text-slate-400" />
-                          {drawerBill.cust_name || "-"}
-                        </span>
-                      </div>
-                      <div>
-                        <span className="text-slate-400 block mb-0.5">ສາຍສົ່ງປະຈຸບັນ</span>
-                        <span className="font-semibold text-slate-800 dark:text-slate-200 flex items-center gap-1">
-                          <FaTruck size={10} className="text-slate-400" />
+                          <FaTruck size={10} className="text-slate-400 shrink-0" />
                           {drawerBill.transport || "-"}
                         </span>
                       </div>
+                      <div className="col-span-2">
+                        <span className="text-slate-400 block mb-0.5">ຊື່ລູກຄ້າ</span>
+                        <span className="font-semibold text-slate-800 dark:text-slate-200 break-words leading-snug">
+                          {drawerBill.transport_name || "-"}
+                        </span>
+                      </div>
+                      {drawerBill.cust_name && drawerBill.cust_name !== drawerBill.transport_name && (
+                        <div className="col-span-2">
+                          <span className="text-slate-400 block mb-0.5">ຊື່ລົງທະບຽນ (ລະບົບ)</span>
+                          <span className="font-semibold text-slate-800 dark:text-slate-200 break-words leading-snug">
+                            {drawerBill.cust_name}
+                          </span>
+                        </div>
+                      )}
                     </div>
                   </div>
+
+                  {/* Cancelled-delivery details */}
+                  {drawerBill.cancelled_delivery && (
+                    <div className="bg-rose-500/[0.04] border border-rose-300/50 dark:border-rose-800/50 rounded-xl p-4 space-y-3">
+                      <h3 className="text-xs font-bold text-rose-700 dark:text-rose-400 uppercase tracking-wider flex items-center gap-1.5">
+                        <FaTimes size={12} /> ຍົກເລີກຈັດສົ່ງ
+                        {(drawerBill.cancelled_secs_ago ?? 0) > 0 && (
+                          <span className="ml-auto text-[10px] font-bold text-rose-600 dark:text-rose-400 tabular-nums">
+                            ⏱ ຍົກເລີກມາ {fmtElapsed(drawerBill.cancelled_secs_ago ?? 0)}
+                          </span>
+                        )}
+                      </h3>
+                      <div className="grid grid-cols-2 gap-x-4 gap-y-2 text-xs">
+                        <div>
+                          <span className="text-slate-400 block mb-0.5">ເລກຖ່ຽວລົດ</span>
+                          <span className="font-mono font-semibold text-slate-800 dark:text-slate-200">{drawerBill.cancelled_delivery_job || "-"}</span>
+                        </div>
+                        <div>
+                          <span className="text-slate-400 block mb-0.5">ຜູ່ຈັດສົ່ງ</span>
+                          <span className="font-semibold text-slate-800 dark:text-slate-200 break-words leading-snug">
+                            {drawerBill.cancelled_delivery_driver || "-"}
+                            {drawerBill.cancelled_delivery_car ? ` · ${drawerBill.cancelled_delivery_car}` : ""}
+                          </span>
+                        </div>
+                        <div className="col-span-2">
+                          <span className="text-slate-400 block mb-0.5">ເວລາຍົກເລີກ</span>
+                          <span className="font-semibold text-slate-800 dark:text-slate-200 tabular-nums">{drawerBill.cancelled_delivery_at || "-"}</span>
+                        </div>
+                        {drawerBill.cancelled_delivery_remark && (
+                          <div className="col-span-2">
+                            <span className="text-slate-400 block mb-0.5">ໝາຍເຫດ</span>
+                            <p className="text-[11px] italic text-rose-700/90 dark:text-rose-300/90 bg-rose-500/5 border border-rose-500/10 rounded-lg p-2">&quot;{drawerBill.cancelled_delivery_remark}&quot;</p>
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  )}
 
                   {/* Flow Status & Planning */}
                   <div className="bg-slate-500/[0.03] dark:bg-white/[0.015] border border-slate-200/50 dark:border-white/5 rounded-xl p-4 space-y-3">
@@ -2482,6 +2005,49 @@ export default function BillsPendingClient() {
                     )}
                   </div>
 
+                  {/* Schedule change history */}
+                  <div className="bg-slate-500/[0.03] dark:bg-white/[0.015] border border-slate-200/50 dark:border-white/5 rounded-xl p-4 space-y-3">
+                    <h3 className="text-xs font-bold text-slate-700 dark:text-slate-300 uppercase tracking-wider flex items-center gap-1.5">
+                      <FaClock size={12} className="text-teal-600 dark:text-teal-400" />
+                      ປະຫວັດການປ່ຽນວັນຈັດສົ່ງ
+                    </h3>
+                    {historyLoading ? (
+                      <p className="flex items-center gap-2 text-xs text-slate-400">
+                        <FaSpinner className="animate-spin" size={11} /> ກຳລັງໂຫຼດ...
+                      </p>
+                    ) : scheduleHistory.length === 0 ? (
+                      <p className="text-xs text-slate-400">ຍັງບໍ່ມີປະຫວັດການປ່ຽນແປງ</p>
+                    ) : (
+                      <ol className="space-y-3">
+                        {scheduleHistory.map((h, idx) => {
+                          const meta = h.action_status ? ACTION_STATUS_MAP[h.action_status] : null;
+                          return (
+                            <li key={idx} className="relative pl-4 border-l-2 border-teal-500/30">
+                              <span className="absolute -left-[5px] top-1 w-2 h-2 rounded-full bg-teal-500" />
+                              <div className="flex flex-wrap items-center gap-2">
+                                <span className="text-xs font-semibold text-slate-800 dark:text-slate-200">
+                                  <FaCalendar size={9} className="inline mr-1 text-slate-400" />
+                                  {h.scheduled_date_display || "—"}
+                                </span>
+                                {meta && (
+                                  <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-slate-500/10 text-slate-600 dark:text-slate-300">
+                                    {meta.label}
+                                  </span>
+                                )}
+                              </div>
+                              {h.remark && (
+                                <p className="mt-0.5 text-[11px] italic text-slate-500 dark:text-slate-400">&quot;{h.remark}&quot;</p>
+                              )}
+                              <p className="mt-0.5 text-[10px] text-slate-400">
+                                {h.changed_at}{h.changed_by ? ` · ${h.changed_by}` : ""}
+                              </p>
+                            </li>
+                          );
+                        })}
+                      </ol>
+                    )}
+                  </div>
+
                   {/* Products Table inside Drawer */}
                   <div className="space-y-2">
                     <div className="flex items-center justify-between">
@@ -2490,9 +2056,27 @@ export default function BillsPendingClient() {
                         ລາຍການສິນຄ້າ
                       </h3>
                       <span className="text-[11px] font-bold px-2 py-0.5 rounded-full bg-teal-500/15 text-teal-700 dark:text-teal-400">
-                        {fmtQty(drawerBill.remaining_qty_total)} ユニット
+                        ເຫຼືອ {fmtQty(drawerBill.remaining_qty_total)} ໜ່ວຍ
                       </span>
                     </div>
+
+                    {/* Partial-delivery breakdown: total ordered / already sent / remaining */}
+                    {drawerBill.partial_delivery && (drawerBill.total_qty_total ?? 0) > 0 && (
+                      <div className="grid grid-cols-3 gap-2">
+                        <div className="rounded-lg bg-slate-500/5 border border-slate-200/50 dark:border-white/5 px-2 py-1.5 text-center">
+                          <p className="text-[9px] text-slate-400 uppercase tracking-wide">ທັງໝົດ</p>
+                          <p className="text-sm font-bold tabular-nums text-slate-700 dark:text-slate-200">{fmtQty(drawerBill.total_qty_total ?? 0)}</p>
+                        </div>
+                        <div className="rounded-lg bg-emerald-500/10 border border-emerald-500/20 px-2 py-1.5 text-center">
+                          <p className="text-[9px] text-emerald-600/80 dark:text-emerald-400/80 uppercase tracking-wide">ສົ່ງແລ້ວ</p>
+                          <p className="text-sm font-bold tabular-nums text-emerald-700 dark:text-emerald-400">{fmtQty(drawerBill.delivered_qty_total ?? 0)}</p>
+                        </div>
+                        <div className="rounded-lg bg-amber-500/10 border border-amber-500/20 px-2 py-1.5 text-center">
+                          <p className="text-[9px] text-amber-600/80 dark:text-amber-400/80 uppercase tracking-wide">ຄົງເຫຼືອ</p>
+                          <p className="text-sm font-bold tabular-nums text-amber-700 dark:text-amber-400">{fmtQty(drawerBill.remaining_qty_total)}</p>
+                        </div>
+                      </div>
+                    )}
 
                     {loadingDoc === drawerBill.doc_no ? (
                       <div className="flex items-center justify-center gap-2 text-xs text-slate-400 py-12">

@@ -1221,6 +1221,99 @@ async function getPhoneTrackingJobs(session) {
   );
 }
 
+// Fleet view of phone tracking — one marker per PHONE/driver at its latest
+// position, never per trip. We can't key purely on imei because the legacy
+// save_travel_history path stores points with a NULL imei (only the batch
+// /api/mobile/location path sets it), so an imei-only key silently drops all
+// of that data. Instead each trip's latest fix is bucketed by
+//   unit_key = COALESCE(imei, driver, car, doc_no)
+// — phone first, then the trip's driver/car so nothing is lost — and DISTINCT
+// ON collapses every bucket to its single most-recent fix. A phone that ran
+// several trips shows once (at where it is now); a trip whose points lack an
+// imei still appears, keyed by its driver. recorded_at comes back as
+// 'YYYY-MM-DD HH24:MI:SS' so the client's gps-time helpers can parse it for
+// the online/offline staleness check.
+async function getPhoneFleet(session) {
+  await ensureDeliveryWorkflowSchema();
+  const scope = getBranchScope(session);
+  return query(
+    `SELECT
+       z.unit_key,
+       z.imei,
+       z.doc_no,
+       to_char(z.doc_date,'DD-MM-YYYY') AS doc_date,
+       COALESCE(NULLIF(TRIM(c.name_1), ''), z.car_code, '-') AS car,
+       COALESCE(NULLIF(TRIM(dr.name_1), ''), NULLIF(TRIM(z.driver_code), ''), NULLIF(TRIM(dev.driver), ''), '-') AS driver,
+       COALESCE(z.job_status, 0) AS job_status,
+       z.lat,
+       z.lng,
+       COALESCE(z.speed, '')    AS speed,
+       COALESCE(z.heading, '')  AS heading,
+       COALESCE(z.accuracy, '') AS accuracy,
+       COALESCE(z.battery, '')  AS battery,
+       COALESCE(z.signal, '')   AS signal,
+       to_char(z.recorded_at,'YYYY-MM-DD HH24:MI:SS') AS recorded_at,
+       z.point_count,
+       COALESCE(dev.model, '')     AS device_model,
+       COALESCE(dev.sim_phone, '') AS sim_phone,
+       COALESCE(dw.stationary_secs, 0)::int AS stationary_secs
+     FROM (
+       SELECT DISTINCT ON (tl.unit_key)
+         tl.unit_key, tl.imei, tl.doc_no, tl.doc_date, tl.car_code,
+         tl.driver_code, tl.job_status, tl.lat, tl.lng, tl.speed, tl.heading,
+         tl.accuracy, tl.battery, tl.signal, tl.recorded_at, tl.point_count
+       FROM (
+         SELECT
+           t.doc_no, t.doc_date, t.car AS car_code, t.driver AS driver_code,
+           t.job_status,
+           last.lat, last.lng, last.speed, last.heading, last.accuracy,
+           last.battery, last.signal, last.imei, last.recorded_at,
+           agg.point_count,
+           COALESCE(NULLIF(TRIM(last.imei), ''), NULLIF(TRIM(t.driver), ''), NULLIF(TRIM(t.car), ''), t.doc_no) AS unit_key
+         FROM public.odg_tms t
+         JOIN LATERAL (
+           SELECT COUNT(*)::int AS point_count
+           FROM public.odg_tms_travel_history h
+           WHERE h.doc_no = t.doc_no AND ${getFixedYearSqlFilter("h.doc_date")}
+         ) agg ON agg.point_count > 0
+         JOIN LATERAL (
+           SELECT h.lat, h.lng, h.speed, h.heading, h.accuracy, h.battery,
+                  h.signal, h.imei, h.recorded_at
+           FROM public.odg_tms_travel_history h
+           WHERE h.doc_no = t.doc_no AND ${getFixedYearSqlFilter("h.doc_date")}
+           ORDER BY h.recorded_at DESC, h.roworder DESC
+           LIMIT 1
+         ) last ON TRUE
+         WHERE ${getFixedYearSqlFilter("t.doc_date")} ${branchFilterJob(scope, "t")}
+       ) tl
+       ORDER BY tl.unit_key, tl.recorded_at DESC, tl.doc_no DESC
+     ) z
+     LEFT JOIN public.odg_tms_mobile_device dev ON dev.imei = NULLIF(TRIM(z.imei), '')
+     LEFT JOIN public.odg_tms_driver dr ON dr.code = COALESCE(NULLIF(TRIM(z.driver_code), ''), dev.driver)
+     LEFT JOIN public.odg_tms_car c ON c.code = z.car_code
+     -- "How long parked here": seconds since the last fix that was FAR (>~65m)
+     -- from the current position. Scans only this trip's points in the last 12h
+     -- (cast guarded — lat/lng are varchar, bad strings are ignored, not fatal).
+     LEFT JOIN LATERAL (
+       SELECT GREATEST(0, EXTRACT(EPOCH FROM (z.recorded_at - COALESCE(
+         MAX(h.recorded_at) FILTER (WHERE
+           ABS((CASE WHEN h.lat ~ '^-?[0-9.]+$' THEN h.lat::float8 END)
+               - (CASE WHEN z.lat ~ '^-?[0-9.]+$' THEN z.lat::float8 END)) > 0.0006
+           OR ABS((CASE WHEN h.lng ~ '^-?[0-9.]+$' THEN h.lng::float8 END)
+               - (CASE WHEN z.lng ~ '^-?[0-9.]+$' THEN z.lng::float8 END)) > 0.0006
+         ),
+         MIN(h.recorded_at)
+       ))))::bigint AS stationary_secs
+       FROM public.odg_tms_travel_history h
+       WHERE h.doc_no = z.doc_no
+         AND ${getFixedYearSqlFilter("h.doc_date")}
+         AND h.recorded_at >= z.recorded_at - INTERVAL '12 hours'
+     ) dw ON TRUE
+     ORDER BY z.recorded_at DESC NULLS LAST
+     LIMIT 500`
+  );
+}
+
 // Full ordered trail for one trip: every phone point with its telemetry, plus
 // the job header and the device identity. Returns null when the trip isn't in
 // the caller's branch scope (same gate trackBill uses), so a scoped user can't
@@ -1287,5 +1380,6 @@ module.exports = {
   getGpsRealtimeAll,
   getLocations,
   getPhoneTrackingJobs,
+  getPhoneFleet,
   getPhoneTrail,
 };

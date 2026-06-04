@@ -1,4 +1,5 @@
 const { pool, query, queryOne } = require("../lib/db");
+const { getBranchScope } = require("./helpers");
 
 const billTodoCache = globalThis;
 
@@ -139,10 +140,45 @@ async function deleteBillTodo(id) {
   return { success: true };
 }
 
+// Cross-bill roll-up of every todo staff have marked, joined to the bill's
+// customer + delivery branch so the consolidated page can show context without
+// a per-bill fetch. Branch-scoped users only see their branch's bills; pass
+// includeDone=true to also return completed items (default: open only).
+async function getAllBillTodos(session, includeDone) {
+  await ensureBillTodoSchema();
+  const scope = getBranchScope(session);
+  const branchWhere = scope.scoped ? "AND a.transport_code = $1" : "";
+  const params = scope.scoped ? [scope.branch] : [];
+  const doneWhere = includeDone ? "" : "AND t.done = false";
+  return query(
+    `SELECT t.id, t.bill_no, t.summary,
+            to_char(t.deadline,'YYYY-MM-DD') AS deadline,
+            to_char(t.deadline,'DD-MM-YYYY') AS deadline_display,
+            t.done,
+            COALESCE(t.created_by,'') AS created_by,
+            to_char(t.created_at,'DD-MM-YYYY HH24:MI') AS created_at,
+            COALESCE(t.done_by,'') AS done_by,
+            to_char(t.done_at,'DD-MM-YYYY HH24:MI') AS done_at,
+            COALESCE(NULLIF(TRIM(cust.name_1), ''), a.transport_name, '') AS customer,
+            COALESCE(a.cust_code, '') AS cust_code,
+            COALESCE(a.transport_code, '') AS transport_code,
+            COALESCE(tt.name_1, '') AS transport
+     FROM public.odg_tms_bill_todo t
+     LEFT JOIN ic_trans_shipment a ON a.doc_no = t.bill_no
+     LEFT JOIN ar_customer cust ON cust.code = a.cust_code
+     LEFT JOIN transport_type tt ON tt.code = a.transport_code
+     WHERE 1=1 ${doneWhere} ${branchWhere}
+     ORDER BY t.done ASC, t.deadline ASC NULLS LAST, t.id DESC
+     LIMIT 1000`,
+    params
+  );
+}
+
 module.exports = {
   ensureBillTodoSchema,
   getBillTodoSummaryMap,
   getBillTodos,
+  getAllBillTodos,
   createBillTodo,
   setBillTodoDone,
   deleteBillTodo,
