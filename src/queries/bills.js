@@ -257,7 +257,7 @@ async function searchManualPendingBills(q) {
      LEFT JOIN ar_customer b ON b.code = a.cust_code
      LEFT JOIN public.odg_tms_pending_bill pb ON pb.bill_no = a.doc_no
      LEFT JOIN public.odg_tms_delivery_round dr ON dr.code = pb.delivery_round_code
-     WHERE a.trans_flag = ${TRANSFER_BILL_FLAG}
+     WHERE a.trans_flag IN (${manualFlagListSql()})
        AND (
          a.doc_no ILIKE $1
          OR a.cust_code ILIKE $1
@@ -343,7 +343,7 @@ async function addManualPendingBill({ billNo, scheduledDate, deliveryRoundCode, 
   const icBill = requestedSource === SERVICE_SOURCE_TYPE ? null : await queryOne(
     `SELECT doc_no FROM ic_trans
      WHERE doc_no = $1
-       AND trans_flag = ${TRANSFER_BILL_FLAG}`,
+       AND trans_flag IN (${manualFlagListSql()})`,
     [code]
   );
   const serviceBill = icBill ? null : await queryB(
@@ -351,7 +351,7 @@ async function addManualPendingBill({ billNo, scheduledDate, deliveryRoundCode, 
     [code]
   );
   if (!icBill && serviceBill.length === 0) {
-    throw new Error("Bill not found in ic_trans trans_flag 72 or odservice.tb_product");
+    throw new Error("Bill not found in ic_trans trans_flag 56/72/44/48 or odservice.tb_product");
   }
   const { upsertPendingBillSchedule } = require("./pending-bill");
   await upsertPendingBillSchedule({
@@ -583,7 +583,7 @@ async function getBillsPending(session, fromDate, toDate, transportCode) {
     query(
       `SELECT
         a.doc_no, to_char(b.doc_date,'DD-MM-YYYY') as doc_date, a.transport_name,
-        a.transport_code,
+        COALESCE(NULLIF(TRIM(pbov.transport_code), ''), a.transport_code) as transport_code,
         a.cust_code,
         COALESCE(NULLIF(TRIM(cust.name_1), ''), a.cust_code, '') as cust_name,
         COALESCE(NULLIF(TRIM(acd.latitude::text), ''), '') as cust_lat,
@@ -592,7 +592,7 @@ async function getBillsPending(session, fromDate, toDate, transportCode) {
         to_char(b.send_date,'DD-MM-YYYY') as send_date_display,
         COALESCE(b.doc_format_code, '') as source_format,
         c.name_1 as sale, COALESCE(dep.name_1::text, c.department::text, '') as department,
-        d.name_1 as transport, to_char(a.create_date_time_now,'DD-MM-YYYY HH24:MI') as time_open,
+        COALESCE(NULLIF(TRIM(dov.name_1), ''), d.name_1) as transport, to_char(a.create_date_time_now,'DD-MM-YYYY HH24:MI') as time_open,
         now() - a.create_date_time_now as time_use,
         now() - b.send_date::timestamp as time_use_send
       FROM ic_trans_shipment a
@@ -602,6 +602,8 @@ async function getBillsPending(session, fromDate, toDate, transportCode) {
       LEFT JOIN erp_user c ON c.code=b.sale_code
       LEFT JOIN erp_department_list dep ON dep.code=c.department
       LEFT JOIN transport_type d ON d.code=a.transport_code
+      LEFT JOIN public.odg_tms_pending_bill pbov ON pbov.bill_no = a.doc_no
+      LEFT JOIN transport_type dov ON dov.code = NULLIF(TRIM(pbov.transport_code), '')
       WHERE a.trans_flag=44 AND check_status=0 AND b.send_date::date BETWEEN $1::date AND $2::date AND ${where}
       ORDER BY b.send_date ASC, b.doc_date ASC`,
       params

@@ -1244,10 +1244,16 @@ export default function BillsPendingClient() {
                                         ⏱ ເປີດ {fmtDur(bill.time_use)}
                                       </span>
                                     )}
-                                    {bill.time_use_send && baseSec(bill.time_use_send) >= 0 && (
-                                      <span className="text-sky-600 dark:text-sky-400" title="ນັບຈາກວັນສົ່ງ">
-                                        📦 ສົ່ງ {fmtDur(bill.time_use_send)}
-                                      </span>
+                                    {bill.time_use_send && (
+                                      baseSec(bill.time_use_send) + tick >= 0 ? (
+                                        <span className="text-sky-600 dark:text-sky-400" title="ນັບຈາກວັນສົ່ງ">
+                                          📦 ສົ່ງ {fmtDur(bill.time_use_send)}
+                                        </span>
+                                      ) : (
+                                        <span className="text-slate-400" title={bill.send_date_display ? `ວັນສົ່ງ ${bill.send_date_display}` : undefined}>
+                                          📦 ສົ່ງ: ຍັງບໍ່ຮອດ{bill.send_date_display ? ` · ${bill.send_date_display}` : ""}
+                                        </span>
+                                      )
                                     )}
                                   </div>
                                 </div>
@@ -1479,7 +1485,7 @@ export default function BillsPendingClient() {
 
       {/* ── Modal ── */}
       {modalOpen && selectedBill && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+        <div className="fixed inset-0 z-[1200] flex items-center justify-center p-4">
           <div className="absolute inset-0 bg-slate-900/50 backdrop-blur-sm" onClick={closeModal} />
           <div className="relative glass-heavy glow-primary rounded-lg w-full max-w-md overflow-hidden">
             <div className="flex items-center justify-between px-5 py-3 border-b border-white/20 dark:border-white/5 bg-teal-500/10">
@@ -1529,7 +1535,7 @@ export default function BillsPendingClient() {
       )}
 
       {manualModalOpen && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+        <div className="fixed inset-0 z-[1200] flex items-center justify-center p-4">
           <div className="absolute inset-0 bg-slate-900/50 backdrop-blur-sm" onClick={closeManualModal} />
           <div className="relative glass-heavy glow-primary rounded-lg w-full max-w-2xl overflow-hidden">
             <div className="flex items-center justify-between px-5 py-3 border-b border-white/20 dark:border-white/5 bg-teal-500/10">
@@ -1793,7 +1799,7 @@ export default function BillsPendingClient() {
 
       {/* Sliding Side Drawer for Product Details & Bill Info */}
       {drawerBill && (
-        <div className="fixed inset-0 z-[100] overflow-hidden">
+        <div className="fixed inset-0 z-[1200] overflow-hidden">
           <div
             className="absolute inset-0 bg-slate-950/40 backdrop-blur-xs transition-opacity duration-300"
             onClick={() => setDrawerBill(null)}
@@ -2206,7 +2212,7 @@ function RouteMenu({
   return (
     <div
       ref={ref}
-      className="fixed z-[80] w-[min(340px,calc(100vw-16px))] overflow-hidden rounded-lg border border-slate-200/40 bg-white shadow-xl dark:border-white/10 dark:bg-[#0d1822]"
+      className="fixed z-[1300] w-[min(340px,calc(100vw-16px))] overflow-hidden rounded-lg border border-slate-200/40 bg-white shadow-xl dark:border-white/10 dark:bg-[#0d1822]"
       style={{ top: pos.top, left: pos.left }}
     >
       <div className="flex items-center justify-between border-b border-slate-200/30 bg-white/70 px-3 py-2 dark:border-white/5 dark:bg-white/5">
@@ -2345,7 +2351,7 @@ function RoundMenu({
   return (
     <div
       ref={ref}
-      className="fixed z-50 w-[240px] glass rounded-lg shadow-xl border border-slate-200/40 dark:border-white/10 overflow-hidden"
+      className="fixed z-[1300] w-[240px] glass rounded-lg shadow-xl border border-slate-200/40 dark:border-white/10 overflow-hidden"
       style={{ top: pos.top, left: pos.left }}
     >
       <div className="px-3 py-2 bg-white/40 dark:bg-white/5 border-b border-slate-200/30 dark:border-white/5 flex items-center justify-between">
@@ -2508,7 +2514,7 @@ function StatusMenu({
   if (!open) return null;
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+    <div className="fixed inset-0 z-[1300] flex items-center justify-center p-4">
       <button
         type="button"
         aria-label="ປິດ"
