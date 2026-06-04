@@ -411,6 +411,9 @@ export default function MaintLogPage() {
   const [deletingRuleCode, setDeletingRuleCode] = useState<string | null>(null);
   const [ruleError, setRuleError] = useState<string | null>(null);
   const [maintPlanAlerts, setMaintPlanAlerts] = useState<MaintPlanAlert[]>([]);
+  const [alertsOpen, setAlertsOpen] = useState(true);
+  const [plansOpen, setPlansOpen] = useState(true);
+  const [inspectionsOpen, setInspectionsOpen] = useState(true);
   const [maintPlans, setMaintPlans] = useState<MaintPlan[]>([]);
   const [planModalOpen, setPlanModalOpen] = useState(false);
   const [planForm, setPlanForm] = useState({ plan_code: "", car_code: "", next_due_km: "", maint_note: "", rule_codes: [] as string[] });
@@ -419,6 +422,7 @@ export default function MaintLogPage() {
   const [savingPlan, setSavingPlan] = useState(false);
   const [deletingPlanCode, setDeletingPlanCode] = useState<string | null>(null);
   const [planError, setPlanError] = useState<string | null>(null);
+  const [expandedPlanCars, setExpandedPlanCars] = useState<Set<string>>(new Set());
 
   const scheduleCarCodes = useMemo(() => Array.from(scheduleMap.keys()).sort(), [scheduleMap]);
 
@@ -435,6 +439,40 @@ export default function MaintLogPage() {
     }
     return m;
   }, [scheduleMap]);
+
+  const groupedMaintPlans = useMemo(() => {
+    const m = new Map<string, MaintPlan[]>();
+    for (const p of maintPlans) {
+      if (!m.has(p.car_code)) m.set(p.car_code, []);
+      m.get(p.car_code)!.push(p);
+    }
+    return m;
+  }, [maintPlans]);
+
+  const groupedMaintPlanAlerts = useMemo(() => {
+    const m = new Map<string, MaintPlanAlert[]>();
+    for (const a of maintPlanAlerts) {
+      if (!m.has(a.car_code)) m.set(a.car_code, []);
+      m.get(a.car_code)!.push(a);
+    }
+    return m;
+  }, [maintPlanAlerts]);
+
+  const planHealthCounts = useMemo(() => {
+    const counts = { overdue: 0, warn: 0, soon: 0, ok: 0 };
+    for (const plans of groupedMaintPlans.values()) {
+      const carOdo = plans[0]?.current_odometer != null ? Number(plans[0].current_odometer) : null;
+      for (const p of plans) {
+        const rem = carOdo != null ? p.next_due_km - carOdo : null;
+        if (rem === null) counts.ok++;
+        else if (rem <= 0) counts.overdue++;
+        else if (rem <= 500) counts.warn++;
+        else if (rem <= 3000) counts.soon++;
+        else counts.ok++;
+      }
+    }
+    return counts;
+  }, [groupedMaintPlans]);
 
   const totalCost = useMemo(() => {
     return lineItems.reduce((sum, item) => {
@@ -581,10 +619,12 @@ export default function MaintLogPage() {
     }
   };
 
-  const load = () => {
+  const load = (overrides?: { fromDate?: string; toDate?: string }) => {
+    const fd = overrides?.fromDate ?? fromDate;
+    const td = overrides?.toDate ?? toDate;
     setLoading(true);
     setLoadError(null);
-    const params = new URLSearchParams({ fromDate, toDate });
+    const params = new URLSearchParams({ fromDate: fd, toDate: td });
     void Promise.all([
       fetch(`/api/maint-log?${params}`, { cache: "no-store" }).then(async (r) => {
         const json = await r.json();
@@ -972,6 +1012,41 @@ export default function MaintLogPage() {
               />
             </div>
           </div>
+          {/* Quick month shortcuts */}
+          <div className="flex flex-col gap-1">
+            <label className="text-xs text-slate-500">ຊ່ວງໄວ</label>
+            <div className="flex gap-1.5">
+              {[
+                { label: "ເດືອນນີ້", offset: 0 },
+                { label: "ເດືອນກ່ອນ", offset: -1 },
+              ].map(({ label, offset }) => {
+                const today = getFixedTodayDate();
+                const [y, mo] = today.slice(0, 7).split("-").map(Number);
+                let tm = mo + offset;
+                let ty = y;
+                if (tm < 1) { tm += 12; ty--; }
+                const pad2 = (n: number) => String(n).padStart(2, "0");
+                const fd = `${ty}-${pad2(tm)}-01`;
+                const daysInMonth = new Date(ty, tm, 0).getDate();
+                const td2 = offset === 0 ? today : `${ty}-${pad2(tm)}-${pad2(daysInMonth)}`;
+                const isActive = fromDate === fd && (offset === 0 ? toDate >= fd : toDate === td2);
+                return (
+                  <button
+                    key={label}
+                    type="button"
+                    onClick={() => { setFromDate(fd); setToDate(td2); load({ fromDate: fd, toDate: td2 }); }}
+                    className={`h-9 rounded-md border px-3 text-xs font-medium transition-colors ${
+                      isActive
+                        ? "border-amber-400 bg-amber-50 text-amber-700 dark:border-amber-600 dark:bg-amber-950/40 dark:text-amber-300"
+                        : "border-slate-200 bg-white text-slate-600 hover:border-amber-300 hover:bg-amber-50/50 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-300"
+                    }`}
+                  >
+                    {label}
+                  </button>
+                );
+              })}
+            </div>
+          </div>
           <div className="relative">
             <FaSearch className="absolute left-2.5 top-1/2 -translate-y-1/2 text-slate-400 text-xs" />
             <input
@@ -983,7 +1058,7 @@ export default function MaintLogPage() {
             />
           </div>
           <button
-            onClick={load}
+            onClick={() => load()}
             className="h-9 rounded-md bg-slate-700 px-4 text-sm text-white hover:bg-slate-600"
           >
             ຄົ້ນຫາ
@@ -1026,11 +1101,15 @@ export default function MaintLogPage() {
 
       {pendingInspections.length > 0 && (
         <div className="overflow-hidden rounded-xl border border-red-200 bg-white shadow-sm dark:border-red-900/40 dark:bg-slate-900">
-          <div className="flex items-center gap-3 border-b border-red-100 bg-red-50 px-5 py-3 dark:border-red-900/30 dark:bg-red-950/30">
-            <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-red-100 dark:bg-red-900/40">
+          <button
+            type="button"
+            onClick={() => setInspectionsOpen(v => !v)}
+            className="flex w-full items-center gap-3 border-b border-red-100 bg-red-50 px-5 py-3 text-left dark:border-red-900/30 dark:bg-red-950/30"
+          >
+            <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-red-100 dark:bg-red-900/40">
               <FaClipboardCheck className="text-sm text-red-500" />
             </div>
-            <div>
+            <div className="min-w-0 flex-1">
               <p className="text-sm font-bold text-red-700 dark:text-red-300">
                 ການກວດທີ່ຕ້ອງສ້ອມ — {pendingInspections.length} ລາຍການ
               </p>
@@ -1038,8 +1117,11 @@ export default function MaintLogPage() {
                 ກວດສະພາບລົດພົບຂໍ້ບົກພ່ອງ ກົດ "ສ້າງໃບສ້ອມ" ທັນທີ
               </p>
             </div>
-          </div>
-          <div className="divide-y divide-slate-100 dark:divide-slate-800">
+            {inspectionsOpen
+              ? <FaChevronDown className="shrink-0 text-xs text-red-400" />
+              : <FaChevronRight className="shrink-0 text-xs text-red-400" />}
+          </button>
+          {inspectionsOpen && <div className="max-h-56 overflow-auto divide-y divide-slate-100 dark:divide-slate-800">
             {pendingInspections.map((insp) => {
               const isCritical = insp.overall_status === "critical";
               return (
@@ -1086,7 +1168,7 @@ export default function MaintLogPage() {
                 </div>
               );
             })}
-          </div>
+          </div>}
         </div>
       )}
 
@@ -1326,89 +1408,153 @@ export default function MaintLogPage() {
 
       {maintPlanAlerts.length > 0 && (
         <div className="overflow-hidden rounded-xl border border-orange-200 bg-white shadow-sm dark:border-orange-900/40 dark:bg-slate-900">
-          <div className="flex items-center gap-3 border-b border-orange-100 bg-orange-50 px-5 py-3 dark:border-orange-900/30 dark:bg-orange-950/30">
-            <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-orange-100 dark:bg-orange-900/40">
+          <button
+            type="button"
+            onClick={() => setAlertsOpen(v => !v)}
+            className="flex w-full items-center gap-3 border-b border-orange-100 bg-orange-50 px-5 py-3 text-left dark:border-orange-900/30 dark:bg-orange-950/30"
+          >
+            <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-orange-100 dark:bg-orange-900/40">
               <FaClipboardCheck className="text-sm text-orange-500" />
             </div>
-            <div>
+            <div className="min-w-0 flex-1">
               <p className="text-sm font-bold text-orange-700 dark:text-orange-300">
-                ໃກ້ຮອດກໍານົດສ້ອມແປງ — {maintPlanAlerts.length} ລາຍການ
+                ໃກ້ຮອດກໍານົດສ້ອມແປງ — {groupedMaintPlanAlerts.size} ລົດ · {maintPlanAlerts.length} ລາຍການ
               </p>
               <p className="text-xs text-orange-500/80 dark:text-orange-400/70">
                 ລົດຕໍ່ໄປນີ້ຄວນໄດ້ຮັບການສ້ອມ (ຕ່ຳກວ່າ 500 km)
               </p>
             </div>
-          </div>
-          <div className="divide-y divide-slate-100 dark:divide-slate-800">
-            {maintPlanAlerts.map((alert) => {
-              const remaining = Number(alert.remaining_km);
-              const isOverdue = remaining < 0;
+            {alertsOpen
+              ? <FaChevronDown className="shrink-0 text-xs text-orange-400" />
+              : <FaChevronRight className="shrink-0 text-xs text-orange-400" />}
+          </button>
+          {alertsOpen && <div className="max-h-56 overflow-auto divide-y divide-slate-100 dark:divide-slate-800">
+            {Array.from(groupedMaintPlanAlerts.entries()).map(([carCode, alerts]) => {
+              const hasOverdue = alerts.some(a => Number(a.remaining_km) < 0);
+              const currentOdo = alerts[0]?.current_odometer ?? 0;
+              const worstAlert = alerts.reduce((w, a) => Number(a.remaining_km) < Number(w.remaining_km) ? a : w, alerts[0]);
+              const fillPct = worstAlert.next_due_km > 0 ? Math.min(100, Math.round((currentOdo / worstAlert.next_due_km) * 100)) : 0;
               return (
-                <div key={alert.plan_code} className="flex items-center gap-4 px-5 py-3">
-                  <div className={`mt-0.5 h-2.5 w-2.5 shrink-0 rounded-full ${isOverdue ? "bg-red-500" : "bg-orange-400"}`} />
-                  <div className="min-w-0 flex-1">
-                    <div className="flex flex-wrap items-baseline gap-x-2 gap-y-0.5">
-                      <span className="text-sm font-bold text-slate-800 dark:text-slate-100">{alert.car_code}</span>
-                      {(alert.rule_code || alert.maint_note) && (
-                        <span className="text-xs text-slate-500 dark:text-slate-400">
-                          {[
-                            alert.rule_code ? (rules.find((r) => r.code === alert.rule_code)?.name ?? alert.rule_code) : null,
-                            alert.maint_note,
-                          ].filter(Boolean).join(" · ")}
-                        </span>
-                      )}
-                      <span className={`rounded-full px-2 py-0.5 text-[11px] font-semibold ${
-                        isOverdue
-                          ? "bg-red-100 text-red-600 dark:bg-red-900/50 dark:text-red-300"
-                          : "bg-orange-100 text-orange-600 dark:bg-orange-900/50 dark:text-orange-300"
-                      }`}>
-                        {isOverdue
-                          ? `ເກີນໜ້ານັດ ${formatNumber(Math.abs(remaining))} km`
-                          : `ອີກ ${formatNumber(remaining)} km`}
-                      </span>
+                <div key={carCode} className="px-5 py-3">
+                  <div className="mb-2 flex items-start justify-between gap-3">
+                    <div className="flex items-start gap-2">
+                      <div className={`mt-1 h-2 w-2 shrink-0 rounded-full ${hasOverdue ? "bg-red-500" : "bg-orange-400"}`} />
+                      <div>
+                        <div className="flex items-center gap-2">
+                          <span className="text-sm font-bold text-slate-800 dark:text-slate-100">{carCode}</span>
+                          {alerts.length > 1 && (
+                            <span className="rounded-full bg-orange-100 px-2 py-0.5 text-[11px] font-semibold text-orange-600 dark:bg-orange-900/50 dark:text-orange-300">
+                              {alerts.length} ລາຍການ
+                            </span>
+                          )}
+                        </div>
+                        <div className="mt-1 flex items-center gap-2">
+                          <div className="h-1.5 w-24 overflow-hidden rounded-full bg-slate-200 dark:bg-slate-700">
+                            <div
+                              className={`h-full rounded-full transition-all duration-500 ${hasOverdue ? "bg-red-500" : fillPct >= 95 ? "bg-orange-500" : "bg-orange-400"}`}
+                              style={{ width: `${fillPct}%` }}
+                            />
+                          </div>
+                          <span className="text-[10px] tabular-nums text-slate-500 dark:text-slate-400">{fillPct}%</span>
+                        </div>
+                        <div className="mt-0.5 text-[10px] text-slate-400 tabular-nums">
+                          Odo {formatNumber(currentOdo)} km
+                        </div>
+                      </div>
                     </div>
-                    <p className="mt-0.5 text-xs text-slate-400">
-                      Odometer ປະຈຸບັນ:{" "}
-                      <span className="tabular-nums font-semibold">{formatNumber(alert.current_odometer)} km</span>
-                      {" → "}ຮອດ{" "}
-                      <span className="tabular-nums font-semibold">{formatNumber(alert.next_due_km)} km</span>
-                    </p>
                   </div>
-                  <button
-                    type="button"
-                    onClick={() => openFormFromAlert(alert)}
-                    className="shrink-0 flex items-center gap-1.5 rounded-lg border border-orange-200 bg-orange-50 px-3 py-1.5 text-xs font-semibold text-orange-600 hover:bg-orange-100 dark:border-orange-800 dark:bg-orange-950/30 dark:text-orange-300 dark:hover:bg-orange-900/40"
-                  >
-                    <FaPlus className="text-[10px]" /> ສ້າງໃບສ້ອນ
-                  </button>
+                  <div className="ml-5 flex flex-col gap-1.5">
+                    {alerts.map(alert => {
+                      const remaining = Number(alert.remaining_km);
+                      const isOverdue = remaining < 0;
+                      return (
+                        <div key={alert.plan_code} className="flex items-center gap-2">
+                          <div className="min-w-0 flex-1 flex flex-wrap items-center gap-x-2 gap-y-0.5">
+                            {(alert.rule_code || alert.maint_note) && (
+                              <span className="text-xs text-slate-600 dark:text-slate-300">
+                                {[
+                                  alert.rule_code ? (rules.find((r) => r.code === alert.rule_code)?.name ?? alert.rule_code) : null,
+                                  alert.maint_note,
+                                ].filter(Boolean).join(" · ")}
+                              </span>
+                            )}
+                            <span className={`rounded-full px-2 py-0.5 text-[11px] font-semibold ${
+                              isOverdue
+                                ? "bg-red-100 text-red-600 dark:bg-red-900/50 dark:text-red-300"
+                                : "bg-orange-100 text-orange-600 dark:bg-orange-900/50 dark:text-orange-300"
+                            }`}>
+                              {isOverdue ? `ເກີນ ${formatNumber(Math.abs(remaining))} km` : `ອີກ ${formatNumber(remaining)} km`}
+                            </span>
+                            <span className="text-[11px] text-slate-400 tabular-nums">ຮອດ {formatNumber(alert.next_due_km)} km</span>
+                          </div>
+                          <button
+                            type="button"
+                            onClick={() => openFormFromAlert(alert)}
+                            className="shrink-0 flex items-center gap-1 rounded border border-orange-200 bg-orange-50 px-2 py-1 text-[11px] font-semibold text-orange-600 hover:bg-orange-100 dark:border-orange-800 dark:bg-orange-950/30 dark:text-orange-300 dark:hover:bg-orange-900/40"
+                          >
+                            <FaPlus className="text-[9px]" /> ສ້າງໃບ
+                          </button>
+                        </div>
+                      );
+                    })}
+                  </div>
                 </div>
               );
             })}
-          </div>
+          </div>}
         </div>
       )}
 
       {maintPlans.length > 0 && (
         <div className="overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm dark:border-slate-700 dark:bg-slate-900">
-          <div className="flex items-center justify-between border-b border-slate-100 bg-slate-50 px-5 py-3 dark:border-slate-700 dark:bg-slate-800/50">
-            <div className="flex items-center gap-3">
-              <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-orange-100 dark:bg-orange-900/40">
-                <FaClipboardCheck className="text-sm text-orange-500" />
-              </div>
-              <div>
-                <p className="text-sm font-bold text-slate-700 dark:text-slate-200">ແຜນສ້ອມແປງ — {maintPlans.length} ລາຍການ</p>
-                <p className="text-xs text-slate-400">next_due_km ຕໍ່ລົດ</p>
-              </div>
+          <div
+            role="button"
+            tabIndex={0}
+            onClick={() => setPlansOpen(v => !v)}
+            onKeyDown={(e) => e.key === "Enter" && setPlansOpen(v => !v)}
+            className="flex cursor-pointer items-center gap-3 border-b border-slate-100 bg-slate-50 px-5 py-3 hover:bg-slate-100/70 dark:border-slate-700 dark:bg-slate-800/50 dark:hover:bg-slate-700/40"
+          >
+            <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-orange-100 dark:bg-orange-900/40">
+              <FaClipboardCheck className="text-sm text-orange-500" />
             </div>
+            <div className="min-w-0 flex-1">
+              <p className="text-sm font-bold text-slate-700 dark:text-slate-200">ແຜນສ້ອມແປງ — {groupedMaintPlans.size} ລົດ · {maintPlans.length} ລາຍການ</p>
+              <p className="text-xs text-slate-400">ຄລິກ row ເພື່ອ expand ລາຍການ rules</p>
+            </div>
+            {plansOpen
+              ? <FaChevronDown className="shrink-0 text-xs text-slate-400" />
+              : <FaChevronRight className="shrink-0 text-xs text-slate-400" />}
             <button
               type="button"
-              onClick={() => { setPlanModalOpen(true); setPlanError(null); }}
-              className="flex h-8 items-center gap-1.5 rounded-lg border border-orange-200 bg-orange-50 px-3 text-xs font-semibold text-orange-600 hover:bg-orange-100 dark:border-orange-800 dark:bg-orange-950/30 dark:text-orange-300"
+              onClick={(e) => { e.stopPropagation(); setPlanModalOpen(true); setPlanError(null); }}
+              className="flex h-8 shrink-0 items-center gap-1.5 rounded-lg border border-orange-200 bg-orange-50 px-3 text-xs font-semibold text-orange-600 hover:bg-orange-100 dark:border-orange-800 dark:bg-orange-950/30 dark:text-orange-300"
             >
               <FaPlus className="text-[10px]" /> ເພີ່ມ
             </button>
           </div>
-          <div className="max-h-72 overflow-auto">
+          {plansOpen && (() => {
+            const { overdue, warn, soon, ok } = planHealthCounts;
+            const total = overdue + warn + soon + ok;
+            if (total === 0) return null;
+            return (
+              <div className="border-b border-slate-100 bg-slate-50/50 px-5 py-2.5 dark:border-slate-700 dark:bg-slate-800/30">
+                <div className="mb-1.5 flex flex-wrap items-center gap-x-3 gap-y-1">
+                  {overdue > 0 && <span className="flex items-center gap-1 text-[11px] font-semibold text-red-500"><span className="inline-block h-2 w-2 rounded-full bg-red-500" />{overdue} ເກີນກຳໜົດ</span>}
+                  {warn > 0 && <span className="flex items-center gap-1 text-[11px] font-semibold text-orange-500"><span className="inline-block h-2 w-2 rounded-full bg-orange-400" />{warn} ໃກ້ຮອດ</span>}
+                  {soon > 0 && <span className="flex items-center gap-1 text-[11px] font-semibold text-amber-500"><span className="inline-block h-2 w-2 rounded-full bg-amber-400" />{soon} ເຝ້າລະວັງ</span>}
+                  {ok > 0 && <span className="flex items-center gap-1 text-[11px] font-semibold text-emerald-500"><span className="inline-block h-2 w-2 rounded-full bg-emerald-400" />{ok} ດີ</span>}
+                  <span className="ml-auto text-[10px] text-slate-400">{total} ລາຍການທັງໝົດ</span>
+                </div>
+                <div className="flex h-2 w-full overflow-hidden rounded-full bg-slate-200 dark:bg-slate-700">
+                  {overdue > 0 && <div className="bg-red-500 transition-all duration-500" style={{ width: `${(overdue / total) * 100}%` }} />}
+                  {warn > 0 && <div className="bg-orange-400 transition-all duration-500" style={{ width: `${(warn / total) * 100}%` }} />}
+                  {soon > 0 && <div className="bg-amber-400 transition-all duration-500" style={{ width: `${(soon / total) * 100}%` }} />}
+                  {ok > 0 && <div className="bg-emerald-400 transition-all duration-500" style={{ width: `${(ok / total) * 100}%` }} />}
+                </div>
+              </div>
+            );
+          })()}
+          {plansOpen && <div className="max-h-72 overflow-auto">
             <table className="w-full text-sm">
               <colgroup>
                 <col className="w-24" />
@@ -1429,47 +1575,109 @@ export default function MaintLogPage() {
                 </tr>
               </thead>
               <tbody>
-                {maintPlans.map((p) => {
-                  const currentOdo = p.current_odometer != null ? Number(p.current_odometer) : null;
-                  const remaining = currentOdo != null ? p.next_due_km - currentOdo : null;
+                {Array.from(groupedMaintPlans.entries()).map(([carCode, plans]) => {
+                  const isExpanded = expandedPlanCars.has(carCode);
+                  const carOdo = plans[0]?.current_odometer != null ? Number(plans[0].current_odometer) : null;
+                  const worstRemaining = carOdo != null
+                    ? Math.min(...plans.map(p => p.next_due_km - carOdo))
+                    : null;
+                  const hasOverdue = worstRemaining != null && worstRemaining <= 0;
+                  const worstPlanDue = carOdo != null ? carOdo + (worstRemaining ?? 0) : null;
+                  const groupFillPct = carOdo != null && worstPlanDue != null && worstPlanDue > 0
+                    ? Math.min(100, Math.round((carOdo / worstPlanDue) * 100))
+                    : null;
                   return (
-                  <tr key={p.plan_code} className="border-b border-slate-50 hover:bg-slate-50 dark:border-slate-800 dark:hover:bg-slate-800/30">
-                    <td className="px-4 py-2.5 font-semibold text-slate-700 dark:text-slate-200">{p.car_code}</td>
-                    <td className="px-3 py-2.5 text-xs text-slate-500 truncate">
-                      {p.rule_code ? (rules.find((r) => r.code === p.rule_code)?.name ?? p.rule_code) : "—"}
-                    </td>
-                    <td className="px-4 py-2.5 text-right tabular-nums text-slate-500 dark:text-slate-400">
-                      {currentOdo != null ? formatNumber(currentOdo) : <span className="text-slate-300">—</span>}
-                    </td>
-                    <td className="px-4 py-2.5 text-right tabular-nums">
-                      <span className={`font-bold ${remaining != null && remaining <= 0 ? "text-red-500 dark:text-red-400" : "text-orange-600 dark:text-orange-400"}`}>
-                        {formatNumber(p.next_due_km)}
-                      </span>
-                      {remaining != null && (
-                        <div className={`text-[10px] tabular-nums ${remaining <= 0 ? "text-red-400" : remaining <= 3000 ? "text-amber-500" : "text-slate-400"}`}>
-                          {remaining <= 0 ? `ເກີນ ${formatNumber(-remaining)} km` : `ເຫຼືອ ${formatNumber(remaining)} km`}
-                        </div>
-                      )}
-                    </td>
-                    <td className="px-3 py-2.5 text-xs text-slate-400 truncate">{p.maint_note ?? "—"}</td>
-                    <td className="px-2 py-2.5 text-center">
-                      <button
-                        type="button"
-                        onClick={() => handleDeletePlan(p.plan_code)}
-                        disabled={deletingPlanCode === p.plan_code}
-                        className="rounded p-1 text-slate-300 hover:text-red-500 disabled:opacity-40"
+                    <Fragment key={carCode}>
+                      <tr
+                        className="cursor-pointer border-b border-slate-100 bg-slate-50/80 hover:bg-slate-100 dark:border-slate-700 dark:bg-slate-800/50 dark:hover:bg-slate-700/50"
+                        onClick={() => setExpandedPlanCars(prev => {
+                          const next = new Set(prev);
+                          if (next.has(carCode)) next.delete(carCode); else next.add(carCode);
+                          return next;
+                        })}
                       >
-                        {deletingPlanCode === p.plan_code
-                          ? <FaSpinner className="animate-spin text-xs" />
-                          : <FaTrash className="text-xs" />}
-                      </button>
-                    </td>
-                  </tr>
+                        <td className="px-4 py-2.5 font-bold text-slate-700 dark:text-slate-200">
+                          <div className="flex items-start gap-2">
+                            <span className="mt-1">
+                              {isExpanded
+                                ? <FaChevronDown className="text-[10px] text-slate-400" />
+                                : <FaChevronRight className="text-[10px] text-slate-400" />}
+                            </span>
+                            <div>
+                              <span className="font-bold text-slate-700 dark:text-slate-200">{carCode}</span>
+                              {groupFillPct != null && (
+                                <div className="mt-0.5 flex items-center gap-1.5">
+                                  <div className="h-1.5 w-20 overflow-hidden rounded-full bg-slate-200 dark:bg-slate-700">
+                                    <div
+                                      className={`h-full rounded-full transition-all duration-500 ${hasOverdue ? "bg-red-500" : groupFillPct >= 90 ? "bg-orange-400" : "bg-amber-400"}`}
+                                      style={{ width: `${groupFillPct}%` }}
+                                    />
+                                  </div>
+                                  <span className="text-[10px] tabular-nums text-slate-400">{groupFillPct}%</span>
+                                </div>
+                              )}
+                            </div>
+                          </div>
+                        </td>
+                        <td className="px-3 py-2.5">
+                          <span className="text-xs text-slate-400">{plans.length} ລາຍການ</span>
+                        </td>
+                        <td className="px-4 py-2.5 text-right tabular-nums text-xs text-slate-500 dark:text-slate-400">
+                          {carOdo != null ? formatNumber(carOdo) : <span className="text-slate-300">—</span>}
+                        </td>
+                        <td className="px-4 py-2.5 text-right tabular-nums">
+                          {worstRemaining != null && (
+                            <span className={`text-xs font-semibold ${hasOverdue ? "text-red-500 dark:text-red-400" : "text-orange-500 dark:text-orange-400"}`}>
+                              {hasOverdue ? `ເກີນ ${formatNumber(-worstRemaining)} km` : `ຕ່ຳສຸດ ${formatNumber(worstRemaining)} km`}
+                            </span>
+                          )}
+                        </td>
+                        <td colSpan={2} />
+                      </tr>
+                      {isExpanded && plans.map((p) => {
+                        const currentOdo = p.current_odometer != null ? Number(p.current_odometer) : null;
+                        const remaining = currentOdo != null ? p.next_due_km - currentOdo : null;
+                        return (
+                          <tr key={p.plan_code} className="border-b border-slate-50 hover:bg-slate-50 dark:border-slate-800 dark:hover:bg-slate-800/30">
+                            <td className="py-2 pl-9 pr-2 text-xs text-slate-300">└</td>
+                            <td className="px-3 py-2 text-xs text-slate-500 truncate">
+                              {p.rule_code ? (rules.find((r) => r.code === p.rule_code)?.name ?? p.rule_code) : "—"}
+                            </td>
+                            <td className="px-4 py-2 text-right tabular-nums text-xs text-slate-500 dark:text-slate-400">
+                              {currentOdo != null ? formatNumber(currentOdo) : <span className="text-slate-300">—</span>}
+                            </td>
+                            <td className="px-4 py-2 text-right tabular-nums">
+                              <span className={`text-xs font-bold ${remaining != null && remaining <= 0 ? "text-red-500 dark:text-red-400" : "text-orange-600 dark:text-orange-400"}`}>
+                                {formatNumber(p.next_due_km)}
+                              </span>
+                              {remaining != null && (
+                                <div className={`text-[10px] tabular-nums ${remaining <= 0 ? "text-red-400" : remaining <= 3000 ? "text-amber-500" : "text-slate-400"}`}>
+                                  {remaining <= 0 ? `ເກີນ ${formatNumber(-remaining)} km` : `ເຫຼືອ ${formatNumber(remaining)} km`}
+                                </div>
+                              )}
+                            </td>
+                            <td className="px-3 py-2 text-xs text-slate-400 truncate">{p.maint_note ?? "—"}</td>
+                            <td className="px-2 py-2 text-center">
+                              <button
+                                type="button"
+                                onClick={(e) => { e.stopPropagation(); handleDeletePlan(p.plan_code); }}
+                                disabled={deletingPlanCode === p.plan_code}
+                                className="rounded p-1 text-slate-300 hover:text-red-500 disabled:opacity-40"
+                              >
+                                {deletingPlanCode === p.plan_code
+                                  ? <FaSpinner className="animate-spin text-xs" />
+                                  : <FaTrash className="text-xs" />}
+                              </button>
+                            </td>
+                          </tr>
+                        );
+                      })}
+                    </Fragment>
                   );
                 })}
               </tbody>
             </table>
-          </div>
+          </div>}
         </div>
       )}
 
@@ -1947,7 +2155,7 @@ export default function MaintLogPage() {
       <StatusTableShell count={filtered.length}>
         <table className="w-full min-w-max text-sm">
           <thead>
-            <tr className="border-b bg-slate-50 text-left text-xs font-semibold text-slate-500 dark:border-slate-700 dark:bg-slate-800/60">
+            <tr className="sticky top-0 z-10 border-b bg-slate-50 text-left text-xs font-semibold text-slate-500 shadow-sm dark:border-slate-700 dark:bg-slate-800/60">
               <th className="w-6 px-2 py-2.5" />
               <th className="px-3 py-2.5">ລຳດັບ</th>
               <th className="px-3 py-2.5">ລົດ</th>
@@ -1970,7 +2178,7 @@ export default function MaintLogPage() {
               return (
                 <Fragment key={row.id}>
                   <tr
-                    className={`border-b transition-colors hover:bg-slate-50 dark:border-slate-800 dark:hover:bg-slate-800/50 ${isExpanded ? "bg-amber-50/40 dark:bg-amber-950/10" : ""}`}
+                    className={`border-b transition-colors hover:bg-slate-50 dark:border-slate-800 dark:hover:bg-slate-800/50 ${isExpanded ? "bg-amber-50/40 dark:bg-amber-950/10" : i % 2 !== 0 ? "bg-slate-50/60 dark:bg-slate-800/20" : ""}`}
                   >
                     <td className="px-2 py-2 text-center">
                       {hasItems ? (
