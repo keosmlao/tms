@@ -474,7 +474,10 @@ const {
 } = require("./pending-bill");
 const { getBillTodoSummaryMap } = require("./bill-todo");
 
-async function getManualPendingRowsForPending(fromDate, toDate) {
+async function getManualPendingRowsForPending(fromDate, toDate, transportCode = "all") {
+  const filterByTransport = transportCode && transportCode !== "all";
+  const params = filterByTransport ? [fromDate, toDate, transportCode] : [fromDate, toDate];
+  const transportWhere = filterByTransport ? "AND pb.transport_code = $3" : "";
   const icRows = await query(
     `SELECT
       a.doc_no,
@@ -488,7 +491,8 @@ async function getManualPendingRowsForPending(fromDate, toDate) {
       to_char(COALESCE(a.send_date, pb.scheduled_date, a.doc_date),'DD-MM-YYYY') as send_date_display,
       COALESCE(sale.name_1, '') as sale,
       COALESCE(dep.name_1::text, sale.department::text, '') as department,
-      'ic_trans ' || a.trans_flag::text as transport,
+      COALESCE(pb.transport_code, '') as transport_code,
+      COALESCE(NULLIF(TRIM(tt.name_1), ''), NULLIF(TRIM(pb.transport_code), ''), '') as transport,
       to_char(COALESCE(pb.updated_at, a.create_date_time_now),'DD-MM-YYYY HH24:MI') as time_open,
       now() - COALESCE(pb.updated_at, a.create_date_time_now) as time_use,
       true as manual_pending_bill,
@@ -503,24 +507,30 @@ async function getManualPendingRowsForPending(fromDate, toDate) {
     LEFT JOIN ar_customer_detail acd ON acd.ar_code = a.cust_code
     LEFT JOIN erp_user sale ON sale.code = a.sale_code
     LEFT JOIN erp_department_list dep ON dep.code = sale.department
+    LEFT JOIN transport_type tt ON tt.code = pb.transport_code
     WHERE a.trans_flag IN (${manualFlagListSql()})
       AND pb.scheduled_date::date BETWEEN $1::date AND $2::date
+      ${transportWhere}
     ORDER BY pb.scheduled_date ASC, a.doc_date ASC`,
-    [fromDate, toDate]
+    params
   );
   const readySchedules = await query(
     `SELECT pb.bill_no,
             pb.scheduled_date,
             to_char(pb.scheduled_date,'YYYY-MM-DD') as send_date,
             to_char(pb.scheduled_date,'DD-MM-YYYY') as send_date_display,
+            COALESCE(pb.transport_code, '') as transport_code,
+            COALESCE(NULLIF(TRIM(tt.name_1), ''), NULLIF(TRIM(pb.transport_code), ''), '') as transport,
             to_char(COALESCE(pb.updated_at, LOCALTIMESTAMP(0)),'DD-MM-YYYY HH24:MI') as time_open,
             now() - COALESCE(pb.updated_at, LOCALTIMESTAMP(0)) as time_use
      FROM public.odg_tms_pending_bill pb
+     LEFT JOIN transport_type tt ON tt.code = pb.transport_code
      WHERE pb.scheduled_date IS NOT NULL
        AND COALESCE(NULLIF(TRIM(pb.delivery_round_code), ''), NULL) IS NOT NULL
        AND COALESCE(pb.action_status, '') = 'contacted_ready'
-       AND pb.scheduled_date::date BETWEEN $1::date AND $2::date`,
-    [fromDate, toDate]
+       AND pb.scheduled_date::date BETWEEN $1::date AND $2::date
+       ${transportWhere}`,
+    params
   );
   const existingIc = new Set(icRows.map((row) => row.doc_no));
   const serviceDocNos = readySchedules
@@ -550,7 +560,8 @@ async function getManualPendingRowsForPending(fromDate, toDate) {
       send_date_display: sched?.send_date_display ?? null,
       sale: "",
       department: "ສູນບໍລິການ",
-      transport: SERVICE_SOURCE_TYPE,
+      transport_code: sched?.transport_code ?? "",
+      transport: sched?.transport ?? "",
       time_open: sched?.time_open ?? "",
       time_use: sched?.time_use ?? null,
       manual_pending_bill: true,
@@ -582,7 +593,8 @@ async function getBillsPending(session, fromDate, toDate, transportCode) {
         COALESCE(b.doc_format_code, '') as source_format,
         c.name_1 as sale, COALESCE(dep.name_1::text, c.department::text, '') as department,
         d.name_1 as transport, to_char(a.create_date_time_now,'DD-MM-YYYY HH24:MI') as time_open,
-        now() - a.create_date_time_now as time_use
+        now() - a.create_date_time_now as time_use,
+        now() - b.send_date::timestamp as time_use_send
       FROM ic_trans_shipment a
       LEFT JOIN ic_trans b ON b.doc_no=a.doc_no
       LEFT JOIN ar_customer cust ON cust.code = a.cust_code
@@ -590,11 +602,11 @@ async function getBillsPending(session, fromDate, toDate, transportCode) {
       LEFT JOIN erp_user c ON c.code=b.sale_code
       LEFT JOIN erp_department_list dep ON dep.code=c.department
       LEFT JOIN transport_type d ON d.code=a.transport_code
-      WHERE check_status=0 AND b.send_date::date BETWEEN $1::date AND $2::date AND ${where}
+      WHERE a.trans_flag=44 AND check_status=0 AND b.send_date::date BETWEEN $1::date AND $2::date AND ${where}
       ORDER BY b.send_date ASC, b.doc_date ASC`,
       params
     ),
-    getManualPendingRowsForPending(fromDate, toDate),
+    getManualPendingRowsForPending(fromDate, toDate, effectiveCode),
     scope.scoped
       ? query("SELECT code, name_1 FROM transport_type WHERE code=$1", [scope.branch])
       : query("SELECT code, name_1 FROM transport_type WHERE code NOT LIKE '01-%' ORDER BY code ASC"),
@@ -615,28 +627,28 @@ async function getBillsPending(session, fromDate, toDate, transportCode) {
       {
         remaining_count: Number(row.count_item ?? 0),
         remaining_qty_total: Number(row.remaining_qty_total ?? 0),
+        total_qty_total: Number(row.total_qty_total ?? 0),
+        delivered_qty_total: Number(row.delivered_qty_total ?? 0),
       },
     ])
   );
 
-  // Detect which bills have a partial-delivery history (had detail_item rows)
-  // so the UI can flag them. Cheap because billNos is bounded.
-  const detailItemRows = await query(
-    `SELECT bill_no FROM public.odg_tms_detail_item WHERE bill_no = ANY($1::varchar[]) GROUP BY bill_no`,
-    [billNos]
-  );
-  const detailItemBills = new Set(detailItemRows.map((row) => row.bill_no));
-
   const cancelledRows = await query(
-    `SELECT DISTINCT ON (bill_no)
-        bill_no,
-        doc_no as cancelled_delivery_job,
-        COALESCE(remark, '') as cancelled_delivery_remark,
-        to_char(COALESCE(sent_end, create_date_time_now), 'DD-MM-YYYY HH24:MI') as cancelled_delivery_at
-      FROM public.odg_tms_detail
-      WHERE bill_no = ANY($1::varchar[])
-        AND COALESCE(status, 0) = 2
-      ORDER BY bill_no, COALESCE(sent_end, create_date_time_now) DESC`,
+    `SELECT DISTINCT ON (d.bill_no)
+        d.bill_no,
+        d.doc_no as cancelled_delivery_job,
+        COALESCE(d.remark, '') as cancelled_delivery_remark,
+        COALESCE(NULLIF(TRIM(drv.name_1), ''), a.driver, '') as cancelled_delivery_driver,
+        COALESCE(NULLIF(TRIM(car.name_1), ''), a.car, '') as cancelled_delivery_car,
+        to_char(COALESCE(d.sent_end, d.create_date_time_now), 'DD-MM-YYYY HH24:MI') as cancelled_delivery_at,
+        GREATEST(FLOOR(EXTRACT(EPOCH FROM (now() - COALESCE(d.sent_end, d.create_date_time_now)))), 0)::bigint as cancelled_secs_ago
+      FROM public.odg_tms_detail d
+      LEFT JOIN public.odg_tms a ON a.doc_no = d.doc_no
+      LEFT JOIN public.odg_tms_driver drv ON drv.code = a.driver
+      LEFT JOIN public.odg_tms_car car ON car.code = a.car
+      WHERE d.bill_no = ANY($1::varchar[])
+        AND COALESCE(d.status, 0) = 2
+      ORDER BY d.bill_no, COALESCE(d.sent_end, d.create_date_time_now) DESC`,
     [billNos]
   );
   const cancelledMap = new Map(cancelledRows.map((row) => [row.bill_no, row]));
@@ -653,6 +665,8 @@ async function getBillsPending(session, fromDate, toDate, transportCode) {
       const summary = summaries.get(bill.doc_no) ?? {
         remaining_count: 0,
         remaining_qty_total: 0,
+        total_qty_total: 0,
+        delivered_qty_total: 0,
       };
       const sched = scheduleMap.get(bill.doc_no) ?? null;
       const todo = todoMap.get(bill.doc_no) ?? null;
@@ -699,8 +713,14 @@ async function getBillsPending(session, fromDate, toDate, transportCode) {
         ...bill,
         remaining_count: summary.remaining_count,
         remaining_qty_total: summary.remaining_qty_total,
+        total_qty_total: summary.total_qty_total,
+        delivered_qty_total: summary.delivered_qty_total,
+        // Partial = some qty was actually delivered on a finished attempt AND
+        // some still remains. A purely *cancelled* bill (status=2) delivered
+        // nothing — delivered_qty_total = 0 — so it no longer falsely reads as
+        // ທະຍອຍ even though it has odg_tms_detail_item rows.
         partial_delivery:
-          detailItemBills.has(bill.doc_no) && summary.remaining_count > 0,
+          (summary.delivered_qty_total ?? 0) > 0 && summary.remaining_count > 0,
         scheduled_date: effectiveDate,
         scheduled_date_display: effectiveDisplay,
         scheduled_date_overridden: scheduledOverridden,
@@ -714,6 +734,9 @@ async function getBillsPending(session, fromDate, toDate, transportCode) {
         cancelled_delivery_job: cancelled?.cancelled_delivery_job ?? "",
         cancelled_delivery_at: cancelled?.cancelled_delivery_at ?? "",
         cancelled_delivery_remark: cancelled?.cancelled_delivery_remark ?? "",
+        cancelled_delivery_driver: cancelled?.cancelled_delivery_driver ?? "",
+        cancelled_delivery_car: cancelled?.cancelled_delivery_car ?? "",
+        cancelled_secs_ago: Number(cancelled?.cancelled_secs_ago ?? 0),
         todo_pending_count: Number(todo?.pending_count ?? 0),
         todo_done_count: Number(todo?.done_count ?? 0),
         todo_earliest_deadline: todo?.earliest_deadline ?? null,

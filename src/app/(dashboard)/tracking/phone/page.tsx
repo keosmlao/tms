@@ -1,6 +1,7 @@
 "use client";
 
-import { Suspense, useCallback, useEffect, useState } from "react";
+import { Suspense, useCallback, useEffect, useRef, useState } from "react";
+import { useSearchParams } from "next/navigation";
 import {
   FaBatteryHalf,
   FaMapMarkedAlt,
@@ -59,6 +60,9 @@ function jobStatusLabel(s: number): { text: string; cls: string } {
 }
 
 function PhoneTrackingInner() {
+  const searchParams = useSearchParams();
+  const docParam = searchParams.get("doc")?.trim() ?? "";
+
   const [jobs, setJobs] = useState<TrackingJob[]>([]);
   const [loadingJobs, setLoadingJobs] = useState(true);
   const [selected, setSelected] = useState<string>("");
@@ -66,6 +70,7 @@ function PhoneTrackingInner() {
   const [loadingTrail, setLoadingTrail] = useState(false);
   const [autoRefresh, setAutoRefresh] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
+  const didAutoSelectRef = useRef(false);
 
   const loadJobs = useCallback(async () => {
     setLoadingJobs(true);
@@ -103,6 +108,14 @@ function PhoneTrackingInner() {
       setRefreshing(false);
     }
   }, []);
+
+  // Opened from the phones-map "ເສັ້ນທາງເຕັມ" link (?doc=<doc_no>): load that
+  // trip's trail once on mount so the user lands straight on its route.
+  useEffect(() => {
+    if (!docParam || didAutoSelectRef.current) return;
+    didAutoSelectRef.current = true;
+    void loadTrail(docParam);
+  }, [docParam, loadTrail]);
 
   const isLive = !!trail && trail.job.job_status < 3;
 

@@ -8,6 +8,7 @@ import {
   getGpsRealtimeAll as svcGetGpsRealtimeAllLive,
   getLocations as svcGetLocations,
   getPhoneTrackingJobs as svcGetPhoneTrackingJobs,
+  getPhoneFleet as svcGetPhoneFleet,
   getPhoneTrail as svcGetPhoneTrail,
 } from "@/queries/tracking.js";
 import {
@@ -58,6 +59,12 @@ export async function getLocations(search?: string) {
 export async function getPhoneTrackingJobs() {
   const s = await requireSession();
   return svcGetPhoneTrackingJobs(s);
+}
+
+// Fleet view: latest phone fix per trip, for the all-phones-on-one-map page.
+export async function getPhoneFleet() {
+  const s = await requireSession();
+  return svcGetPhoneFleet(s);
 }
 
 // Full ordered trail + telemetry + device info for one trip.

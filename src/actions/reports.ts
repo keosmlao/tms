@@ -8,6 +8,8 @@ import {
   getReportByBill as svcGetReportByBill,
   getReportMonthlyCar as svcGetReportMonthlyCar,
   getReportMonthlyDriver as svcGetReportMonthlyDriver,
+  getReportMonthlyDelivery as svcGetReportMonthlyDelivery,
+  getMonthlyDeliveryKpi as svcGetMonthlyDeliveryKpi,
   getReportPendingDaily as svcGetReportPendingDaily,
   getReportDeliveredDaily as svcGetReportDeliveredDaily,
   getReportCancelledDaily as svcGetReportCancelledDaily,
@@ -50,6 +52,16 @@ export async function getReportMonthlyCar(monthly: string) {
 export async function getReportMonthlyDriver(monthly: string) {
   const s = await requireSession();
   return svcGetReportMonthlyDriver(s, monthly);
+}
+
+export async function getReportMonthlyDelivery(monthly: string) {
+  const s = await requireSession();
+  return svcGetReportMonthlyDelivery(s, monthly);
+}
+
+export async function getMonthlyDeliveryKpi(monthly: string) {
+  const s = await requireSession();
+  return svcGetMonthlyDeliveryKpi(s, monthly);
 }
 
 export async function getReportPendingDaily(fromDate: string, toDate: string) {

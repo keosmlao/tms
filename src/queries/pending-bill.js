@@ -82,12 +82,33 @@ async function ensurePendingBillSchemaInternal(db) {
     CREATE INDEX IF NOT EXISTS idx_odg_tms_pending_bill_round
     ON public.odg_tms_pending_bill (delivery_round_code) WHERE delivery_round_code IS NOT NULL
   `);
+  // Append-only change log for the schedule fields. The main row only keeps the
+  // latest value (it's an UPSERT), so this is the only place the dispatcher can
+  // see how a bill's delivery date / remark / status evolved over time.
+  await safeDdl(db, `
+    CREATE TABLE IF NOT EXISTS public.odg_tms_pending_bill_history (
+      id BIGSERIAL PRIMARY KEY,
+      bill_no character varying NOT NULL,
+      scheduled_date date,
+      remark text,
+      action_status character varying,
+      delivery_route_code character varying,
+      delivery_round_code character varying,
+      transport_code character varying,
+      changed_by character varying,
+      changed_at timestamp without time zone DEFAULT LOCALTIMESTAMP(0)
+    )
+  `);
+  await safeDdl(db, `
+    CREATE INDEX IF NOT EXISTS idx_odg_tms_pending_bill_history_bill
+    ON public.odg_tms_pending_bill_history (bill_no, changed_at DESC)
+  `);
 }
 
 // Bump the cache version whenever the DDL changes so existing dev/prod
 // processes re-run the ALTER TABLE migrations on next call (the global cache
 // otherwise persists across hot-reloads).
-const PENDING_BILL_SCHEMA_VERSION = "v5_planned_location";
+const PENDING_BILL_SCHEMA_VERSION = "v6_schedule_history";
 
 async function ensurePendingBillSchema() {
   const readyKey = `__tmsPendingBillSchemaReady_${PENDING_BILL_SCHEMA_VERSION}`;
@@ -129,6 +150,29 @@ async function getPendingBillScheduleMap(billNos) {
     [billNos]
   );
   return new Map(rows.map((r) => [r.bill_no, r]));
+}
+
+// Newest-first change log for one bill's schedule (date / remark / status /
+// route / round). Drives the "ປະຫວັດການປ່ຽນວັນຈັດສົ່ງ" timeline in the drawer.
+async function getPendingBillScheduleHistory(billNo) {
+  const code = String(billNo ?? "").trim();
+  if (!code) return [];
+  await ensurePendingBillSchema();
+  return query(
+    `SELECT
+       to_char(scheduled_date,'DD-MM-YYYY') as scheduled_date_display,
+       COALESCE(remark, '') as remark,
+       COALESCE(action_status, '') as action_status,
+       COALESCE(delivery_route_code, '') as delivery_route_code,
+       COALESCE(delivery_round_code, '') as delivery_round_code,
+       COALESCE(changed_by, '') as changed_by,
+       to_char(changed_at,'DD-MM-YYYY HH24:MI') as changed_at
+     FROM public.odg_tms_pending_bill_history
+     WHERE bill_no = $1
+     ORDER BY changed_at DESC, id DESC
+     LIMIT 50`,
+    [code]
+  );
 }
 
 async function upsertPendingBillSchedule({
@@ -176,6 +220,18 @@ async function upsertPendingBillSchedule({
            updated_at = LOCALTIMESTAMP(0)`,
     [code, date, note, status, route, round, transport, user]
   );
+  // Append the new state to the change history (best-effort — never block the
+  // save itself on the audit write).
+  try {
+    await pool.query(
+      `INSERT INTO public.odg_tms_pending_bill_history
+         (bill_no, scheduled_date, remark, action_status, delivery_route_code, delivery_round_code, transport_code, changed_by)
+       VALUES ($1, $2::date, $3, $4, $5, $6, $7, $8)`,
+      [code, date, note, status, route, round, transport, user]
+    );
+  } catch (err) {
+    console.error("pending_bill history insert failed:", err);
+  }
   return { success: true };
 }
 
@@ -244,6 +300,15 @@ async function bulkUpdatePendingBills(input) {
       `UPDATE public.odg_tms_pending_bill SET ${sets.join(", ")}
        WHERE bill_no = ANY($${i}::varchar[])`,
       params
+    );
+    // Snapshot each touched bill's resulting schedule into the change history.
+    await client.query(
+      `INSERT INTO public.odg_tms_pending_bill_history
+         (bill_no, scheduled_date, remark, action_status, delivery_route_code, delivery_round_code, transport_code, changed_by)
+       SELECT bill_no, scheduled_date, remark, action_status, delivery_route_code, delivery_round_code, transport_code, updated_by
+       FROM public.odg_tms_pending_bill
+       WHERE bill_no = ANY($1::varchar[])`,
+      [codes]
     );
     await client.query("COMMIT");
     return { success: true, updated: result.rowCount ?? codes.length };
@@ -319,6 +384,7 @@ async function upsertPendingBillLocation({ billNo, lat, lng, userCode }) {
 module.exports = {
   ensurePendingBillSchema,
   getPendingBillScheduleMap,
+  getPendingBillScheduleHistory,
   getPendingBillSchedule,
   upsertPendingBillSchedule,
   bulkUpdatePendingBills,

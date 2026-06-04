@@ -24,6 +24,7 @@ import {
 } from "react-icons/fa";
 import { FIXED_YEAR } from "@/lib/fixed-year";
 import { Actions } from "@/lib/api";
+import { LiveFleetOverview } from "@/components/live-fleet-overview";
 // Ported from server actions: getDashboardData
 
 // ==================== Types ====================
@@ -1299,6 +1300,9 @@ export default function DashboardPage() {
           {error}
         </div>
       )}
+
+      {/* ========== LIVE FLEET (cars + driver phones) ========== */}
+      <LiveFleetOverview />
 
       {/* ========== PENDING BREAKDOWN ========== */}
       {data.pending_breakdown && (

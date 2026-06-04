@@ -25,6 +25,7 @@ import {
   FaAngleDoubleRight,
   FaClock,
   FaCheckCircle,
+  FaStickyNote,
   FaMapMarkerAlt,
   FaFileInvoice,
   FaBroadcastTower,
@@ -57,6 +58,7 @@ const navSections: NavSection[] = [
     items: [
       { label: "ຕິດຕາມສິນຄ້າ", href: "/tracking", icon: <FaMapMarkerAlt size={13} /> },
       { label: "ແຜນທີ່ລົດ", href: "/tracking/cars-map", icon: <FaBroadcastTower size={13} /> },
+      { label: "ແຜນທີ່ມືຖື", href: "/tracking/phones-map", icon: <FaMobileAlt size={13} /> },
       { label: "ເສັ້ນທາງມືຖືຄົນຂັບ", href: "/tracking/phone", icon: <FaMobileAlt size={13} /> },
       { label: "ສະຫຼຸບ GPS ປະຈຳວັນ", href: "/tracking/gps-usage", icon: <FaChartArea size={13} /> },
       // { label: "ດຶງຂໍ້ມູນ GPS ຍ້ອນຫຼັງ", href: "/tracking/gps-backfill", icon: <FaCloudDownloadAlt size={13} /> },
@@ -103,6 +105,7 @@ const navSections: NavSection[] = [
       { label: "ຕາມບິນ", href: "/reports/by-bill", icon: <FaFileInvoice size={13} /> },
       { label: "ນຳໃຊ້ລົດ/ເດືອນ", href: "/reports/monthly-car", icon: <FaChartLine size={13} /> },
       { label: "ຄົນຂັບ/ເດືອນ", href: "/reports/monthly-driver", icon: <FaChartLine size={13} /> },
+      { label: "KPI ຈັດສົ່ງ/ເດືອນ", href: "/reports/monthly-delivery", icon: <FaCheckCircle size={13} /> },
       { label: "Leaderboard ຄົນຂັບ", href: "/reports/drivers", icon: <FaUserTie size={13} /> },
     ],
   },
@@ -276,6 +279,32 @@ export default function Sidebar({
           >
             <FaTachometerAlt size={16} className={pathname === "/" ? "text-teal-200" : "transition-colors group-hover:text-teal-200"} />
             {!showCollapsed && <span>Dashboard</span>}
+          </Link>
+          <Link
+            href="/bills-pending/todos"
+            className={`group flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-medium transition-all duration-200 ${
+              pathname === "/bills-pending/todos"
+                ? "bg-teal-400/14 text-white ring-1 ring-teal-300/20"
+                : "text-slate-400 hover:bg-white/8 hover:text-white"
+            } ${showCollapsed ? "justify-center" : ""}`}
+            onClick={() => setMobileOpen(false)}
+            title={showCollapsed ? "Todo" : undefined}
+          >
+            <FaStickyNote size={16} className={pathname === "/bills-pending/todos" ? "text-teal-200" : "transition-colors group-hover:text-teal-200"} />
+            {!showCollapsed && <span>Todo ບິນ</span>}
+          </Link>
+          <Link
+            href="/reports/monthly-delivery"
+            className={`group flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-medium transition-all duration-200 ${
+              pathname === "/reports/monthly-delivery"
+                ? "bg-teal-400/14 text-white ring-1 ring-teal-300/20"
+                : "text-slate-400 hover:bg-white/8 hover:text-white"
+            } ${showCollapsed ? "justify-center" : ""}`}
+            onClick={() => setMobileOpen(false)}
+            title={showCollapsed ? "KPI ຈັດສົ່ງ" : undefined}
+          >
+            <FaChartLine size={16} className={pathname === "/reports/monthly-delivery" ? "text-teal-200" : "transition-colors group-hover:text-teal-200"} />
+            {!showCollapsed && <span>KPI ຈັດສົ່ງ/ເດືອນ</span>}
           </Link>
         </div>
 
