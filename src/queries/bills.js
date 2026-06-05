@@ -487,10 +487,11 @@ async function getManualPendingRowsForPending(fromDate, toDate, transportCode = 
       COALESCE(NULLIF(TRIM(cust.name_1), ''), a.cust_code, '') as transport_name,
       COALESCE(NULLIF(TRIM(acd.latitude::text), ''), '') as cust_lat,
       COALESCE(NULLIF(TRIM(acd.longitude::text), ''), '') as cust_lng,
+      COALESCE(NULLIF(TRIM(a.remark), ''), '') as sales_remark,
       to_char(COALESCE(a.send_date, pb.scheduled_date, a.doc_date),'YYYY-MM-DD') as send_date,
       to_char(COALESCE(a.send_date, pb.scheduled_date, a.doc_date),'DD-MM-YYYY') as send_date_display,
-      COALESCE(sale.name_1, '') as sale,
-      COALESCE(dep.name_1::text, sale.department::text, '') as department,
+      COALESCE(NULLIF(TRIM(oe.fullname_lo), ''), NULLIF(TRIM(oe.nickname), ''), a.sale_code) as sale,
+      COALESCE(NULLIF(TRIM(od.department_name_lo), ''), oe.department_code, '') as department,
       COALESCE(pb.transport_code, '') as transport_code,
       COALESCE(NULLIF(TRIM(tt.name_1), ''), NULLIF(TRIM(pb.transport_code), ''), '') as transport,
       to_char(COALESCE(pb.updated_at, a.create_date_time_now),'DD-MM-YYYY HH24:MI') as time_open,
@@ -505,8 +506,8 @@ async function getManualPendingRowsForPending(fromDate, toDate, transportCode = 
       AND COALESCE(NULLIF(TRIM(pb.delivery_round_code), ''), NULL) IS NOT NULL
     LEFT JOIN ar_customer cust ON cust.code = a.cust_code
     LEFT JOIN ar_customer_detail acd ON acd.ar_code = a.cust_code
-    LEFT JOIN erp_user sale ON sale.code = a.sale_code
-    LEFT JOIN erp_department_list dep ON dep.code = sale.department
+    LEFT JOIN public.odg_employee oe ON oe.employee_code = a.sale_code
+    LEFT JOIN public.odg_department od ON od.department_code = oe.department_code
     LEFT JOIN transport_type tt ON tt.code = pb.transport_code
     WHERE a.trans_flag IN (${manualFlagListSql()})
       AND pb.scheduled_date::date BETWEEN $1::date AND $2::date
@@ -556,6 +557,7 @@ async function getManualPendingRowsForPending(fromDate, toDate, transportCode = 
       doc_no: row.doc_no,
       doc_date: row.doc_date,
       transport_name: row.transport_name,
+      sales_remark: "",
       send_date: sched?.send_date ?? null,
       send_date_display: sched?.send_date_display ?? null,
       sale: "",
@@ -588,10 +590,12 @@ async function getBillsPending(session, fromDate, toDate, transportCode) {
         COALESCE(NULLIF(TRIM(cust.name_1), ''), a.cust_code, '') as cust_name,
         COALESCE(NULLIF(TRIM(acd.latitude::text), ''), '') as cust_lat,
         COALESCE(NULLIF(TRIM(acd.longitude::text), ''), '') as cust_lng,
+        COALESCE(NULLIF(TRIM(b.remark), ''), '') as sales_remark,
         to_char(b.send_date,'YYYY-MM-DD') as send_date,
         to_char(b.send_date,'DD-MM-YYYY') as send_date_display,
         COALESCE(b.doc_format_code, '') as source_format,
-        c.name_1 as sale, COALESCE(dep.name_1::text, c.department::text, '') as department,
+        COALESCE(NULLIF(TRIM(oe.fullname_lo), ''), NULLIF(TRIM(oe.nickname), ''), b.sale_code) as sale,
+        COALESCE(NULLIF(TRIM(od.department_name_lo), ''), oe.department_code, '') as department,
         COALESCE(NULLIF(TRIM(dov.name_1), ''), d.name_1) as transport, to_char(a.create_date_time_now,'DD-MM-YYYY HH24:MI') as time_open,
         now() - a.create_date_time_now as time_use,
         now() - b.send_date::timestamp as time_use_send
@@ -599,8 +603,8 @@ async function getBillsPending(session, fromDate, toDate, transportCode) {
       LEFT JOIN ic_trans b ON b.doc_no=a.doc_no
       LEFT JOIN ar_customer cust ON cust.code = a.cust_code
       LEFT JOIN ar_customer_detail acd ON acd.ar_code = a.cust_code
-      LEFT JOIN erp_user c ON c.code=b.sale_code
-      LEFT JOIN erp_department_list dep ON dep.code=c.department
+      LEFT JOIN public.odg_employee oe ON oe.employee_code = b.sale_code
+      LEFT JOIN public.odg_department od ON od.department_code = oe.department_code
       LEFT JOIN transport_type d ON d.code=a.transport_code
       LEFT JOIN public.odg_tms_pending_bill pbov ON pbov.bill_no = a.doc_no
       LEFT JOIN transport_type dov ON dov.code = NULLIF(TRIM(pbov.transport_code), '')
@@ -727,6 +731,7 @@ async function getBillsPending(session, fromDate, toDate, transportCode) {
         scheduled_date_display: effectiveDisplay,
         scheduled_date_overridden: scheduledOverridden,
         schedule_remark: sched?.remark ?? "",
+        sales_remark: bill.sales_remark ?? "",
         action_status: actionStatus,
         delivery_route_code: sched?.delivery_route_code ?? "",
         delivery_round_code: sched?.delivery_round_code ?? "",

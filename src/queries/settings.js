@@ -2,6 +2,7 @@
 // cached in-process (30s TTL) so the notify helpers can hit DB lazily without
 // blowing up Postgres on every WhatsApp/LINE event.
 const { pool, query, queryOne } = require("../lib/db");
+const { recordAudit } = require("./audit-log");
 
 const settingsCache = globalThis;
 
@@ -89,6 +90,11 @@ async function setSetting(key, value, userCode) {
   if (!k) throw new Error("setting key is required");
   const v = value == null ? null : String(value);
   const u = userCode ? String(userCode).trim() || null : null;
+  const oldRow = await queryOne(
+    `SELECT value FROM public.odg_tms_setting WHERE key = $1`,
+    [k]
+  );
+  const oldValue = oldRow?.value ?? null;
   await pool.query(
     `INSERT INTO public.odg_tms_setting (key, value, updated_by, updated_at)
      VALUES ($1, $2, $3, LOCALTIMESTAMP(0))
@@ -102,6 +108,19 @@ async function setSetting(key, value, userCode) {
   const c = getCache();
   if (v == null) c.map.delete(k);
   else c.map.set(k, v);
+  if (oldValue !== v) {
+    await recordAudit({
+      action: "setting.update",
+      entityType: "setting",
+      entityId: k,
+      userCode: u,
+      changes: {
+        key: k,
+        old_value: oldValue,
+        new_value: v,
+      },
+    });
+  }
   return { success: true };
 }
 

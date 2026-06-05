@@ -67,6 +67,7 @@ export interface Bill {
   scheduled_date?: string | null;
   scheduled_date_display?: string | null;
   scheduled_date_overridden?: boolean;
+  sales_remark?: string;
   schedule_remark?: string;
   action_status?: string;
   delivery_route_code?: string;
@@ -604,6 +605,7 @@ export default function BillsPendingClient() {
       b.sale,
       b.department,
       b.transport,
+      b.sales_remark,
       b.time_open,
       b.partial_delivery ? "ກຳລັງທະຍອຍສົ່ງ partial delivery" : "",
       b.cancelled_delivery ? "ຍົກເລີກຈັດສົ່ງ cancelled delivery" : "",
@@ -1265,6 +1267,15 @@ export default function BillsPendingClient() {
                                   <div className="text-[10px] text-slate-400 dark:text-slate-500 truncate">
                                     {[bill.sale, bill.department, bill.transport].filter(Boolean).join(" · ")}
                                   </div>
+                                  {bill.sales_remark && (
+                                    <div
+                                      className="mt-0.5 flex items-center gap-1 truncate text-[10px] font-medium text-amber-700 dark:text-amber-400"
+                                      title={bill.sales_remark}
+                                    >
+                                      <FaStickyNote size={8} className="shrink-0" />
+                                      <span className="truncate">{bill.sales_remark}</span>
+                                    </div>
+                                  )}
                                 </div>
                                 {/* Status */}
                                 <div className="px-3 py-1.5" onClick={(e) => { e.stopPropagation(); }}>
@@ -1427,6 +1438,15 @@ export default function BillsPendingClient() {
                                 <div className="text-[11px] text-slate-600 dark:text-slate-300 truncate font-medium">
                                   {bill.transport_name}
                                 </div>
+                                {bill.sales_remark && (
+                                  <div
+                                    className="flex items-start gap-1 rounded-md bg-amber-500/10 px-2 py-1 text-[10px] font-medium text-amber-700 dark:text-amber-400"
+                                    title={bill.sales_remark}
+                                  >
+                                    <FaStickyNote size={8} className="mt-0.5 shrink-0" />
+                                    <span className="max-h-[2.6em] overflow-hidden leading-snug">{bill.sales_remark}</span>
+                                  </div>
+                                )}
                                 <div className="flex flex-wrap gap-1.5 items-center">
                                   <button
                                     type="button"
@@ -1507,6 +1527,14 @@ export default function BillsPendingClient() {
               <div className="glass-subtle rounded-lg p-3 space-y-1.5 text-xs">
                 <div className="flex justify-between"><span className="text-slate-500">ລູກຄ້າ</span><span className="font-medium text-slate-700 text-right">{selectedBill.transport_name}</span></div>
                 <div className="flex justify-between"><span className="text-slate-500">ຂົນສົ່ງ</span><span className="font-medium text-slate-700 text-right">{selectedBill.transport || "-"}</span></div>
+                {selectedBill.sales_remark && (
+                  <div className="border-t border-slate-200/50 pt-1.5">
+                    <span className="text-slate-500">ໝາຍເຫດບິນຂາຍ</span>
+                    <p className="mt-0.5 rounded-md bg-amber-500/10 px-2 py-1 text-[11px] font-medium text-amber-700">
+                      {selectedBill.sales_remark}
+                    </p>
+                  </div>
+                )}
               </div>
 
               <div>
@@ -1764,8 +1792,14 @@ export default function BillsPendingClient() {
             ? bills.find((b) => b.doc_no === statusMenu.billNo)?.schedule_remark ?? ""
             : ""
         }
+        currentTransport={
+          statusMenu
+            ? bills.find((b) => b.doc_no === statusMenu.billNo)?.transport_code ?? ""
+            : ""
+        }
         routes={deliveryRoutes}
         rounds={deliveryRounds}
+        transports={allBranches.length > 0 ? allBranches : transports}
         anchorEl={statusMenu?.anchor ?? null}
         onClose={() => setStatusMenu(null)}
         onSaved={() => void fetchBills()}
@@ -1876,6 +1910,14 @@ export default function BillsPendingClient() {
                           <span className="font-semibold text-slate-800 dark:text-slate-200 break-words leading-snug">
                             {drawerBill.cust_name}
                           </span>
+                        </div>
+                      )}
+                      {drawerBill.sales_remark && (
+                        <div className="col-span-2 border-t border-slate-200/50 pt-2 dark:border-white/5">
+                          <span className="text-slate-400 block mb-1">ໝາຍເຫດບິນຂາຍ</span>
+                          <p className="rounded-lg border border-amber-500/15 bg-amber-500/10 p-2.5 text-[11px] font-medium leading-relaxed text-amber-800 dark:text-amber-300">
+                            {drawerBill.sales_remark}
+                          </p>
                         </div>
                       )}
                     </div>
@@ -2418,8 +2460,10 @@ function StatusMenu({
   currentRoute,
   currentRound,
   currentRemark,
+  currentTransport,
   routes,
   rounds,
+  transports,
   anchorEl,
   onClose,
   onSaved,
@@ -2430,8 +2474,10 @@ function StatusMenu({
   currentRoute: string;
   currentRound: string;
   currentRemark: string;
+  currentTransport: string;
   routes: DeliveryRoute[];
   rounds: DeliveryRound[];
+  transports: Transport[];
   anchorEl: HTMLElement | null;
   onClose: () => void;
   onSaved: () => void;
@@ -2441,6 +2487,7 @@ function StatusMenu({
   const [pickedDate, setPickedDate] = useState<string>("");
   const [pickedRoute, setPickedRoute] = useState<string>("");
   const [pickedRound, setPickedRound] = useState<string>("");
+  const [pickedTransport, setPickedTransport] = useState<string>("");
   const [remark, setRemark] = useState("");
   const [error, setError] = useState<string | null>(null);
   const open = billNo !== null && anchorEl !== null;
@@ -2452,9 +2499,10 @@ function StatusMenu({
     setPickedDate(currentDate ?? "");
     setPickedRoute(currentRoute ?? "");
     setPickedRound(currentRound ?? "");
+    setPickedTransport(currentTransport ?? "");
     setRemark(currentRemark ?? "");
     setError(null);
-  }, [open, currentStatus, currentDate, currentRoute, currentRound, currentRemark]);
+  }, [open, currentStatus, currentDate, currentRoute, currentRound, currentRemark, currentTransport]);
 
   useEffect(() => {
     if (!open || pickedStatus !== "contacted_ready") return;
@@ -2500,6 +2548,7 @@ function StatusMenu({
         scheduled_date: !clear && pickedStatus === "contacted_ready" ? pickedDate : undefined,
         delivery_route_code: !clear && pickedStatus === "contacted_ready" ? pickedRoute : undefined,
         delivery_round_code: !clear && pickedStatus === "contacted_ready" ? pickedRound : undefined,
+        transport_code: !clear && pickedStatus === "contacted_ready" ? (pickedTransport || null) : undefined,
         remark: clear ? null : remark.trim() || null,
       });
       onSaved();
@@ -2651,6 +2700,24 @@ function StatusMenu({
                     <option key={r.code} value={r.code}>
                       {r.name}
                       {r.time_label ? ` · ${r.time_label}` : ""}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <label className="block">
+                <span className="block text-[10px] font-semibold text-slate-500 uppercase tracking-wider mb-1">
+                  <FaTruck className="inline mr-1" size={9} /> ຂົນສົ່ງ
+                </span>
+                <select
+                  value={pickedTransport}
+                  onChange={(e) => setPickedTransport(e.target.value)}
+                  disabled={saving}
+                  className="w-full glass-input rounded-md px-2 py-1.5 text-[11px] text-slate-700 dark:text-slate-200"
+                >
+                  <option value="">— ຄ່າເລີ່ມຕົ້ນ —</option>
+                  {transports.map((t) => (
+                    <option key={t.code} value={t.code}>
+                      {t.name_1}
                     </option>
                   ))}
                 </select>

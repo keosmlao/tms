@@ -176,27 +176,29 @@ export default function Topbar() {
       : [];
 
   return (
-    <header className="sticky top-0 z-[1000] border-b border-slate-200/80 bg-white/90 backdrop-blur-md transition-all duration-300 dark:border-slate-800 dark:bg-[#0b151b]/92 print:hidden">
+    <header className="sticky top-0 z-40 border-b border-white/[0.06] bg-[#0b1614]/95 shadow-[0_10px_30px_-14px_rgba(0,0,0,0.55)] backdrop-blur-xl transition-all duration-300 print:hidden">
       <div className="flex h-16 items-center justify-between gap-3 pl-16 pr-3 sm:gap-4 sm:pr-4 md:px-6">
         {/* Left: Title + Breadcrumb */}
-        <div className="flex flex-col justify-center min-w-0">
-          <h1 className="truncate text-lg font-bold text-slate-800 dark:text-white">
+        <div className="flex items-center gap-2.5 min-w-0">
+          <span className="hidden h-9 w-1 shrink-0 rounded-full bg-gradient-to-b from-teal-400 to-emerald-500 sm:block" />
+          <div className="flex flex-col justify-center min-w-0">
+          <h1 className="truncate text-lg font-bold tracking-tight text-white">
             {pageTitle || "Dashboard"}
           </h1>
           {breadcrumb.length > 0 && (
             <nav className="flex items-center gap-1 text-[11px] mt-0.5">
               {breadcrumb.map((item, i) => (
                 <span key={item.href} className="flex items-center gap-1">
-                  {i > 0 && <FaChevronRight className="text-[8px] text-slate-300 dark:text-slate-600" />}
+                  {i > 0 && <FaChevronRight className="text-[8px] text-slate-600" />}
                   {i < breadcrumb.length - 1 ? (
                     <Link
                       href={item.href}
-                      className="text-slate-400 transition-colors hover:text-teal-700 dark:text-slate-500 dark:hover:text-teal-300"
+                      className="text-slate-400 transition-colors hover:text-teal-300"
                     >
                       {item.label}
                     </Link>
                   ) : (
-                    <span className="text-slate-500 dark:text-slate-400 font-medium">
+                    <span className="text-slate-200 font-medium">
                       {item.label}
                     </span>
                   )}
@@ -204,6 +206,7 @@ export default function Topbar() {
               ))}
             </nav>
           )}
+          </div>
         </div>
 
         {/* Right: Actions */}
@@ -212,7 +215,7 @@ export default function Topbar() {
           <a
             href="/tms.apk"
             download
-            className="inline-flex items-center gap-1.5 rounded-lg bg-emerald-600 px-2.5 py-1.5 text-xs font-semibold text-white shadow-sm transition-all hover:bg-emerald-700 hover:shadow"
+            className="inline-flex items-center gap-1.5 rounded-full bg-gradient-to-r from-emerald-600 to-teal-600 px-3 py-1.5 text-xs font-semibold text-white shadow-sm transition-all hover:from-emerald-500 hover:to-teal-500 hover:shadow-md"
             title="ດາວໂຫຼດ App ສຳລັບ Android"
           >
             <FaDownload size={12} />
@@ -222,7 +225,7 @@ export default function Topbar() {
           {/* Theme toggle */}
           <button
             onClick={toggleTheme}
-            className="rounded-lg p-2 transition-all duration-200 hover:bg-slate-100 dark:hover:bg-white/8"
+            className="rounded-full p-2 text-slate-300 transition-all duration-200 hover:bg-white/10"
             aria-label="Toggle theme"
           >
             {isDarkMode
@@ -233,12 +236,12 @@ export default function Topbar() {
           {/* Search */}
           <form onSubmit={handleSearch} className="hidden sm:block">
             <div className="relative group">
-              <FaSearch className="absolute left-3 top-1/2 -translate-y-1/2 text-xs text-slate-400 transition-colors group-focus-within:text-teal-700 dark:text-slate-500 dark:group-focus-within:text-teal-300" />
+              <FaSearch className="absolute left-3 top-1/2 -translate-y-1/2 text-xs text-slate-500 transition-colors group-focus-within:text-teal-300" />
               <input
                 type="text"
                 value={searchText}
                 onChange={(e) => setSearchText(e.target.value)}
-                className="glass-input w-48 rounded-lg py-2 pl-9 pr-4 text-sm text-slate-700 placeholder:text-slate-400 transition-all duration-300 focus:w-64 dark:text-slate-200 dark:placeholder:text-slate-600"
+                className="w-48 rounded-full border border-white/10 bg-white/5 py-2 pl-9 pr-4 text-sm text-slate-100 outline-none transition-all duration-300 placeholder:text-slate-500 focus:w-64 focus:border-teal-400/50 focus:bg-white/10 focus:ring-2 focus:ring-teal-500/20"
                 placeholder="ຄົ້ນຫາເລກບິນ..."
               />
             </div>
@@ -252,7 +255,7 @@ export default function Topbar() {
                 setShowDropdown(false);
                 void loadNotifications();
               }}
-              className="relative rounded-lg p-2 text-slate-400 transition-colors hover:bg-slate-100 dark:text-slate-500 dark:hover:bg-white/8"
+              className="relative rounded-full p-2 text-slate-300 transition-colors hover:bg-white/10"
               aria-label="Notifications"
             >
               <FaBell size={15} />
@@ -361,16 +364,16 @@ export default function Topbar() {
                 setShowDropdown(!showDropdown);
                 setShowNotifications(false);
               }}
-              className="flex items-center gap-2 rounded-lg py-1 pl-1 pr-2.5 transition-all duration-200 hover:bg-slate-100 dark:hover:bg-white/8"
+              className="flex items-center gap-2 rounded-full border border-white/10 bg-white/5 py-1 pl-1 pr-2.5 transition-all duration-200 hover:bg-white/10"
             >
               <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-teal-700 text-xs font-bold text-white shadow-sm dark:bg-teal-400 dark:text-slate-950">
                 {username?.charAt(0)?.toUpperCase() || <FaUser size={12} />}
               </div>
               <div className="hidden lg:block text-left">
-                <p className="text-sm font-medium text-slate-700 dark:text-slate-200 leading-tight">
+                <p className="text-sm font-medium text-slate-100 leading-tight">
                   {username}
                 </p>
-                <p className="text-[10px] text-slate-400 dark:text-slate-500">ODIEN GROUP</p>
+                <p className="text-[10px] text-slate-400">ODIEN GROUP</p>
               </div>
             </button>
 

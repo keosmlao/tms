@@ -105,7 +105,6 @@ const navSections: NavSection[] = [
       { label: "ຕາມບິນ", href: "/reports/by-bill", icon: <FaFileInvoice size={13} /> },
       { label: "ນຳໃຊ້ລົດ/ເດືອນ", href: "/reports/monthly-car", icon: <FaChartLine size={13} /> },
       { label: "ຄົນຂັບ/ເດືອນ", href: "/reports/monthly-driver", icon: <FaChartLine size={13} /> },
-      { label: "KPI ຈັດສົ່ງ/ເດືອນ", href: "/reports/monthly-delivery", icon: <FaCheckCircle size={13} /> },
       { label: "Leaderboard ຄົນຂັບ", href: "/reports/drivers", icon: <FaUserTie size={13} /> },
     ],
   },
@@ -133,6 +132,7 @@ const navSections: NavSection[] = [
     key: "manage",
     items: [
       { label: "ຂໍ້ມູນລົດ", href: "/manage/cars", icon: <FaTruck size={13} /> },
+      { label: "ປະເພດລົດ", href: "/manage/car-types", icon: <FaTruck size={13} /> },
       // { label: "ຄົນຂັບລົດ", href: "/manage/drivers", icon: <FaUserTie size={13} /> },
       { label: "ພະນັກງານຂົນສົ່ງ", href: "/manage/warehouse-workers", icon: <FaTruck size={13} /> },
       { label: "ເສັ້ນທາງຂົນສົ່ງ", href: "/manage/delivery-routes", icon: <FaRoute size={13} /> },
@@ -157,6 +157,12 @@ export default function Sidebar({
   // Accordion: at most one section open at a time. Defaults to the section
   // that owns the current route so users land on a useful expanded state.
   const sectionForPath = (path: string): string | null => {
+    // Quick-access shortcuts (top "ທາງລັດ" group) must NOT pop open the section
+    // that merely prefix-matches their route — that read like the menu opening
+    // by itself when you clicked Todo / KPI.
+    if (path === "/bills-pending/todos" || path === "/reports/monthly-delivery") {
+      return null;
+    }
     const match = navSections.find((s) =>
       s.items.some((it) => path.startsWith(it.href))
     );
@@ -280,6 +286,17 @@ export default function Sidebar({
             <FaTachometerAlt size={16} className={pathname === "/" ? "text-teal-200" : "transition-colors group-hover:text-teal-200"} />
             {!showCollapsed && <span>Dashboard</span>}
           </Link>
+        </div>
+
+        {/* Quick-access shortcuts */}
+        {!showCollapsed && (
+          <div className="px-5 pt-3 pb-1">
+            <p className="text-[10px] font-semibold uppercase tracking-[0.2em] text-slate-500">
+              ທາງລັດ
+            </p>
+          </div>
+        )}
+        <div className="px-3 space-y-1">
           <Link
             href="/bills-pending/todos"
             className={`group flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-medium transition-all duration-200 ${

@@ -1221,18 +1221,18 @@ async function getPhoneTrackingJobs(session) {
   );
 }
 
-// Fleet view of phone tracking — one marker per PHONE/driver at its latest
-// position, never per trip. We can't key purely on imei because the legacy
+// Live fleet view of phone tracking — one marker per active PHONE/driver at
+// its latest position, never per trip. Closed trips are intentionally excluded:
+// this page answers "where are the phones now?", while completed trip history
+// belongs on /tracking/phone. We can't key purely on imei because the legacy
 // save_travel_history path stores points with a NULL imei (only the batch
 // /api/mobile/location path sets it), so an imei-only key silently drops all
-// of that data. Instead each trip's latest fix is bucketed by
+// of that data. Instead each active trip's latest fix is bucketed by
 //   unit_key = COALESCE(imei, driver, car, doc_no)
 // — phone first, then the trip's driver/car so nothing is lost — and DISTINCT
-// ON collapses every bucket to its single most-recent fix. A phone that ran
-// several trips shows once (at where it is now); a trip whose points lack an
-// imei still appears, keyed by its driver. recorded_at comes back as
-// 'YYYY-MM-DD HH24:MI:SS' so the client's gps-time helpers can parse it for
-// the online/offline staleness check.
+// ON collapses every bucket to its single most-recent fix. recorded_at comes
+// back as 'YYYY-MM-DD HH24:MI:SS' so the client's gps-time helpers can parse
+// it for the online/offline staleness check.
 async function getPhoneFleet(session) {
   await ensureDeliveryWorkflowSchema();
   const scope = getBranchScope(session);
@@ -1284,7 +1284,9 @@ async function getPhoneFleet(session) {
            ORDER BY h.recorded_at DESC, h.roworder DESC
            LIMIT 1
          ) last ON TRUE
-         WHERE ${getFixedYearSqlFilter("t.doc_date")} ${branchFilterJob(scope, "t")}
+         WHERE ${getFixedYearSqlFilter("t.doc_date")}
+           AND COALESCE(t.job_status, 0) IN (1, 2)
+           ${branchFilterJob(scope, "t")}
        ) tl
        ORDER BY tl.unit_key, tl.recorded_at DESC, tl.doc_no DESC
      ) z

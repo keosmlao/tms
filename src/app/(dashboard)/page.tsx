@@ -1155,7 +1155,9 @@ export default function DashboardPage() {
     // 3 hard-coded branch buckets, so summing teams under-counts.
     const totalPending = toNumber(data.pending_summary.year_pending);
     const totalComplete = teams.reduce((s, t) => s + toNumber(t.stats.complete), 0);
+    const totalLogisticWork = totalComplete + totalPending;
     const completionRate = getPercent(totalComplete, totalPending + totalComplete);
+    const logisticWorkRate = getPercent(totalLogisticWork, totalBills);
     const logisticRate = getPercent(logistic, totalBills);
 
     const allCarrierMix = [
@@ -1165,7 +1167,18 @@ export default function DashboardPage() {
     ];
     const carrierMix = data.user_branch ? allCarrierMix.filter((c) => c.branch === data.user_branch) : allCarrierMix;
 
-    return { totalBills, logistic, teams, totalPending, totalComplete, completionRate, logisticRate, carrierMix };
+    return {
+      totalBills,
+      logistic,
+      totalLogisticWork,
+      teams,
+      totalPending,
+      totalComplete,
+      completionRate,
+      logisticWorkRate,
+      logisticRate,
+      carrierMix,
+    };
   }, [data]);
 
   if (loading && !data) {
@@ -1197,7 +1210,18 @@ export default function DashboardPage() {
     );
   }
 
-  const { totalBills, logistic, teams, totalPending, totalComplete, completionRate, logisticRate, carrierMix } = computed;
+  const {
+    totalBills,
+    logistic,
+    totalLogisticWork,
+    teams,
+    totalPending,
+    totalComplete,
+    completionRate,
+    logisticWorkRate,
+    logisticRate,
+    carrierMix,
+  } = computed;
   const currentYear = FIXED_YEAR;
 
   const pendingLists: Record<PendingTab, { count: CountValue; items: PendingShipment[]; subtitle: string }> = {
@@ -1270,8 +1294,8 @@ export default function DashboardPage() {
             />
             <HeroKpiTile
               label="ຕ້ອງຂົນສົ່ງ"
-              value={logistic}
-              caption={`${logisticRate}% ຂອງບິນທັງໝົດ`}
+              value={totalLogisticWork}
+              caption={`${logisticWorkRate}% ຂອງບິນທັງໝົດ`}
               icon={<FaTruck size={14} />}
               accent="bg-sky-600"
             />

@@ -6,6 +6,7 @@ import * as bills from "@/actions/bills";
 import * as dashboard from "@/actions/dashboard";
 import * as deliveryRound from "@/actions/delivery-round";
 import * as deliveryRoute from "@/actions/delivery-route";
+import * as carType from "@/actions/car-type";
 import * as fuel from "@/actions/fuel";
 import * as geofence from "@/actions/geofence";
 import * as gps from "@/actions/gps";
@@ -201,6 +202,11 @@ export const Actions = {
   getDeliveryRound: deliveryRound.getDeliveryRound,
   upsertDeliveryRound: deliveryRound.upsertDeliveryRound,
   deleteDeliveryRound: deliveryRound.deleteDeliveryRound,
+
+  // Car types (ປະເພດລົດ)
+  listCarTypes: carType.listCarTypes,
+  upsertCarType: carType.upsertCarType,
+  deleteCarType: carType.deleteCarType,
 
   // Delivery route master
   listDeliveryRoutes: deliveryRoute.listDeliveryRoutes,

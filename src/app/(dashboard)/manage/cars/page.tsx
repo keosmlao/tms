@@ -390,6 +390,7 @@ export default function CarsManagePage() {
   const [showForm, setShowForm] = useState(false);
   const [editingCode, setEditingCode] = useState<string | null>(null);
   const [form, setForm] = useState<CarForm>(emptyForm);
+  const [carTypeOptions, setCarTypeOptions] = useState<string[]>(CAR_TYPE_OPTIONS);
   const [searchText, setSearchText] = useState("");
   const [directoryFilter, setDirectoryFilter] = useState<DirectoryFilter>("all");
   const [currentPage, setCurrentPage] = useState(1);
@@ -418,6 +419,19 @@ export default function CarsManagePage() {
     setEditingCode(null);
     setShowForm(false);
   };
+
+  // Car types are admin-managed at /manage/car-types; fall back to the seeded
+  // defaults (CAR_TYPE_OPTIONS) until the list loads.
+  useEffect(() => {
+    void Actions.listCarTypes(true)
+      .then((data) => {
+        const types = (data as Array<{ name?: string }> | null)
+          ?.map((t) => (t.name ?? "").trim())
+          .filter(Boolean) ?? [];
+        if (types.length > 0) setCarTypeOptions(types);
+      })
+      .catch(() => undefined);
+  }, []);
 
   useEffect(() => {
     let cancelled = false;
@@ -944,7 +958,7 @@ export default function CarsManagePage() {
 
       {/* ========== MODAL ========== */}
       {showForm && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+        <div className="fixed inset-0 z-[1200] flex items-center justify-center p-4">
           <div
             role="button"
             tabIndex={0}
@@ -1074,7 +1088,7 @@ export default function CarsManagePage() {
                             className="glass-input h-10 w-full appearance-none rounded-lg pl-3 pr-9 text-sm"
                           >
                             <option value="">— ບໍ່ລະບຸ —</option>
-                            {CAR_TYPE_OPTIONS.map((option) => (
+                            {carTypeOptions.map((option) => (
                               <option key={option} value={option}>
                                 {option}
                               </option>

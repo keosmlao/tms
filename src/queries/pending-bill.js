@@ -95,9 +95,19 @@ async function ensurePendingBillSchemaInternal(db) {
       delivery_route_code character varying,
       delivery_round_code character varying,
       transport_code character varying,
+      planned_lat character varying,
+      planned_lng character varying,
       changed_by character varying,
       changed_at timestamp without time zone DEFAULT LOCALTIMESTAMP(0)
     )
+  `);
+  await safeDdl(db, `
+    ALTER TABLE public.odg_tms_pending_bill_history
+    ADD COLUMN IF NOT EXISTS planned_lat character varying
+  `);
+  await safeDdl(db, `
+    ALTER TABLE public.odg_tms_pending_bill_history
+    ADD COLUMN IF NOT EXISTS planned_lng character varying
   `);
   await safeDdl(db, `
     CREATE INDEX IF NOT EXISTS idx_odg_tms_pending_bill_history_bill
@@ -108,7 +118,7 @@ async function ensurePendingBillSchemaInternal(db) {
 // Bump the cache version whenever the DDL changes so existing dev/prod
 // processes re-run the ALTER TABLE migrations on next call (the global cache
 // otherwise persists across hot-reloads).
-const PENDING_BILL_SCHEMA_VERSION = "v6_schedule_history";
+const PENDING_BILL_SCHEMA_VERSION = "v7_full_edit_history";
 
 async function ensurePendingBillSchema() {
   const readyKey = `__tmsPendingBillSchemaReady_${PENDING_BILL_SCHEMA_VERSION}`;
@@ -165,6 +175,8 @@ async function getPendingBillScheduleHistory(billNo) {
        COALESCE(action_status, '') as action_status,
        COALESCE(delivery_route_code, '') as delivery_route_code,
        COALESCE(delivery_round_code, '') as delivery_round_code,
+       COALESCE(planned_lat, '') as planned_lat,
+       COALESCE(planned_lng, '') as planned_lng,
        COALESCE(changed_by, '') as changed_by,
        to_char(changed_at,'DD-MM-YYYY HH24:MI') as changed_at
      FROM public.odg_tms_pending_bill_history
@@ -199,10 +211,28 @@ async function upsertPendingBillSchedule({
 
   // If all fields are blank, drop the row instead of keeping an empty entry.
   if (!date && !note && !status && !route && !round && !transport) {
-    await pool.query(
-      `DELETE FROM public.odg_tms_pending_bill WHERE bill_no = $1`,
-      [code]
-    );
+    const client = await pool.connect();
+    try {
+      await client.query("BEGIN");
+      await client.query(
+        `INSERT INTO public.odg_tms_pending_bill_history
+           (bill_no, scheduled_date, remark, action_status, delivery_route_code, delivery_round_code, transport_code, planned_lat, planned_lng, changed_by)
+         SELECT bill_no, NULL::date, NULL, NULL, NULL, NULL, NULL, planned_lat, planned_lng, $2
+         FROM public.odg_tms_pending_bill
+         WHERE bill_no = $1`,
+        [code, user]
+      );
+      await client.query(
+        `DELETE FROM public.odg_tms_pending_bill WHERE bill_no = $1`,
+        [code]
+      );
+      await client.query("COMMIT");
+    } catch (err) {
+      await client.query("ROLLBACK");
+      throw err;
+    } finally {
+      client.release();
+    }
     return { success: true, removed: true };
   }
 
@@ -225,9 +255,11 @@ async function upsertPendingBillSchedule({
   try {
     await pool.query(
       `INSERT INTO public.odg_tms_pending_bill_history
-         (bill_no, scheduled_date, remark, action_status, delivery_route_code, delivery_round_code, transport_code, changed_by)
-       VALUES ($1, $2::date, $3, $4, $5, $6, $7, $8)`,
-      [code, date, note, status, route, round, transport, user]
+         (bill_no, scheduled_date, remark, action_status, delivery_route_code, delivery_round_code, transport_code, planned_lat, planned_lng, changed_by)
+       SELECT bill_no, scheduled_date, remark, action_status, delivery_route_code, delivery_round_code, transport_code, planned_lat, planned_lng, updated_by
+       FROM public.odg_tms_pending_bill
+       WHERE bill_no = $1`,
+      [code]
     );
   } catch (err) {
     console.error("pending_bill history insert failed:", err);
@@ -304,8 +336,8 @@ async function bulkUpdatePendingBills(input) {
     // Snapshot each touched bill's resulting schedule into the change history.
     await client.query(
       `INSERT INTO public.odg_tms_pending_bill_history
-         (bill_no, scheduled_date, remark, action_status, delivery_route_code, delivery_round_code, transport_code, changed_by)
-       SELECT bill_no, scheduled_date, remark, action_status, delivery_route_code, delivery_round_code, transport_code, updated_by
+         (bill_no, scheduled_date, remark, action_status, delivery_route_code, delivery_round_code, transport_code, planned_lat, planned_lng, changed_by)
+       SELECT bill_no, scheduled_date, remark, action_status, delivery_route_code, delivery_round_code, transport_code, planned_lat, planned_lng, updated_by
        FROM public.odg_tms_pending_bill
        WHERE bill_no = ANY($1::varchar[])`,
       [codes]
@@ -365,6 +397,18 @@ async function upsertPendingBillLocation({ billNo, lat, lng, userCode }) {
              updated_at = LOCALTIMESTAMP(0)`,
       [code, user]
     );
+    try {
+      await pool.query(
+        `INSERT INTO public.odg_tms_pending_bill_history
+           (bill_no, scheduled_date, remark, action_status, delivery_route_code, delivery_round_code, transport_code, planned_lat, planned_lng, changed_by)
+         SELECT bill_no, scheduled_date, remark, action_status, delivery_route_code, delivery_round_code, transport_code, planned_lat, planned_lng, updated_by
+         FROM public.odg_tms_pending_bill
+         WHERE bill_no = $1`,
+        [code]
+      );
+    } catch (err) {
+      console.error("pending_bill location history insert failed:", err);
+    }
     return { success: true, cleared: true };
   }
 
@@ -378,6 +422,18 @@ async function upsertPendingBillLocation({ billNo, lat, lng, userCode }) {
            updated_at = LOCALTIMESTAMP(0)`,
     [code, latStr, lngStr, user]
   );
+  try {
+    await pool.query(
+      `INSERT INTO public.odg_tms_pending_bill_history
+         (bill_no, scheduled_date, remark, action_status, delivery_route_code, delivery_round_code, transport_code, planned_lat, planned_lng, changed_by)
+       SELECT bill_no, scheduled_date, remark, action_status, delivery_route_code, delivery_round_code, transport_code, planned_lat, planned_lng, updated_by
+       FROM public.odg_tms_pending_bill
+       WHERE bill_no = $1`,
+      [code]
+    );
+  } catch (err) {
+    console.error("pending_bill location history insert failed:", err);
+  }
   return { success: true };
 }
 

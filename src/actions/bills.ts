@@ -183,24 +183,52 @@ export async function upsertPendingBillSchedule(input: {
   transport_code?: string | null;
 }) {
   const s = await requireSession();
+  const userCode = (s as { code?: string })?.code;
   const current = await svcGetPendingBillSchedule(input.bill_no);
   const has = (key: keyof typeof input) => Object.prototype.hasOwnProperty.call(input, key);
-  return svcUpsertPendingBillSchedule({
-    billNo: input.bill_no,
-    scheduledDate: has("scheduled_date") ? input.scheduled_date ?? null : current?.scheduled_date ?? null,
+  const next = {
+    scheduled_date: has("scheduled_date") ? input.scheduled_date ?? null : current?.scheduled_date ?? null,
     remark: has("remark") ? input.remark ?? null : current?.remark ?? null,
-    actionStatus: has("action_status") ? input.action_status ?? null : current?.action_status ?? null,
-    deliveryRouteCode: has("delivery_route_code")
+    action_status: has("action_status") ? input.action_status ?? null : current?.action_status ?? null,
+    delivery_route_code: has("delivery_route_code")
       ? input.delivery_route_code ?? null
       : current?.delivery_route_code ?? null,
-    deliveryRoundCode: has("delivery_round_code")
+    delivery_round_code: has("delivery_round_code")
       ? input.delivery_round_code ?? null
       : current?.delivery_round_code ?? null,
-    transportCode: has("transport_code")
+    transport_code: has("transport_code")
       ? input.transport_code ?? null
       : current?.transport_code ?? null,
-    userCode: (s as { code?: string })?.code,
+  };
+  const result = await svcUpsertPendingBillSchedule({
+    billNo: input.bill_no,
+    scheduledDate: next.scheduled_date,
+    remark: next.remark,
+    actionStatus: next.action_status,
+    deliveryRouteCode: next.delivery_route_code,
+    deliveryRoundCode: next.delivery_round_code,
+    transportCode: next.transport_code,
+    userCode,
   });
+  const { recordAudit } = await import("@/queries/audit-log.js");
+  await recordAudit({
+    action: "pending_bill.schedule_update",
+    entityType: "bill",
+    entityId: input.bill_no,
+    userCode,
+    changes: {
+      old: {
+        scheduled_date: current?.scheduled_date ?? null,
+        remark: current?.remark ?? null,
+        action_status: current?.action_status ?? null,
+        delivery_route_code: current?.delivery_route_code ?? null,
+        delivery_round_code: current?.delivery_round_code ?? null,
+        transport_code: current?.transport_code ?? null,
+      },
+      new: next,
+    },
+  });
+  return result;
 }
 
 export async function bulkUpdatePendingBills(input: {
@@ -244,12 +272,32 @@ export async function setPendingBillLocation(input: {
   lng: string | number | null;
 }) {
   const s = await requireSession();
-  return svcUpsertPendingBillLocation({
+  const userCode = (s as { code?: string })?.code;
+  const current = await svcGetPendingBillSchedule(input.bill_no);
+  const result = await svcUpsertPendingBillLocation({
     billNo: input.bill_no,
     lat: input.lat,
     lng: input.lng,
-    userCode: (s as { code?: string })?.code,
+    userCode,
   });
+  const { recordAudit } = await import("@/queries/audit-log.js");
+  await recordAudit({
+    action: "pending_bill.location_update",
+    entityType: "bill",
+    entityId: input.bill_no,
+    userCode,
+    changes: {
+      old: {
+        planned_lat: current?.planned_lat ?? null,
+        planned_lng: current?.planned_lng ?? null,
+      },
+      new: {
+        planned_lat: input.lat ?? null,
+        planned_lng: input.lng ?? null,
+      },
+    },
+  });
+  return result;
 }
 
 export async function getBillTodos(billNo: string) {
@@ -268,24 +316,57 @@ export async function createBillTodo(input: {
   deadline?: string | null;
 }) {
   const s = await requireSession();
-  return svcCreateBillTodo({
+  const userCode = (s as { code?: string })?.code;
+  const result = await svcCreateBillTodo({
     billNo: input.bill_no,
     summary: input.summary,
     deadline: input.deadline ?? null,
-    userCode: (s as { code?: string })?.code,
+    userCode,
   });
+  const { recordAudit } = await import("@/queries/audit-log.js");
+  await recordAudit({
+    action: "bill_todo.create",
+    entityType: "bill",
+    entityId: input.bill_no,
+    userCode,
+    changes: {
+      id: result.id,
+      summary: input.summary,
+      deadline: input.deadline ?? null,
+    },
+  });
+  return result;
 }
 
 export async function setBillTodoDone(input: { id: number | string; done: boolean }) {
   const s = await requireSession();
-  return svcSetBillTodoDone({
+  const userCode = (s as { code?: string })?.code;
+  const result = await svcSetBillTodoDone({
     id: input.id,
     done: input.done,
-    userCode: (s as { code?: string })?.code,
+    userCode,
   });
+  const { recordAudit } = await import("@/queries/audit-log.js");
+  await recordAudit({
+    action: "bill_todo.set_done",
+    entityType: "bill_todo",
+    entityId: String(input.id),
+    userCode,
+    changes: { done: input.done },
+  });
+  return result;
 }
 
 export async function deleteBillTodo(id: number | string) {
-  await requireSession();
-  return svcDeleteBillTodo(id);
+  const s = await requireSession();
+  const userCode = (s as { code?: string })?.code;
+  const result = await svcDeleteBillTodo(id);
+  const { recordAudit } = await import("@/queries/audit-log.js");
+  await recordAudit({
+    action: "bill_todo.delete",
+    entityType: "bill_todo",
+    entityId: String(id),
+    userCode,
+  });
+  return result;
 }

@@ -1,5 +1,6 @@
 const { pool, query } = require("../lib/db");
 const { getFixedYearSqlFilter } = require("../lib/fixed-year");
+const { recordAudit } = require("./audit-log");
 
 const thunjaiCache = globalThis;
 
@@ -68,6 +69,11 @@ async function setSetting(key, value, userCode) {
   if (!k) throw new Error("ThunJai setting key is required");
   const v = value == null ? null : String(value);
   const u = userCode ? String(userCode).trim() || null : null;
+  const oldRows = await query(
+    `SELECT value FROM public.odg_thunjai_setting WHERE key = $1`,
+    [k]
+  );
+  const oldValue = oldRows[0]?.value ?? null;
   await pool.query(
     `INSERT INTO public.odg_thunjai_setting (key, value, updated_by, updated_at)
      VALUES ($1, $2, $3, LOCALTIMESTAMP(0))
@@ -77,6 +83,21 @@ async function setSetting(key, value, userCode) {
            updated_at = LOCALTIMESTAMP(0)`,
     [k, v, u]
   );
+  if (oldValue !== v) {
+    const sensitive = /pwd|password|secret|token|key/i.test(k);
+    await recordAudit({
+      action: "thunjai.setting.update",
+      entityType: "thunjai_setting",
+      entityId: k,
+      userCode: u,
+      changes: {
+        key: k,
+        old_value: sensitive && oldValue ? "***" : oldValue,
+        new_value: sensitive && v ? "***" : v,
+        masked: sensitive,
+      },
+    });
+  }
   return { success: true };
 }
 

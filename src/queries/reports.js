@@ -1,4 +1,4 @@
-const { query } = require("../lib/db");
+const { query, queryOne } = require("../lib/db");
 const { getFixedYearSqlFilter } = require("../lib/fixed-year");
 const {
   getBranchScope,
@@ -106,113 +106,497 @@ async function getReportMonthlyDriver(session, monthly) {
   return result;
 }
 
-// Monthly delivery completion-rate KPI ("ອັດຕາການຈັດສົ່ງສຳເລັດ / ເດືອນ").
-// For bills dispatched in the given month it measures how many were delivered
-// successfully vs still outstanding — the rate the ops team tracks.
-//
-// Universe = bills (odg_tms_detail) belonging to an APPROVED, non-admin-closed
-// job (approve_status=1, job_status<>4) whose job date (doc_date) falls in the
-// month. Month is keyed on doc_date for consistency with every other monthly
-// report + the fixed-year filter (sent_end is NULL for not-yet-delivered bills,
-// so it can't key the denominator). Cancelled bills (status=2) are EXCLUDED so
-// they neither help nor hurt the rate — total = delivered + pending exactly.
-//   delivered (ສົ່ງສຳເລັດ) : status=1 AND sent_end set       — canonical "done"
-//   pending   (ຄ້າງສົ່ງ)    : status NOT IN (1,2)             — waiting + in transit
-//   on_time                : delivered AND sent_end::date <= target date
-//                            (scheduled_date | send_date | bill_date) — the same
-//                            canonical on-time rule the dashboard/KPI-alert use.
-// One pass returns an overall rollup PLUS a per-branch (transport_code)
-// breakdown via GROUPING SETS; the rollup row is the one with branch_code NULL.
+// Monthly delivery KPI for management review.
+// The month is event-based:
+//   opened    — closed bills with delivery in the month, using real open
+//               timestamp from the shipment/sales bill
+//               (ic_trans.create_date_time_now, shipment create timestamp,
+//               then doc_date fallback).
+//   assigned  — bills arranged into delivery trips in the month, using the
+//               delivery detail creation timestamp. Some were opened in an
+//               earlier month; those are carry_in.
+//   carry_out — bills opened in the month but not completed before next month.
+//   multi_round_bills — distinct bills touched in the month that have more
+//               than one approved delivery detail across their history.
+//   on_time   — delivered within 24h, measured two ways:
+//               1) bill open time -> sent_end, denominator = opened
+//               2) delivery date/start -> sent_end, denominator = assigned
+// Only the three managed transport branches are included in delivery KPIs.
+// 02-0001 is the Khua Luang/Odean branch in current master data.
+const MONTHLY_DELIVERY_BRANCH_CODES = ["02-0001", "02-0002", "02-0003"];
+const MONTHLY_DELIVERY_BRANCH_NAMES = {
+  "02-0001": "ຂົນສົ່ງຂົວຫຼວງ",
+  "02-0002": "ຂົນສົ່ງດອນຕິ້ວ",
+  "02-0003": "ຂົນສົ່ງປາກເຊ",
+};
+
 async function getReportMonthlyDelivery(session, monthly) {
   const scope = getBranchScope(session);
-  const branchClause = scope.scoped
-    ? `AND EXISTS (SELECT 1 FROM ic_trans_shipment __ts WHERE __ts.doc_no = d.bill_no AND __ts.transport_code = '${scope.branch}')`
-    : "";
+  const monthStart = `${monthly}-01`;
+  const [yearText, monthText] = monthly.split("-");
+  const year = Number.parseInt(yearText, 10);
+  const month = Number.parseInt(monthText, 10);
+  const nextMonthStart =
+    month === 12
+      ? `${year + 1}-01-01`
+      : `${year}-${String(month + 1).padStart(2, "0")}-01`;
+  const branchCodeSql = MONTHLY_DELIVERY_BRANCH_CODES.map((code) => `'${code}'`).join(",");
+  const openedBranchClause = scope.scoped ? `AND s.transport_code = '${scope.branch}'` : "";
+  const deliveredBranchClause = scope.scoped ? `AND s.transport_code = '${scope.branch}'` : "";
   const rows = await query(
-    `WITH base AS (
+    `WITH params AS (
+       SELECT $1::timestamp AS start_at, $2::timestamp AS end_at
+     ),
+     opened_source AS (
        SELECT
-         COALESCE(s.transport_code, '') AS branch_code,
+         s.doc_no AS bill_no,
+         COALESCE(NULLIF(TRIM(s.transport_code), ''), 'unknown') AS branch_code,
+         COALESCE(NULLIF(TRIM(sale_u.department::text), ''), 'unknown') AS department_code,
+         COALESCE(
+           NULLIF(TRIM(dep.name_1::text), ''),
+           NULLIF(TRIM(sale_u.department::text), ''),
+           'ບໍ່ລະບຸພະແນກ'
+         ) AS department_name,
+         COALESCE(t.create_date_time_now, s.create_date_time_now, s.doc_date::timestamp) AS opened_at,
+         completed.sent_end AS completed_at,
+         p.end_at AS month_end_at
+       FROM public.ic_trans_shipment s
+       LEFT JOIN public.ic_trans t ON t.doc_no = s.doc_no
+       LEFT JOIN erp_user sale_u ON sale_u.code = t.sale_code
+       LEFT JOIN erp_department_list dep ON dep.code = sale_u.department
+       LEFT JOIN LATERAL (
+         SELECT MIN(done.sent_end) AS sent_end
+         FROM public.odg_tms_detail done
+         LEFT JOIN public.odg_tms done_job ON done_job.doc_no = done.doc_no
+         WHERE done.bill_no = s.doc_no
+           AND done.status = 1
+           AND done.sent_end IS NOT NULL
+           AND COALESCE(done_job.approve_status,0) = 1
+       ) completed ON true
+       CROSS JOIN params p
+       WHERE COALESCE(t.create_date_time_now, s.create_date_time_now, s.doc_date::timestamp) >= p.start_at
+         AND COALESCE(t.create_date_time_now, s.create_date_time_now, s.doc_date::timestamp) < p.end_at
+         AND s.transport_code IS NOT NULL
+         AND s.transport_code IN (${branchCodeSql})
+         ${openedBranchClause}
+     ),
+     opened_rollup AS (
+       SELECT
+         branch_code,
+         COUNT(*)::int AS opened,
+         COUNT(*) FILTER (WHERE completed_at IS NULL)::int AS pending,
+         COUNT(*) FILTER (
+           WHERE completed_at IS NULL
+              OR completed_at >= month_end_at
+         )::int AS carry_out,
+         COUNT(*) FILTER (
+           WHERE completed_at IS NOT NULL
+             AND completed_at <= opened_at + INTERVAL '24 hours'
+         )::int AS on_time_from_open,
+         COUNT(*) FILTER (
+           WHERE completed_at IS NULL
+              OR completed_at > opened_at + INTERVAL '24 hours'
+         )::int AS breach_from_open
+       FROM opened_source
+       GROUP BY branch_code
+     ),
+     department_opened_rollup AS (
+       SELECT
+         department_code,
+         MAX(department_name) AS department_name,
+         COUNT(*)::int AS opened,
+         COUNT(*) FILTER (WHERE completed_at IS NULL)::int AS pending,
+         COUNT(*) FILTER (
+           WHERE completed_at IS NULL
+              OR completed_at >= month_end_at
+         )::int AS carry_out,
+         COUNT(*) FILTER (
+           WHERE completed_at IS NOT NULL
+             AND completed_at <= opened_at + INTERVAL '24 hours'
+         )::int AS on_time_from_open,
+         COUNT(*) FILTER (
+           WHERE completed_at IS NULL
+              OR completed_at > opened_at + INTERVAL '24 hours'
+         )::int AS breach_from_open
+       FROM opened_source
+       GROUP BY department_code
+     ),
+     assigned_source AS (
+       SELECT
+         d.bill_no,
+         COALESCE(NULLIF(TRIM(s.transport_code), ''), 'unknown') AS branch_code,
+         COALESCE(NULLIF(TRIM(sale_u.department::text), ''), 'unknown') AS department_code,
+         COALESCE(
+           NULLIF(TRIM(dep.name_1::text), ''),
+           NULLIF(TRIM(sale_u.department::text), ''),
+           'ບໍ່ລະບຸພະແນກ'
+         ) AS department_name,
          d.status,
+         d.sent_start,
+         COALESCE(d.date_logistic::timestamp, a.date_logistic::timestamp, d.sent_start, a.dispatch_started_at) AS delivery_date_at,
          d.sent_end,
-         CASE
-           WHEN d.status = 1 AND d.sent_end IS NOT NULL THEN
-             CASE
-               WHEN COALESCE(pb.scheduled_date::date, t.send_date::date, d.bill_date::date) IS NULL THEN NULL
-               WHEN d.sent_end::date <= COALESCE(pb.scheduled_date::date, t.send_date::date, d.bill_date::date) THEN true
-               ELSE false
-             END
-         END AS is_on_time
+         COALESCE(t.create_date_time_now, s.create_date_time_now, s.doc_date::timestamp) AS bill_opened_at,
+         COALESCE(history.delivery_rounds, 0) AS delivery_rounds,
+         p.start_at AS month_start_at,
+         p.end_at AS month_end_at
        FROM public.odg_tms_detail d
-       INNER JOIN public.odg_tms a ON a.doc_no = d.doc_no
-       LEFT JOIN public.odg_tms_pending_bill pb ON pb.bill_no = d.bill_no
-       LEFT JOIN ic_trans t ON t.doc_no = d.bill_no
-       LEFT JOIN ic_trans_shipment s ON s.doc_no = d.bill_no
-       WHERE to_char(d.doc_date,'yyyy-MM') = $1
-         AND ${getFixedYearSqlFilter("d.doc_date")}
+       LEFT JOIN public.odg_tms a ON a.doc_no = d.doc_no
+       LEFT JOIN public.ic_trans_shipment s ON s.doc_no = d.bill_no
+       LEFT JOIN public.ic_trans t ON t.doc_no = d.bill_no
+       LEFT JOIN erp_user sale_u ON sale_u.code = t.sale_code
+       LEFT JOIN erp_department_list dep ON dep.code = sale_u.department
+       LEFT JOIN LATERAL (
+         SELECT COUNT(*)::int AS delivery_rounds
+         FROM public.odg_tms_detail hist
+         LEFT JOIN public.odg_tms hist_job ON hist_job.doc_no = hist.doc_no
+         WHERE hist.bill_no = d.bill_no
+           AND COALESCE(hist_job.approve_status,0) = 1
+       ) history ON true
+       CROSS JOIN params p
+       WHERE d.create_date_time_now >= p.start_at
+         AND d.create_date_time_now < p.end_at
          AND COALESCE(a.approve_status,0) = 1
-         AND COALESCE(a.job_status,0) <> 4
-         ${branchClause}
+         AND COALESCE(NULLIF(TRIM(s.transport_code), ''), '') IN (${branchCodeSql})
+         ${deliveredBranchClause}
+     ),
+     assigned_rollup AS (
+       SELECT
+         branch_code,
+         COUNT(*)::int AS assigned,
+         COUNT(DISTINCT bill_no)::int AS assigned_bills,
+         COUNT(DISTINCT bill_no) FILTER (WHERE delivery_rounds > 1)::int AS multi_round_bills,
+         COUNT(DISTINCT bill_no) FILTER (WHERE bill_opened_at < month_start_at)::int AS carry_in,
+         COUNT(DISTINCT bill_no) FILTER (
+           WHERE bill_opened_at >= month_start_at
+             AND bill_opened_at < month_end_at
+         )::int AS same_month_assigned,
+         COUNT(*) FILTER (WHERE status = 1 AND sent_end IS NOT NULL)::int AS delivered,
+         COUNT(*) FILTER (WHERE status = 2 AND sent_end IS NOT NULL)::int AS cancelled,
+         COUNT(*) FILTER (
+           WHERE status = 1
+             AND sent_end IS NOT NULL
+             AND delivery_date_at IS NOT NULL
+             AND sent_end <= delivery_date_at + INTERVAL '24 hours'
+         )::int AS on_time_from_start,
+         COUNT(*) FILTER (
+           WHERE NOT (
+             status = 1
+             AND sent_end IS NOT NULL
+             AND delivery_date_at IS NOT NULL
+             AND sent_end <= delivery_date_at + INTERVAL '24 hours'
+           )
+           AND COALESCE(status,0) <> 2
+             AND (
+               delivery_date_at IS NULL
+               OR sent_end IS NULL
+               OR sent_end > delivery_date_at + INTERVAL '24 hours'
+             )
+         )::int AS breach_from_start
+       FROM assigned_source
+       GROUP BY branch_code
+     ),
+     department_assigned_rollup AS (
+       SELECT
+         department_code,
+         MAX(department_name) AS department_name,
+         COUNT(*)::int AS assigned,
+         COUNT(DISTINCT bill_no)::int AS assigned_bills,
+         COUNT(DISTINCT bill_no) FILTER (WHERE delivery_rounds > 1)::int AS multi_round_bills,
+         COUNT(DISTINCT bill_no) FILTER (WHERE bill_opened_at < month_start_at)::int AS carry_in,
+         COUNT(DISTINCT bill_no) FILTER (
+           WHERE bill_opened_at >= month_start_at
+             AND bill_opened_at < month_end_at
+         )::int AS same_month_assigned,
+         COUNT(*) FILTER (WHERE status = 1 AND sent_end IS NOT NULL)::int AS delivered,
+         COUNT(*) FILTER (WHERE status = 2 AND sent_end IS NOT NULL)::int AS cancelled,
+         COUNT(*) FILTER (
+           WHERE status = 1
+             AND sent_end IS NOT NULL
+             AND delivery_date_at IS NOT NULL
+             AND sent_end <= delivery_date_at + INTERVAL '24 hours'
+         )::int AS on_time_from_start,
+         COUNT(*) FILTER (
+           WHERE NOT (
+             status = 1
+             AND sent_end IS NOT NULL
+             AND delivery_date_at IS NOT NULL
+             AND sent_end <= delivery_date_at + INTERVAL '24 hours'
+           )
+           AND COALESCE(status,0) <> 2
+             AND (
+               delivery_date_at IS NULL
+               OR sent_end IS NULL
+               OR sent_end > delivery_date_at + INTERVAL '24 hours'
+             )
+         )::int AS breach_from_start
+       FROM assigned_source
+       GROUP BY department_code
      )
      SELECT
-       branch_code,
-       COUNT(*) FILTER (WHERE status = 1 AND sent_end IS NOT NULL)::int AS delivered,
-       COUNT(*) FILTER (WHERE COALESCE(status,0) NOT IN (1,2))::int   AS pending,
-       COUNT(*) FILTER (WHERE status = 2)::int                        AS cancelled,
-       COUNT(*) FILTER (WHERE is_on_time = true)::int                 AS on_time,
-       COUNT(*) FILTER (WHERE is_on_time = false)::int                AS breach
-     FROM base
-     GROUP BY GROUPING SETS ((), (branch_code))`,
-    [monthly]
+       'branch' AS dimension,
+       COALESCE(o.branch_code, d.branch_code) AS branch_code,
+       NULL::text AS department_code,
+       NULL::text AS department_name,
+       COALESCE(o.opened, 0)::int AS opened,
+       COALESCE(d.assigned, 0)::int AS assigned,
+       COALESCE(d.assigned_bills, 0)::int AS assigned_bills,
+       COALESCE(d.multi_round_bills, 0)::int AS multi_round_bills,
+       COALESCE(d.carry_in, 0)::int AS carry_in,
+       COALESCE(d.same_month_assigned, 0)::int AS same_month_assigned,
+       COALESCE(d.delivered, 0)::int AS delivered,
+       COALESCE(o.pending, 0)::int AS pending,
+       GREATEST(COALESCE(o.opened, 0) - COALESCE(d.same_month_assigned, 0), 0)::int AS carry_out,
+       COALESCE(d.cancelled, 0)::int AS cancelled,
+       COALESCE(o.on_time_from_open, 0)::int AS on_time_from_open,
+       COALESCE(o.breach_from_open, 0)::int AS breach_from_open,
+       COALESCE(d.on_time_from_start, 0)::int AS on_time_from_start,
+       COALESCE(d.breach_from_start, 0)::int AS breach_from_start
+     FROM opened_rollup o
+     FULL JOIN assigned_rollup d USING (branch_code)
+     UNION ALL
+     SELECT
+       'department' AS dimension,
+       NULL::text AS branch_code,
+       COALESCE(o.department_code, d.department_code) AS department_code,
+       COALESCE(o.department_name, d.department_name, 'ບໍ່ລະບຸພະແນກ') AS department_name,
+       COALESCE(o.opened, 0)::int AS opened,
+       COALESCE(d.assigned, 0)::int AS assigned,
+       COALESCE(d.assigned_bills, 0)::int AS assigned_bills,
+       COALESCE(d.multi_round_bills, 0)::int AS multi_round_bills,
+       COALESCE(d.carry_in, 0)::int AS carry_in,
+       COALESCE(d.same_month_assigned, 0)::int AS same_month_assigned,
+       COALESCE(d.delivered, 0)::int AS delivered,
+       COALESCE(o.pending, 0)::int AS pending,
+       GREATEST(COALESCE(o.opened, 0) - COALESCE(d.same_month_assigned, 0), 0)::int AS carry_out,
+       COALESCE(d.cancelled, 0)::int AS cancelled,
+       COALESCE(o.on_time_from_open, 0)::int AS on_time_from_open,
+       COALESCE(o.breach_from_open, 0)::int AS breach_from_open,
+       COALESCE(d.on_time_from_start, 0)::int AS on_time_from_start,
+       COALESCE(d.breach_from_start, 0)::int AS breach_from_start
+     FROM department_opened_rollup o
+     FULL JOIN department_assigned_rollup d USING (department_code)
+     ORDER BY dimension, branch_code, department_code`,
+    [monthStart, nextMonthStart]
   );
 
   const branchNameRows = await query(
     `SELECT code, COALESCE(NULLIF(TRIM(name_1), ''), code) AS name
-     FROM transport_type WHERE code IN ('02-0001','02-0002','02-0003')`
+     FROM transport_type
+     WHERE code = ANY($1::text[])`,
+    [MONTHLY_DELIVERY_BRANCH_CODES]
   );
-  const branchNames = Object.fromEntries(branchNameRows.map((r) => [r.code, r.name]));
+  const branchNames = {
+    ...Object.fromEntries(branchNameRows.map((r) => [r.code, r.name])),
+    ...MONTHLY_DELIVERY_BRANCH_NAMES,
+  };
 
   const toEntry = (r) => ({
+    opened: Number(r.opened) || 0,
+    assigned: Number(r.assigned) || 0,
+    assigned_bills: Number(r.assigned_bills) || 0,
+    multi_round_bills: Number(r.multi_round_bills) || 0,
+    carry_in: Number(r.carry_in) || 0,
+    same_month_assigned: Number(r.same_month_assigned) || 0,
     delivered: Number(r.delivered) || 0,
     pending: Number(r.pending) || 0,
+    carry_out: Number(r.carry_out) || 0,
     cancelled: Number(r.cancelled) || 0,
-    on_time: Number(r.on_time) || 0,
-    breach: Number(r.breach) || 0,
+    on_time: Number(r.on_time_from_open) || 0,
+    breach: Number(r.breach_from_open) || 0,
+    on_time_from_open: Number(r.on_time_from_open) || 0,
+    breach_from_open: Number(r.breach_from_open) || 0,
+    on_time_from_start: Number(r.on_time_from_start) || 0,
+    breach_from_start: Number(r.breach_from_start) || 0,
   });
 
-  let overall = { delivered: 0, pending: 0, cancelled: 0, on_time: 0, breach: 0 };
-  const branches = [];
-  for (const r of rows) {
-    // GROUPING SETS marks the all-branches rollup row with branch_code = NULL;
-    // the per-branch rows carry the (possibly empty) transport_code.
-    if (r.branch_code === null) {
-      overall = toEntry(r);
-    } else {
-      const code = String(r.branch_code || "").trim();
-      branches.push({
-        branch_code: code || "unknown",
-        branch_name: (code && branchNames[code]) || code || "ບໍ່ລະບຸສາຂາ",
-        ...toEntry(r),
-      });
+  const overall = {
+    opened: 0,
+    assigned: 0,
+    assigned_bills: 0,
+    multi_round_bills: 0,
+    carry_in: 0,
+    same_month_assigned: 0,
+    delivered: 0,
+    pending: 0,
+    carry_out: 0,
+    cancelled: 0,
+    on_time: 0,
+    breach: 0,
+    on_time_from_open: 0,
+    breach_from_open: 0,
+    on_time_from_start: 0,
+    breach_from_start: 0,
+  };
+  const branchRows = rows.filter((r) => r.dimension === "branch");
+  const departmentRows = rows.filter((r) => r.dimension === "department");
+
+  const branches = branchRows.map((r) => {
+    const code = String(r.branch_code || "").trim();
+    const entry = {
+      branch_code: code || "unknown",
+      branch_name: (code && branchNames[code]) || code || "ບໍ່ລະບຸສາຂາ",
+      ...toEntry(r),
+    };
+    for (const key of Object.keys(overall)) {
+      overall[key] += Number(entry[key]) || 0;
     }
-  }
+    return entry;
+  });
+
+  const departments = departmentRows.map((r) => ({
+    department_code: String(r.department_code || "").trim() || "unknown",
+    department_name: String(r.department_name || "").trim() || "ບໍ່ລະບຸພະແນກ",
+    ...toEntry(r),
+  }));
+
   branches.sort((a, b) => a.branch_code.localeCompare(b.branch_code));
-  return { month: monthly, overall, branches };
+  departments.sort((a, b) => {
+    const assignedDiff = (Number(b.assigned) || 0) - (Number(a.assigned) || 0);
+    if (assignedDiff !== 0) return assignedDiff;
+    return a.department_name.localeCompare(b.department_name);
+  });
+  // ບິນຄ້າງສົ່ງແຕ່ລະມື້ — ນັບບິນທີ່ເປີດແຕ່ລະວັນ (ໃນເດືອນ) ແລະ ຍັງບໍ່ສຳເລັດ.
+  const dailyRows = await query(
+    `WITH params AS (SELECT $1::timestamp AS start_at, $2::timestamp AS end_at),
+     opened_source AS (
+       SELECT s.doc_no AS bill_no,
+         COALESCE(t.create_date_time_now, s.create_date_time_now, s.doc_date::timestamp) AS opened_at,
+         (SELECT MIN(done.sent_end) FROM public.odg_tms_detail done
+            LEFT JOIN public.odg_tms done_job ON done_job.doc_no = done.doc_no
+            WHERE done.bill_no = s.doc_no AND done.status = 1 AND done.sent_end IS NOT NULL
+              AND COALESCE(done_job.approve_status,0) = 1) AS completed_at
+       FROM public.ic_trans_shipment s
+       LEFT JOIN public.ic_trans t ON t.doc_no = s.doc_no
+       CROSS JOIN params p
+       WHERE COALESCE(t.create_date_time_now, s.create_date_time_now, s.doc_date::timestamp) >= p.start_at
+         AND COALESCE(t.create_date_time_now, s.create_date_time_now, s.doc_date::timestamp) < p.end_at
+         AND s.transport_code IS NOT NULL
+         AND s.transport_code IN (${branchCodeSql})
+         ${openedBranchClause}
+     )
+     SELECT to_char(opened_at::date, 'YYYY-MM-DD') AS day,
+            to_char(opened_at::date, 'DD/MM') AS day_label,
+            COUNT(DISTINCT bill_no)::int AS opened,
+            COUNT(DISTINCT bill_no) FILTER (WHERE completed_at IS NULL)::int AS pending,
+            COUNT(DISTINCT bill_no) FILTER (WHERE completed_at IS NOT NULL)::int AS delivered
+     FROM opened_source
+     GROUP BY opened_at::date
+     ORDER BY opened_at::date`,
+    [monthStart, nextMonthStart]
+  );
+  const daily = dailyRows.map((r) => ({
+    day: r.day,
+    day_label: r.day_label,
+    opened: Number(r.opened) || 0,
+    pending: Number(r.pending) || 0,
+    delivered: Number(r.delivered) || 0,
+  }));
+
+  // ສະຫຼຸບຕາມເຂດ (ນະຄອນຫຼວງ vs ຕ່າງແຂວງ) — ສະເລ່ຍ "ມື້ທີ່ຈັດສົ່ງສຳເລັດ"
+  // ນັບຈາກ ວັນນັດຈັດສົ່ງ (date_logistic) ຫາ ວັນສຳເລັດ (sent_end). province '01' = ນະຄອນຫຼວງ.
+  const zoneRows = await query(
+    `WITH params AS (SELECT $1::timestamp AS start_at, $2::timestamp AS end_at),
+     zone_source AS (
+       SELECT d.bill_no,
+         CASE WHEN TRIM(COALESCE(cust.province,'')) = '01' THEN 'ນະຄອນຫຼວງ' ELSE 'ຕ່າງແຂວງ' END AS zone,
+         d.status,
+         COALESCE(d.date_logistic::timestamp, a.date_logistic::timestamp, d.sent_start, a.dispatch_started_at) AS appt_at,
+         COALESCE(t.create_date_time_now, s.create_date_time_now, s.doc_date::timestamp) AS bill_opened_at,
+         d.sent_end
+       FROM public.odg_tms_detail d
+       LEFT JOIN public.odg_tms a ON a.doc_no = d.doc_no
+       LEFT JOIN public.ic_trans_shipment s ON s.doc_no = d.bill_no
+       LEFT JOIN public.ic_trans t ON t.doc_no = d.bill_no
+       LEFT JOIN public.ar_customer cust ON cust.code = s.cust_code
+       CROSS JOIN params p
+       WHERE d.create_date_time_now >= p.start_at
+         AND d.create_date_time_now < p.end_at
+         AND COALESCE(a.approve_status,0) = 1
+         AND COALESCE(NULLIF(TRIM(s.transport_code), ''), '') IN (${branchCodeSql})
+         ${deliveredBranchClause}
+     )
+     SELECT zone,
+       COUNT(DISTINCT bill_no)::int AS assigned_bills,
+       COUNT(*) FILTER (WHERE status = 1 AND sent_end IS NOT NULL)::int AS delivered,
+       COUNT(*) FILTER (
+         WHERE status = 1 AND sent_end IS NOT NULL AND appt_at IS NOT NULL
+           AND sent_end::date <= appt_at::date
+       )::int AS on_time_appt,
+       ROUND(AVG(sent_end::date - appt_at::date) FILTER (
+         WHERE status = 1 AND sent_end IS NOT NULL AND appt_at IS NOT NULL
+       ), 2) AS avg_days_from_appt,
+       ROUND(AVG(sent_end::date - bill_opened_at::date) FILTER (
+         WHERE status = 1 AND sent_end IS NOT NULL AND bill_opened_at IS NOT NULL
+       ), 2) AS avg_days_from_open
+     FROM zone_source
+     GROUP BY zone`,
+    [monthStart, nextMonthStart]
+  );
+  const zoneOrder = ["ນະຄອນຫຼວງ", "ຕ່າງແຂວງ"];
+  const zones = zoneRows
+    .map((r) => ({
+      zone: r.zone,
+      assigned_bills: Number(r.assigned_bills) || 0,
+      delivered: Number(r.delivered) || 0,
+      on_time_appt: Number(r.on_time_appt) || 0,
+      avg_days_from_appt: r.avg_days_from_appt == null ? null : Number(r.avg_days_from_appt),
+      avg_days_from_open: r.avg_days_from_open == null ? null : Number(r.avg_days_from_open),
+    }))
+    .sort((a, b) => zoneOrder.indexOf(a.zone) - zoneOrder.indexOf(b.zone));
+
+  // ການນຳໃຊ້ລົດ — ຖ້ຽວທີ່ແລ່ນ, ລົດທີ່ໃຊ້ງານ, ສະເລ່ຍຖ້ຽວ/ຄັນ/ມື້ (job ທີ່ອະນຸມັດ
+  // ແລະ ມີບິນຢູ່ສາຂາ KPI).
+  const fleetRow = await queryOne(
+    `WITH j AS (
+       SELECT DISTINCT a.doc_no, a.car, a.create_date_time_now::date AS d
+       FROM public.odg_tms a
+       WHERE a.create_date_time_now >= $1::timestamp
+         AND a.create_date_time_now < $2::timestamp
+         AND COALESCE(a.approve_status,0) = 1
+         AND COALESCE(NULLIF(TRIM(a.car), ''), '') <> ''
+         AND EXISTS (
+           SELECT 1 FROM public.odg_tms_detail dd
+           LEFT JOIN public.ic_trans_shipment ss ON ss.doc_no = dd.bill_no
+           WHERE dd.doc_no = a.doc_no
+             AND COALESCE(NULLIF(TRIM(ss.transport_code), ''), '') IN (${branchCodeSql})
+         )
+     )
+     SELECT COUNT(*)::int AS total_trips,
+            COUNT(DISTINCT car)::int AS active_cars,
+            COUNT(DISTINCT (car, d))::int AS car_days,
+            ROUND(COUNT(*)::numeric / NULLIF(COUNT(DISTINCT (car, d)), 0), 2) AS trips_per_car_per_day
+     FROM j`,
+    [monthStart, nextMonthStart]
+  );
+  const fleet = {
+    total_trips: Number(fleetRow?.total_trips) || 0,
+    active_cars: Number(fleetRow?.active_cars) || 0,
+    car_days: Number(fleetRow?.car_days) || 0,
+    trips_per_car_per_day:
+      fleetRow?.trips_per_car_per_day == null ? null : Number(fleetRow.trips_per_car_per_day),
+  };
+
+  return { month: monthly, overall, branches, departments, daily, zones, fleet };
 }
 
 async function getMonthlyDeliveryKpi(session, monthly) {
   const report = await getReportMonthlyDelivery(session, monthly);
   return {
     branches: report.branches.map((branch) => {
-      const opened = Number(branch.delivered) + Number(branch.pending);
+      const opened = Number(branch.opened) || 0;
       return {
         branch_code: branch.branch_code,
         branch_name: branch.branch_name,
         opened,
-        assigned: opened,
-        dispatched: opened,
+        assigned: Number(branch.assigned) || 0,
+        assigned_bills: Number(branch.assigned_bills) || 0,
+        multi_round_bills: Number(branch.multi_round_bills) || 0,
+        carry_in: Number(branch.carry_in) || 0,
+        carry_out: Number(branch.carry_out) || 0,
+        dispatched: Number(branch.assigned) || 0,
         delivered: Number(branch.delivered) || 0,
         pending: Number(branch.pending) || 0,
-        kpi_success: Number(branch.on_time) || 0,
+        kpi_success: Number(branch.on_time_from_open ?? branch.on_time) || 0,
         returns: 0,
         failed_closed: Number(branch.cancelled) || 0,
         avg_days_from_appt: null,
