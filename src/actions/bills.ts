@@ -100,7 +100,7 @@ export async function removeManualPendingBill(billNo: string) {
     action: "pending_bill.remove_manual",
     entityType: "bill",
     entityId: billNo,
-    userCode: (s as { code?: string })?.code,
+    userCode: s.usercode,
   });
   return result;
 }
@@ -122,7 +122,7 @@ export async function updateBillTransport(docNo: string, transportCode: string) 
     action: "bill.update_transport",
     entityType: "bill",
     entityId: docNo,
-    userCode: (s as { code?: string })?.code,
+    userCode: s.usercode,
     changes: { transport_code: transportCode },
   });
   return result;
@@ -183,7 +183,7 @@ export async function upsertPendingBillSchedule(input: {
   transport_code?: string | null;
 }) {
   const s = await requireSession();
-  const userCode = (s as { code?: string })?.code;
+  const userCode = s.usercode;
   const current = await svcGetPendingBillSchedule(input.bill_no);
   const has = (key: keyof typeof input) => Object.prototype.hasOwnProperty.call(input, key);
   const next = {
@@ -239,7 +239,7 @@ export async function bulkUpdatePendingBills(input: {
   action_status?: string | null;
 }) {
   const s = await requireSession();
-  const userCode = (s as { code?: string })?.code;
+  const userCode = s.usercode;
   const patch: {
     scheduledDate?: string | null;
     deliveryRoundCode?: string | null;
@@ -272,7 +272,7 @@ export async function setPendingBillLocation(input: {
   lng: string | number | null;
 }) {
   const s = await requireSession();
-  const userCode = (s as { code?: string })?.code;
+  const userCode = s.usercode;
   const current = await svcGetPendingBillSchedule(input.bill_no);
   const result = await svcUpsertPendingBillLocation({
     billNo: input.bill_no,
@@ -316,7 +316,7 @@ export async function createBillTodo(input: {
   deadline?: string | null;
 }) {
   const s = await requireSession();
-  const userCode = (s as { usercode?: string; code?: string })?.usercode ?? (s as { code?: string })?.code;
+  const userCode = (s as { usercode?: string; code?: string })?.usercode ?? s.usercode;
   const result = await svcCreateBillTodo({
     billNo: input.bill_no,
     summary: input.summary,
@@ -341,7 +341,7 @@ export async function createBillTodo(input: {
 
 export async function setBillTodoDone(input: { id: number | string; done: boolean }) {
   const s = await requireSession();
-  const userCode = (s as { usercode?: string; code?: string })?.usercode ?? (s as { code?: string })?.code;
+  const userCode = (s as { usercode?: string; code?: string })?.usercode ?? s.usercode;
   const result = await svcSetBillTodoDone({
     id: input.id,
     done: input.done,
@@ -361,7 +361,7 @@ export async function setBillTodoDone(input: { id: number | string; done: boolea
 
 export async function deleteBillTodo(id: number | string) {
   const s = await requireSession();
-  const userCode = (s as { usercode?: string; code?: string })?.usercode ?? (s as { code?: string })?.code;
+  const userCode = (s as { usercode?: string; code?: string })?.usercode ?? s.usercode;
   const result = await svcDeleteBillTodo(id, s);
   const { recordAudit } = await import("@/queries/audit-log.js");
   await recordAudit({

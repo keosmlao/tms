@@ -7,9 +7,7 @@ const {
   normalizeMsgType,
   serializeMentions,
   collectChatterRecipients,
-  isSalesUser,
 } = require("../lib/chatter-helpers");
-const { getBranchScope } = require("./helpers");
 
 const chatCache = globalThis;
 
@@ -103,9 +101,14 @@ async function ensureChatterSchema() {
   await chatCache.__tmsChatterSchemaPromise;
 }
 
-// Authorisation: which bills a user may read/post chatter on. Sales staff are
-// limited to their department's bills; a branch-scoped dispatcher to their own
-// branch; head office sees all. Non-bill models are unrestricted for now.
+// Authorisation: which records a user may read/post chatter on.
+// - DM ("ຂໍ້ຄວາມລອຍ"): strictly private — only the two participants may read/post.
+// - Bill conversations: OPEN to every logged-in user. Sales gives a bill its
+//   delivery branch via the odg_tms_pending_bill override, and that branch's
+//   staff must be able to read/reply on the bill thread even though the ERP
+//   shipment row still points elsewhere; department/branch scoping used to block
+//   them. Bill chatter is therefore a shared, org-internal discussion (only DMs
+//   stay private).
 async function canAccessRecord(session, model, recordId) {
   const r = String(recordId ?? "").trim();
   // Direct messages are private: record_id is "dm:<codeA>|<codeB>" and ONLY the
@@ -118,30 +121,8 @@ async function canAccessRecord(session, model, recordId) {
     const parts = key.split("|").map((x) => x.trim()).filter(Boolean);
     return parts.includes(me);
   }
-  if (model !== "bill") return true;
-  if (!r) return false;
-  if (isSalesUser(session)) {
-    const dept = String(session?.emp_department_code ?? "").trim();
-    const row = await queryOne(
-      `SELECT 1 FROM public.ic_trans t
-       LEFT JOIN public.odg_employee u ON u.employee_code = t.sale_code
-       WHERE t.doc_no = $1
-         AND COALESCE(NULLIF(TRIM(u.department_code), ''), '') = $2
-       LIMIT 1`,
-      [r, dept]
-    );
-    return !!row;
-  }
-  const scope = getBranchScope(session);
-  if (scope.scoped) {
-    const row = await queryOne(
-      `SELECT 1 FROM public.ic_trans_shipment s
-       WHERE s.doc_no = $1 AND s.transport_code = $2 LIMIT 1`,
-      [r, scope.branch]
-    );
-    return !!row;
-  }
-  return true; // head office — all bills
+  // Bill (and other non-DM) conversations are visible to all authenticated users.
+  return true;
 }
 
 // ---- Messages ----
@@ -164,24 +145,45 @@ async function listChatterMessages(model, recordId) {
      LIMIT 300`,
     [m, r]
   );
-  // Audit trail: merge pending-bill change history as system messages.
+  // Audit trail: merge pending-bill change history as system messages so every
+  // edit on the "ລໍຖ້າຈັດຖ້ຽວ" (bills-pending) screen — status, delivery date,
+  // transport branch, route, round, remark, map pin — shows in the conversation.
+  // NOTE: the history table columns are changed_by / changed_at (NOT
+  // user_code / created_at) — using the wrong names silently dropped the whole
+  // audit trail from the chatter.
   let systemRows = [];
   if (m === "bill") {
     try {
       systemRows = await query(
         `SELECT NULL::bigint AS id, 'system' AS msg_type,
                 CONCAT_WS(' · ',
-                  CASE WHEN action_status IS NOT NULL THEN CONCAT('ສະຖານະ: ', action_status) END,
-                  CASE WHEN scheduled_date IS NOT NULL THEN CONCAT('ວັນຮັບ: ', to_char(scheduled_date,'DD-MM-YYYY')) END,
-                  CASE WHEN NULLIF(TRIM(remark),'') IS NOT NULL THEN remark END
+                  CASE WHEN h.action_status IS NOT NULL THEN CONCAT('ສະຖານະ: ',
+                    CASE h.action_status
+                      WHEN 'sales_not_notified' THEN 'ພະນັກງານຂາຍຍັງບໍ່ແຈ້ງ'
+                      WHEN 'contact_failed' THEN 'ຕິດຕໍ່ບໍ່ໄດ້'
+                      WHEN 'customer_postponed' THEN 'ລູກຄ້າເລື່ອນວັນຮັບ'
+                      WHEN 'customer_cancelled' THEN 'ລູກຄ້າປະຕິເສດ/ຍົກເລີກ'
+                      WHEN 'contacted_ready' THEN 'ພ້ອມຮັບ'
+                      ELSE h.action_status
+                    END) END,
+                  CASE WHEN h.scheduled_date IS NOT NULL THEN CONCAT('ວັນຮັບ: ', to_char(h.scheduled_date,'DD-MM-YYYY')) END,
+                  CASE WHEN NULLIF(TRIM(h.transport_code),'') IS NOT NULL THEN CONCAT('ຂົນສົ່ງ: ', COALESCE(NULLIF(TRIM(tt.name_1),''), h.transport_code)) END,
+                  CASE WHEN NULLIF(TRIM(h.delivery_route_code),'') IS NOT NULL THEN CONCAT('ສາຍ: ', COALESCE(NULLIF(TRIM(rt.name),''), h.delivery_route_code)) END,
+                  CASE WHEN NULLIF(TRIM(h.delivery_round_code),'') IS NOT NULL THEN CONCAT('ຮອບ: ', COALESCE(NULLIF(TRIM(dr.name),''), h.delivery_round_code)) END,
+                  CASE WHEN NULLIF(TRIM(h.planned_lat),'') IS NOT NULL THEN 'ປັກໝຸດຈຸດສົ່ງ' END,
+                  CASE WHEN NULLIF(TRIM(h.remark),'') IS NOT NULL THEN CONCAT('ໝາຍເຫດ: ', h.remark) END
                 ) AS body,
-                '' AS mentions, COALESCE(user_code,'') AS author_code,
-                COALESCE(NULLIF(TRIM(user_code),''),'ລະບົບ') AS author_name,
+                '' AS mentions, COALESCE(h.changed_by,'') AS author_code,
+                COALESCE(NULLIF(TRIM(emp.fullname_lo),''), NULLIF(TRIM(emp.nickname),''), NULLIF(TRIM(h.changed_by),''), 'ລະບົບ') AS author_name,
                 false AS has_attachment, '' AS attachment_name, false AS edited,
-                created_at, to_char(created_at,'DD-MM-YYYY HH24:MI') AS created_at_display
-         FROM public.odg_tms_pending_bill_history
-         WHERE bill_no = $1
-         ORDER BY created_at DESC
+                h.changed_at AS created_at, to_char(h.changed_at,'DD-MM-YYYY HH24:MI') AS created_at_display
+         FROM public.odg_tms_pending_bill_history h
+         LEFT JOIN public.transport_type tt ON tt.code = NULLIF(TRIM(h.transport_code), '')
+         LEFT JOIN public.odg_tms_delivery_route rt ON rt.code = NULLIF(TRIM(h.delivery_route_code), '')
+         LEFT JOIN public.odg_tms_delivery_round dr ON dr.code = NULLIF(TRIM(h.delivery_round_code), '')
+         LEFT JOIN public.odg_employee emp ON emp.employee_code = h.changed_by
+         WHERE h.bill_no = $1
+         ORDER BY h.changed_at DESC
          LIMIT 100`,
         [r]
       );
@@ -577,6 +579,32 @@ async function toggleFollower({ model, recordId, userCode, userName }) {
   return { following: true };
 }
 
+// Bulk add followers idempotently (no toggle). Used when a bill is assigned a
+// transport branch so the branch's staff start following the bill — and, since
+// postChatterMessage resolves followers fresh at post time, get notified by the
+// message posted right after. Accepts [{ code, name }] and skips blanks/dupes.
+async function addFollowers({ model, recordId, users }) {
+  await ensureChatterSchema();
+  const m = String(model ?? "").trim();
+  const r = String(recordId ?? "").trim();
+  const list = Array.isArray(users) ? users : [];
+  if (!m || !r || list.length === 0) return { added: 0 };
+  const seen = new Set();
+  let added = 0;
+  for (const u of list) {
+    const code = String(u?.code ?? "").trim();
+    if (!code || seen.has(code)) continue;
+    seen.add(code);
+    const res = await pool.query(
+      `INSERT INTO public.odg_chatter_follower (model, record_id, user_code, user_name)
+       VALUES ($1,$2,$3,$4) ON CONFLICT DO NOTHING`,
+      [m, r, code, u?.name ? String(u.name).trim() : null]
+    );
+    added += res.rowCount ?? 0;
+  }
+  return { added };
+}
+
 // ---- Activities ----
 async function listActivities(model, recordId) {
   await ensureChatterSchema();
@@ -656,6 +684,7 @@ module.exports = {
   getDmPeerRead,
   listFollowers,
   toggleFollower,
+  addFollowers,
   listActivities,
   scheduleActivity,
   completeActivity,

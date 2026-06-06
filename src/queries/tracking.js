@@ -1716,6 +1716,145 @@ async function getPhoneTrail(session, docNo) {
   return { job, device, points };
 }
 
+// ---- ເບີດບິນປະຈຳວັນ (Daily opened bills, sales-facing) ----
+// Bills a salesperson opened on a given day (ic_trans.doc_date), so they can set
+// the delivery date + transport branch before dispatch picks them up. Scope is
+// the same as getSalesBillTrackingList: salesperson sees their own bills,
+// head/manager sees the whole sales department. Both may edit (the page allows
+// Save for all sales roles).
+async function getDailyOpenedBillsForSales(session, opts = {}) {
+  await ensurePendingBillSchema();
+  const empDept = String(session?.emp_department_code ?? "").trim();
+  const userCode = String(session?.usercode ?? "").trim();
+  if (!empDept || !userCode) return [];
+  const deptScope = canSeeDepartmentSales(session);
+  const scopeRole = salesRoleFromSession(session) || "admin";
+  const scopeLabel = deptScope ? "ທັງໝົດໃນພະແນກ" : "ຂອງຕົນເອງ";
+
+  const date = String(opts.date ?? "").trim();
+  if (!date) return [];
+  const search = String(opts.search ?? "").trim();
+  const params = [deptScope ? empDept : userCode, date, scopeRole, scopeLabel];
+  const scopeClause = deptScope
+    ? "COALESCE(NULLIF(TRIM(sale_e.department_code), ''), '') = $1"
+    : "COALESCE(NULLIF(TRIM(t.sale_code), ''), '') = $1";
+  let searchClause = "";
+  if (search) {
+    params.push(`%${search.toUpperCase()}%`);
+    searchClause = `AND (
+      UPPER(t.doc_no) LIKE $${params.length}
+      OR UPPER(COALESCE(c.name_1, '')) LIKE $${params.length}
+      OR UPPER(COALESCE(t.cust_code, '')) LIKE $${params.length}
+      OR UPPER(COALESCE(t.remark, '')) LIKE $${params.length}
+    )`;
+  }
+
+  return query(
+    `SELECT
+       t.doc_no AS bill_no,
+       to_char(t.doc_date,'DD-MM-YYYY') AS bill_date,
+       to_char(t.doc_date,'YYYY-MM-DD') AS bill_date_iso,
+       to_char(t.create_date_time_now,'DD-MM-YYYY HH24:MI') AS created_at,
+       COALESCE(NULLIF(TRIM(c.name_1), ''), t.cust_code, '-') AS customer_name,
+       COALESCE(NULLIF(TRIM(t.cust_code), ''), '') AS cust_code,
+       COALESCE(NULLIF(TRIM(t.sale_code), ''), '') AS sale_code,
+       COALESCE(NULLIF(TRIM(sale_e.fullname_lo), ''), NULLIF(TRIM(sale_e.nickname), ''), NULLIF(TRIM(t.sale_code), ''), '') AS salesperson,
+       COALESCE(NULLIF(TRIM(t.remark), ''), '') AS sales_remark,
+       -- current schedule (from odg_tms_pending_bill) merged in for the editors
+       to_char(pb.scheduled_date,'YYYY-MM-DD') AS scheduled_date,
+       to_char(pb.scheduled_date,'DD-MM-YYYY') AS scheduled_date_display,
+       COALESCE(pb.transport_code, '') AS transport_code,
+       COALESCE(NULLIF(TRIM(tt_pb.name_1), ''), NULLIF(TRIM(tt_ship.name_1), ''), NULLIF(TRIM(s.transport_code), ''), '') AS transport_name,
+       COALESCE(pb.action_status, '') AS action_status,
+       COALESCE(pb.delivery_route_code, '') AS delivery_route_code,
+       COALESCE(pb.delivery_round_code, '') AS delivery_round_code,
+       COALESCE(NULLIF(TRIM(pb.updated_by), ''), '') AS updated_by,
+       -- "locked" = the transport/dispatch side has engaged with the bill. Those
+       -- fields (contact status / route / round) are set only by dispatch in the
+       -- bills-pending screen; sales never sets them. Once any is present, sales
+       -- can no longer change the delivery date or branch.
+       (
+         COALESCE(NULLIF(TRIM(pb.action_status), ''), NULL) IS NOT NULL
+         OR COALESCE(NULLIF(TRIM(pb.delivery_route_code), ''), NULL) IS NOT NULL
+         OR COALESCE(NULLIF(TRIM(pb.delivery_round_code), ''), NULL) IS NOT NULL
+       ) AS locked,
+       to_char(pb.updated_at,'DD-MM-YYYY HH24:MI') AS pending_updated_at,
+       $3::text AS scope_role,
+       $4::text AS scope_label
+     FROM public.ic_trans t
+     LEFT JOIN public.ic_trans_shipment s ON s.doc_no = t.doc_no
+     LEFT JOIN public.ar_customer c ON c.code = t.cust_code
+     LEFT JOIN public.odg_employee sale_e ON sale_e.employee_code = t.sale_code
+     LEFT JOIN public.odg_tms_pending_bill pb ON pb.bill_no = t.doc_no
+     LEFT JOIN public.transport_type tt_pb ON tt_pb.code = NULLIF(TRIM(pb.transport_code), '')
+     LEFT JOIN public.transport_type tt_ship ON tt_ship.code = s.transport_code
+     WHERE ${scopeClause}
+       AND t.trans_flag = 44
+       AND NOT EXISTS (
+         SELECT 1 FROM public.ic_trans_detail rd
+         INNER JOIN public.ic_trans r ON r.doc_no = rd.doc_no AND r.trans_flag = 48
+         WHERE rd.ref_doc_no = t.doc_no
+       )
+       AND t.doc_date::date = $2::date
+       AND ${getFixedYearSqlFilter("t.doc_date")}
+       ${searchClause}
+     ORDER BY t.create_date_time_now DESC NULLS LAST, t.doc_no DESC
+     LIMIT 500`,
+    params
+  );
+}
+
+// Selectable transport branches for the sales date/branch editor. Includes
+// "ລູກຄ້າຮັບເອງ" (02-0004) so sales can mark a self-pickup. Excludes only the
+// external-flow types ThunJai (02-0005) and technician-pickup (02-0006).
+async function getSalesTransportBranches() {
+  return query(
+    `SELECT code, name_1 FROM public.transport_type
+     WHERE code LIKE '02-%' AND code NOT IN ('02-0005', '02-0006')
+     ORDER BY code ASC`
+  );
+}
+
+// Back-office/dispatch staff assigned to a transport branch, via the
+// odg_tms_worker_branch mapping → odg_employee (NOT erp_user). Returns employee
+// codes, which double as the chatter recipient key (push + LINE fan-out).
+async function getBranchStaffForNotify(branchCode) {
+  const code = String(branchCode ?? "").trim();
+  if (!code) return [];
+  // odg_tms_worker_branch is created/maintained by the worker-branch admin flow
+  // (master-data.js). Callers run this inside a best-effort try/catch, so a
+  // missing table degrades to "no branch recipients" rather than failing a save.
+  return query(
+    `SELECT e.employee_code AS code,
+            COALESCE(NULLIF(TRIM(e.fullname_lo), ''), NULLIF(TRIM(e.nickname), ''), e.employee_code) AS name
+     FROM public.odg_tms_worker_branch wb
+     INNER JOIN public.odg_employee e ON e.employee_code = wb.worker_code
+     WHERE wb.transport_code = $1 AND e.employment_status = 'ACTIVE'`,
+    [code]
+  );
+}
+
+// Defence-in-depth for saveSalesBillSchedule: confirm the bill is inside the
+// caller's sales scope (own bill / own department) before allowing a write.
+// The list already hides out-of-scope bills; this guards direct action calls.
+async function isSalesBillInScope(session, billNo) {
+  const empDept = String(session?.emp_department_code ?? "").trim();
+  const userCode = String(session?.usercode ?? "").trim();
+  const code = String(billNo ?? "").trim();
+  if (!empDept || !userCode || !code) return false;
+  const deptScope = canSeeDepartmentSales(session);
+  const scopeClause = deptScope
+    ? "COALESCE(NULLIF(TRIM(sale_e.department_code), ''), '') = $2"
+    : "COALESCE(NULLIF(TRIM(t.sale_code), ''), '') = $2";
+  const row = await queryOne(
+    `SELECT 1 FROM public.ic_trans t
+     LEFT JOIN public.odg_employee sale_e ON sale_e.employee_code = t.sale_code
+     WHERE t.doc_no = $1 AND t.trans_flag = 44 AND ${scopeClause} LIMIT 1`,
+    [code, deptScope ? empDept : userCode]
+  );
+  return !!row;
+}
+
 module.exports = {
   trackBill,
   getSalesBillTrackingList,
@@ -1728,4 +1867,8 @@ module.exports = {
   getPhoneTrackingJobs,
   getPhoneFleet,
   getPhoneTrail,
+  getDailyOpenedBillsForSales,
+  getSalesTransportBranches,
+  getBranchStaffForNotify,
+  isSalesBillInScope,
 };

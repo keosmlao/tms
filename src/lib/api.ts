@@ -145,6 +145,9 @@ export const Actions = {
   getPhoneTrackingJobs: tracking.getPhoneTrackingJobs,
   getPhoneFleet: tracking.getPhoneFleet,
   getPhoneTrail: tracking.getPhoneTrail,
+  getDailyOpenedBillsForSales: tracking.getDailyOpenedBillsForSales,
+  getSalesTransportBranches: tracking.getSalesTransportBranches,
+  saveSalesBillSchedule: tracking.saveSalesBillSchedule,
 
   // Geofence (per-branch start/end points)
   getGeofences: geofence.getGeofences,

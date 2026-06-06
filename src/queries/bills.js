@@ -613,8 +613,14 @@ async function getBillsPending(session, fromDate, toDate, transportCode) {
       LEFT JOIN transport_type d ON d.code=a.transport_code
       LEFT JOIN public.odg_tms_pending_bill pbov ON pbov.bill_no = a.doc_no
       LEFT JOIN transport_type dov ON dov.code = NULLIF(TRIM(pbov.transport_code), '')
-      WHERE a.trans_flag=44 AND check_status=0 AND b.send_date::date BETWEEN $1::date AND $2::date AND ${where}
-      ORDER BY b.send_date ASC, b.doc_date ASC`,
+      -- A sale bill with no send_date yet (NULL) must still surface so admins
+      -- can schedule it. NULL::date BETWEEN x AND y is FALSE in SQL, which used
+      -- to silently drop these bills, so fall back to doc_date for the window
+      -- check (matches the COALESCE in getManualPendingRowsForPending). The
+      -- SELECT keeps send_date NULL on purpose so the row stays flagged as
+      -- "needs a delivery date" on the page.
+      WHERE a.trans_flag=44 AND check_status=0 AND COALESCE(b.send_date::date, b.doc_date::date) BETWEEN $1::date AND $2::date AND ${where}
+      ORDER BY COALESCE(b.send_date, b.doc_date) ASC, b.doc_date ASC`,
       params
     ),
     getManualPendingRowsForPending(fromDate, toDate, effectiveCode),

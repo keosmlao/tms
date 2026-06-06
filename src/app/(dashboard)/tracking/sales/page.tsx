@@ -4,6 +4,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import {
   FaBox,
   FaCheckCircle,
+  FaChevronRight,
   FaClock,
   FaExclamationTriangle,
   FaFileInvoice,
@@ -14,9 +15,13 @@ import {
   FaRegCommentDots,
   FaRoute,
   FaSearch,
+  FaSort,
+  FaSortDown,
+  FaSortUp,
   FaSpinner,
   FaStickyNote,
   FaSyncAlt,
+  FaTimes,
   FaTruck,
   FaUser,
 } from "react-icons/fa";
@@ -129,6 +134,8 @@ type StageKey =
 
 type StageFilter = "all" | StageKey;
 
+type SortKey = "bill_no" | "customer" | "stage" | "days" | "send";
+
 const STAGE_META: Record<StageKey, { label: string; tone: string; icon: React.ReactNode; order: number }> = {
   opened: { label: "ເປີດບິນ", tone: "slate", icon: <FaFileInvoice size={10} />, order: 1 },
   shipment_opened: { label: "ລໍຖ້າ pending", tone: "amber", icon: <FaClock size={10} />, order: 2 },
@@ -176,10 +183,46 @@ function toneClass(tone: string, active = false) {
 function StageBadge({ stage }: { stage: StageKey }) {
   const meta = STAGE_META[stage] ?? STAGE_META.opened;
   return (
-    <span className={`inline-flex items-center gap-1.5 rounded-full border px-2 py-0.5 text-[10px] font-bold ${toneClass(meta.tone)}`}>
+    <span className={`inline-flex items-center gap-1 rounded-full border px-1.5 py-0.5 text-[9px] font-bold ${toneClass(meta.tone)}`}>
       {meta.icon}
       {meta.label}
     </span>
+  );
+}
+
+// Sortable table column header.
+function SortHeader({
+  label,
+  sortKey,
+  active,
+  dir,
+  onSort,
+  align = "left",
+}: {
+  label: string;
+  sortKey: SortKey;
+  active: boolean;
+  dir: "asc" | "desc";
+  onSort: (k: SortKey) => void;
+  align?: "left" | "right";
+}) {
+  return (
+    <th className={`px-2.5 py-1.5 font-semibold ${align === "right" ? "text-right" : "text-left"}`}>
+      <button
+        type="button"
+        onClick={() => onSort(sortKey)}
+        className={`inline-flex items-center gap-1 transition-colors hover:text-slate-700 dark:hover:text-slate-200 ${
+          active ? "text-teal-600 dark:text-teal-400" : ""
+        }`}
+      >
+        {label}
+        {active ? (
+          dir === "asc" ? <FaSortUp size={9} /> : <FaSortDown size={9} />
+        ) : (
+          <FaSort size={9} className="opacity-30" />
+        )}
+      </button>
+    </th>
   );
 }
 
@@ -286,6 +329,7 @@ export default function SalesTrackingPage() {
   const [loading, setLoading] = useState(false);
   const [detailLoading, setDetailLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [sort, setSort] = useState<{ key: SortKey; dir: "asc" | "desc" } | null>(null);
 
   const selectedRow = useMemo(
     () => rows.find((row) => row.bill_no === selectedBillNo) ?? null,
@@ -308,10 +352,9 @@ export default function SalesTrackingPage() {
       });
       const next = (data ?? []) as SalesBillRow[];
       setRows(next);
-      if (next.length > 0 && !next.some((row) => row.bill_no === selectedBillNo)) {
-        setSelectedBillNo(next[0].bill_no);
-      }
-      if (next.length === 0) {
+      // Table + drawer UX: do NOT auto-open a bill on load — the drawer only
+      // opens when the user clicks a row. Just drop a stale selection.
+      if (next.length === 0 || !next.some((row) => row.bill_no === selectedBillNo)) {
         setSelectedBillNo("");
         setDetail(null);
       }
@@ -409,6 +452,53 @@ export default function SalesTrackingPage() {
     return rows.filter((row) => row.current_stage === stageFilter);
   }, [rows, stageFilter]);
 
+  const sortedRows = useMemo(() => {
+    if (!sort) return visibleRows;
+    const dir = sort.dir === "asc" ? 1 : -1;
+    const val = (r: SalesBillRow): string | number => {
+      switch (sort.key) {
+        case "bill_no":
+          return r.bill_no;
+        case "customer":
+          return r.customer_name || "";
+        case "stage":
+          return STAGE_META[r.current_stage]?.order ?? 0;
+        case "days":
+          return r.days_open;
+        case "send":
+          return r.send_date || r.bill_date_iso || "";
+        default:
+          return "";
+      }
+    };
+    return [...visibleRows].sort((a, b) => {
+      const va = val(a);
+      const vb = val(b);
+      if (va < vb) return -dir;
+      if (va > vb) return dir;
+      return 0;
+    });
+  }, [visibleRows, sort]);
+
+  const toggleSort = (key: SortKey) =>
+    setSort((prev) =>
+      prev?.key === key
+        ? prev.dir === "asc"
+          ? { key, dir: "desc" }
+          : null
+        : { key, dir: "asc" }
+    );
+
+  // Close the detail drawer with Escape.
+  useEffect(() => {
+    if (!selectedBillNo) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") setSelectedBillNo("");
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [selectedBillNo]);
+
   const counts = useMemo(() => {
     const init: Record<StageKey, number> = {
       opened: 0,
@@ -433,106 +523,68 @@ export default function SalesTrackingPage() {
     ["assigned", "received", "in_delivery"].includes(row.current_stage)
   ).length;
   return (
-    <div className="space-y-4">
+    <div className="space-y-3">
       <section className="overflow-hidden rounded-xl border border-slate-200/70 bg-white shadow-sm dark:border-white/[0.06] dark:bg-slate-900">
-        <div className="border-b border-slate-100 px-4 py-4 dark:border-white/[0.06]">
-          <div className="flex flex-col gap-3 xl:flex-row xl:items-end xl:justify-between">
-            <div className="min-w-0">
-              <div className="flex flex-wrap items-center gap-2">
-                <span className="inline-flex items-center gap-1.5 rounded-full border border-teal-500/20 bg-teal-500/10 px-2 py-0.5 text-[10px] font-bold uppercase tracking-[0.18em] text-teal-700 dark:text-teal-400">
-                  <span className="h-1.5 w-1.5 rounded-full bg-teal-500" />
-                  Sales Tracking
-                </span>
-                <span className={`inline-flex items-center gap-1.5 rounded-full border px-2 py-0.5 text-[10px] font-bold ${
-                  readOnlyMode
-                    ? "border-amber-500/20 bg-amber-500/10 text-amber-700 dark:text-amber-400"
-                    : "border-sky-500/20 bg-sky-500/10 text-sky-700 dark:text-sky-400"
-                }`}>
-                  <FaUser size={9} />
-                  {scopeLabel}
-                </span>
-                <span className="text-[10px] font-semibold text-slate-400">
-                  {fromDate} - {toDate}
-                </span>
-              </div>
-              <h1 className="mt-2 text-xl font-extrabold text-slate-950 dark:text-white">
-                ບິນສົ່ງບໍ່ສຳເລັດຂອງຝ່າຍຂາຍ
-              </h1>
-              <p className="mt-1 max-w-2xl text-xs leading-relaxed text-slate-500 dark:text-slate-400">
-                {readOnlyMode
-                  ? "ຫົວໜ້າ/ຜູ້ຈັດການເບິ່ງບິນຂອງທຸກຄົນໃນພະແນກໄດ້, ແຕ່ເປັນ read-only."
-                  : "ຕິດຕາມບິນຂອງຕົນເອງຈາກເວລາເປີດບິນ, pending, ຈັດຖ້ຽວ ໄປຈົນຮອດຜົນສຳເລັດ."}
-              </p>
-            </div>
-            <form
-              onSubmit={(event) => {
-                event.preventDefault();
-                void loadRows();
-              }}
-              className="grid w-full gap-2 md:grid-cols-[minmax(220px,1fr)_150px_150px_auto] xl:max-w-3xl"
-            >
-              <div className="relative">
-                <FaSearch className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" size={11} />
-                <input
-                  value={searchText}
-                  onChange={(event) => setSearchText(event.target.value)}
-                  placeholder="ຄົ້ນຫາເລກບິນ, ລູກຄ້າ, ໝາຍເຫດ..."
-                  className="h-9 w-full rounded-lg border border-slate-200 bg-slate-50 py-2 pl-8 pr-3 text-xs text-slate-700 outline-hidden transition-colors focus:border-teal-500 focus:bg-white dark:border-white/10 dark:bg-white/5 dark:text-slate-200"
-                />
-              </div>
-              <input
-                type="date"
-                value={fromDate}
-                min={FIXED_YEAR_START}
-                max={FIXED_YEAR_END}
-                onChange={(event) => setFromDate(event.target.value)}
-                className="h-9 rounded-lg border border-slate-200 bg-slate-50 px-3 text-xs dark:border-white/10 dark:bg-white/5"
-              />
-              <input
-                type="date"
-                value={toDate}
-                min={FIXED_YEAR_START}
-                max={FIXED_YEAR_END}
-                onChange={(event) => setToDate(event.target.value)}
-                className="h-9 rounded-lg border border-slate-200 bg-slate-50 px-3 text-xs dark:border-white/10 dark:bg-white/5"
-              />
-              <button
-                type="submit"
-                disabled={loading}
-                className="inline-flex h-9 items-center justify-center gap-2 rounded-lg bg-teal-600 px-4 text-xs font-bold text-white transition-colors hover:bg-teal-700 disabled:opacity-60"
-              >
-                {loading ? <FaSpinner className="animate-spin" size={11} /> : <FaSyncAlt size={11} />}
-                ອັບເດດ
-              </button>
-            </form>
+        <div className="flex flex-col gap-2 px-3 py-2.5 lg:flex-row lg:items-center lg:justify-between">
+          <div className="flex min-w-0 flex-wrap items-center gap-1.5">
+            <h1 className="text-sm font-extrabold text-slate-900 dark:text-white">ບິນສົ່ງບໍ່ສຳເລັດ</h1>
+            <span className={`inline-flex items-center gap-1 rounded-full border px-1.5 py-0.5 text-[9px] font-bold ${
+              readOnlyMode
+                ? "border-amber-500/20 bg-amber-500/10 text-amber-700 dark:text-amber-400"
+                : "border-sky-500/20 bg-sky-500/10 text-sky-700 dark:text-sky-400"
+            }`}>
+              <FaUser size={8} />
+              {scopeLabel}
+            </span>
           </div>
-        </div>
-
-        <div className="grid border-b border-slate-100 dark:border-white/[0.06] sm:grid-cols-2 xl:grid-cols-4">
-          {[
-            { label: "ບິນບໍ່ສຳເລັດ", value: rows.length, icon: <FaFileInvoice />, cls: "text-slate-900 dark:text-white", hint: "ລາຍການທີ່ sale ຕ້ອງຕິດຕາມ" },
-            { label: "ລໍຖ້າ / pending", value: waitingCount, icon: <FaClock />, cls: "text-amber-700 dark:text-amber-400", hint: "ຍັງບໍ່ອອກສົ່ງ" },
-            { label: "ຢູ່ໃນການຈັດສົ່ງ", value: inMotionCount, icon: <FaTruck />, cls: "text-sky-700 dark:text-sky-400", hint: "ຈັດຖ້ຽວ / ຮັບ / ກຳລັງສົ່ງ" },
-            { label: "ຍົກເລີກ", value: cancelledCount, icon: <FaExclamationTriangle />, cls: "text-rose-700 dark:text-rose-400", hint: "ຕ້ອງກວດເຫດຜົນ" },
-          ].map((stat) => (
-            <div key={stat.label} className="flex items-start gap-3 border-r border-slate-100 px-4 py-3 last:border-r-0 dark:border-white/[0.06]">
-              <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-slate-100 text-slate-500 dark:bg-white/5 dark:text-slate-300">
-                {stat.icon}
-              </div>
-              <div className="min-w-0">
-                <p className="text-[10px] font-bold uppercase tracking-wider text-slate-400">{stat.label}</p>
-                <p className={`text-2xl font-extrabold leading-tight ${stat.cls}`}>{stat.value}</p>
-                <p className="truncate text-[10px] text-slate-400">{stat.hint}</p>
-              </div>
+          <form
+            onSubmit={(event) => {
+              event.preventDefault();
+              void loadRows();
+            }}
+            className="flex flex-wrap items-center gap-1.5"
+          >
+            <div className="relative">
+              <FaSearch className="absolute left-2.5 top-1/2 -translate-y-1/2 text-slate-400" size={10} />
+              <input
+                value={searchText}
+                onChange={(event) => setSearchText(event.target.value)}
+                placeholder="ຄົ້ນຫາ..."
+                className="h-8 w-40 rounded-md border border-slate-200 bg-slate-50 py-1 pl-7 pr-2 text-[11px] text-slate-700 outline-hidden transition-colors focus:border-teal-500 focus:bg-white dark:border-white/10 dark:bg-white/5 dark:text-slate-200"
+              />
             </div>
-          ))}
+            <input
+              type="date"
+              value={fromDate}
+              min={FIXED_YEAR_START}
+              max={FIXED_YEAR_END}
+              onChange={(event) => setFromDate(event.target.value)}
+              className="h-8 rounded-md border border-slate-200 bg-slate-50 px-2 text-[11px] dark:border-white/10 dark:bg-white/5"
+            />
+            <input
+              type="date"
+              value={toDate}
+              min={FIXED_YEAR_START}
+              max={FIXED_YEAR_END}
+              onChange={(event) => setToDate(event.target.value)}
+              className="h-8 rounded-md border border-slate-200 bg-slate-50 px-2 text-[11px] dark:border-white/10 dark:bg-white/5"
+            />
+            <button
+              type="submit"
+              disabled={loading}
+              className="inline-flex h-8 items-center justify-center gap-1.5 rounded-md bg-teal-600 px-3 text-[11px] font-bold text-white transition-colors hover:bg-teal-700 disabled:opacity-60"
+            >
+              {loading ? <FaSpinner className="animate-spin" size={10} /> : <FaSyncAlt size={10} />}
+              ອັບເດດ
+            </button>
+          </form>
         </div>
 
-        <div className="flex gap-2 overflow-x-auto px-4 py-3">
+        <div className="flex flex-wrap items-center gap-1 border-t border-slate-100 px-3 py-1.5 dark:border-white/[0.06]">
           <button
             type="button"
             onClick={() => setStageFilter("all")}
-            className={`shrink-0 rounded-full border px-3 py-1.5 text-[11px] font-bold transition-colors ${
+            className={`shrink-0 rounded-full border px-2 py-0.5 text-[10px] font-bold transition-colors ${
               stageFilter === "all"
                 ? "border-slate-800 bg-slate-800 text-white dark:border-slate-200 dark:bg-slate-200 dark:text-slate-900"
                 : "border-slate-200 bg-slate-50 text-slate-600 hover:bg-slate-100 dark:border-white/10 dark:bg-white/5 dark:text-slate-300"
@@ -547,13 +599,17 @@ export default function SalesTrackingPage() {
                 key={stage}
                 type="button"
                 onClick={() => setStageFilter(stage)}
-                className={`shrink-0 rounded-full border px-3 py-1.5 text-[11px] font-bold transition-colors ${toneClass(meta.tone, stageFilter === stage)}`}
+                className={`shrink-0 rounded-full border px-2 py-0.5 text-[10px] font-bold transition-colors ${toneClass(meta.tone, stageFilter === stage)}`}
               >
-                <span className="mr-1 inline-flex align-[-1px]">{meta.icon}</span>
                 {meta.label} {counts[stage] ?? 0}
               </button>
             );
           })}
+          <span className="ml-auto hidden items-center gap-2 pr-1 text-[10px] font-semibold text-slate-400 sm:flex">
+            <span className="text-amber-600 dark:text-amber-400">ລໍຖ້າ {waitingCount}</span>
+            <span className="text-sky-600 dark:text-sky-400">ກຳລັງສົ່ງ {inMotionCount}</span>
+            <span className="text-rose-600 dark:text-rose-400">ຍົກເລີກ {cancelledCount}</span>
+          </span>
         </div>
       </section>
 
@@ -563,199 +619,161 @@ export default function SalesTrackingPage() {
         </div>
       )}
 
-      <div className="grid min-h-[calc(100vh-18rem)] gap-4 xl:grid-cols-[minmax(380px,0.95fr)_minmax(480px,1.05fr)]">
-        <section className="overflow-hidden rounded-xl border border-slate-200/70 bg-white shadow-sm dark:border-white/[0.06] dark:bg-slate-900">
-          <div className="flex items-center justify-between border-b border-slate-100 px-4 py-3 dark:border-white/[0.06]">
-            <div>
-              <h2 className="text-sm font-bold text-slate-800 dark:text-white">
-                {readOnlyMode ? "ລາຍການບິນທັງພະແນກ" : "ລາຍການບິນຂອງຂ້ອຍ"}
-              </h2>
-              <p className="text-[11px] text-slate-500">
-                {visibleRows.length} / {rows.length} ບິນ{readOnlyMode ? " · read only" : ""}
-              </p>
-            </div>
-            {loading && <FaSpinner className="animate-spin text-teal-500" size={16} />}
-          </div>
-
-          <div className="max-h-[calc(100vh-20rem)] space-y-2 overflow-auto p-3">
-            {visibleRows.map((row) => {
-              const active = selectedBillNo === row.bill_no;
-              const cancelled = row.current_stage === "cancelled";
-              const hasUnread = (unreadMap[row.bill_no] ?? 0) > 0;
-              return (
-                <button
-                  key={row.bill_no}
-                  type="button"
-                  onClick={() => setSelectedBillNo(row.bill_no)}
-                  className={`w-full rounded-lg border p-3 text-left transition-all ${
-                    active
-                      ? "border-teal-500 bg-teal-50 shadow-sm ring-1 ring-teal-500/20 dark:bg-teal-950/30"
-                      : cancelled
-                        ? "border-rose-400 bg-rose-50 hover:bg-rose-100/60 dark:border-rose-500/40 dark:bg-rose-950/20"
-                        : "border-slate-200 bg-white hover:border-teal-300 hover:bg-slate-50 dark:border-white/10 dark:bg-white/[0.02] dark:hover:bg-white/[0.04]"
-                  } ${hasUnread ? "ring-2 ring-teal-400/50" : ""}`}
-                >
-                  <div className="flex items-start gap-3">
-                    <div className={`mt-0.5 flex h-10 w-10 shrink-0 items-center justify-center rounded-lg ${
-                      active ? "bg-teal-600 text-white" : "bg-slate-100 text-slate-500 dark:bg-white/5 dark:text-slate-300"
-                    }`}>
-                      <FaFileInvoice size={14} />
-                    </div>
-                    <div className="min-w-0 flex-1">
-                      <div className="flex flex-wrap items-start justify-between gap-2">
-                        <div className="min-w-0">
-                          <p className="flex items-center gap-1.5 font-mono text-sm font-extrabold text-slate-950 dark:text-white">
-                            {row.bill_no}
-                            {unreadMap[row.bill_no] > 0 && (
-                              <span className="inline-flex items-center gap-0.5 rounded-full bg-teal-500 px-1.5 py-0.5 text-[9px] font-bold text-white">
-                                <FaRegCommentDots size={8} /> {unreadMap[row.bill_no]}
-                              </span>
-                            )}
-                          </p>
-                          <p className="truncate text-xs font-bold text-slate-700 dark:text-slate-200">{row.customer_name || "-"}</p>
-                        </div>
-                        <div className="flex shrink-0 flex-col items-end gap-1">
-                          <StageBadge stage={row.current_stage} />
-                          <span
-                            className={`inline-flex items-center gap-1 rounded-full px-1.5 py-0.5 text-[9px] font-bold ${
-                              row.days_open >= 7
-                                ? "bg-rose-500/15 text-rose-600 dark:text-rose-400"
-                                : row.days_open >= 3
-                                  ? "bg-amber-500/15 text-amber-600 dark:text-amber-400"
-                                  : "bg-slate-500/10 text-slate-500 dark:text-slate-400"
-                            }`}
-                          >
-                            <FaClock size={8} />
-                            {row.days_open <= 0 ? "ມື້ນີ້" : `ເປີດມາ ${row.days_open} ມື້`}
+      <section className="overflow-hidden rounded-xl border border-slate-200/70 bg-white shadow-sm dark:border-white/[0.06] dark:bg-slate-900">
+        <div className="flex items-center justify-between border-b border-slate-100 px-3 py-1.5 dark:border-white/[0.06]">
+          <p className="text-[11px] font-semibold text-slate-500">
+            {sortedRows.length} / {rows.length} ບິນ{readOnlyMode ? " · ທັງພະແນກ" : ""}
+          </p>
+          {loading && <FaSpinner className="animate-spin text-teal-500" size={13} />}
+        </div>
+        <div className="overflow-x-auto">
+          <table className="w-full min-w-[760px] border-collapse text-left text-xs">
+            <thead className="border-b border-slate-100 bg-slate-50/70 text-[10px] uppercase tracking-wide text-slate-400 dark:border-white/[0.06] dark:bg-white/[0.03]">
+              <tr>
+                <SortHeader label="ບິນ" sortKey="bill_no" active={sort?.key === "bill_no"} dir={sort?.dir ?? "asc"} onSort={toggleSort} />
+                <SortHeader label="ລູກຄ້າ" sortKey="customer" active={sort?.key === "customer"} dir={sort?.dir ?? "asc"} onSort={toggleSort} />
+                <SortHeader label="ສະຖານະ" sortKey="stage" active={sort?.key === "stage"} dir={sort?.dir ?? "asc"} onSort={toggleSort} />
+                <SortHeader label="ສົ່ງ" sortKey="send" active={sort?.key === "send"} dir={sort?.dir ?? "asc"} onSort={toggleSort} />
+                <SortHeader label="ເປີດ" sortKey="days" active={sort?.key === "days"} dir={sort?.dir ?? "asc"} onSort={toggleSort} align="right" />
+                <th className="px-2.5 py-1.5 font-semibold">ຂົນສົ່ງ / ລົດ</th>
+                <th className="px-2.5 py-1.5 font-semibold">ພະນັກງານ</th>
+                <th className="px-2.5 py-1.5 text-right font-semibold">ຮອບ</th>
+                <th className="w-7" />
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-slate-100 dark:divide-white/[0.05]">
+              {sortedRows.map((row) => {
+                const active = selectedBillNo === row.bill_no;
+                const cancelled = row.current_stage === "cancelled";
+                const unread = unreadMap[row.bill_no] ?? 0;
+                return (
+                  <tr
+                    key={row.bill_no}
+                    onClick={() => setSelectedBillNo(row.bill_no)}
+                    className={`cursor-pointer transition-colors ${
+                      active
+                        ? "bg-teal-50 dark:bg-teal-950/30"
+                        : cancelled
+                          ? "bg-rose-50/50 hover:bg-rose-50 dark:bg-rose-950/10 dark:hover:bg-rose-950/20"
+                          : "hover:bg-slate-50 dark:hover:bg-white/[0.03]"
+                    }`}
+                  >
+                    <td className="whitespace-nowrap px-2.5 py-1.5">
+                      <span className="flex items-center gap-1.5 font-mono text-[11px] font-bold text-slate-900 dark:text-white">
+                        {row.bill_no}
+                        {unread > 0 && (
+                          <span className="inline-flex items-center gap-0.5 rounded-full bg-teal-500 px-1 py-0.5 text-[8px] font-bold text-white">
+                            <FaRegCommentDots size={7} /> {unread}
                           </span>
-                        </div>
-                      </div>
-                      <div className="mt-2 grid gap-1.5 text-[10.5px] text-slate-500 sm:grid-cols-2">
-                        <span className="inline-flex items-center gap-1">
-                          <FaClock size={9} className="text-slate-400" />
-                          ເປີດ {dateLabel(row.bill_date)}
-                        </span>
-                        <span className="inline-flex items-center gap-1">
-                          <FaRoute size={9} className="text-slate-400" />
-                          ສົ່ງ {dateLabel(row.send_date_display)}
-                        </span>
-                        <span className="inline-flex min-w-0 items-center gap-1">
-                          <FaTruck size={9} className="shrink-0 text-slate-400" />
-                          <span className="truncate">{row.car_plate || row.car || row.transport_name || "-"}</span>
-                        </span>
-                        <span className="inline-flex min-w-0 items-center gap-1">
-                          <FaUser size={9} className="shrink-0 text-slate-400" />
-                          <span className="truncate">{readOnlyMode ? `ຂອງ ${row.salesperson || row.sale_code || "-"}` : row.salesperson || "-"}</span>
-                        </span>
-                        <span className="inline-flex items-center gap-1">
-                          <FaFlagCheckered size={9} className="text-slate-400" />
-                          {row.attempt_count} ຮອບ · ສຳເລັດ {row.completed_count}
-                        </span>
-                      </div>
-                      {(row.sales_remark || row.pending_remark) && (
-                        <p className="mt-2 flex min-w-0 items-start gap-1 rounded-md bg-amber-500/10 px-2 py-1 text-[10.5px] font-medium text-amber-800 dark:text-amber-300">
-                          <FaStickyNote size={8} className="mt-0.5 shrink-0" />
-                          <span className="truncate">{row.sales_remark || row.pending_remark}</span>
-                        </p>
-                      )}
-                    </div>
-                  </div>
-                </button>
-              );
-            })}
-            {visibleRows.length === 0 && !loading && (
-              <div className="flex min-h-[280px] flex-col items-center justify-center rounded-lg border border-dashed border-slate-200 p-8 text-center text-slate-400 dark:border-white/10">
-                <FaFileInvoice size={30} className="mb-3 opacity-50" />
-                <p className="text-sm font-semibold">ບໍ່ພົບບິນທີ່ກົງກັບເງື່ອນໄຂ</p>
-                <p className="mt-1 text-[11px]">ລອງປ່ຽນວັນທີ ຫຼື ລ້າງຄຳຄົ້ນຫາ</p>
-              </div>
-            )}
-          </div>
-        </section>
-
-        <aside className="overflow-hidden rounded-xl border border-slate-200/70 bg-white shadow-sm dark:border-white/[0.06] dark:bg-slate-900">
-          <div className="border-b border-slate-100 px-4 py-3 dark:border-white/[0.06]">
-            <div className="flex items-center justify-between gap-3">
-              <div className="min-w-0">
-                <h2 className="text-sm font-bold text-slate-800 dark:text-white">ລາຍລະອຽດການດຳເນີນການ</h2>
-                <p className="truncate text-[11px] text-slate-500">
-                  {selectedRow ? `${selectedRow.bill_no} · ${selectedRow.customer_name}` : "ເລືອກບິນເພື່ອເບິ່ງ timeline"}
-                </p>
-              </div>
-              {detailLoading && <FaSpinner className="shrink-0 animate-spin text-teal-500" size={15} />}
-            </div>
-          </div>
-
-          {!selectedRow ? (
-            <div className="flex min-h-[360px] flex-col items-center justify-center p-8 text-center text-slate-400">
-              <FaFileInvoice size={32} className="mb-3 opacity-50" />
-              <p className="text-sm">ຍັງບໍ່ໄດ້ເລືອກບິນ</p>
-            </div>
-          ) : (
-            <div className="max-h-[calc(100vh-20rem)] overflow-y-auto">
-              <div className="border-b border-slate-100 bg-slate-50/80 px-4 py-4 dark:border-white/[0.06] dark:bg-white/[0.03]">
-                <div className="flex flex-wrap items-start justify-between gap-3">
-                  <div className="min-w-0">
-                    <p className="font-mono text-lg font-extrabold leading-tight text-slate-950 dark:text-white">{selectedRow.bill_no}</p>
-                    <p className="truncate text-sm font-bold text-slate-700 dark:text-slate-200">{selectedRow.customer_name || "-"}</p>
-                    <p className="mt-1 text-[11px] text-slate-400">
-                      ລູກຄ້າ {selectedRow.cust_code || "-"} · ເປີດ {dateLabel(selectedRow.bill_date)} · ຂອງ {selectedRow.salesperson || selectedRow.sale_code || "-"}
-                    </p>
-                  </div>
-                  <div className="flex flex-wrap items-center justify-end gap-2">
-                    {selectedReadOnly && (
-                      <span className="rounded-full border border-amber-500/20 bg-amber-500/10 px-2 py-0.5 text-[10px] font-bold text-amber-700 dark:text-amber-400">
-                        read only
+                        )}
                       </span>
+                    </td>
+                    <td className="max-w-[180px] truncate px-2.5 py-1.5 text-slate-700 dark:text-slate-200">{row.customer_name || "-"}</td>
+                    <td className="whitespace-nowrap px-2.5 py-1.5"><StageBadge stage={row.current_stage} /></td>
+                    <td className="whitespace-nowrap px-2.5 py-1.5 text-[11px] text-slate-500">{dateLabel(row.send_date_display)}</td>
+                    <td className="whitespace-nowrap px-2.5 py-1.5 text-right">
+                      <span className={`inline-flex items-center gap-1 rounded-full px-1.5 py-0.5 text-[9px] font-bold ${
+                        row.days_open >= 7
+                          ? "bg-rose-500/15 text-rose-600 dark:text-rose-400"
+                          : row.days_open >= 3
+                            ? "bg-amber-500/15 text-amber-600 dark:text-amber-400"
+                            : "bg-slate-500/10 text-slate-500 dark:text-slate-400"
+                      }`}>
+                        {row.days_open <= 0 ? "ມື້ນີ້" : `${row.days_open} ມື້`}
+                      </span>
+                    </td>
+                    <td className="max-w-[150px] truncate px-2.5 py-1.5 text-[11px] text-slate-500">{row.car_plate || row.car || row.transport_name || "-"}</td>
+                    <td className="max-w-[120px] truncate px-2.5 py-1.5 text-[11px] text-slate-500">{readOnlyMode ? row.salesperson || row.sale_code || "-" : row.salesperson || "-"}</td>
+                    <td className="whitespace-nowrap px-2.5 py-1.5 text-right text-[11px] text-slate-500">{row.attempt_count}·{row.completed_count}✓</td>
+                    <td className="px-1 text-slate-300"><FaChevronRight size={10} /></td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+          {sortedRows.length === 0 && !loading && (
+            <div className="flex min-h-[200px] flex-col items-center justify-center p-8 text-center text-slate-400">
+              <FaFileInvoice size={26} className="mb-2 opacity-50" />
+              <p className="text-xs font-semibold">ບໍ່ພົບບິນທີ່ກົງກັບເງື່ອນໄຂ</p>
+              <p className="mt-1 text-[10px]">ລອງປ່ຽນວັນທີ ຫຼື ລ້າງຄຳຄົ້ນຫາ</p>
+            </div>
+          )}
+        </div>
+      </section>
+
+      {selectedRow && (
+        <div className="fixed inset-0 z-50 flex justify-end">
+          <button
+            type="button"
+            aria-label="close"
+            onClick={() => setSelectedBillNo("")}
+            className="absolute inset-0 bg-slate-900/40 backdrop-blur-[1px]"
+          />
+          <div className="relative flex h-full w-full max-w-md flex-col border-l border-slate-200 bg-white shadow-2xl dark:border-white/10 dark:bg-slate-900">
+            <div className="flex items-center justify-between gap-2 border-b border-slate-100 px-3 py-2 dark:border-white/[0.06]">
+              <div className="min-w-0">
+                <p className="flex items-center gap-1.5 truncate font-mono text-sm font-extrabold text-slate-900 dark:text-white">
+                  {selectedRow.bill_no}
+                  {selectedReadOnly && (
+                    <span className="rounded-full border border-amber-500/20 bg-amber-500/10 px-1.5 py-0.5 text-[9px] font-bold text-amber-700 dark:text-amber-400">read only</span>
+                  )}
+                </p>
+                <p className="truncate text-[11px] text-slate-500">{selectedRow.customer_name || "-"}</p>
+              </div>
+              <div className="flex shrink-0 items-center gap-1.5">
+                {detailLoading && <FaSpinner className="animate-spin text-teal-500" size={13} />}
+                <StageBadge stage={selectedRow.current_stage} />
+                <button
+                  type="button"
+                  onClick={() => setSelectedBillNo("")}
+                  className="rounded-md p-1.5 text-slate-400 transition-colors hover:bg-slate-100 hover:text-slate-700 dark:hover:bg-white/10"
+                >
+                  <FaTimes size={13} />
+                </button>
+              </div>
+            </div>
+
+            <div className="flex-1 overflow-y-auto">
+              <div className="grid grid-cols-2 gap-1.5 border-b border-slate-100 p-2.5 sm:grid-cols-3 dark:border-white/[0.06]">
+                {[
+                  { label: "ວັນສົ່ງ", value: dateLabel(selectedRow.send_date_display), icon: <FaClock /> },
+                  { label: "ຖ້ຽວ", value: selectedRow.job_no || "-", icon: <FaRoute />, mono: true },
+                  { label: "ຂົນສົ່ງ", value: selectedRow.transport_name || "-", icon: <FaTruck /> },
+                  { label: "ຮອບສົ່ງ", value: selectedRow.delivery_round_name || selectedRow.delivery_round_code || "-", icon: <FaFlagCheckered /> },
+                  { label: "ພະນັກງານຂາຍ", value: selectedRow.salesperson || "-", icon: <FaUser /> },
+                  { label: "ທະບຽນລົດ", value: selectedRow.car_plate || selectedRow.car || "-", icon: <FaTruck /> },
+                  { label: "ຄົນຂັບ", value: selectedRow.driver || "-", icon: <FaUser /> },
+                  { label: "ເບີໂທ", value: selectedRow.driver_phone || "-", icon: <FaPhone />, phone: selectedRow.driver_phone },
+                ].map((item) => (
+                  <div key={item.label} className="min-w-0 rounded-md border border-slate-200 bg-slate-50/60 px-2 py-1 dark:border-white/10 dark:bg-white/5">
+                    <p className="flex items-center gap-1 text-[9px] font-semibold uppercase text-slate-400">
+                      <span className="text-slate-300">{item.icon}</span>
+                      {item.label}
+                    </p>
+                    {item.phone ? (
+                      <a href={`tel:${item.phone}`} className="mt-0.5 block truncate text-[11px] font-bold text-sky-600 dark:text-sky-400">{item.value}</a>
+                    ) : (
+                      <p className={`mt-0.5 truncate text-[11px] font-bold text-slate-800 dark:text-slate-100 ${item.mono ? "font-mono" : ""}`}>{item.value}</p>
                     )}
-                    <StageBadge stage={selectedRow.current_stage} />
                   </div>
-                </div>
-                <div className="mt-4 grid grid-cols-2 gap-2 text-[11px] md:grid-cols-4">
-                  {[
-                    { label: "ວັນສົ່ງ", value: dateLabel(selectedRow.send_date_display), icon: <FaClock /> },
-                    { label: "ຖ້ຽວລ່າສຸດ", value: selectedRow.job_no || "-", icon: <FaRoute />, mono: true },
-                    { label: "ຂົນສົ່ງ", value: selectedRow.transport_name || "-", icon: <FaTruck /> },
-                    { label: "ຮອບສົ່ງ", value: selectedRow.delivery_round_name || selectedRow.delivery_round_code || "-", icon: <FaFlagCheckered /> },
-                    { label: "ພະນັກງານຂາຍ", value: selectedRow.salesperson || "-", icon: <FaUser /> },
-                    { label: "ທະບຽນລົດ", value: selectedRow.car_plate || selectedRow.car || "-", icon: <FaTruck /> },
-                    { label: "ຄົນຂັບ", value: selectedRow.driver || "-", icon: <FaUser /> },
-                    { label: "ເບີໂທ", value: selectedRow.driver_phone || "-", icon: <FaPhone />, phone: selectedRow.driver_phone },
-                  ].map((item) => (
-                    <div key={item.label} className="min-w-0 rounded-lg border border-slate-200 bg-white px-2.5 py-2 dark:border-white/10 dark:bg-white/5">
-                      <p className="flex items-center gap-1 text-[10px] font-semibold text-slate-400">
-                        <span className="text-slate-300">{item.icon}</span>
-                        {item.label}
-                      </p>
-                      {item.phone ? (
-                        <a href={`tel:${item.phone}`} className="mt-0.5 block truncate font-bold text-sky-600 dark:text-sky-400">
-                          {item.value}
-                        </a>
-                      ) : (
-                        <p className={`mt-0.5 truncate font-bold text-slate-800 dark:text-slate-100 ${item.mono ? "font-mono" : ""}`}>
-                          {item.value}
-                        </p>
-                      )}
-                    </div>
-                  ))}
-                </div>
+                ))}
               </div>
 
-              <div className="space-y-4 p-4">
+              <div className="space-y-2.5 p-2.5">
                 {detail?.car_position && (
-                  <div className="isolate overflow-hidden rounded-lg border border-slate-200 dark:border-white/10">
-                    <div className="flex items-center justify-between border-b border-slate-100 bg-slate-50 px-3 py-2 dark:border-white/10 dark:bg-white/5">
-                      <p className="flex items-center gap-1.5 text-xs font-bold text-slate-700 dark:text-slate-200">
+                  <div className="isolate overflow-hidden rounded-md border border-slate-200 dark:border-white/10">
+                    <div className="flex items-center justify-between border-b border-slate-100 bg-slate-50 px-2.5 py-1.5 dark:border-white/10 dark:bg-white/5">
+                      <p className="flex items-center gap-1.5 text-[11px] font-bold text-slate-700 dark:text-slate-200">
                         <span className="relative flex h-2 w-2">
                           <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-sky-400 opacity-75" />
                           <span className="relative inline-flex h-2 w-2 rounded-full bg-sky-500" />
                         </span>
-                        ຕຳແໜ່ງລົດປະຈຸບັນ
+                        ຕຳແໜ່ງລົດ
                       </p>
-                      <span className="text-[10px] text-slate-400">{detail.car_position.recorded_at}</span>
+                      <span className="text-[9px] text-slate-400">{detail.car_position.recorded_at}</span>
                     </div>
                     <BillLiveMap position={detail.car_position} />
-                    <div className="grid gap-2 border-t border-slate-100 px-3 py-2 text-[11px] text-slate-500 dark:border-white/10 dark:text-slate-400 sm:grid-cols-2">
+                    <div className="grid gap-1 border-t border-slate-100 px-2.5 py-1.5 text-[10px] text-slate-500 dark:border-white/10 dark:text-slate-400 sm:grid-cols-2">
                       <span className="inline-flex items-center gap-1">
                         <FaMapMarkerAlt size={9} className="text-sky-500" />
                         {detail.car_position.address || "ຍັງບໍ່ມີທີ່ຢູ່"}
@@ -769,22 +787,19 @@ export default function SalesTrackingPage() {
                 )}
 
                 {(selectedRow.sales_remark || selectedRow.pending_remark) && (
-                  <div className="rounded-lg border border-amber-500/20 bg-amber-500/10 px-3 py-2 text-[11px] text-amber-800 dark:text-amber-300">
-                    <p className="mb-1 flex items-center gap-1 font-bold">
-                      <FaStickyNote size={10} />
-                      ໝາຍເຫດ
-                    </p>
+                  <div className="rounded-md border border-amber-500/20 bg-amber-500/10 px-2.5 py-1.5 text-[11px] text-amber-800 dark:text-amber-300">
+                    <p className="mb-0.5 flex items-center gap-1 font-bold"><FaStickyNote size={9} /> ໝາຍເຫດ</p>
                     <p className="leading-relaxed">{selectedRow.sales_remark || selectedRow.pending_remark}</p>
                   </div>
                 )}
 
-                <div className="flex gap-1 rounded-lg border border-slate-200 bg-slate-50 p-1 dark:border-white/10 dark:bg-white/[0.03]">
+                <div className="flex gap-1 rounded-md border border-slate-200 bg-slate-50 p-0.5 dark:border-white/10 dark:bg-white/[0.03]">
                   {(["timeline", "products", "chatter"] as const).map((t) => (
                     <button
                       key={t}
                       type="button"
                       onClick={() => setDetailTab(t)}
-                      className={`flex-1 rounded-md px-2 py-1.5 text-[11px] font-bold transition-colors ${
+                      className={`flex-1 rounded px-2 py-1 text-[11px] font-bold transition-colors ${
                         detailTab === t
                           ? "bg-teal-600 text-white shadow-sm"
                           : "text-slate-500 hover:bg-white dark:text-slate-400 dark:hover:bg-white/5"
@@ -796,81 +811,68 @@ export default function SalesTrackingPage() {
                 </div>
 
                 {detailTab === "timeline" && (detailLoading ? (
-                  <div className="flex items-center justify-center gap-2 rounded-lg border border-dashed border-slate-200 py-12 text-sm text-slate-400 dark:border-white/10">
-                    <FaSpinner className="animate-spin" />
-                    ກຳລັງໂຫຼດ timeline...
+                  <div className="flex items-center justify-center gap-2 rounded-md border border-dashed border-slate-200 py-10 text-xs text-slate-400 dark:border-white/10">
+                    <FaSpinner className="animate-spin" /> ກຳລັງໂຫຼດ...
                   </div>
                 ) : (
-                  <ol className="relative space-y-3 border-l border-slate-200 pl-4 dark:border-white/10">
+                  <ol className="relative space-y-2 border-l border-slate-200 pl-3.5 dark:border-white/10">
                     {timeline.map((step, index) => {
                       const isLast = index === timeline.length - 1;
                       return (
                         <li key={`${step.status}-${index}`} className="relative">
-                          <span
-                            className={`absolute -left-[22px] top-1 flex h-3.5 w-3.5 rounded-full border-2 border-white dark:border-slate-900 ${
-                              isLast ? "bg-teal-600" : "bg-slate-300 dark:bg-slate-600"
-                            }`}
-                          />
-                          <div className={`rounded-lg border p-3 ${isLast ? "border-teal-500/30 bg-teal-500/10" : "border-slate-200 bg-white dark:border-white/10 dark:bg-white/[0.03]"}`}>
+                          <span className={`absolute -left-[20px] top-1 flex h-3 w-3 rounded-full border-2 border-white dark:border-slate-900 ${isLast ? "bg-teal-600" : "bg-slate-300 dark:bg-slate-600"}`} />
+                          <div className={`rounded-md border p-2 ${isLast ? "border-teal-500/30 bg-teal-500/10" : "border-slate-200 bg-white dark:border-white/10 dark:bg-white/[0.03]"}`}>
                             <div className="flex items-start justify-between gap-2">
-                              <p className="text-xs font-bold text-slate-800 dark:text-slate-100">{step.status}</p>
-                              <span className="shrink-0 text-right text-[10px] font-semibold text-slate-400">
-                                {step.doc_date}{step.doc_time ? ` · ${step.doc_time}` : ""}
-                              </span>
+                              <p className="text-[11px] font-bold text-slate-800 dark:text-slate-100">{step.status}</p>
+                              <span className="shrink-0 text-right text-[9px] font-semibold text-slate-400">{step.doc_date}{step.doc_time ? ` · ${step.doc_time}` : ""}</span>
                             </div>
-                            {step.remark && (
-                              <p className="mt-1 text-[11px] leading-relaxed text-slate-600 dark:text-slate-300">{step.remark}</p>
-                            )}
+                            {step.remark && <p className="mt-0.5 text-[10px] leading-relaxed text-slate-600 dark:text-slate-300">{step.remark}</p>}
                           </div>
                         </li>
                       );
                     })}
                     {timeline.length === 0 && (
-                      <li className="rounded-lg border border-dashed border-slate-200 py-10 text-center text-xs text-slate-400 dark:border-white/10">
-                        ຍັງບໍ່ມີ timeline
-                      </li>
+                      <li className="rounded-md border border-dashed border-slate-200 py-8 text-center text-[11px] text-slate-400 dark:border-white/10">ຍັງບໍ່ມີ timeline</li>
                     )}
                   </ol>
                 ))}
 
                 {detailTab === "products" && !detailLoading && (
-                  <div className="overflow-hidden rounded-lg border border-slate-200 dark:border-white/10">
-                    <p className="border-b border-slate-100 bg-slate-50 px-3 py-2 text-xs font-bold text-slate-700 dark:border-white/10 dark:bg-white/5 dark:text-slate-200">
+                  <div className="overflow-hidden rounded-md border border-slate-200 dark:border-white/10">
+                    <p className="border-b border-slate-100 bg-slate-50 px-2.5 py-1.5 text-[11px] font-bold text-slate-700 dark:border-white/10 dark:bg-white/5 dark:text-slate-200">
                       ລາຍການສິນຄ້າ ({detail?.items?.length ?? 0})
                     </p>
                     {detail?.items && detail.items.length > 0 ? (
                       <ul className="divide-y divide-slate-100 dark:divide-white/[0.04]">
                         {detail.items.map((it, i) => (
-                          <li
-                            key={`${it.item_code}-${i}`}
-                            className="grid grid-cols-[minmax(0,1fr)_auto] items-center gap-3 px-3 py-2 text-[11px]"
-                          >
+                          <li key={`${it.item_code}-${i}`} className="grid grid-cols-[minmax(0,1fr)_auto] items-center gap-2 px-2.5 py-1.5 text-[10px]">
                             <span className="min-w-0 truncate text-slate-700 dark:text-slate-200">
                               <span className="font-mono text-slate-400">{it.item_code}</span> {it.item_name}
                             </span>
-                            <span className="shrink-0 rounded-md bg-slate-100 px-2 py-1 font-bold tabular-nums text-slate-800 dark:bg-white/5 dark:text-white">
-                              {formatQty(it.qty)} {it.unit_code}
-                            </span>
+                            <span className="shrink-0 rounded bg-slate-100 px-1.5 py-0.5 font-bold tabular-nums text-slate-800 dark:bg-white/5 dark:text-white">{formatQty(it.qty)} {it.unit_code}</span>
                           </li>
                         ))}
                       </ul>
                     ) : (
-                      <div className="flex min-h-[180px] flex-col items-center justify-center text-center text-slate-400">
-                        <FaBox size={24} className="mb-2 opacity-50" />
-                        <p className="text-xs font-semibold">ຍັງບໍ່ມີລາຍການສິນຄ້າ</p>
+                      <div className="flex min-h-[140px] flex-col items-center justify-center text-center text-slate-400">
+                        <FaBox size={22} className="mb-2 opacity-50" />
+                        <p className="text-[11px] font-semibold">ຍັງບໍ່ມີລາຍການສິນຄ້າ</p>
                       </div>
                     )}
                   </div>
                 )}
 
                 {detailTab === "chatter" && (
-                  <Chatter model="bill" recordId={selectedRow.bill_no} readOnly={selectedReadOnly} />
+                  // Conversation is open to everyone (only DMs stay private), so
+                  // the chatter is always writable here — even for head/manager
+                  // whose schedule view is otherwise read-only.
+                  <Chatter model="bill" recordId={selectedRow.bill_no} readOnly={false} />
                 )}
               </div>
             </div>
-          )}
-        </aside>
-      </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
