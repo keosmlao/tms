@@ -224,17 +224,24 @@ async function mobileJobsListAll({ date = "", driverId = "", status = "" } = {})
     where.push(`a.driver=$${params.length}`);
   }
   if (normalizedStatus === "pending") {
-    where.push(`(a.job_status = 0 OR COALESCE(a.approve_status, 0) = 0)`);
+    where.push(`COALESCE(a.approve_status, 0) = 0`);
   } else if (normalizedStatus === "active") {
     where.push(`a.job_status IN (1, 2)`);
   } else if (normalizedStatus === "done") {
     where.push(`a.job_status >= 3`);
-  } else if (normalizedStatus === "issue") {
-    where.push(`COALESCE(bs.cancelled_bill_count, 0) > 0`);
   }
+  const issueWhere =
+    normalizedStatus === "issue"
+      ? " AND COALESCE(bs.cancelled_bill_count, 0) > 0"
+      : "";
 
   const sql = `
-    WITH bill_summary AS (
+    WITH candidate_jobs AS (
+      SELECT a.doc_no
+      FROM odg_tms a
+      WHERE ${where.join(" AND ")}
+    ),
+    bill_summary AS (
       SELECT
         d.doc_no, COUNT(*)::int AS total_bills,
         COUNT(*) FILTER (WHERE COALESCE(d.status, 0) NOT IN (1, 2) AND d.sent_start IS NULL)::int AS waiting_bill_count,
@@ -244,6 +251,7 @@ async function mobileJobsListAll({ date = "", driverId = "", status = "" } = {})
         MIN(d.recipt_job) AS received_at,
         MIN(d.sent_start) FILTER (WHERE d.sent_start IS NOT NULL) AS first_bill_started_at
       FROM public.odg_tms_detail d
+      INNER JOIN candidate_jobs cj ON cj.doc_no = d.doc_no
       WHERE ${getFixedYearSqlFilter("d.doc_date")}
       GROUP BY d.doc_no
     )
@@ -279,7 +287,7 @@ async function mobileJobsListAll({ date = "", driverId = "", status = "" } = {})
     LEFT JOIN public.odg_tms_driver c ON c.code = a.driver
     LEFT JOIN erp_user d ON d.code = a.user_created
     LEFT JOIN bill_summary bs ON bs.doc_no = a.doc_no
-    WHERE ${where.join(" AND ")}
+    WHERE ${where.join(" AND ")}${issueWhere}
     ORDER BY a.doc_no`;
   return await query(sql, params);
 }
@@ -1512,23 +1520,26 @@ async function mobileJobAction(body) {
   }
 }
 
-async function mobileBills({ docNo, billNo, type, driverId }) {
+async function mobileBills({ docNo, billNo, type, driverId, isSupervisor }) {
   // The bill SELECT below references parent_bill_no (added via auto-DDL).
   // Run the schema check first so a fresh DB doesn't blow up on missing column.
   // Cached after first call so this is effectively a no-op afterwards.
   await ensureDeliveryWorkflowSchema(pool);
   const cleanDriver = asText(driverId);
-  if (!cleanDriver) {
+  if (!cleanDriver && !isSupervisor) {
     const err = new Error("Unauthorized");
     err.status = 401;
     throw err;
   }
+  // Supervisors may view any trip's bills; drivers are restricted to their own.
   if (docNo) {
     const allowedJob = await queryOne(
-      `SELECT 1 FROM odg_tms
-       WHERE doc_no = $1 AND driver = $2 AND ${getFixedYearSqlFilter("doc_date")}
-       LIMIT 1`,
-      [docNo, cleanDriver]
+      isSupervisor
+        ? `SELECT 1 FROM odg_tms
+           WHERE doc_no = $1 AND ${getFixedYearSqlFilter("doc_date")} LIMIT 1`
+        : `SELECT 1 FROM odg_tms
+           WHERE doc_no = $1 AND driver = $2 AND ${getFixedYearSqlFilter("doc_date")} LIMIT 1`,
+      isSupervisor ? [docNo] : [docNo, cleanDriver]
     );
     if (!allowedJob) {
       const err = new Error("Forbidden");
@@ -1538,14 +1549,18 @@ async function mobileBills({ docNo, billNo, type, driverId }) {
   }
   if (billNo) {
     const allowedBill = await queryOne(
-      `SELECT 1
-       FROM public.odg_tms_detail d
-       INNER JOIN odg_tms t ON t.doc_no = d.doc_no
-       WHERE d.bill_no = $1
-         AND t.driver = $2
-         AND ${getFixedYearSqlFilter("d.doc_date")}
-       LIMIT 1`,
-      [billNo, cleanDriver]
+      isSupervisor
+        ? `SELECT 1
+           FROM public.odg_tms_detail d
+           INNER JOIN odg_tms t ON t.doc_no = d.doc_no
+           WHERE d.bill_no = $1 AND ${getFixedYearSqlFilter("d.doc_date")} LIMIT 1`
+        : `SELECT 1
+           FROM public.odg_tms_detail d
+           INNER JOIN odg_tms t ON t.doc_no = d.doc_no
+           WHERE d.bill_no = $1
+             AND t.driver = $2
+             AND ${getFixedYearSqlFilter("d.doc_date")} LIMIT 1`,
+      isSupervisor ? [billNo] : [billNo, cleanDriver]
     );
     if (!allowedBill) {
       const err = new Error("Forbidden");

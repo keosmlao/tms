@@ -1,6 +1,6 @@
 import type { NextRequest } from "next/server";
 import { mobileJobsList, mobileJobsListAll, mobileJobAction, mobileSupervisorKpi } from "@/queries/mobile.js";
-import { getPhoneFleet } from "@/queries/tracking.js";
+import { getGpsRealtimeAll, getPhoneFleet } from "@/queries/tracking.js";
 import { approveJob } from "@/queries/approve.js";
 import { mobileErrorResponse, requireMobileSession } from "@/lib/mobile-auth";
 import { parseJsonBody, parseSearchParams } from "@/lib/validation";
@@ -24,6 +24,15 @@ function canUseSupervisorScope(session: {
     text.includes("logistic") ||
     text.includes("transport_head")
   );
+}
+
+function gpsAgeSeconds(value: unknown) {
+  const text = String(value ?? "").trim();
+  if (!text) return 0;
+  const normalized = text.includes("T") ? text : text.replace(" ", "T");
+  const timestamp = Date.parse(normalized);
+  if (!Number.isFinite(timestamp)) return 0;
+  return Math.max(0, Math.floor((Date.now() - timestamp) / 1000));
 }
 
 export async function GET(request: NextRequest) {
@@ -53,8 +62,34 @@ export async function GET(request: NextRequest) {
         (error as Error & { status?: number }).status = 403;
         throw error;
       }
-      const data = await getPhoneFleet(session);
-      return Response.json(data);
+      const [phones, vehicles] = await Promise.all([
+        getPhoneFleet(session),
+        getGpsRealtimeAll(),
+      ]);
+      return Response.json([
+        ...phones.map((row: Record<string, unknown>) => ({
+          ...row,
+          source: "phone",
+        })),
+        ...vehicles.map((row: Record<string, unknown>) => ({
+          unit_key: `vehicle:${row.imei ?? row.car_code ?? ""}`,
+          source: "vehicle",
+          imei: row.imei ?? "",
+          doc_no: "",
+          car: row.car_name ?? row.car_code ?? "-",
+          driver: "",
+          job_status: 0,
+          lat: row.lat ?? "",
+          lng: row.lng ?? "",
+          speed: row.speed ?? "",
+          heading: row.heading ?? "",
+          battery: "",
+          recorded_at: row.recorded_at ?? "",
+          age_seconds: gpsAgeSeconds(row.recorded_at),
+          stationary_secs: 0,
+          address: row.address ?? "",
+        })),
+      ]);
     }
     if (scope === "kpi") {
       if (!canUseSupervisorScope(session)) {

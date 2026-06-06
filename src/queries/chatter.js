@@ -107,8 +107,18 @@ async function ensureChatterSchema() {
 // limited to their department's bills; a branch-scoped dispatcher to their own
 // branch; head office sees all. Non-bill models are unrestricted for now.
 async function canAccessRecord(session, model, recordId) {
-  if (model !== "bill") return true;
   const r = String(recordId ?? "").trim();
+  // Direct messages are private: record_id is "dm:<codeA>|<codeB>" and ONLY the
+  // two participants may read/post. Without this, any logged-in user could open
+  // any DM by guessing the key.
+  if (model === "dm") {
+    const me = String(session?.usercode ?? "").trim();
+    if (!me || !r) return false;
+    const key = r.startsWith("dm:") ? r.slice(3) : r;
+    const parts = key.split("|").map((x) => x.trim()).filter(Boolean);
+    return parts.includes(me);
+  }
+  if (model !== "bill") return true;
   if (!r) return false;
   if (isSalesUser(session)) {
     const dept = String(session?.emp_department_code ?? "").trim();
@@ -242,42 +252,63 @@ async function postChatterMessage({ model, recordId, body, msgType, mentions, at
           if (code && code !== authorCode) dmOther.push(code);
         }
       }
-      const fol = await pool.query(
-        `SELECT user_code FROM public.odg_chatter_follower WHERE model = $1 AND record_id = $2`,
-        [m, r]
-      );
-      const recipients = collectChatterRecipients({
-        mentions: men,
-        followers: [...fol.rows.map((x) => x.user_code), ...headManagers, ...dmOther],
-        saleCode,
-        authorCode,
-      });
+      const isDm = m === "dm";
+      let recipients;
+      if (isDm) {
+        // Private DM: notify ONLY the other participant — never followers,
+        // mentions, or the bill salesperson, which would leak the message to
+        // people who aren't part of the conversation.
+        recipients = Array.from(
+          new Set(dmOther.filter((c) => c && c !== authorCode))
+        );
+      } else {
+        const fol = await pool.query(
+          `SELECT user_code FROM public.odg_chatter_follower WHERE model = $1 AND record_id = $2`,
+          [m, r]
+        );
+        recipients = collectChatterRecipients({
+          mentions: men,
+          followers: [...fol.rows.map((x) => x.user_code), ...headManagers],
+          saleCode,
+          authorCode,
+        });
+      }
       if (recipients.length > 0) {
         const who = String(authorName || authorCode || "").trim();
         const preview = text ? text.slice(0, 80) : "ໄດ້ແນບໄຟລ໌";
         const { pushToEmployees } = require("./push");
-        await pushToEmployees(recipients, `ບິນ ${r}`, `${who}: ${preview}`, {
-          type: "chatter",
-          bill_no: r,
-          href: `/tracking?search=${r}`,
-        });
-        // LINE notify (best-effort) — recipients who have a LINE id mapped.
-        try {
-          const lineRows = await query(
-            `SELECT DISTINCT NULLIF(TRIM(u.line_id::text), '') AS line_id
-             FROM public.erp_user u
-             WHERE u.code = ANY($1) AND NULLIF(TRIM(u.line_id::text), '') IS NOT NULL`,
-            [recipients]
-          );
-          if (lineRows.length > 0) {
-            const { sendLineText } = require("../lib/line");
-            const msg = `📋 ບິນ ${r}\n${who}: ${preview}`;
-            await Promise.all(
-              lineRows.map((x) => sendLineText(x.line_id, msg).catch(() => undefined))
+        if (isDm) {
+          // In-app push only. DMs are private — do NOT send to the external LINE
+          // channel, and never label the conversation key as a "bill".
+          await pushToEmployees(recipients, "💬 ຂໍ້ຄວາມໃໝ່", `${who}: ${preview}`, {
+            type: "dm",
+            dm: r,
+            href: `/?dm=${encodeURIComponent(r)}`,
+          });
+        } else {
+          await pushToEmployees(recipients, `ບິນ ${r}`, `${who}: ${preview}`, {
+            type: "chatter",
+            bill_no: r,
+            href: `/tracking?search=${r}`,
+          });
+          // LINE notify (best-effort) — bill conversations only.
+          try {
+            const lineRows = await query(
+              `SELECT DISTINCT NULLIF(TRIM(u.line_id::text), '') AS line_id
+               FROM public.erp_user u
+               WHERE u.code = ANY($1) AND NULLIF(TRIM(u.line_id::text), '') IS NOT NULL`,
+              [recipients]
             );
+            if (lineRows.length > 0) {
+              const { sendLineText } = require("../lib/line");
+              const msg = `📋 ບິນ ${r}\n${who}: ${preview}`;
+              await Promise.all(
+                lineRows.map((x) => sendLineText(x.line_id, msg).catch(() => undefined))
+              );
+            }
+          } catch (err) {
+            console.warn("[chatter] line notify failed:", err?.message ?? err);
           }
-        } catch (err) {
-          console.warn("[chatter] line notify failed:", err?.message ?? err);
         }
       }
     } catch (err) {

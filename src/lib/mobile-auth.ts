@@ -14,6 +14,28 @@ export interface MobileSession {
   is_driver: boolean;
 }
 
+// A session is a supervisor/manager (not a plain driver) when the server marked
+// it is_driver=false, or — for legacy tokens without the flag — its role text
+// names an office role. Such users may view/act beyond their own trips.
+export function isSupervisorSession(session: {
+  roles?: string;
+  title?: string;
+  logistic_code?: string;
+  is_driver?: boolean;
+}): boolean {
+  if (session.is_driver === false) return true;
+  const text = `${session.roles ?? ""} ${session.title ?? ""} ${
+    session.logistic_code ?? ""
+  }`.toLowerCase();
+  return (
+    text.includes("supervisor") ||
+    text.includes("manager") ||
+    text.includes("admin") ||
+    text.includes("logistic") ||
+    text.includes("transport_head")
+  );
+}
+
 export async function requireMobileSession(
   request: Request | NextRequest
 ): Promise<MobileSession> {
