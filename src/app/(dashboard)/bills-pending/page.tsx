@@ -37,6 +37,7 @@ import {
   type PendingLocationDefaults,
 } from "@/components/pending-bill-location-dialog";
 import { BillTodoPopover } from "@/components/bill-todo-popover";
+import Chatter from "@/components/Chatter";
 import { printBillLocationQr } from "@/lib/print-bill-location-qr";
 // Ported from server actions: getBillProducts, getBillsPending, updateBillTransport
 
@@ -2166,6 +2167,9 @@ export default function BillsPendingClient() {
                       </div>
                     )}
                   </div>
+
+                  {/* Chatter — discussion / internal notes on this bill */}
+                  <Chatter model="bill" recordId={drawerBill.doc_no} />
                 </div>
 
                 {/* Footer buttons: print QR + set delivery point */}

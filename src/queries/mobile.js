@@ -37,11 +37,50 @@ function createAuthPayload(input) {
     code,
     name_1: asText(input.name_1) || username,
     department: asText(input.department),
-    roles: asText(input.roles),
+    roles: asText(input.roles) || asText(input.title),
     driver_id: driverId,
     logistic_code: asText(input.logistic_code),
     title: asText(input.title),
+    // Overwritten by mobileLogin after a DB check; default driver.
+    is_driver: true,
   };
+}
+
+// A user is a DRIVER iff they are a transport-department ("ຂົນສົ່ງ") employee in
+// odg_employee — the exact definition the dispatch flow (getDispatchDriverByCode)
+// and the web login use. Everyone else (other departments, or non-employee
+// `users` accounts) is treated as a supervisor/manager by the app.
+async function resolveIsDriver(code, rolesText) {
+  const role = `${rolesText ?? ""}`.toLowerCase();
+  const isOperationsRole =
+    role.includes("supervisor") ||
+    role.includes("head") ||
+    role.includes("team_lead") ||
+    role.includes("manager") ||
+    role.includes("admin") ||
+    role.includes("director") ||
+    role.includes("executive") ||
+    role.includes("transport_head") ||
+    role.includes("ຫົວໜ້າ") ||
+    role.includes("ຜູ້ຈັດການ");
+  // A management title must win over department membership. Otherwise a
+  // transport manager/head is incorrectly issued a driver-scoped token.
+  if (isOperationsRole) return false;
+
+  if (code) {
+    const emp = await queryOne(
+      `SELECT (d.department_name_lo ILIKE '%ຂົນສົ່ງ%') AS is_transport
+       FROM public.odg_employee e
+       LEFT JOIN public.odg_department d ON d.department_code = e.department_code
+       WHERE e.employee_code = $1
+       LIMIT 1`,
+      [code]
+    );
+    if (emp) return emp.is_transport === true;
+  }
+  // Non-employee login (e.g. web `users` account) → supervisor unless the role
+  // explicitly says driver.
+  return role.includes("driver");
 }
 
 async function mobileLogin(body) {
@@ -55,13 +94,21 @@ async function mobileLogin(body) {
   }
 
   const user = await queryOne(
-    `SELECT code, name_1, department, logistic_code, title
-     FROM erp_user
-     WHERE code = $1 AND password = $2`,
+    `SELECT u.code, u.name_1, u.department, u.logistic_code,
+            COALESCE(
+              NULLIF(TRIM(wb.position_code), ''),
+              NULLIF(TRIM(e.app_role), ''),
+              NULLIF(TRIM(u.title), ''),
+              ''
+            ) AS title
+     FROM erp_user u
+     LEFT JOIN public.odg_employee e ON e.employee_code = u.code
+     LEFT JOIN public.odg_tms_worker_branch wb ON wb.worker_code = u.code
+     WHERE u.code = $1 AND u.password = $2`,
     [username, password]
   );
   if (user) {
-    return createAuthPayload({
+    const payload = createAuthPayload({
       username: user.code,
       code: user.code,
       name_1: user.name_1 ?? user.code,
@@ -70,6 +117,8 @@ async function mobileLogin(body) {
       logistic_code: user.logistic_code ?? "",
       title: user.title ?? "",
     });
+    payload.is_driver = await resolveIsDriver(payload.code, payload.roles);
+    return payload;
   }
 
   const userB = await queryOneB(
@@ -77,13 +126,15 @@ async function mobileLogin(body) {
     [username, password]
   );
   if (userB) {
-    return createAuthPayload({
+    const payload = createAuthPayload({
       username: userB.username,
       code: userB.username,
       name_1: userB.username,
       roles: userB.roles ?? "",
       driver_id: userB.username,
     });
+    payload.is_driver = await resolveIsDriver(payload.code, payload.roles);
+    return payload;
   }
 
   const err = new Error("ຊື່ຜູ້ໃຊ້ ຫຼື ລະຫັດຜ່ານບໍ່ຖືກ");
@@ -150,6 +201,87 @@ async function mobileJobsList(driverId, date) {
 
   sql += ` WHERE a.driver=$1 AND a.job_status != 4 AND ${getFixedYearSqlFilter("a.doc_date")} ORDER BY a.doc_no`;
   return await query(sql, [driverId]);
+}
+
+function normalizeSupervisorStatus(value) {
+  const status = asText(value).toLowerCase();
+  if (["pending", "active", "done", "issue"].includes(status)) return status;
+  return "";
+}
+
+async function mobileJobsListAll({ date = "", driverId = "", status = "" } = {}) {
+  const fixedDate = date ? coerceDateToFixedYear(date) : null;
+  const normalizedStatus = normalizeSupervisorStatus(status);
+  const where = ["a.job_status != 4", getFixedYearSqlFilter("a.doc_date")];
+  const params = [];
+
+  if (fixedDate) {
+    params.push(fixedDate);
+    where.push(`a.doc_date=$${params.length}`);
+  }
+  if (asText(driverId)) {
+    params.push(asText(driverId));
+    where.push(`a.driver=$${params.length}`);
+  }
+  if (normalizedStatus === "pending") {
+    where.push(`(a.job_status = 0 OR COALESCE(a.approve_status, 0) = 0)`);
+  } else if (normalizedStatus === "active") {
+    where.push(`a.job_status IN (1, 2)`);
+  } else if (normalizedStatus === "done") {
+    where.push(`a.job_status >= 3`);
+  } else if (normalizedStatus === "issue") {
+    where.push(`COALESCE(bs.cancelled_bill_count, 0) > 0`);
+  }
+
+  const sql = `
+    WITH bill_summary AS (
+      SELECT
+        d.doc_no, COUNT(*)::int AS total_bills,
+        COUNT(*) FILTER (WHERE COALESCE(d.status, 0) NOT IN (1, 2) AND d.sent_start IS NULL)::int AS waiting_bill_count,
+        COUNT(*) FILTER (WHERE COALESCE(d.status, 0) NOT IN (1, 2) AND d.sent_start IS NOT NULL)::int AS inprogress_bill_count,
+        COUNT(*) FILTER (WHERE COALESCE(d.status, 0) = 1)::int AS completed_bill_count,
+        COUNT(*) FILTER (WHERE COALESCE(d.status, 0) = 2)::int AS cancelled_bill_count,
+        MIN(d.recipt_job) AS received_at,
+        MIN(d.sent_start) FILTER (WHERE d.sent_start IS NOT NULL) AS first_bill_started_at
+      FROM public.odg_tms_detail d
+      WHERE ${getFixedYearSqlFilter("d.doc_date")}
+      GROUP BY d.doc_no
+    )
+    SELECT
+      to_char(a.doc_date,'DD-MM-YYYY') as doc_date, a.doc_no,
+      to_char(a.date_logistic,'DD-MM-YYYY') as date_logistic,
+      a.car as car_code, b.name_1 as car, c.name_1 as driver,
+      COALESCE(bs.total_bills, 0) as item_bill, d.name_1 as user_created,
+      a.approve_status::text, a.job_status,
+      COALESCE(bs.waiting_bill_count, 0) as waiting_bill_count,
+      COALESCE(bs.inprogress_bill_count, 0) as inprogress_bill_count,
+      COALESCE(bs.completed_bill_count, 0) as completed_bill_count,
+      COALESCE(bs.cancelled_bill_count, 0) as cancelled_bill_count,
+      COALESCE(to_char(bs.received_at,'DD-MM-YYYY HH24:MI'), '-') as received_at,
+      COALESCE(to_char(a.dispatch_started_at,'DD-MM-YYYY HH24:MI'), '-') as dispatch_started_at,
+      COALESCE(a.miles_start, '') as miles_start,
+      '' as img_start,
+      (a.img_start IS NOT NULL AND a.img_start <> '') as has_img_start,
+      COALESCE(a.miles_end, '') as miles_end,
+      '' as img_end,
+      (a.img_end IS NOT NULL AND a.img_end <> '') as has_img_end,
+      case when a.approve_status = 0 then 'ລໍຖ້າອະນຸມັດ'
+        else case
+          when a.job_status = 0 then 'ລໍຖ້າຈັດສົ່ງ'
+          when a.job_status = 1 then 'ຮັບຖ້ຽວ'
+          when a.job_status = 2 then 'ກຳລັງຈັດສົ່ງ'
+          when a.job_status = 3 then 'ຄົນຂັບປິດງານ'
+          else 'admin ປິດຖ້ຽວ'
+        end
+      end as status
+    FROM odg_tms a
+    LEFT JOIN public.odg_tms_car b ON b.code = a.car
+    LEFT JOIN public.odg_tms_driver c ON c.code = a.driver
+    LEFT JOIN erp_user d ON d.code = a.user_created
+    LEFT JOIN bill_summary bs ON bs.doc_no = a.doc_no
+    WHERE ${where.join(" AND ")}
+    ORDER BY a.doc_no`;
+  return await query(sql, params);
 }
 
 function normalizeItems(value) {
@@ -318,6 +450,103 @@ async function mobileJobAction(body) {
 
         await client.query("COMMIT");
         void notifyBillStatus(billNo, "📦 ເບີກເຄື່ອງແລ້ວ");
+        return { success: true, doc_no: currentDocNo };
+      }
+
+      // Receive goods AT the customer's home/shop ("ຮັບສິນຄ້າຈາກລານລູກຄ້າ").
+      // Used by the driver app for '__CUSTOMER__' pickup bills, where the goods
+      // are collected from the customer (reverse logistics) before being driven
+      // on to the real drop-off. Unlike pickup_bill, this captures the receive
+      // GPS + a photo + the customer's signature (attached separately via
+      // attach_bill_image kind=pickup / pickup_signature) and DELIBERATELY does
+      // NOT set sent_start — the bill stays in the "pickup" phase so the driver
+      // still does a separate Check in + ສຳເລັດ at the delivery destination.
+      case "receive_customer_bill": {
+        if (!billNo) throw new Error("bill_no is required");
+        const billRow = await client.query(
+          `SELECT d.doc_no, d.cust_code, d.pickup_transport_code,
+                  t.approve_status, t.job_status
+           FROM public.odg_tms_detail d
+           INNER JOIN odg_tms t ON t.doc_no = d.doc_no
+           WHERE d.bill_no = $1 AND ${getFixedYearSqlFilter("d.doc_date")}
+           ORDER BY (CASE WHEN COALESCE(d.status, 0) NOT IN (1, 2) THEN 0 ELSE 1 END),
+                    d.create_date_time_now DESC NULLS LAST
+           LIMIT 1`,
+          [billNo]
+        );
+        const currentBill = billRow.rows[0];
+        const currentDocNo = currentBill?.doc_no;
+        if (!currentDocNo) throw new Error("Bill was not found");
+        if (Number(currentBill.approve_status ?? 0) !== 1) throw new Error("ຖ້ຽວນີ້ຍັງບໍ່ຖືກອະນຸມັດ");
+        if (Number(currentBill.job_status ?? 0) >= 3) throw new Error("ຖ້ຽວນີ້ປິດແລ້ວ ບໍ່ສາມາດຮັບເຄື່ອງ");
+        if (currentBill.pickup_transport_code !== "__CUSTOMER__") {
+          throw new Error("ບິນນີ້ບໍ່ແມ່ນການຮັບຈາກລານລູກຄ້າ");
+        }
+        // Auto-receive the trip if the driver hasn't tapped "ຮັບຖ້ຽວ" — arriving
+        // to collect goods implies the trip is in hand.
+        if (Number(currentBill.job_status ?? 0) === 0) {
+          await client.query(
+            `UPDATE odg_tms
+             SET job_status = 1
+             WHERE doc_no = $1 AND COALESCE(approve_status, 0) = 1 AND ${getFixedYearSqlFilter("doc_date")}`,
+            [currentDocNo]
+          );
+        }
+
+        await ensureBillDeliveryItems(billNo, client);
+
+        // Mark goods received + stamp the receive GPS. sent_start is left NULL
+        // on purpose so the bill remains in the "pickup" phase for the delivery
+        // leg. The photo + signature are stored by attach_bill_image beforehand.
+        await client.query(
+          `UPDATE public.odg_tms_detail
+           SET recipt_job = COALESCE(recipt_job, LOCALTIMESTAMP(0)),
+               lat = COALESCE($2, lat), lng = COALESCE($3, lng)
+           WHERE bill_no = $1 AND ${getFixedYearSqlFilter("doc_date")}`,
+          [billNo, lat, lng]
+        );
+
+        // Backfill the customer's stored location when it's missing — same
+        // guarded update as checkin_bill (only fills NULL/empty/zero).
+        if (currentBill.cust_code && lat && lng) {
+          const updated = await client.query(
+            `UPDATE public.ar_customer_detail
+             SET latitude = $2, longitude = $3
+             WHERE ar_code = $1
+               AND (
+                 latitude IS NULL
+                 OR longitude IS NULL
+                 OR TRIM(latitude::text) = ''
+                 OR TRIM(longitude::text) = ''
+                 OR TRIM(latitude::text) ~ '^-?0+\\.?0*$'
+                 OR TRIM(longitude::text) ~ '^-?0+\\.?0*$'
+               )
+             RETURNING ar_code`,
+            [currentBill.cust_code, lat, lng]
+          );
+          if ((updated.rowCount ?? 0) === 0) {
+            await client.query(
+              `INSERT INTO public.ar_customer_detail (ar_code, latitude, longitude)
+               VALUES ($1, $2, $3)
+               ON CONFLICT (ar_code) DO UPDATE
+                 SET latitude = EXCLUDED.latitude,
+                     longitude = EXCLUDED.longitude
+                 WHERE
+                   public.ar_customer_detail.latitude IS NULL
+                   OR public.ar_customer_detail.longitude IS NULL
+                   OR TRIM(public.ar_customer_detail.latitude::text) = ''
+                   OR TRIM(public.ar_customer_detail.longitude::text) = ''
+                   OR TRIM(public.ar_customer_detail.latitude::text) ~ '^-?0+\\.?0*$'
+                   OR TRIM(public.ar_customer_detail.longitude::text) ~ '^-?0+\\.?0*$'`,
+              [currentBill.cust_code, lat, lng]
+            ).catch((err) => {
+              console.warn('[receive_customer_bill] ar_customer_detail insert skipped:', err?.message);
+            });
+          }
+        }
+
+        await client.query("COMMIT");
+        void notifyBillStatus(billNo, "📦 ຮັບສິນຄ້າຈາກລານລູກຄ້າແລ້ວ");
         return { success: true, doc_no: currentDocNo };
       }
 
@@ -607,8 +836,25 @@ async function mobileJobAction(body) {
              WHERE bill_no = $1 AND ${getFixedYearSqlFilter("doc_date")}`,
             [billNo, imageData]
           );
+        } else if (kind === "pickup") {
+          // Proof-of-pickup photo captured at the customer's home/shop for
+          // '__CUSTOMER__' bills — kept apart from the delivery photo (url_img).
+          await client.query(
+            `UPDATE public.odg_tms_detail
+             SET recipt_img = $2
+             WHERE bill_no = $1 AND ${getFixedYearSqlFilter("doc_date")}`,
+            [billNo, imageData]
+          );
+        } else if (kind === "pickup_signature") {
+          // Customer's signature confirming the goods were handed over at pickup.
+          await client.query(
+            `UPDATE public.odg_tms_detail
+             SET recipt_sign_img = $2
+             WHERE bill_no = $1 AND ${getFixedYearSqlFilter("doc_date")}`,
+            [billNo, imageData]
+          );
         } else {
-          throw new Error("kind must be delivery|signature|primary");
+          throw new Error("kind must be delivery|signature|primary|pickup|pickup_signature");
         }
 
         await client.query("COMMIT");
@@ -865,6 +1111,22 @@ async function mobileJobAction(body) {
           );
         }
 
+        // COD (Module B): record cash/transfer collected at delivery, if sent.
+        const collectedAmount =
+          body.collected_amount != null && `${body.collected_amount}` !== ""
+            ? Number(body.collected_amount)
+            : null;
+        if (collectedAmount !== null && !Number.isNaN(collectedAmount)) {
+          await client.query(
+            `UPDATE public.odg_tms_detail
+             SET collected_amount = $2,
+                 payment_method = COALESCE($3, payment_method),
+                 collected_at = LOCALTIMESTAMP(0)
+             WHERE bill_no = $1 AND ${getFixedYearSqlFilter("doc_date")}`,
+            [billNo, collectedAmount, asNullableText(body.payment_method)]
+          );
+        }
+
         const summary = await getBillDeliveryItemSummary(billNo, client);
         const remainingItems = Number(summary?.remaining_item_count ?? 0);
         const remainingQty = Number(summary?.remaining_qty_total ?? 0);
@@ -968,6 +1230,20 @@ async function mobileJobAction(body) {
            WHERE bill_no = $1 AND doc_no = $8 AND ${getFixedYearSqlFilter("doc_date")}`,
           [billNo, lat, lng, latEnd, lngEnd, deliveryImage, comment, currentDocNo]
         );
+
+        // Module D: standardized failure reason + optional reschedule date so
+        // the office can analyse why deliveries fail and re-dispatch deferrals.
+        const reasonCode = asNullableText(body.reason_code ?? body.cancel_reason_code);
+        const rescheduleDate = asNullableText(body.reschedule_date);
+        if (reasonCode || rescheduleDate) {
+          await client.query(
+            `UPDATE public.odg_tms_detail
+             SET cancel_reason_code = COALESCE($2, cancel_reason_code),
+                 reschedule_date = COALESCE($3::date, reschedule_date)
+             WHERE bill_no = $1 AND ${getFixedYearSqlFilter("doc_date")}`,
+            [billNo, reasonCode, rescheduleDate]
+          );
+        }
 
         // ປ່ອຍ check_status ເມື່ອບໍ່ມີຖ້ຽວເປີດຄ້າງສຳລັບບິນນີ້ — ຖ້າຍັງມີ detail ອື່ນທີ່ຍັງບໍ່ປິດ (ຈັດຫຼາຍຄັ້ງ) ຈະບໍ່ປ່ອຍ
         await client.query(
@@ -1277,6 +1553,22 @@ async function mobileBills({ docNo, billNo, type, driverId }) {
       throw err;
     }
   }
+  // Proof-of-pickup image bytes for one bill — fetched on demand so the driver
+  // can re-view the photo + signature they captured at the customer's yard
+  // (the list payload only carries has_recipt_img flags). Auth-gated above.
+  if (type === "pickup_images" && billNo) {
+    const row = await queryOne(
+      `SELECT COALESCE(recipt_img, '') AS recipt_img,
+              COALESCE(recipt_sign_img, '') AS recipt_sign_img
+       FROM public.odg_tms_detail
+       WHERE bill_no = $1 AND ${getFixedYearSqlFilter("doc_date")}
+       ORDER BY (CASE WHEN COALESCE(status, 0) NOT IN (1, 2) THEN 0 ELSE 1 END),
+                create_date_time_now DESC NULLS LAST
+       LIMIT 1`,
+      [billNo]
+    );
+    return row ?? { recipt_img: "", recipt_sign_img: "" };
+  }
   if (type === "products" && docNo) {
     return await getBillDeliveryItems({ docNo });
   }
@@ -1348,6 +1640,17 @@ async function mobileBills({ docNo, billNo, type, driverId }) {
         '' as sight_img,
         (a.url_img IS NOT NULL AND a.url_img <> '') as has_url_img,
         (a.sight_img IS NOT NULL AND a.sight_img <> '') as has_sight_img,
+        -- Proof-of-pickup captured at the customer's yard ('__CUSTOMER__' bills).
+        -- Bytes excluded from the list payload (same reason as url_img); flags
+        -- only so the UI can show a "photo on file" indicator.
+        (a.recipt_img IS NOT NULL AND a.recipt_img <> '') as has_recipt_img,
+        (a.recipt_sign_img IS NOT NULL AND a.recipt_sign_img <> '') as has_recipt_sign_img,
+        -- COD (Module B) + failure reason / reschedule (Module D)
+        COALESCE(a.cod_amount, 0) as cod_amount,
+        a.collected_amount as collected_amount,
+        COALESCE(a.payment_method, '') as payment_method,
+        COALESCE(a.cancel_reason_code, '') as cancel_reason_code,
+        COALESCE(to_char(a.reschedule_date,'DD-MM-YYYY'), '') as reschedule_date,
         COALESCE(a.remark, '') as remark,
         COALESCE(NULLIF(TRIM(pb.planned_lat), ''), '') as planned_lat,
         COALESCE(NULLIF(TRIM(pb.planned_lng), ''), '') as planned_lng
@@ -1570,9 +1873,36 @@ async function mobileSaveLocations({ doc_no, driver_id, imei, device, points }) 
   }
 }
 
+// Supervisor KPI summary for a single day (Module F.2). Defaults to today.
+async function mobileSupervisorKpi({ date = "" } = {}) {
+  const day = coerceDateToFixedYear(
+    date || new Date().toISOString().split("T")[0]
+  );
+  const row = await query(
+    `SELECT
+       COUNT(DISTINCT t.doc_no)::int AS total_trips,
+       COUNT(DISTINCT t.doc_no) FILTER (WHERE COALESCE(t.job_status,0) >= 3)::int AS done_trips,
+       COUNT(d.bill_no)::int AS total_bills,
+       COUNT(*) FILTER (WHERE COALESCE(d.status,0) = 1)::int AS delivered_bills,
+       COUNT(*) FILTER (WHERE COALESCE(d.status,0) = 2)::int AS cancelled_bills,
+       COUNT(*) FILTER (WHERE COALESCE(d.status,0) NOT IN (1,2))::int AS pending_bills,
+       COALESCE(SUM(d.collected_amount), 0)::numeric AS cod_collected
+     FROM odg_tms t
+     LEFT JOIN public.odg_tms_detail d
+       ON d.doc_no = t.doc_no AND ${getFixedYearSqlFilter("d.doc_date")}
+     WHERE t.doc_date = $1
+       AND COALESCE(t.job_status,0) != 4
+       AND ${getFixedYearSqlFilter("t.doc_date")}`,
+    [day]
+  );
+  return row[0] ?? {};
+}
+
 module.exports = {
   mobileLogin,
   mobileJobsList,
+  mobileJobsListAll,
+  mobileSupervisorKpi,
   mobileJobAction,
   mobileBills,
   mobileFuelLogs,

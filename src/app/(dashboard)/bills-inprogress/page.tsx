@@ -55,6 +55,8 @@ function ImageThumb({ src, label }: { src: string; label: string }) {
 function collectDeliveryImages(detail: {
   url_img?: string;
   sight_img?: string;
+  recipt_img?: string;
+  recipt_sign_img?: string;
   delivery_images?: string[];
 }): Array<{ src: string; label: string }> {
   const out: Array<{ src: string; label: string }> = [];
@@ -68,6 +70,8 @@ function collectDeliveryImages(detail: {
   if (Array.isArray(detail.delivery_images)) {
     detail.delivery_images.forEach((src, i) => push(src, `ຮູບ ${i + 1}`));
   }
+  push(detail.recipt_img, "ຮູບຮັບເຄື່ອງ");
+  push(detail.recipt_sign_img, "ລາຍເຊັນຮັບເຄື່ອງ");
   push(detail.url_img, "ຮູບຫຼັກ");
   push(detail.sight_img, "ລາຍເຊັນ");
   return out;

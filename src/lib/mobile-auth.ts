@@ -1,6 +1,7 @@
 import type { NextRequest } from "next/server";
 import { verifyToken } from "@/lib/auth";
 import { assertMobileAppVersion } from "@/lib/app-version";
+import { touchUserPresence } from "@/queries/presence.js";
 
 export interface MobileSession {
   usercode: string;
@@ -8,6 +9,9 @@ export interface MobileSession {
   driver_id: string;
   logistic_code: string;
   title: string;
+  roles: string;
+  /// true = driver; false = non-driver (treated as supervisor/manager).
+  is_driver: boolean;
 }
 
 export async function requireMobileSession(
@@ -38,13 +42,21 @@ export async function requireMobileSession(
   // below the admin-set minimum. Throws a 426 that mobileErrorResponse turns
   // into a force_update payload.
   await assertMobileAppVersion(request);
-  return {
+  const session = {
     usercode,
     username,
     driver_id: driverId,
     logistic_code: String(payload.logistic_code ?? ""),
     title: String(payload.title ?? ""),
+    roles: String(payload.roles ?? ""),
+    is_driver: payload.is_driver === true,
   };
+  await ((touchUserPresence as unknown) as (input: Record<string, unknown>) => Promise<unknown>)({
+    session,
+    source: "mobile",
+    request,
+  });
+  return session;
 }
 
 export function mobileErrorResponse(error: unknown): Response {

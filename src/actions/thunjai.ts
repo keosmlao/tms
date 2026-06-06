@@ -276,7 +276,6 @@ export async function createThunJaiOrder(input: unknown) {
     return {
       name: requiredString(item.name ?? item.product_name, `Product ${index + 1} name`),
       requestedQty,
-      orderCount: Math.ceil(requestedQty),
       weight: requiredNumber(item.weight ?? data.weight, `Product ${index + 1} weight`),
       package_type: {
         id:
@@ -298,7 +297,6 @@ export async function createThunJaiOrder(input: unknown) {
           `Product ${index + 1} package height`
         ),
       },
-      is_service_at_dest: cleanBoolean(item.is_service_at_dest ?? data.is_service_at_dest),
       is_cod: cleanBoolean(item.is_cod ?? data.is_cod),
       price: cleanNumber(item.price ?? data.price) ?? 0,
     };
@@ -329,85 +327,45 @@ export async function createThunJaiOrder(input: unknown) {
     note_deliverer: cleanString(data.note_deliverer),
   };
 
-  const orders = products.flatMap((product, productIndex) =>
-    Array.from({ length: product.orderCount }, (_, unitIndex) => ({
-      productIndex,
-      unitIndex,
-      product,
-    }))
+  const payload = {
+    ...commonPayload,
+    sender_order_no: baseSenderOrderNo,
+    is_service_at_dest: cleanBoolean(data.is_service_at_dest),
+    product_list: products.map((product) => ({
+      name: product.name,
+      qty: product.requestedQty,
+      weight: product.weight,
+      package_type: product.package_type,
+      is_cod: product.is_cod,
+      price: product.price,
+    })),
+  };
+  const response = await sendThunJaiApi(
+    settings,
+    token,
+    "PUT",
+    "/order/service/create",
+    payload
   );
-
-  const results = [];
-  for (let index = 0; index < orders.length; index += 1) {
-    const { product, productIndex, unitIndex } = orders[index];
-    const senderOrderNo =
-      orders.length > 1 && baseSenderOrderNo
-        ? `${baseSenderOrderNo}-${String(index + 1).padStart(3, "0")}`
-        : baseSenderOrderNo;
-    const payload = {
-      ...commonPayload,
-      sender_order_no: senderOrderNo,
-      product_list: [
-        {
-          name: product.name,
-          qty: 1,
-          weight: product.weight,
-          package_type: product.package_type,
-          is_service_at_dest: product.is_service_at_dest,
-          is_cod: product.is_cod,
-          price: product.price,
-        },
-      ],
-    };
-    try {
-      const response = await sendThunJaiApi(
-        settings,
-        token,
-        "PUT",
-        "/order/service/create",
-        payload
-      );
-      results.push({
-        ok: true,
-        index: index + 1,
-        sender_order_no: senderOrderNo,
-        source_product_index: productIndex + 1,
-        source_unit_index: unitIndex + 1,
-        source_requested_qty: product.requestedQty,
-        product_name: product.name,
-        payload,
-        response,
-      });
-    } catch (err) {
-      results.push({
-        ok: false,
-        index: index + 1,
-        sender_order_no: senderOrderNo,
-        source_product_index: productIndex + 1,
-        source_unit_index: unitIndex + 1,
-        source_requested_qty: product.requestedQty,
-        product_name: product.name,
-        payload,
-        error: err instanceof Error ? err.message : "ThunJai API request failed",
-      });
-      return {
-        success: false,
-        mode: "split_one_item_one_qty",
-        requested_product_count: products.length,
-        requested_order_count: orders.length,
-        created_order_count: results.filter((item) => item.ok).length,
-        failed_at_order: index + 1,
-        results,
-      };
-    }
-  }
+  const results = [
+    {
+      ok: true,
+      index: 1,
+      sender_order_no: baseSenderOrderNo,
+      product_count: products.length,
+      payload,
+      response,
+    },
+  ];
 
   return {
     success: true,
-    mode: "split_one_item_one_qty",
+    mode: "api_native_product_list",
     requested_product_count: products.length,
-    requested_order_count: orders.length,
-    created_order_count: results.length,
+    requested_order_count: 1,
+    created_order_count: 1,
+    payload,
+    response,
     results,
   };
 }

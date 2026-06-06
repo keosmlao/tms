@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   FaCalendarAlt,
   FaChartLine,
@@ -79,6 +79,13 @@ type DeliveryReport = {
   daily: DeliveryDay[];
   zones: DeliveryZone[];
   fleet: DeliveryFleet;
+  queue: DeliveryQueue;
+};
+
+type DeliveryQueue = {
+  delivered: number;
+  jumped: number;
+  rate: number;
 };
 
 const EMPTY_FLEET: DeliveryFleet = {
@@ -129,6 +136,7 @@ const EMPTY_REPORT: DeliveryReport = {
   daily: [],
   zones: [],
   fleet: EMPTY_FLEET,
+  queue: { delivered: 0, jumped: 0, rate: 0 },
 };
 
 const MONTH_NAMES = [
@@ -311,6 +319,37 @@ function StatTile({
       </p>
       <p className={`mt-1.5 text-2xl font-extrabold tabular-nums ${toneClass.text}`}>{value}</p>
       {sub && <p className="mt-1 text-[10px] leading-tight text-slate-400">{sub}</p>}
+    </div>
+  );
+}
+
+function CapInput({
+  label,
+  value,
+  onChange,
+  step = 1,
+  min = 0,
+  hint,
+}: {
+  label: string;
+  value: number;
+  onChange: (v: number) => void;
+  step?: number;
+  min?: number;
+  hint?: string;
+}) {
+  return (
+    <div>
+      <label className="block text-[10px] font-semibold uppercase tracking-wider text-slate-400">{label}</label>
+      <input
+        type="number"
+        value={value}
+        min={min}
+        step={step}
+        onChange={(e) => onChange(Math.max(min, Number(e.target.value) || 0))}
+        className="mt-1 w-full glass-input rounded-lg px-2.5 py-1.5 text-sm font-bold tabular-nums text-slate-800 dark:text-slate-200"
+      />
+      {hint && <p className="mt-0.5 text-[9px] text-slate-400">{hint}</p>}
     </div>
   );
 }
@@ -498,6 +537,8 @@ export default function MonthlyDeliveryPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [tab, setTab] = useState<"overview" | "branch" | "department">("overview");
+  const [cap, setCap] = useState({ cars: 16, hours: 6, hoursPerTrip: 2.5, billsPerTrip: 5, demand: 90 });
+  const capSeededRef = useRef(false);
 
   const loadReport = useCallback(() => {
     setLoading(true);
@@ -585,6 +626,29 @@ export default function MonthlyDeliveryPage() {
   );
   const zones = report.zones ?? [];
   const fleet = report.fleet ?? EMPTY_FLEET;
+  const queue = report.queue ?? { delivered: 0, jumped: 0, rate: 0 };
+
+  // Seed the capacity planner from real data the first time it loads.
+  useEffect(() => {
+    if (capSeededRef.current) return;
+    if (fleet.active_cars > 0 || daily.length > 0) {
+      const peak = daily.length ? Math.max(...daily.map((d) => d.opened)) : 90;
+      const bpt = fleet.total_trips > 0 ? Math.max(1, Math.round(totals.delivered / fleet.total_trips)) : 5;
+      setCap((c) => ({
+        ...c,
+        cars: fleet.active_cars || c.cars,
+        demand: peak || c.demand,
+        billsPerTrip: bpt,
+      }));
+      capSeededRef.current = true;
+    }
+  }, [fleet, daily, totals.delivered]);
+
+  const capTripsPerCar = Math.max(0, Math.floor(cap.hours / Math.max(0.1, cap.hoursPerTrip)));
+  const capBillsPerCarDay = capTripsPerCar * cap.billsPerTrip;
+  const capCapacity = cap.cars * capBillsPerCarDay;
+  const capFeasible = capCapacity >= cap.demand;
+  const capCarsNeeded = capBillsPerCarDay > 0 ? Math.ceil(cap.demand / capBillsPerCarDay) : 0;
 
   const criticalBranches = branches.filter(
     (branch) => branch.carry_out > 0 || branch.openKpiRate < 80 || branch.startKpiRate < 80
@@ -888,6 +952,81 @@ export default function MonthlyDeliveryPage() {
               value={fleet.trips_per_car_per_day == null ? "-" : numberText(fleet.trips_per_car_per_day, 2)}
               sub="ຖ້ຽວ ຕໍ່ລົດ ຕໍ່ມື້"
               tone="emerald"
+            />
+          </div>
+        </section>
+      )}
+
+      {fleet.total_trips > 0 && (
+        <section className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm dark:border-slate-800 dark:bg-slate-900/70">
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <h2 className="text-sm font-bold text-slate-950 dark:text-white">ການວາງແຜນຄວາມສາມາດ</h2>
+            <p className="text-xs text-slate-500 dark:text-slate-400">
+              ສົ່ງທັນພາຍໃນມື້ໄດ້ບໍ່? ປັບຄ່າເພື່ອລອງ (ຄ່າເລີ່ມຕົ້ນຈາກ data ຈິງ)
+            </p>
+          </div>
+          <div className="mt-3 grid grid-cols-1 gap-4 lg:grid-cols-[1.15fr_0.85fr]">
+            <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
+              <CapInput label="ລົດທີ່ໃຊ້ (ຄັນ)" value={cap.cars} onChange={(v) => setCap((c) => ({ ...c, cars: v }))} hint={`ໃຊ້ງານຈິງ ${numberText(fleet.active_cars)}`} />
+              <CapInput label="ຊມ/ມື້" value={cap.hours} step={0.5} onChange={(v) => setCap((c) => ({ ...c, hours: v }))} />
+              <CapInput label="ຊມ/ຖ້ຽວ" value={cap.hoursPerTrip} step={0.5} min={0.5} onChange={(v) => setCap((c) => ({ ...c, hoursPerTrip: v }))} />
+              <CapInput label="ບິນ/ຖ້ຽວ" value={cap.billsPerTrip} onChange={(v) => setCap((c) => ({ ...c, billsPerTrip: v }))} />
+              <CapInput label="ບິນ/ມື້ (demand)" value={cap.demand} onChange={(v) => setCap((c) => ({ ...c, demand: v }))} hint="ມື້ສູງສຸດ" />
+            </div>
+            <div
+              className={`flex flex-col justify-center rounded-lg border p-4 ${
+                capFeasible
+                  ? "border-emerald-300 bg-emerald-50 dark:border-emerald-900/60 dark:bg-emerald-950/25"
+                  : "border-rose-300 bg-rose-50 dark:border-rose-900/60 dark:bg-rose-950/25"
+              }`}
+            >
+              <p className={`text-lg font-extrabold ${capFeasible ? "text-emerald-700 dark:text-emerald-300" : "text-rose-700 dark:text-rose-300"}`}>
+                {capFeasible ? "✅ ສົ່ງທັນພາຍໃນມື້" : "⚠️ ສົ່ງບໍ່ທັນ"}
+              </p>
+              <div className="mt-2 space-y-1 text-xs text-slate-600 dark:text-slate-300">
+                <p>
+                  ຄວາມສາມາດ:{" "}
+                  <b className="text-slate-900 dark:text-white">{numberText(capCapacity)} ບິນ/ມື້</b>{" "}
+                  ({numberText(capBillsPerCarDay)} ບິນ/ຄັນ × {numberText(cap.cars)} ຄັນ)
+                </p>
+                <p>
+                  ຄວາມຕ້ອງການ:{" "}
+                  <b className="text-slate-900 dark:text-white">{numberText(cap.demand)} ບິນ/ມື້</b>
+                </p>
+                <p>1 ຄັນ ໄດ້ {numberText(capTripsPerCar)} ຖ້ຽວ/ມື້ × {numberText(cap.billsPerTrip)} ບິນ</p>
+                {!capFeasible && capBillsPerCarDay > 0 && (
+                  <p className="font-bold text-rose-600 dark:text-rose-300">
+                    ຕ້ອງໃຊ້ {numberText(capCarsNeeded)} ຄັນ (ຂາດ {numberText(Math.max(0, capCarsNeeded - cap.cars))} ຄັນ)
+                  </p>
+                )}
+              </div>
+            </div>
+          </div>
+        </section>
+      )}
+
+      {queue.delivered > 0 && (
+        <section className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm dark:border-slate-800 dark:bg-slate-900/70">
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <div className="min-w-0">
+              <h2 className="text-sm font-bold text-slate-950 dark:text-white">ສັດສ່ວນການລັດຄິວ</h2>
+              <p className="mt-0.5 text-xs text-slate-500 dark:text-slate-400">
+                ບິນທີ່ສົ່ງ ໃນຂະນະທີ່ມີບິນ (ສາຂາດຽວກັນ) ນັດໃຫ້ສົ່ງກ່ອນ ຍັງຄ້າງ
+              </p>
+            </div>
+            <div className="text-right">
+              <p className={`text-3xl font-extrabold tabular-nums ${queue.rate >= 30 ? "text-amber-600 dark:text-amber-400" : "text-emerald-600 dark:text-emerald-400"}`}>
+                {percentText(queue.rate)}
+              </p>
+              <p className="text-[11px] text-slate-500 dark:text-slate-400">
+                {numberText(queue.jumped)} / {numberText(queue.delivered)} ບິນ
+              </p>
+            </div>
+          </div>
+          <div className="mt-3 h-2.5 overflow-hidden rounded-full bg-slate-100 dark:bg-slate-800">
+            <div
+              className={`h-full ${queue.rate >= 30 ? "bg-amber-500" : "bg-emerald-500"}`}
+              style={{ width: `${clampPercent(queue.rate)}%` }}
             />
           </div>
         </section>

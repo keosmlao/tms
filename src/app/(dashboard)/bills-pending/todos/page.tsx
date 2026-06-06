@@ -29,10 +29,15 @@ interface TodoRow {
   created_at: string;
   done_by: string;
   done_at: string;
+  owner_code: string;
+  owner_name: string;
   customer: string;
   cust_code: string;
   transport_code: string;
   transport: string;
+  scope_readonly?: boolean;
+  scope_role?: string;
+  scope_label?: string;
 }
 
 // Same per-branch palette as the bills-pending list so a bill's branch reads
@@ -64,6 +69,8 @@ export default function BillTodosPage() {
   const [search, setSearch] = useState("");
   const [savingId, setSavingId] = useState<number | null>(null);
   const today = getFixedTodayDate();
+  const readOnlyMode = todos.some((t) => t.scope_readonly);
+  const scopeLabel = todos.find((t) => t.scope_label)?.scope_label ?? "ຂອງຕົນເອງ";
 
   const fetchTodos = (withDone: boolean) => {
     setLoading(true);
@@ -78,6 +85,7 @@ export default function BillTodosPage() {
   }, [includeDone]);
 
   const toggleDone = async (todo: TodoRow) => {
+    if (todo.scope_readonly) return;
     setSavingId(todo.id);
     try {
       await Actions.setBillTodoDone({ id: todo.id, done: !todo.done });
@@ -100,7 +108,9 @@ export default function BillTodosPage() {
     const q = search.trim().toLowerCase();
     if (!q) return todos;
     return todos.filter((t) =>
-      [t.bill_no, t.customer, t.summary, t.created_by].some((v) => (v || "").toLowerCase().includes(q))
+      [t.bill_no, t.customer, t.summary, t.created_by, t.owner_code, t.owner_name].some((v) =>
+        (v || "").toLowerCase().includes(q)
+      )
     );
   }, [todos, search]);
 
@@ -137,7 +147,11 @@ export default function BillTodosPage() {
 
       <StatusPageHeader
         title="ສິ່ງທີ່ຕ້ອງເຮັດ (Todo)"
-        subtitle="ລວບລວມບັນທຶກ/ກິດຈະກຳ ທີ່ພະນັກງານໝາຍໄວ້ໃນແຕ່ລະບິນ ມາໄວ້ບ່ອນດຽວ"
+        subtitle={
+          readOnlyMode
+            ? "ຫົວໜ້າ/ຜູ້ຈັດການຂົນສົ່ງເບິ່ງລາຍການທັງໝົດໃນສາຂາໄດ້ ແຕ່ເປັນ read only"
+            : "ລວບລວມບັນທຶກ/ກິດຈະກຳຂອງຕົນເອງ ທີ່ໝາຍໄວ້ໃນແຕ່ລະບິນ"
+        }
         icon={<FaStickyNote />}
         tone="teal"
       />
@@ -172,6 +186,15 @@ export default function BillTodosPage() {
           ສະແດງລາຍການທີ່ເຮັດແລ້ວ
         </label>
         <span className="text-[11px] text-slate-400">ພົບ {filtered.length} ລາຍການ</span>
+        <span
+          className={`rounded-full px-2.5 py-1 text-[11px] font-bold ${
+            readOnlyMode
+              ? "bg-amber-500/10 text-amber-700 dark:text-amber-400"
+              : "bg-teal-500/10 text-teal-700 dark:text-teal-400"
+          }`}
+        >
+          {scopeLabel}{readOnlyMode ? " · read only" : ""}
+        </span>
       </div>
 
       {loading ? (
@@ -186,10 +209,34 @@ export default function BillTodosPage() {
         </div>
       ) : (
         <div className="space-y-5">
-          <TodoGroup title="ເກີນກຳນົດ" tone="rose" rows={groups.overdue} savingId={savingId} onToggle={toggleDone} today={today} />
-          <TodoGroup title="ກຳລັງລໍ" tone="amber" rows={groups.open} savingId={savingId} onToggle={toggleDone} today={today} />
+          <TodoGroup
+            title="ເກີນກຳນົດ"
+            tone="rose"
+            rows={groups.overdue}
+            savingId={savingId}
+            onToggle={toggleDone}
+            today={today}
+            readOnly={readOnlyMode}
+          />
+          <TodoGroup
+            title="ກຳລັງລໍ"
+            tone="amber"
+            rows={groups.open}
+            savingId={savingId}
+            onToggle={toggleDone}
+            today={today}
+            readOnly={readOnlyMode}
+          />
           {includeDone && (
-            <TodoGroup title="ເຮັດແລ້ວ" tone="emerald" rows={groups.done} savingId={savingId} onToggle={toggleDone} today={today} />
+            <TodoGroup
+              title="ເຮັດແລ້ວ"
+              tone="emerald"
+              rows={groups.done}
+              savingId={savingId}
+              onToggle={toggleDone}
+              today={today}
+              readOnly={readOnlyMode}
+            />
           )}
         </div>
       )}
@@ -204,6 +251,7 @@ function TodoGroup({
   savingId,
   onToggle,
   today,
+  readOnly,
 }: {
   title: string;
   tone: "rose" | "amber" | "emerald";
@@ -211,6 +259,7 @@ function TodoGroup({
   savingId: number | null;
   onToggle: (t: TodoRow) => void;
   today: string;
+  readOnly: boolean;
 }) {
   if (rows.length === 0) return null;
   const dot = { rose: "bg-rose-500", amber: "bg-amber-500", emerald: "bg-emerald-500" }[tone];
@@ -224,6 +273,7 @@ function TodoGroup({
       <div className="space-y-2">
         {rows.map((t) => {
           const overdue = !t.done && !!t.deadline && t.deadline < today;
+          const ownerLabel = t.owner_name || t.owner_code || t.created_by;
           return (
             <div
               key={t.id}
@@ -234,11 +284,19 @@ function TodoGroup({
               <button
                 type="button"
                 onClick={() => onToggle(t)}
-                disabled={savingId === t.id}
+                disabled={savingId === t.id || readOnly || t.scope_readonly}
                 className={`mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded transition-colors ${
-                  t.done ? "bg-emerald-600 text-white" : "border border-slate-300 dark:border-slate-600 text-transparent hover:border-teal-500"
+                  t.done
+                    ? "bg-emerald-600 text-white disabled:opacity-70"
+                    : "border border-slate-300 dark:border-slate-600 text-transparent hover:border-teal-500 disabled:hover:border-slate-300 disabled:opacity-60"
                 }`}
-                title={t.done ? "ໝາຍວ່າຍັງບໍ່ເຮັດ" : "ໝາຍວ່າເຮັດແລ້ວ"}
+                title={
+                  readOnly || t.scope_readonly
+                    ? "read only"
+                    : t.done
+                    ? "ໝາຍວ່າຍັງບໍ່ເຮັດ"
+                    : "ໝາຍວ່າເຮັດແລ້ວ"
+                }
               >
                 {savingId === t.id ? <FaSpinner className="animate-spin" size={10} /> : t.done ? <FaCheck size={10} /> : <FaRegSquare size={10} className="opacity-0" />}
               </button>
@@ -256,6 +314,11 @@ function TodoGroup({
                   </Link>
                   {t.customer && <span className="truncate max-w-[260px]">· {t.customer}</span>}
                   <BranchBadge code={t.transport_code} name={t.transport} />
+                  {ownerLabel && (
+                    <span className="rounded-full bg-slate-500/10 px-1.5 py-0.5 text-[10px] font-semibold text-slate-500 dark:text-slate-400">
+                      ຂອງ {ownerLabel}
+                    </span>
+                  )}
                 </div>
                 <div className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-1 text-[10.5px]">
                   {t.deadline_display && (

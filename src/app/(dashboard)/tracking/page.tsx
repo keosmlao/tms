@@ -133,6 +133,8 @@ interface TrackingResult {
   forward_transport_name?: string;
   url_img: string;
   sight_img?: string;
+  recipt_img?: string;
+  recipt_sign_img?: string;
   delivery_images?: string[];
   lat: string;
   lng: string;
@@ -706,10 +708,14 @@ function DeliveryImage({
   url,
   signature,
   extra,
+  recipt,
+  reciptSign,
 }: {
   url: string;
   signature?: string;
   extra?: string[];
+  recipt?: string;
+  reciptSign?: string;
 }) {
   const [zoomed, setZoomed] = useState<string | null>(null);
   const seen = new Set<string>();
@@ -719,6 +725,10 @@ function DeliveryImage({
     seen.add(src);
     items.push({ src, label });
   };
+  // Proof captured at the customer's yard ('__CUSTOMER__' receive) first, then
+  // the delivery photos/signature.
+  push(recipt, "ຮູບຮັບເຄື່ອງ");
+  push(reciptSign, "ລາຍເຊັນຮັບເຄື່ອງ");
   (extra ?? []).forEach((src, i) => push(src, `ຮູບ ${i + 1}`));
   push(url, "ຮູບຫຼັກ");
   push(signature, "ລາຍເຊັນ");
@@ -1286,7 +1296,7 @@ function TrackingPageInner() {
             </div>
             <div className="lg:col-span-2 space-y-4">
               <LocationCard result={result} />
-              <DeliveryImage url={result.url_img} signature={result.sight_img} extra={result.delivery_images} />
+              <DeliveryImage url={result.url_img} signature={result.sight_img} extra={result.delivery_images} recipt={result.recipt_img} reciptSign={result.recipt_sign_img} />
             </div>
           </div>
         </div>

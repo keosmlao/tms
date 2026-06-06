@@ -54,6 +54,20 @@ function contactStatusLabel(status) {
   }
 }
 
+function salesRoleFromSession(session) {
+  const appRole = String(session?.app_role ?? "").trim().toLowerCase();
+  const pos = String(session?.position_code ?? "").trim();
+  if (appRole === "manager" || (!appRole && pos === "11")) return "manager";
+  if (appRole === "head" || (!appRole && pos === "12")) return "head";
+  if (appRole === "salesperson" || appRole === "pc" || (!appRole && pos === "13")) return "salesperson";
+  return appRole || "";
+}
+
+function canSeeDepartmentSales(session) {
+  const role = salesRoleFromSession(session);
+  return role === "manager" || role === "head";
+}
+
 function pendingStepsFromRow(row) {
   if (!row) return [];
   const date = row.pending_updated_date || row.scheduled_date_display || row.bill_date || row.doc_date || "-";
@@ -248,6 +262,25 @@ async function getBillAttempts(billNo, branchClause = "") {
   );
 }
 
+// Sale-bill items (ic_trans_detail) — fallback for bills not yet dispatched
+// into a trip (no odg_tms_detail_item rows), so the product list is never
+// empty for a real bill. selected_qty = ordered qty; delivered_qty = 0.
+async function getSaleItems(billNo) {
+  return query(
+    `SELECT t.item_code,
+            MAX(t.item_name) AS item_name,
+            SUM(COALESCE(t.qty, 0))::numeric AS qty,
+            SUM(COALESCE(t.qty, 0))::numeric AS selected_qty,
+            0::numeric AS delivered_qty,
+            MAX(t.unit_code) AS unit_code
+     FROM public.ic_trans_detail t
+     WHERE t.doc_no = $1 AND t.item_code NOT LIKE '97%'
+     GROUP BY t.item_code
+     ORDER BY t.item_code`,
+    [String(billNo ?? "").trim()]
+  );
+}
+
 async function trackBill(session, search) {
   await ensureDeliveryWorkflowSchema();
   const scope = getBranchScope(session);
@@ -263,6 +296,8 @@ async function trackBill(session, search) {
       COALESCE(fwd.name_1, '') as forward_transport_name,
       c.imei as car_imei,
       url_img, COALESCE(a.sight_img, '') as sight_img,
+      COALESCE(a.recipt_img, '') as recipt_img,
+      COALESCE(a.recipt_sign_img, '') as recipt_sign_img,
       COALESCE(img.delivery_images, ARRAY[]::text[]) as delivery_images,
       a.lat, a.lng, a.lat_end, a.lng_end, a.remark,
       COALESCE(a.status, 0) as bill_status,
@@ -306,6 +341,8 @@ async function trackBill(session, search) {
       driver: "",
       url_img: "",
       sight_img: "",
+      recipt_img: "",
+      recipt_sign_img: "",
       delivery_images: [],
       lat: "",
       lng: "",
@@ -314,7 +351,7 @@ async function trackBill(session, search) {
       remark: pending.pending_remark || "",
       bill_status: 0,
       list: pendingStepsFromRow(pending),
-      items: [],
+      items: await getSaleItems(pending.bill_no),
       attempts: [],
       car_position: null,
       tracking_stage: "pending",
@@ -334,7 +371,7 @@ async function trackBill(session, search) {
   const pendingSteps = pendingStepsFromRow(pending);
 
   // Items selected for this dispatch (with delivered progress).
-  const items = await query(
+  let items = await query(
     `SELECT i.item_code, i.item_name,
             COALESCE(i.qty, 0)::numeric as qty,
             COALESCE(i.selected_qty, 0)::numeric as selected_qty,
@@ -347,41 +384,62 @@ async function trackBill(session, search) {
      ORDER BY i.roworder NULLS LAST, i.item_code`,
     [row.bill_no, row.doc_no]
   );
+  // Dispatch rows not populated yet → show the sale's items instead.
+  if (!items || items.length === 0) {
+    items = await getSaleItems(row.bill_no);
+  }
 
   // Latest GPS position for the car. We query odg_tms_gps_current (the live
   // sync table) by car_code first, falling back to imei. Wrap in try/catch
   // so any GPS issue never breaks the bill tracking.
+  // Live position for the map. PREFER the driver's PHONE GPS (mobile app
+  // travel_history for this trip); fall back to the car's GPS device.
   let car_position = null;
   try {
-    const params = [];
-    const conds = [];
-    if (row.car_code) {
-      params.push(String(row.car_code).trim());
-      conds.push(`car_code = $${params.length}`);
-    }
-    if (row.car_imei) {
-      params.push(String(row.car_imei).trim());
-      conds.push(`imei = $${params.length}`);
-    }
-    if (conds.length > 0) {
-      // recorded_at is stored as wall-clock Bangkok time (UTC+7) without
-      // timezone info; the DB itself runs in UTC. Compare against NOW() in
-      // Bangkok so the age is non-negative.
-      const pos = await queryOne(
+    if (row.doc_no) {
+      car_position = await queryOne(
         `SELECT lat::float as lat, lng::float as lng,
                 COALESCE(speed::float, 0) as speed,
                 COALESCE(heading::float, 0) as heading,
                 to_char(recorded_at::timestamp,'DD-MM-YYYY HH24:MI:SS') as recorded_at,
-                COALESCE(address, '') as address,
-                COALESCE(state_detail, '') as state_detail,
+                '' as address, '' as state_detail,
                 GREATEST(0, EXTRACT(EPOCH FROM ((NOW() AT TIME ZONE 'Asia/Bangkok') - recorded_at::timestamp)))::int as age_seconds
-         FROM public.odg_tms_gps_current
-         WHERE ${conds.join(" OR ")}
+         FROM public.odg_tms_travel_history
+         WHERE doc_no = $1 AND lat IS NOT NULL AND lng IS NOT NULL
          ORDER BY recorded_at DESC NULLS LAST
          LIMIT 1`,
-        params
+        [String(row.doc_no).trim()]
       );
-      if (pos) car_position = pos;
+    }
+    if (!car_position) {
+      const params = [];
+      const conds = [];
+      if (row.car_code) {
+        params.push(String(row.car_code).trim());
+        conds.push(`car_code = $${params.length}`);
+      }
+      if (row.car_imei) {
+        params.push(String(row.car_imei).trim());
+        conds.push(`imei = $${params.length}`);
+      }
+      if (conds.length > 0) {
+        // recorded_at is wall-clock Bangkok time (UTC+7) without tz; the DB
+        // runs in UTC, so compare against NOW() in Bangkok for a sane age.
+        car_position = await queryOne(
+          `SELECT lat::float as lat, lng::float as lng,
+                  COALESCE(speed::float, 0) as speed,
+                  COALESCE(heading::float, 0) as heading,
+                  to_char(recorded_at::timestamp,'DD-MM-YYYY HH24:MI:SS') as recorded_at,
+                  COALESCE(address, '') as address,
+                  COALESCE(state_detail, '') as state_detail,
+                  GREATEST(0, EXTRACT(EPOCH FROM ((NOW() AT TIME ZONE 'Asia/Bangkok') - recorded_at::timestamp)))::int as age_seconds
+           FROM public.odg_tms_gps_current
+           WHERE ${conds.join(" OR ")}
+           ORDER BY recorded_at DESC NULLS LAST
+           LIMIT 1`,
+          params
+        );
+      }
     }
   } catch (err) {
     console.warn("[trackBill] gps lookup failed:", err?.message ?? err);
@@ -402,6 +460,176 @@ async function trackBill(session, search) {
     delivery_round_name: pending?.delivery_round_name || "",
     delivery_round_time_label: pending?.delivery_round_time_label || "",
     action_status: pending?.action_status || "",
+  };
+}
+
+async function getSalesBillTrackingList(session, opts = {}) {
+  await ensurePendingBillSchema();
+  await ensureDeliveryRouteSchema();
+  await ensureDeliveryRoundSchema();
+  await ensureDeliveryWorkflowSchema();
+  // Sales scope:
+  // - salesperson/admin: their own bills only (t.sale_code = session.usercode)
+  // - head/manager: whole sales department, read-only, with owner shown in UI.
+  const empDept = String(session?.emp_department_code ?? "").trim();
+  const userCode = String(session?.usercode ?? "").trim();
+  if (!empDept || !userCode) return [];
+  const deptScope = canSeeDepartmentSales(session);
+  const scopeRole = salesRoleFromSession(session) || "admin";
+  const scopeLabel = deptScope ? "ທັງໝົດໃນພະແນກ" : "ຂອງຕົນເອງ";
+
+  const fromDate = String(opts.fromDate ?? "").trim() || "1900-01-01";
+  const toDate = String(opts.toDate ?? "").trim() || "2999-12-31";
+  const search = String(opts.search ?? "").trim();
+  const params = [deptScope ? empDept : userCode, fromDate, toDate, deptScope, scopeRole, scopeLabel];
+  const scopeClause = deptScope
+    ? "COALESCE(NULLIF(TRIM(sale_e.department_code), ''), '') = $1"
+    : "COALESCE(NULLIF(TRIM(t.sale_code), ''), '') = $1";
+  let searchClause = "";
+  if (search) {
+    params.push(`%${search.toUpperCase()}%`);
+    searchClause = `AND (
+      UPPER(t.doc_no) LIKE $${params.length}
+      OR UPPER(COALESCE(c.name_1, '')) LIKE $${params.length}
+      OR UPPER(COALESCE(t.cust_code, '')) LIKE $${params.length}
+      OR UPPER(COALESCE(t.remark, '')) LIKE $${params.length}
+    )`;
+  }
+
+  return query(
+    `SELECT
+       t.doc_no AS bill_no,
+       to_char(t.doc_date,'DD-MM-YYYY') AS bill_date,
+       to_char(t.doc_date,'YYYY-MM-DD') AS bill_date_iso,
+       GREATEST(0, (CURRENT_DATE - t.doc_date::date))::int AS days_open,
+       to_char(t.send_date,'DD-MM-YYYY') AS send_date_display,
+       to_char(t.send_date,'YYYY-MM-DD') AS send_date,
+       COALESCE(NULLIF(TRIM(c.name_1), ''), t.cust_code, '-') AS customer_name,
+       COALESCE(NULLIF(TRIM(t.cust_code), ''), '') AS cust_code,
+       COALESCE(NULLIF(TRIM(t.remark), ''), '') AS sales_remark,
+       COALESCE(NULLIF(TRIM(t.sale_code), ''), '') AS sale_code,
+       COALESCE(NULLIF(TRIM(sale_e.fullname_lo), ''), NULLIF(TRIM(sale_e.nickname), ''), NULLIF(TRIM(t.sale_code), ''), '') AS salesperson,
+       $4::boolean AS scope_readonly,
+       $5::text AS scope_role,
+       $6::text AS scope_label,
+       COALESCE(NULLIF(TRIM(tt.name_1), ''), NULLIF(TRIM(s.transport_code), ''), '') AS transport_name,
+       COALESCE(pb.action_status, '') AS action_status,
+       COALESCE(pb.remark, '') AS pending_remark,
+       to_char(pb.updated_at,'DD-MM-YYYY HH24:MI') AS pending_updated_at,
+       to_char(pb.scheduled_date,'DD-MM-YYYY') AS scheduled_date_display,
+       COALESCE(pb.delivery_route_code, '') AS delivery_route_code,
+       COALESCE(rt.name, '') AS delivery_route_name,
+       COALESCE(pb.delivery_round_code, '') AS delivery_round_code,
+       COALESCE(dr.name, '') AS delivery_round_name,
+       COALESCE(dr.time_label, '') AS delivery_round_time_label,
+       COALESCE(latest.doc_no, '') AS job_no,
+       to_char(latest.doc_date,'DD-MM-YYYY') AS job_date,
+       COALESCE(latest.status, 0)::int AS bill_status,
+       COALESCE(latest.job_status, 0)::int AS job_status,
+       to_char(latest.recipt_job,'DD-MM-YYYY HH24:MI') AS received_at,
+       to_char(latest.sent_start,'DD-MM-YYYY HH24:MI') AS sent_start_at,
+       to_char(latest.sent_end,'DD-MM-YYYY HH24:MI') AS sent_end_at,
+       COALESCE(NULLIF(TRIM(car.name_1), ''), latest.car, '') AS car,
+       COALESCE(NULLIF(TRIM(car.plate_no), ''), '') AS car_plate,
+       COALESCE(NULLIF(TRIM(driver.name_1), ''), job.driver, '') AS driver,
+       COALESCE(NULLIF(TRIM(driver.tel), ''), '') AS driver_phone,
+       COALESCE(attempts.attempt_count, 0)::int AS attempt_count,
+       COALESCE(attempts.completed_count, 0)::int AS completed_count,
+       COALESCE(attempts.cancelled_count, 0)::int AS cancelled_count,
+       CASE
+         WHEN latest.status = 1 THEN 'delivered'
+         WHEN latest.status = 2 THEN 'cancelled'
+         WHEN latest.sent_start IS NOT NULL OR COALESCE(latest.job_status, 0) >= 2 THEN 'in_delivery'
+         WHEN latest.recipt_job IS NOT NULL OR COALESCE(latest.job_status, 0) = 1 THEN 'received'
+         WHEN latest.doc_no IS NOT NULL THEN 'assigned'
+         WHEN pb.bill_no IS NOT NULL THEN 'pending'
+         WHEN s.doc_no IS NOT NULL THEN 'shipment_opened'
+         ELSE 'opened'
+       END AS current_stage
+     FROM public.ic_trans t
+     LEFT JOIN public.ic_trans_shipment s ON s.doc_no = t.doc_no
+     LEFT JOIN public.ar_customer c ON c.code = t.cust_code
+     LEFT JOIN public.odg_employee sale_e ON sale_e.employee_code = t.sale_code
+     LEFT JOIN public.transport_type tt ON tt.code = s.transport_code
+     LEFT JOIN public.odg_tms_pending_bill pb ON pb.bill_no = t.doc_no
+     LEFT JOIN public.odg_tms_delivery_route rt ON rt.code = pb.delivery_route_code
+     LEFT JOIN public.odg_tms_delivery_round dr ON dr.code = pb.delivery_round_code
+     LEFT JOIN LATERAL (
+       SELECT d.doc_no, d.doc_date, d.status, d.recipt_job, d.sent_start, d.sent_end,
+              d.car, j.driver, j.car AS job_car, j.job_status,
+              COALESCE(j.create_date_time_now, d.create_date_time_now, d.doc_date::timestamp) AS sort_at
+       FROM public.odg_tms_detail d
+       LEFT JOIN public.odg_tms j ON j.doc_no = d.doc_no
+       WHERE d.bill_no = t.doc_no
+         AND ${getFixedYearSqlFilter("d.doc_date")}
+       ORDER BY sort_at DESC NULLS LAST, d.doc_no DESC
+       LIMIT 1
+     ) latest ON true
+     LEFT JOIN public.odg_tms job ON job.doc_no = latest.doc_no
+     LEFT JOIN public.odg_tms_car car ON car.code = COALESCE(latest.job_car, latest.car)
+     LEFT JOIN public.odg_tms_driver driver ON driver.code = COALESCE(job.driver, latest.driver)
+     LEFT JOIN LATERAL (
+       SELECT COUNT(*)::int AS attempt_count,
+              COUNT(*) FILTER (WHERE COALESCE(d.status, 0) = 1)::int AS completed_count,
+              COUNT(*) FILTER (WHERE COALESCE(d.status, 0) = 2)::int AS cancelled_count
+       FROM public.odg_tms_detail d
+       WHERE d.bill_no = t.doc_no
+         AND ${getFixedYearSqlFilter("d.doc_date")}
+     ) attempts ON true
+     WHERE ${scopeClause}
+       AND t.trans_flag = 44
+       AND NOT EXISTS (
+         SELECT 1 FROM public.ic_trans_detail rd
+         INNER JOIN public.ic_trans r ON r.doc_no = rd.doc_no AND r.trans_flag = 48
+         WHERE rd.ref_doc_no = t.doc_no
+       )
+       AND COALESCE(NULLIF(TRIM(s.transport_code), ''), '') NOT IN ('', '02-0004')
+       AND COALESCE(t.send_date, t.doc_date)::date BETWEEN $2::date AND $3::date
+       AND ${getFixedYearSqlFilter("t.doc_date")}
+       AND COALESCE(latest.status, 0) <> 1
+       ${searchClause}
+     ORDER BY COALESCE(t.send_date, t.doc_date) DESC, t.doc_no DESC
+     LIMIT 500`,
+    params
+  );
+}
+
+async function trackSalesBill(session, billNo) {
+  const empDept = String(session?.emp_department_code ?? "").trim();
+  const userCode = String(session?.usercode ?? "").trim();
+  const clean = String(billNo ?? "").trim().toUpperCase();
+  if (!empDept || !userCode || !clean) return null;
+  const deptScope = canSeeDepartmentSales(session);
+  const scopeClause = deptScope
+    ? "COALESCE(NULLIF(TRIM(u.department_code), ''), '') = $2"
+    : "COALESCE(NULLIF(TRIM(t.sale_code), ''), '') = $2";
+  const ownBill = await queryOne(
+    `SELECT t.doc_no
+     FROM public.ic_trans t
+     LEFT JOIN public.odg_employee u ON u.employee_code = t.sale_code
+     WHERE t.doc_no = $1
+       AND t.trans_flag = 44
+       AND ${scopeClause}
+       AND ${getFixedYearSqlFilter("t.doc_date")}
+     LIMIT 1`,
+    [clean, deptScope ? empDept : userCode]
+  );
+  if (!ownBill) return null;
+  // Already authorised by department; clear logistic_code so trackBill is NOT
+  // branch-scoped — a salesperson must see the full timeline of their dept's
+  // bill no matter which branch delivered it.
+  const tracked = await trackBill({ ...session, logistic_code: "" }, clean);
+  if (tracked) return tracked;
+  // Bill is neither dispatched nor in the pending workflow yet, so trackBill
+  // found nothing. Still surface the sale's items (timeline falls back to the
+  // selected row on the page) so the ສິນຄ້າ tab is never empty for a real bill.
+  return {
+    bill_no: clean,
+    doc_no: "",
+    list: [],
+    items: await getSaleItems(clean),
+    attempts: [],
+    car_position: null,
   };
 }
 
@@ -604,12 +832,62 @@ async function searchActiveDeliveryBills(session, q) {
      LIMIT 30`,
     pendingParams
   );
+  // Any sale bill in ic_trans (even ones never put into a trip) so a user can
+  // look up + track an arbitrary bill, not just active/pending ones.
+  let icRows = [];
+  if (text) {
+    const icBranch = scope.scoped
+      ? `AND EXISTS (SELECT 1 FROM public.ic_trans_shipment __ts WHERE __ts.doc_no = t.doc_no AND __ts.transport_code = '${scope.branch}')`
+      : "";
+    icRows = await query(
+      `SELECT
+         t.doc_no AS bill_no,
+         COALESCE(latest.doc_no, '') AS doc_no,
+         to_char(t.doc_date,'DD-MM-YYYY') AS bill_date,
+         COALESCE(NULLIF(TRIM(t.cust_code), ''), '') AS cust_code,
+         COALESCE(NULLIF(TRIM(cu.name_1), ''), t.cust_code, '-') AS cust_name,
+         COALESCE(NULLIF(TRIM(car.name_1), ''), latest.car, '-') AS car,
+         COALESCE(NULLIF(TRIM(drv.name_1), ''), j.driver, '-') AS driver,
+         CASE
+           WHEN latest.status = 1 THEN 'ສົ່ງສຳເລັດ'
+           WHEN latest.status = 2 THEN 'ຍົກເລີກ'
+           WHEN latest.sent_start IS NOT NULL THEN 'ກຳລັງຈັດສົ່ງ'
+           WHEN latest.recipt_job IS NOT NULL THEN 'ເບີກເຄື່ອງແລ້ວ'
+           WHEN latest.doc_no IS NOT NULL THEN 'ຈັດຖ້ຽວແລ້ວ'
+           ELSE 'ບິນຂາຍ'
+         END AS phase
+       FROM public.ic_trans t
+       LEFT JOIN public.ar_customer cu ON cu.code = t.cust_code
+       LEFT JOIN LATERAL (
+         SELECT d.doc_no, d.status, d.recipt_job, d.sent_start, d.car
+         FROM public.odg_tms_detail d
+         WHERE d.bill_no = t.doc_no
+         ORDER BY d.create_date_time_now DESC NULLS LAST
+         LIMIT 1
+       ) latest ON true
+       LEFT JOIN public.odg_tms j ON j.doc_no = latest.doc_no
+       LEFT JOIN public.odg_tms_car car ON car.code = COALESCE(j.car, latest.car)
+       LEFT JOIN public.odg_tms_driver drv ON drv.code = j.driver
+       WHERE t.trans_flag = 44
+         AND NOT EXISTS (
+           SELECT 1 FROM public.ic_trans_detail rd
+           INNER JOIN public.ic_trans r ON r.doc_no = rd.doc_no AND r.trans_flag = 48
+           WHERE rd.ref_doc_no = t.doc_no
+         )
+         AND (UPPER(t.doc_no) LIKE $1 OR UPPER(COALESCE(t.cust_code,'')) LIKE $1 OR UPPER(COALESCE(cu.name_1,'')) LIKE $1)
+         AND ${getFixedYearSqlFilter("t.doc_date")}
+         ${icBranch}
+       ORDER BY t.doc_date DESC
+       LIMIT 10`,
+      [`%${text.toUpperCase()}%`]
+    );
+  }
   const seen = new Set();
-  return [...activeRows, ...pendingRows].filter((row) => {
+  return [...activeRows, ...pendingRows, ...icRows].filter((row) => {
     if (seen.has(row.bill_no)) return false;
     seen.add(row.bill_no);
     return true;
-  }).slice(0, 30);
+  }).slice(0, 10);
 }
 
 // ==================== GPS ====================
@@ -1221,10 +1499,11 @@ async function getPhoneTrackingJobs(session) {
   );
 }
 
-// Live fleet view of phone tracking — one marker per active PHONE/driver at
-// its latest position, never per trip. Closed trips are intentionally excluded:
-// this page answers "where are the phones now?", while completed trip history
-// belongs on /tracking/phone. We can't key purely on imei because the legacy
+// Live fleet view of phone tracking — one marker per PHONE/driver at its
+// latest position, never per trip. EVERY phone that has reported in the fixed
+// year is included (any trip status), so the map shows the whole fleet; idle /
+// closed-trip phones simply read as offline via the client's staleness check.
+// We can't key purely on imei because the legacy
 // save_travel_history path stores points with a NULL imei (only the batch
 // /api/mobile/location path sets it), so an imei-only key silently drops all
 // of that data. Instead each active trip's latest fix is bucketed by
@@ -1253,6 +1532,7 @@ async function getPhoneFleet(session) {
        COALESCE(z.battery, '')  AS battery,
        COALESCE(z.signal, '')   AS signal,
        to_char(z.recorded_at,'YYYY-MM-DD HH24:MI:SS') AS recorded_at,
+       GREATEST(0, EXTRACT(EPOCH FROM ((NOW() AT TIME ZONE 'Asia/Bangkok') - z.recorded_at)))::int AS age_seconds,
        z.point_count,
        COALESCE(dev.model, '')     AS device_model,
        COALESCE(dev.sim_phone, '') AS sim_phone,
@@ -1285,7 +1565,6 @@ async function getPhoneFleet(session) {
            LIMIT 1
          ) last ON TRUE
          WHERE ${getFixedYearSqlFilter("t.doc_date")}
-           AND COALESCE(t.job_status, 0) IN (1, 2)
            ${branchFilterJob(scope, "t")}
        ) tl
        ORDER BY tl.unit_key, tl.recorded_at DESC, tl.doc_no DESC
@@ -1342,8 +1621,21 @@ async function getPhoneTrail(session, docNo) {
   );
   if (!job) return null;
 
+  // Decimate the trail to ~1500 points max. At a 5-second cadence a long trip
+  // produces thousands of points, which bloats the payload and makes the
+  // Leaflet polyline render heavily. We evenly down-sample but always keep the
+  // first and last fix so the route's start/end stay accurate; short trips
+  // (≤ MAX_POINTS) are returned in full.
   const points = await query(
-    `SELECT
+    `WITH pts AS (
+       SELECT lat, lng, recorded_at, roworder, speed, heading, accuracy,
+              battery, signal, imei,
+              row_number() OVER (ORDER BY recorded_at ASC, roworder ASC) AS rn,
+              count(*) OVER () AS total
+       FROM public.odg_tms_travel_history
+       WHERE doc_no = $1 AND ${getFixedYearSqlFilter("doc_date")}
+     )
+     SELECT
        lat, lng,
        to_char(recorded_at,'DD-MM-YYYY HH24:MI:SS') AS recorded_at,
        COALESCE(speed, '')    AS speed,
@@ -1352,8 +1644,11 @@ async function getPhoneTrail(session, docNo) {
        COALESCE(battery, '')  AS battery,
        COALESCE(signal, '')   AS signal,
        COALESCE(imei, '')     AS imei
-     FROM public.odg_tms_travel_history
-     WHERE doc_no = $1 AND ${getFixedYearSqlFilter("doc_date")}
+     FROM pts
+     WHERE total <= 1500
+        OR rn = 1
+        OR rn = total
+        OR (rn % GREATEST(1, CEIL(total / 1500.0)::int)) = 0
      ORDER BY recorded_at ASC, roworder ASC`,
     [clean]
   );
@@ -1376,6 +1671,8 @@ async function getPhoneTrail(session, docNo) {
 
 module.exports = {
   trackBill,
+  getSalesBillTrackingList,
+  trackSalesBill,
   trackBillPublic,
   searchActiveDeliveryBills,
   getGpsRealtime,

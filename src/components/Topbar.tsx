@@ -17,6 +17,7 @@ import {
 import { useTheme } from "@/hooks/use-theme";
 import { useSession } from "@/providers/session-provider";
 import { Actions } from "@/lib/api";
+import { isSalesLogin } from "@/lib/sales-role";
 
 const pageTitles: Record<string, string> = {
   "/": "Dashboard",
@@ -48,6 +49,7 @@ const pageTitles: Record<string, string> = {
   "/manage/delivery-routes": "ເສັ້ນທາງຂົນສົ່ງ",
   "/manage/delivery-rounds": "ຮອບການຈັດສົ່ງ",
   "/tracking": "ຕິດຕາມ",
+  "/tracking/sales": "ບິນສົ່ງບໍ່ສຳເລັດ",
   "/tracking/cars-map": "ແຜນທີ່ລົດ",
   "/location": "ຕໍາແໜ່ງລົດ",
 };
@@ -95,8 +97,10 @@ export default function Topbar() {
   const { isDarkMode, toggleTheme } = useTheme();
   const { session, logout } = useSession();
   const username = session?.username ?? "";
+  const isSaleLogin = isSalesLogin(session);
 
   const loadNotifications = useCallback(async () => {
+    if (isSaleLogin) return;
     try {
       setNotificationsLoading(true);
       const rows = await Actions.getActivityNotifications(30);
@@ -106,13 +110,17 @@ export default function Topbar() {
     } finally {
       setNotificationsLoading(false);
     }
-  }, []);
+  }, [isSaleLogin]);
 
   useEffect(() => {
+    if (isSaleLogin) {
+      setNotifications([]);
+      return;
+    }
     void loadNotifications();
     const timer = window.setInterval(() => void loadNotifications(), 30000);
     return () => window.clearInterval(timer);
-  }, [loadNotifications]);
+  }, [isSaleLogin, loadNotifications]);
 
   const unreadCount = useMemo(
     () => notifications.filter((item) => !item.read).length,
@@ -151,7 +159,11 @@ export default function Topbar() {
   const handleSearch = (e: React.FormEvent) => {
     e.preventDefault();
     if (searchText.trim()) {
-      router.push(`/tracking?search=${encodeURIComponent(searchText)}`);
+      router.push(
+        isSaleLogin
+          ? `/tracking/sales?search=${encodeURIComponent(searchText)}`
+          : `/tracking?search=${encodeURIComponent(searchText)}`
+      );
     }
   };
 
@@ -166,7 +178,7 @@ export default function Topbar() {
   const breadcrumb =
     segments.length > 0
       ? [
-          { label: "ໜ້າຫຼັກ", href: "/" },
+          { label: "ໜ້າຫຼັກ", href: isSaleLogin ? "/tracking/sales" : "/" },
           ...segments.map((seg, i) => ({
             label:
               pageTitles["/" + segments.slice(0, i + 1).join("/")] || seg,
@@ -188,7 +200,7 @@ export default function Topbar() {
           {breadcrumb.length > 0 && (
             <nav className="flex items-center gap-1 text-[11px] mt-0.5">
               {breadcrumb.map((item, i) => (
-                <span key={item.href} className="flex items-center gap-1">
+                <span key={`${item.href}-${i}`} className="flex items-center gap-1">
                   {i > 0 && <FaChevronRight className="text-[8px] text-slate-600" />}
                   {i < breadcrumb.length - 1 ? (
                     <Link
@@ -233,21 +245,23 @@ export default function Topbar() {
               : <FaMoon size={15} className="text-slate-400" />}
           </button>
 
-          {/* Search */}
-          <form onSubmit={handleSearch} className="hidden sm:block">
-            <div className="relative group">
-              <FaSearch className="absolute left-3 top-1/2 -translate-y-1/2 text-xs text-slate-500 transition-colors group-focus-within:text-teal-300" />
-              <input
-                type="text"
-                value={searchText}
-                onChange={(e) => setSearchText(e.target.value)}
-                className="w-48 rounded-full border border-white/10 bg-white/5 py-2 pl-9 pr-4 text-sm text-slate-100 outline-none transition-all duration-300 placeholder:text-slate-500 focus:w-64 focus:border-teal-400/50 focus:bg-white/10 focus:ring-2 focus:ring-teal-500/20"
-                placeholder="ຄົ້ນຫາເລກບິນ..."
-              />
-            </div>
-          </form>
+          {!isSaleLogin && (
+            <form onSubmit={handleSearch} className="hidden sm:block">
+              <div className="relative group">
+                <FaSearch className="absolute left-3 top-1/2 -translate-y-1/2 text-xs text-slate-500 transition-colors group-focus-within:text-teal-300" />
+                <input
+                  type="text"
+                  value={searchText}
+                  onChange={(e) => setSearchText(e.target.value)}
+                  className="w-48 rounded-full border border-white/10 bg-white/5 py-2 pl-9 pr-4 text-sm text-slate-100 outline-none transition-all duration-300 placeholder:text-slate-500 focus:w-64 focus:border-teal-400/50 focus:bg-white/10 focus:ring-2 focus:ring-teal-500/20"
+                  placeholder="ຄົ້ນຫາເລກບິນ..."
+                />
+              </div>
+            </form>
+          )}
 
           {/* Notifications */}
+          {!isSaleLogin && (
           <div className="relative">
             <button
               onClick={() => {
@@ -356,6 +370,7 @@ export default function Topbar() {
               </>
             )}
           </div>
+          )}
 
           {/* User */}
           <div className="relative">
@@ -388,9 +403,14 @@ export default function Topbar() {
                     <p className="text-sm font-semibold text-slate-800 dark:text-white">
                       {username}
                     </p>
-                    <p className="text-xs text-slate-400 dark:text-slate-500 mt-0.5">
-                      {session?.title || "Administrator"}
+                    <p className="text-xs font-medium text-slate-600 dark:text-slate-300 mt-0.5">
+                      {session?.position_title || session?.title || "—"}
                     </p>
+                    {session?.emp_department_name && (
+                      <p className="text-[11px] text-slate-400 dark:text-slate-500 mt-0.5">
+                        {session.emp_department_name}
+                      </p>
+                    )}
                   </div>
                   <div className="py-1">
                     <button

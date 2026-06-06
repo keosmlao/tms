@@ -5,7 +5,13 @@ export interface Session {
   usercode: string;
   username: string;
   logistic_code: string;
+  department: string;
   title: string;
+  emp_department_code: string;
+  emp_department_name: string;
+  position_title: string;
+  app_role: string;
+  position_code: string;
 }
 
 const COOKIE_NAME = "token";
@@ -45,7 +51,13 @@ export async function getSession(): Promise<Session | null> {
     usercode: String(payload.usercode ?? ""),
     username: String(payload.username ?? ""),
     logistic_code: String(payload.logistic_code ?? ""),
+    department: String(payload.department ?? ""),
     title: String(payload.title ?? ""),
+    emp_department_code: String(payload.emp_department_code ?? ""),
+    emp_department_name: String(payload.emp_department_name ?? ""),
+    position_title: String(payload.position_title ?? ""),
+    app_role: String(payload.app_role ?? ""),
+    position_code: String(payload.position_code ?? ""),
   };
 }
 

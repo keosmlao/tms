@@ -1,11 +1,27 @@
 "use client";
 
-import { useState, type ReactNode } from "react";
+import { useEffect, useState, type ReactNode } from "react";
+import { usePathname, useRouter } from "next/navigation";
 import Sidebar from "./Sidebar";
 import Topbar from "./Topbar";
+import ChatWidget from "./ChatWidget";
+import { useSession } from "@/providers/session-provider";
+import { isSalesLogin } from "@/lib/sales-role";
 
 export default function DashboardLayout({ children }: { children: ReactNode }) {
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
+  const pathname = usePathname() ?? "";
+  const router = useRouter();
+  const { session } = useSession();
+  const isSaleLogin = isSalesLogin(session);
+
+  useEffect(() => {
+    // Sales staff are confined to their own undelivered-bill tracking page.
+    const allowed = pathname.startsWith("/tracking/sales");
+    if (isSaleLogin && !allowed) {
+      router.replace("/tracking/sales");
+    }
+  }, [isSaleLogin, pathname, router]);
 
   return (
     <div className="gradient-mesh-bg relative flex min-h-screen print:block print:min-h-0">
@@ -25,6 +41,7 @@ export default function DashboardLayout({ children }: { children: ReactNode }) {
           Copyright &copy; ODG {new Date().getFullYear()}
         </footer>
       </div>
+      <ChatWidget />
     </div>
   );
 }

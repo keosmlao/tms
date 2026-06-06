@@ -580,7 +580,12 @@ async function getBillsPending(session, fromDate, toDate, transportCode) {
   const scope = getBranchScope(session);
   const effectiveCode = scope.scoped ? scope.branch : transportCode;
   const params = effectiveCode === "all" ? [fromDate, toDate] : [fromDate, toDate, effectiveCode];
-  const where = effectiveCode === "all" ? "a.transport_code NOT IN ('02-0004')" : "a.transport_code=$3";
+  // Exclude transport types handled outside the internal delivery queue:
+  //   02-0004 ลูกค้ารับเอง · 02-0005 ขนส่งทันใจ (ThunJai) · 02-0006 ช่างโอเดียนมารับเอง
+  // Match on the effective transport (pending override, else the shipment's).
+  const where = effectiveCode === "all"
+    ? "COALESCE(NULLIF(TRIM(pbov.transport_code), ''), a.transport_code) NOT IN ('02-0004', '02-0005', '02-0006')"
+    : "a.transport_code=$3";
   const [shipmentRaw, manualRaw, listtrans] = await Promise.all([
     query(
       `SELECT
@@ -867,6 +872,10 @@ async function getBillsWaitingSentDetails(docNo) {
       COALESCE(d.remark, '') as remark,
       COALESCE(d.url_img, '') as url_img,
       COALESCE(d.sight_img, '') as sight_img,
+      -- Proof-of-pickup captured at the customer's yard for '__CUSTOMER__' bills
+      -- (photo of the goods + customer signature taken at collection time).
+      COALESCE(d.recipt_img, '') as recipt_img,
+      COALESCE(d.recipt_sign_img, '') as recipt_sign_img,
       COALESCE(img.delivery_images, ARRAY[]::text[]) as delivery_images,
       COALESCE(d.forward_transport_code, '') as forward_transport_code,
       COALESCE(ftt.name_1, '') as forward_transport_name,

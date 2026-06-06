@@ -103,6 +103,54 @@ async function ensureDeliveryWorkflowSchemaInternal(db) {
     ADD COLUMN IF NOT EXISTS parent_bill_no character varying
   `);
 
+  // Proof-of-pickup captured at the customer's home/shop for '__CUSTOMER__'
+  // pickup bills (reverse-logistics / collect-from-customer trips). The driver
+  // taps "ຮັບສິນຄ້າຈາກລານລູກຄ້າ" on arrival and captures a photo of the goods
+  // plus the customer's signature — separate from the delivery photo/signature
+  // (url_img / sight_img) that gets captured later at the drop-off point.
+  await safeDdl(db, `
+    ALTER TABLE public.odg_tms_detail
+    ADD COLUMN IF NOT EXISTS recipt_img text
+  `);
+  await safeDdl(db, `
+    ALTER TABLE public.odg_tms_detail
+    ADD COLUMN IF NOT EXISTS recipt_sign_img text
+  `);
+
+  // ── COD / cash-on-delivery (Module B) ──
+  // cod_amount = amount the driver is expected to collect for this bill;
+  // collected_amount / payment_method / collected_at record what was actually
+  // taken at delivery so the office can reconcile cash per trip.
+  await safeDdl(db, `
+    ALTER TABLE public.odg_tms_detail
+    ADD COLUMN IF NOT EXISTS cod_amount numeric DEFAULT 0
+  `);
+  await safeDdl(db, `
+    ALTER TABLE public.odg_tms_detail
+    ADD COLUMN IF NOT EXISTS collected_amount numeric
+  `);
+  await safeDdl(db, `
+    ALTER TABLE public.odg_tms_detail
+    ADD COLUMN IF NOT EXISTS payment_method character varying
+  `);
+  await safeDdl(db, `
+    ALTER TABLE public.odg_tms_detail
+    ADD COLUMN IF NOT EXISTS collected_at timestamp without time zone
+  `);
+
+  // ── Failed-delivery reason + reschedule (Module D) ──
+  // cancel_reason_code = standardized code (no_one|refused|wrong_addr|...) set
+  // on cancel; reschedule_date = a new delivery date when the driver defers a
+  // bill instead of cancelling it outright.
+  await safeDdl(db, `
+    ALTER TABLE public.odg_tms_detail
+    ADD COLUMN IF NOT EXISTS cancel_reason_code character varying
+  `);
+  await safeDdl(db, `
+    ALTER TABLE public.odg_tms_detail
+    ADD COLUMN IF NOT EXISTS reschedule_date date
+  `);
+
   // checkin_at — moment the driver tapped "Check in" at the destination.
   // sent_start used to double as both "dispatch start" and "checkin time",
   // which conflated two different events. We keep sent_start as a backward-
@@ -236,26 +284,26 @@ async function ensureDeliveryWorkflowSchema(client) {
   // this short-circuit each mobile API request was re-running ~10 DDL
   // statements, which can stall under concurrent load while ALTER TABLE waits
   // for an ACCESS EXCLUSIVE lock.
-  if (deliveryCache.__tmsDeliverySchemaReady_v6) return;
+  if (deliveryCache.__tmsDeliverySchemaReady_v8) return;
 
   const isSharedPool = !client || client === pool;
   if (!isSharedPool) {
     await ensureDeliveryWorkflowSchemaInternal(client);
-    deliveryCache.__tmsDeliverySchemaReady_v6 = true;
+    deliveryCache.__tmsDeliverySchemaReady_v8 = true;
     return;
   }
 
-  if (!deliveryCache.__tmsDeliverySchemaPromise_v6) {
-    deliveryCache.__tmsDeliverySchemaPromise_v6 = ensureDeliveryWorkflowSchemaInternal(pool)
+  if (!deliveryCache.__tmsDeliverySchemaPromise_v8) {
+    deliveryCache.__tmsDeliverySchemaPromise_v8 = ensureDeliveryWorkflowSchemaInternal(pool)
       .then(() => {
-        deliveryCache.__tmsDeliverySchemaReady_v6 = true;
+        deliveryCache.__tmsDeliverySchemaReady_v8 = true;
       })
       .catch((err) => {
-        deliveryCache.__tmsDeliverySchemaPromise_v6 = null;
+        deliveryCache.__tmsDeliverySchemaPromise_v8 = null;
         throw err;
       });
   }
-  await deliveryCache.__tmsDeliverySchemaPromise_v6;
+  await deliveryCache.__tmsDeliverySchemaPromise_v8;
 }
 
 async function ensureJobDeliveryItems(docNo, client) {

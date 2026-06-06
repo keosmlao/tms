@@ -31,6 +31,7 @@ import {
   StatusTableShell,
 } from "@/components/status-page-shell";
 import { useConfirm } from "@/components/confirm-dialog";
+import Chatter from "@/components/Chatter";
 // Ported from server actions: approveJob, closeJob, deleteJob, getJobBillsWithProducts, getJobs
 
 // ==================== Types ====================
@@ -445,6 +446,9 @@ function JobRow({
                 </div>
               </div>
             )}
+            <div className="mt-3">
+              <Chatter model="job" recordId={job.doc_no} />
+            </div>
           </td>
         </tr>
       )}

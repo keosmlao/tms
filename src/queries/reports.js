@@ -576,7 +576,50 @@ async function getReportMonthlyDelivery(session, monthly) {
       fleetRow?.trips_per_car_per_day == null ? null : Number(fleetRow.trips_per_car_per_day),
   };
 
-  return { month: monthly, overall, branches, departments, daily, zones, fleet };
+  // ສັດສ່ວນການລັດຄິວ — ບິນທີ່ສົ່ງສຳເລັດ ໃນຂະນະທີ່ມີບິນ (ສາຂາດຽວກັນ) ທີ່ນັດໃຫ້
+  // ສົ່ງກ່ອນ (appointment ກ່ອນ) ແຕ່ຍັງບໍ່ສຳເລັດ → ໄດ້ສົ່ງຂ້າມຄິວຄົນທີ່ຄວນໄດ້ກ່ອນ.
+  const queueRow = await queryOne(
+    `WITH bills AS (
+       SELECT s.doc_no AS bill_no,
+         COALESCE(NULLIF(TRIM(s.transport_code), ''), '') AS branch,
+         (SELECT MIN(COALESCE(dd.date_logistic::timestamp, dd.sent_start))
+            FROM public.odg_tms_detail dd
+            LEFT JOIN public.odg_tms aa ON aa.doc_no = dd.doc_no
+            WHERE dd.bill_no = s.doc_no AND COALESCE(aa.approve_status,0) = 1) AS appt_at,
+         (SELECT MIN(dn.sent_end)
+            FROM public.odg_tms_detail dn
+            LEFT JOIN public.odg_tms dj ON dj.doc_no = dn.doc_no
+            WHERE dn.bill_no = s.doc_no AND dn.status = 1 AND dn.sent_end IS NOT NULL
+              AND COALESCE(dj.approve_status,0) = 1) AS completed_at
+       FROM public.ic_trans_shipment s
+       LEFT JOIN public.ic_trans t ON t.doc_no = s.doc_no
+       WHERE COALESCE(t.create_date_time_now, s.create_date_time_now, s.doc_date::timestamp) >= $1::timestamp
+         AND COALESCE(t.create_date_time_now, s.create_date_time_now, s.doc_date::timestamp) < $2::timestamp
+         AND s.transport_code IS NOT NULL
+         AND s.transport_code IN (${branchCodeSql})
+         ${openedBranchClause}
+     )
+     SELECT
+       COUNT(*) FILTER (WHERE completed_at IS NOT NULL)::int AS delivered,
+       COUNT(*) FILTER (
+         WHERE completed_at IS NOT NULL AND EXISTS (
+           SELECT 1 FROM bills a
+           WHERE a.branch = b.branch AND a.appt_at IS NOT NULL AND a.appt_at < b.appt_at
+             AND (a.completed_at IS NULL OR a.completed_at > b.completed_at)
+         )
+       )::int AS jumped
+     FROM bills b`,
+    [monthStart, nextMonthStart]
+  );
+  const qDelivered = Number(queueRow?.delivered) || 0;
+  const qJumped = Number(queueRow?.jumped) || 0;
+  const queue = {
+    delivered: qDelivered,
+    jumped: qJumped,
+    rate: qDelivered > 0 ? (qJumped / qDelivered) * 100 : 0,
+  };
+
+  return { month: monthly, overall, branches, departments, daily, zones, fleet, queue };
 }
 
 async function getMonthlyDeliveryKpi(session, monthly) {

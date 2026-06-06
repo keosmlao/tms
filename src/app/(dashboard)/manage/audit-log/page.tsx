@@ -12,6 +12,7 @@ interface AuditEntry {
   entity_type: string | null;
   entity_id: string | null;
   user_code: string | null;
+  user_name: string | null;
   ip_addr: string | null;
   changes: Record<string, unknown> | null;
   created_at: string;
@@ -19,6 +20,9 @@ interface AuditEntry {
 
 function actionLabel(action: string) {
   const map: Record<string, string> = {
+    "auth.login": "ເຂົ້າລະບົບ",
+    "auth.login_failed": "ເຂົ້າລະບົບບໍ່ສຳເລັດ",
+    "auth.logout": "ອອກຈາກລະບົບ",
     "bill.update_transport": "ປ່ຽນຂົນສົ່ງ",
     "pending_bill.add_manual": "ເພີ່ມບິນເຂົ້າຄິວ",
     "pending_bill.remove_manual": "ລົບບິນຈາກຄິວ",
@@ -26,6 +30,11 @@ function actionLabel(action: string) {
     "push.sent": "ສົ່ງ Push Notification",
   };
   return map[action] ?? action;
+}
+
+function userAgentLabel(changes: Record<string, unknown> | null) {
+  const value = changes?.user_agent;
+  return typeof value === "string" && value.trim() ? value : "";
 }
 
 export default function AuditLogPage() {
@@ -37,15 +46,15 @@ export default function AuditLogPage() {
   const [userCode, setUserCode] = useState("");
   const [action, setAction] = useState("");
 
-  const fetchLog = async () => {
+  const fetchLog = async (override?: { action?: string; entityId?: string }) => {
     setLoading(true);
     try {
       const data = await Actions.getAuditLog({
         fromDate,
         toDate,
-        entityId: entityId.trim() || undefined,
+        entityId: (override?.entityId ?? entityId).trim() || undefined,
         userCode: userCode.trim() || undefined,
-        action: action.trim() || undefined,
+        action: (override?.action ?? action).trim() || undefined,
         limit: 500,
       });
       setEntries((data ?? []) as AuditEntry[]);
@@ -66,7 +75,7 @@ export default function AuditLogPage() {
     <div className="space-y-5">
       <StatusPageHeader
         title="Audit Log"
-        subtitle="ກວດປະຫວັດການປ່ຽນແປງຂອງລະບົບ"
+        subtitle="ກວດປະຫວັດ login/logout ແລະການປ່ຽນແປງສຳຄັນຂອງລະບົບ"
         icon={<FaHistory />}
         tone="slate"
       />
@@ -128,6 +137,9 @@ export default function AuditLogPage() {
             className="w-full glass-input rounded-lg px-3 py-2 text-xs text-slate-700 dark:text-slate-200"
           >
             <option value="">ທັງໝົດ</option>
+            <option value="auth.login">ເຂົ້າລະບົບ</option>
+            <option value="auth.login_failed">ເຂົ້າລະບົບບໍ່ສຳເລັດ</option>
+            <option value="auth.logout">ອອກຈາກລະບົບ</option>
             <option value="bill.update_transport">ປ່ຽນຂົນສົ່ງ</option>
             <option value="pending_bill.add_manual">ເພີ່ມບິນເຂົ້າຄິວ</option>
             <option value="pending_bill.remove_manual">ລົບບິນຈາກຄິວ</option>
@@ -142,6 +154,30 @@ export default function AuditLogPage() {
             className="w-full px-3 py-2 rounded-lg bg-teal-600 hover:bg-teal-700 text-white text-xs font-semibold disabled:opacity-50 inline-flex items-center justify-center gap-1.5"
           >
             <FaSearch size={10} /> ຄົ້ນຫາ
+          </button>
+        </div>
+        <div className="col-span-2 md:col-span-6 flex flex-wrap gap-2">
+          <button
+            type="button"
+            onClick={() => {
+              setAction("auth.login");
+              setEntityId("");
+              void fetchLog({ action: "auth.login", entityId: "" });
+            }}
+            className="rounded-full border border-emerald-500/20 bg-emerald-500/10 px-3 py-1 text-[11px] font-bold text-emerald-700 dark:text-emerald-400"
+          >
+            ເບິ່ງຜູ້ເຂົ້າໃຊ້
+          </button>
+          <button
+            type="button"
+            onClick={() => {
+              setAction("auth.login_failed");
+              setEntityId("");
+              void fetchLog({ action: "auth.login_failed", entityId: "" });
+            }}
+            className="rounded-full border border-rose-500/20 bg-rose-500/10 px-3 py-1 text-[11px] font-bold text-rose-700 dark:text-rose-400"
+          >
+            login ຜິດ
           </button>
         </div>
       </form>
@@ -162,6 +198,7 @@ export default function AuditLogPage() {
                   <th className="px-3 py-2 text-left font-semibold">Action</th>
                   <th className="px-3 py-2 text-left font-semibold">Entity</th>
                   <th className="px-3 py-2 text-left font-semibold">User</th>
+                  <th className="px-3 py-2 text-left font-semibold">IP / Device</th>
                   <th className="px-3 py-2 text-left font-semibold">ການປ່ຽນແປງ</th>
                 </tr>
               </thead>
@@ -172,10 +209,21 @@ export default function AuditLogPage() {
                     <td className="px-3 py-2 font-semibold text-slate-700 dark:text-slate-200">{actionLabel(e.action)}</td>
                     <td className="px-3 py-2 font-mono text-slate-600 dark:text-slate-300">{e.entity_id || "-"}</td>
                     <td className="px-3 py-2 text-slate-600 dark:text-slate-300">
-                      <span className="inline-flex items-center gap-1">
+                      <span className="inline-flex items-center gap-1 font-semibold">
                         <FaUser className="text-slate-400" size={9} />
-                        {e.user_code || "system"}
+                        {e.user_name || e.user_code || "system"}
                       </span>
+                      {e.user_code && e.user_name !== e.user_code && (
+                        <span className="block font-mono text-[10px] text-slate-400">{e.user_code}</span>
+                      )}
+                    </td>
+                    <td className="px-3 py-2 text-[10px] text-slate-500 dark:text-slate-400">
+                      <span className="block font-mono">{e.ip_addr || "-"}</span>
+                      {userAgentLabel(e.changes) && (
+                        <span className="block max-w-[220px] truncate" title={userAgentLabel(e.changes)}>
+                          {userAgentLabel(e.changes)}
+                        </span>
+                      )}
                     </td>
                     <td className="px-3 py-2 text-[10px] font-mono text-slate-500 dark:text-slate-400 max-w-md truncate">
                       {e.changes ? JSON.stringify(e.changes) : "-"}

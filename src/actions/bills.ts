@@ -316,12 +316,13 @@ export async function createBillTodo(input: {
   deadline?: string | null;
 }) {
   const s = await requireSession();
-  const userCode = (s as { code?: string })?.code;
+  const userCode = (s as { usercode?: string; code?: string })?.usercode ?? (s as { code?: string })?.code;
   const result = await svcCreateBillTodo({
     billNo: input.bill_no,
     summary: input.summary,
     deadline: input.deadline ?? null,
     userCode,
+    session: s,
   });
   const { recordAudit } = await import("@/queries/audit-log.js");
   await recordAudit({
@@ -340,11 +341,12 @@ export async function createBillTodo(input: {
 
 export async function setBillTodoDone(input: { id: number | string; done: boolean }) {
   const s = await requireSession();
-  const userCode = (s as { code?: string })?.code;
+  const userCode = (s as { usercode?: string; code?: string })?.usercode ?? (s as { code?: string })?.code;
   const result = await svcSetBillTodoDone({
     id: input.id,
     done: input.done,
     userCode,
+    session: s,
   });
   const { recordAudit } = await import("@/queries/audit-log.js");
   await recordAudit({
@@ -359,8 +361,8 @@ export async function setBillTodoDone(input: { id: number | string; done: boolea
 
 export async function deleteBillTodo(id: number | string) {
   const s = await requireSession();
-  const userCode = (s as { code?: string })?.code;
-  const result = await svcDeleteBillTodo(id);
+  const userCode = (s as { usercode?: string; code?: string })?.usercode ?? (s as { code?: string })?.code;
+  const result = await svcDeleteBillTodo(id, s);
   const { recordAudit } = await import("@/queries/audit-log.js");
   await recordAudit({
     action: "bill_todo.delete",

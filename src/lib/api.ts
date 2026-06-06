@@ -7,12 +7,14 @@ import * as dashboard from "@/actions/dashboard";
 import * as deliveryRound from "@/actions/delivery-round";
 import * as deliveryRoute from "@/actions/delivery-route";
 import * as carType from "@/actions/car-type";
+import * as chatter from "@/actions/chatter";
 import * as fuel from "@/actions/fuel";
 import * as geofence from "@/actions/geofence";
 import * as gps from "@/actions/gps";
 import * as jobs from "@/actions/jobs";
 import * as masterData from "@/actions/master-data";
 import * as notifications from "@/actions/notifications";
+import * as presence from "@/actions/presence";
 import * as reports from "@/actions/reports";
 import * as settings from "@/actions/settings";
 import * as thunjai from "@/actions/thunjai";
@@ -21,10 +23,15 @@ import * as tracking from "@/actions/tracking";
 export const Actions = {
   // Dashboard
   getDashboardData: dashboard.getDashboardData,
+  getDashboardActivity: dashboard.getDashboardActivity,
   getDriverLeaderboard: dashboard.getDriverLeaderboard,
 
   // Audit log
   getAuditLog: auditLog.getAuditLog,
+
+  // Presence
+  heartbeat: presence.heartbeat,
+  getUserPresence: presence.getUserPresence,
 
   // Approve
   getApproveList: approve.getApproveList,
@@ -127,6 +134,8 @@ export const Actions = {
 
   // Tracking
   trackBill: tracking.trackBill,
+  getSalesBillTrackingList: tracking.getSalesBillTrackingList,
+  trackSalesBill: tracking.trackSalesBill,
   searchActiveDeliveryBills: tracking.searchActiveDeliveryBills,
   getGpsRealtime: tracking.getGpsRealtime,
   getGpsRealtimeAll: tracking.getGpsRealtimeAll,
@@ -208,6 +217,25 @@ export const Actions = {
   upsertCarType: carType.upsertCarType,
   deleteCarType: carType.deleteCarType,
 
+  // Chatter (Odoo-style discussion thread + activities + followers)
+  getChatterMessages: chatter.getChatterMessages,
+  getChatterBundle: chatter.getChatterBundle,
+  postChatterMessage: chatter.postChatterMessage,
+  editChatterMessage: chatter.editChatterMessage,
+  deleteChatterMessage: chatter.deleteChatterMessage,
+  getChatterFollowers: chatter.getChatterFollowers,
+  toggleChatterFollower: chatter.toggleChatterFollower,
+  getChatterActivities: chatter.getChatterActivities,
+  scheduleChatterActivity: chatter.scheduleChatterActivity,
+  completeChatterActivity: chatter.completeChatterActivity,
+  deleteChatterActivity: chatter.deleteChatterActivity,
+  getChatterUsers: chatter.getChatterUsers,
+  markChatterRead: chatter.markChatterRead,
+  getUnreadChatterCounts: chatter.getUnreadChatterCounts,
+  getInboxConversations: chatter.getInboxConversations,
+  getDmPeople: chatter.getDmPeople,
+  getDmPeerRead: chatter.getDmPeerRead,
+
   // Delivery route master
   listDeliveryRoutes: deliveryRoute.listDeliveryRoutes,
   getDeliveryRoute: deliveryRoute.getDeliveryRoute,
@@ -219,4 +247,5 @@ export const Auth = {
   login: auth.login,
   logout: auth.logout,
   me: auth.me,
+  heartbeat: presence.heartbeat,
 };

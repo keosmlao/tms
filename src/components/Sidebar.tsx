@@ -2,8 +2,10 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { useState, useEffect } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { useTheme } from "@/hooks/use-theme";
+import { useSession } from "@/providers/session-provider";
+import { isSalesLogin } from "@/lib/sales-role";
 import {
   FaTachometerAlt,
   FaClipboardCheck,
@@ -26,6 +28,7 @@ import {
   FaClock,
   FaCheckCircle,
   FaStickyNote,
+  FaInbox,
   FaMapMarkerAlt,
   FaFileInvoice,
   FaBroadcastTower,
@@ -57,6 +60,7 @@ const navSections: NavSection[] = [
     key: "tracking",
     items: [
       { label: "ຕິດຕາມສິນຄ້າ", href: "/tracking", icon: <FaMapMarkerAlt size={13} /> },
+      { label: "ບິນສົ່ງບໍ່ສຳເລັດ", href: "/tracking/sales", icon: <FaFileInvoice size={13} /> },
       { label: "ແຜນທີ່ລົດ", href: "/tracking/cars-map", icon: <FaBroadcastTower size={13} /> },
       { label: "ແຜນທີ່ມືຖື", href: "/tracking/phones-map", icon: <FaMobileAlt size={13} /> },
       { label: "ເສັ້ນທາງມືຖືຄົນຂັບ", href: "/tracking/phone", icon: <FaMobileAlt size={13} /> },
@@ -137,6 +141,7 @@ const navSections: NavSection[] = [
       { label: "ພະນັກງານຂົນສົ່ງ", href: "/manage/warehouse-workers", icon: <FaTruck size={13} /> },
       { label: "ເສັ້ນທາງຂົນສົ່ງ", href: "/manage/delivery-routes", icon: <FaRoute size={13} /> },
       { label: "ຮອບການຈັດສົ່ງ", href: "/manage/delivery-rounds", icon: <FaClock size={13} /> },
+      { label: "ຜູ້ໃຊ້ Online", href: "/manage/presence", icon: <FaBroadcastTower size={13} /> },
       { label: "ຕັ້ງຄ່າ", href: "/manage/settings", icon: <FaCog size={13} /> },
       { label: "Audit Log", href: "/manage/audit-log", icon: <FaHistory size={13} /> },
     ],
@@ -152,22 +157,41 @@ export default function Sidebar({
 }) {
   const pathname = usePathname() ?? "";
   const { isDarkMode, toggleTheme } = useTheme();
+  const { session } = useSession();
+  const isSaleLogin = isSalesLogin(session);
+  // Sales staff see a single purpose-built menu: their undelivered bill list.
+  const visibleSections = useMemo<NavSection[]>(
+    () =>
+      isSaleLogin
+        ? [
+            {
+              title: "ຝ່າຍຂາຍ",
+              icon: <FaFileInvoice size={16} />,
+              key: "sales-tracking",
+              items: [
+                { label: "ບິນສົ່ງບໍ່ສຳເລັດ", href: "/tracking/sales", icon: <FaFileInvoice size={13} /> },
+              ],
+            },
+          ]
+        : navSections,
+    [isSaleLogin]
+  );
   const [isCollapsed, setIsCollapsed] = useState(false);
   const [mobileOpen, setMobileOpen] = useState(false);
   // Accordion: at most one section open at a time. Defaults to the section
   // that owns the current route so users land on a useful expanded state.
-  const sectionForPath = (path: string): string | null => {
+  const sectionForPath = useCallback((path: string): string | null => {
     // Quick-access shortcuts (top "ທາງລັດ" group) must NOT pop open the section
     // that merely prefix-matches their route — that read like the menu opening
     // by itself when you clicked Todo / KPI.
     if (path === "/bills-pending/todos" || path === "/reports/monthly-delivery") {
       return null;
     }
-    const match = navSections.find((s) =>
+    const match = visibleSections.find((s) =>
       s.items.some((it) => path.startsWith(it.href))
     );
     return match?.key ?? null;
-  };
+  }, [visibleSections]);
 
   const [openSection, setOpenSection] = useState<string | null>(
     () => sectionForPath(pathname) ?? "route"
@@ -194,7 +218,7 @@ export default function Sidebar({
     const k = sectionForPath(pathname);
     if (k) setOpenSection(k);
     setMobileOpen(false);
-  }, [pathname]);
+  }, [pathname, sectionForPath]);
 
   const toggleCollapse = () => {
     const newState = !isCollapsed;
@@ -245,7 +269,7 @@ export default function Sidebar({
       >
         {/* Logo */}
         <div className="relative flex items-center justify-between border-b border-white/10 px-4 py-4">
-          <Link href="/" className="flex items-center gap-3 overflow-hidden">
+          <Link href={isSaleLogin ? "/tracking/sales" : "/"} className="flex items-center gap-3 overflow-hidden">
             <div className="flex h-10 w-10 flex-shrink-0 items-center justify-center overflow-hidden rounded-lg bg-white shadow-lg shadow-teal-500/10">
               <img
                 src="/odg.png"
@@ -272,58 +296,75 @@ export default function Sidebar({
         </div>
 
         {/* Dashboard link */}
-        <div className="px-3 pt-3 space-y-1">
-          <Link
-            href="/"
-            className={`group flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-medium transition-all duration-200 ${
-              pathname === "/"
-                ? "bg-teal-400/14 text-white ring-1 ring-teal-300/20"
-                : "text-slate-400 hover:bg-white/8 hover:text-white"
-            } ${showCollapsed ? "justify-center" : ""}`}
-            onClick={() => setMobileOpen(false)}
-            title={showCollapsed ? "Dashboard" : undefined}
-          >
-            <FaTachometerAlt size={16} className={pathname === "/" ? "text-teal-200" : "transition-colors group-hover:text-teal-200"} />
-            {!showCollapsed && <span>Dashboard</span>}
-          </Link>
-        </div>
+        {!isSaleLogin && (
+          <div className="px-3 pt-3 space-y-1">
+            <Link
+              href="/"
+              className={`group flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-medium transition-all duration-200 ${
+                pathname === "/"
+                  ? "bg-teal-400/14 text-white ring-1 ring-teal-300/20"
+                  : "text-slate-400 hover:bg-white/8 hover:text-white"
+              } ${showCollapsed ? "justify-center" : ""}`}
+              onClick={() => setMobileOpen(false)}
+              title={showCollapsed ? "Dashboard" : undefined}
+            >
+              <FaTachometerAlt size={16} className={pathname === "/" ? "text-teal-200" : "transition-colors group-hover:text-teal-200"} />
+              {!showCollapsed && <span>Dashboard</span>}
+            </Link>
+          </div>
+        )}
 
         {/* Quick-access shortcuts */}
-        {!showCollapsed && (
+        {!isSaleLogin && !showCollapsed && (
           <div className="px-5 pt-3 pb-1">
             <p className="text-[10px] font-semibold uppercase tracking-[0.2em] text-slate-500">
               ທາງລັດ
             </p>
           </div>
         )}
-        <div className="px-3 space-y-1">
-          <Link
-            href="/bills-pending/todos"
-            className={`group flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-medium transition-all duration-200 ${
-              pathname === "/bills-pending/todos"
-                ? "bg-teal-400/14 text-white ring-1 ring-teal-300/20"
-                : "text-slate-400 hover:bg-white/8 hover:text-white"
-            } ${showCollapsed ? "justify-center" : ""}`}
-            onClick={() => setMobileOpen(false)}
-            title={showCollapsed ? "Todo" : undefined}
-          >
-            <FaStickyNote size={16} className={pathname === "/bills-pending/todos" ? "text-teal-200" : "transition-colors group-hover:text-teal-200"} />
-            {!showCollapsed && <span>Todo ບິນ</span>}
-          </Link>
-          <Link
-            href="/reports/monthly-delivery"
-            className={`group flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-medium transition-all duration-200 ${
-              pathname === "/reports/monthly-delivery"
-                ? "bg-teal-400/14 text-white ring-1 ring-teal-300/20"
-                : "text-slate-400 hover:bg-white/8 hover:text-white"
-            } ${showCollapsed ? "justify-center" : ""}`}
-            onClick={() => setMobileOpen(false)}
-            title={showCollapsed ? "KPI ຈັດສົ່ງ" : undefined}
-          >
-            <FaChartLine size={16} className={pathname === "/reports/monthly-delivery" ? "text-teal-200" : "transition-colors group-hover:text-teal-200"} />
-            {!showCollapsed && <span>KPI ຈັດສົ່ງ/ເດືອນ</span>}
-          </Link>
-        </div>
+        {!isSaleLogin && (
+          <div className="px-3 space-y-1">
+            <Link
+              href="/inbox"
+              className={`group flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-medium transition-all duration-200 ${
+                pathname === "/inbox"
+                  ? "bg-teal-400/14 text-white ring-1 ring-teal-300/20"
+                  : "text-slate-400 hover:bg-white/8 hover:text-white"
+              } ${showCollapsed ? "justify-center" : ""}`}
+              onClick={() => setMobileOpen(false)}
+              title={showCollapsed ? "ກ່ອງຂໍ້ຄວາມ" : undefined}
+            >
+              <FaInbox size={16} className={pathname === "/inbox" ? "text-teal-200" : "transition-colors group-hover:text-teal-200"} />
+              {!showCollapsed && <span>ກ່ອງຂໍ້ຄວາມ</span>}
+            </Link>
+            <Link
+              href="/bills-pending/todos"
+              className={`group flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-medium transition-all duration-200 ${
+                pathname === "/bills-pending/todos"
+                  ? "bg-teal-400/14 text-white ring-1 ring-teal-300/20"
+                  : "text-slate-400 hover:bg-white/8 hover:text-white"
+              } ${showCollapsed ? "justify-center" : ""}`}
+              onClick={() => setMobileOpen(false)}
+              title={showCollapsed ? "Todo" : undefined}
+            >
+              <FaStickyNote size={16} className={pathname === "/bills-pending/todos" ? "text-teal-200" : "transition-colors group-hover:text-teal-200"} />
+              {!showCollapsed && <span>Todo ບິນ</span>}
+            </Link>
+            <Link
+              href="/reports/monthly-delivery"
+              className={`group flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-medium transition-all duration-200 ${
+                pathname === "/reports/monthly-delivery"
+                  ? "bg-teal-400/14 text-white ring-1 ring-teal-300/20"
+                  : "text-slate-400 hover:bg-white/8 hover:text-white"
+              } ${showCollapsed ? "justify-center" : ""}`}
+              onClick={() => setMobileOpen(false)}
+              title={showCollapsed ? "KPI ຈັດສົ່ງ" : undefined}
+            >
+              <FaChartLine size={16} className={pathname === "/reports/monthly-delivery" ? "text-teal-200" : "transition-colors group-hover:text-teal-200"} />
+              {!showCollapsed && <span>KPI ຈັດສົ່ງ/ເດືອນ</span>}
+            </Link>
+          </div>
+        )}
 
         {/* Section label */}
         {!showCollapsed && (
@@ -336,7 +377,7 @@ export default function Sidebar({
 
         {/* Nav sections */}
         <nav className="flex-1 px-3 pb-4 overflow-y-auto">
-          {navSections.map((section) => {
+          {visibleSections.map((section) => {
             const isOpen = openSection === section.key;
             const sectionActive = isSectionActive(section);
 

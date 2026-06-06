@@ -3,6 +3,8 @@
 import { requireSession } from "./_helpers";
 import {
   trackBill as svcTrackBill,
+  getSalesBillTrackingList as svcGetSalesBillTrackingList,
+  trackSalesBill as svcTrackSalesBill,
   searchActiveDeliveryBills as svcSearchActiveDeliveryBills,
   getGpsRealtime as svcGetGpsRealtime,
   getGpsRealtimeAll as svcGetGpsRealtimeAllLive,
@@ -19,6 +21,20 @@ import {
 export async function trackBill(search: string) {
   const s = await requireSession();
   return svcTrackBill(s, search);
+}
+
+export async function getSalesBillTrackingList(input?: {
+  fromDate?: string;
+  toDate?: string;
+  search?: string;
+}) {
+  const s = await requireSession();
+  return svcGetSalesBillTrackingList(s, input ?? {});
+}
+
+export async function trackSalesBill(billNo: string) {
+  const s = await requireSession();
+  return svcTrackSalesBill(s, billNo);
 }
 
 export async function searchActiveDeliveryBills(query?: string) {

@@ -50,11 +50,24 @@ paths:
   /api/mobile/jobs:
     get:
       tags: [jobs]
-      summary: List the authenticated driver's jobs (optionally filtered by date).
+      summary: List mobile jobs.
+      description: |
+        Default scope returns the authenticated driver's jobs. Supervisor-capable
+        tokens may pass `scope=all` to return all drivers' jobs, optionally
+        filtered by driver/status/date.
       parameters:
         - in: query
           name: date
           schema: { type: string, format: date }
+        - in: query
+          name: scope
+          schema: { type: string, enum: [all] }
+        - in: query
+          name: driver_id
+          schema: { type: string }
+        - in: query
+          name: status
+          schema: { type: string, enum: [pending, active, done, issue] }
       responses:
         '200':
           description: Jobs list
@@ -64,6 +77,7 @@ paths:
                 type: array
                 items: { $ref: '#/components/schemas/DeliveryJob' }
         '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
     post:
       tags: [jobs]
       summary: Perform a job action (state transition, image attach, fuel refill, etc.).
@@ -316,6 +330,11 @@ components:
   responses:
     Unauthorized:
       description: Missing/invalid JWT
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Error' }
+    Forbidden:
+      description: Authenticated but not allowed to access this scope
       content:
         application/json:
           schema: { $ref: '#/components/schemas/Error' }

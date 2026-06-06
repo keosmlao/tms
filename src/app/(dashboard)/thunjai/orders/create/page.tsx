@@ -95,20 +95,6 @@ function valueText(value: unknown) {
   return String(value ?? "").trim();
 }
 
-function positiveCeil(value: unknown) {
-  const n = Number(value);
-  return Number.isFinite(n) && n > 0 ? Math.ceil(n) : 0;
-}
-
-function expandProductRows(rows: ProductRow[]) {
-  return rows.flatMap((row) =>
-    Array.from({ length: Math.max(positiveCeil(row.qty), 1) }, () => ({
-      ...row,
-      qty: "1",
-    }))
-  );
-}
-
 function senderId(row: SelectRow) {
   return valueText(row.sender_addr_id ?? row.id);
 }
@@ -166,15 +152,9 @@ function payloadFromForm(form: FormState) {
         long: product.long || form.long,
         height: product.height || form.height,
       },
-      is_service_at_dest: form.is_service_at_dest,
       is_cod: form.is_cod,
       price: product.price || form.price,
     })),
-    thunjai_split_note: "This page can collect many items, but the server creates one ThunJai order per item unit with qty=1.",
-    expected_thunjai_order_count: productSource.reduce(
-      (sum, product) => sum + positiveCeil(product.qty),
-      0
-    ),
     weight: form.weight,
     package_type_id: form.package_type_id,
     width: form.width,
@@ -350,10 +330,7 @@ export default function CreateThunJaiOrderPage() {
   const [error, setError] = useState<string | null>(null);
 
   const payload = useMemo(() => payloadFromForm(form), [form]);
-  const splitOrderCount = useMemo(
-    () => payload.product_list.reduce((sum, product) => sum + positiveCeil(product.qty), 0),
-    [payload]
-  );
+  const productCount = payload.product_list.length;
 
   useEffect(() => {
     void (async () => {
@@ -567,7 +544,7 @@ export default function CreateThunJaiOrderPage() {
 
   const applySourceProduct = (row: SelectRow) => {
     const itemLines = Array.isArray(row.item_lines) ? (row.item_lines as SelectRow[]) : [];
-    const products = expandProductRows(
+    const products =
       itemLines.length > 0
         ? itemLines.map((item) => ({
             name: valueText(item.item_name || item.item_code),
@@ -590,8 +567,7 @@ export default function CreateThunJaiOrderPage() {
               height: form.height || "10",
               price: form.price || "0",
             },
-          ]
-    );
+          ];
     const docNo = valueText(row.doc_no);
     setForm((prev) => ({
       ...prev,
@@ -705,7 +681,8 @@ export default function CreateThunJaiOrderPage() {
               <span className="font-bold">
                 {success ? "✓ ສ້າງ order ສຳເລັດ" : "⚠ ສ້າງ order ບໍ່ຄົບ"} —{" "}
                 {valueText(createResult.created_order_count) || String(created.length)}/
-                {valueText(createResult.requested_order_count) || String(results.length)} ໃບ
+                {valueText(createResult.requested_order_count) || String(results.length)} ໃບ ·{" "}
+                {valueText(createResult.requested_product_count)} ລາຍການ
               </span>
               <button
                 type="button"
@@ -755,14 +732,14 @@ export default function CreateThunJaiOrderPage() {
           <Panel title="ພັດສະດຸ" icon={<FaBox />}>
             <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
               <p className="text-[11px] text-slate-500 dark:text-slate-400">
-                ThunJai ຮອງຮັບ 1 order = 1 ພັດສະດຸ ແລະ qty 1; ລະບົບຈະແຕກໃຫ້ອັດຕະໂນມັດ
+                ThunJai API ສ້າງ 1 order ພ້ອມ product_list ຫຼາຍລາຍການ; qty ສົ່ງຕາມຈຳນວນຈິງ
               </p>
               <Button tone="slate" onClick={() => setProductModalOpen(true)}>
                 <FaSearch /> ຄົ້ນຫາເອກະສານ
               </Button>
             </div>
             <div className="mb-3 rounded-md border border-teal-200 bg-teal-500/10 px-2.5 py-1.5 text-[11px] font-semibold text-teal-800 dark:border-teal-500/30 dark:text-teal-200">
-              ຈະສ້າງ ThunJai order ທັງໝົດ {splitOrderCount} ໃບ. ທຸກໃບຈະສົ່ງ product_list 1 ລາຍການ ແລະ qty = 1.
+              ຈະສ້າງ ThunJai order 1 ໃບ ພ້ອມ product_list {productCount} ລາຍການ.
             </div>
             <div className="grid gap-2 md:grid-cols-3">
               <div className="md:col-span-3">
@@ -771,7 +748,7 @@ export default function CreateThunJaiOrderPage() {
                     <thead className="bg-slate-100 text-slate-600 dark:bg-slate-900 dark:text-slate-300">
                       <tr>
                         <th className="px-2 py-1.5 font-semibold min-w-[320px]">ພັດສະດຸ</th>
-                        <th className="px-2 py-1.5 text-right font-semibold">Qty/Order</th>
+                        <th className="px-2 py-1.5 text-right font-semibold">Qty</th>
                         <th className="px-2 py-1.5 text-right font-semibold">ນ້ຳໜັກ kg</th>
                         <th className="px-2 py-1.5 font-semibold">ປະເພດ</th>
                         <th className="px-2 py-1.5 text-right font-semibold">ກວ້າງ</th>
@@ -795,8 +772,8 @@ export default function CreateThunJaiOrderPage() {
                             <input
                               type="number"
                               value={product.qty}
-                              readOnly
-                              className="w-20 rounded-md border border-slate-200 bg-slate-100 px-2 py-1 text-right text-[11px] text-slate-600 outline-none dark:border-white/10 dark:bg-slate-900 dark:text-slate-300"
+                              onChange={(e) => updateProduct(index, "qty", e.target.value)}
+                              className="w-20 rounded-md border border-slate-200 bg-white px-2 py-1 text-right text-[11px] text-slate-800 outline-none focus:border-teal-400 dark:border-white/10 dark:bg-slate-950/40 dark:text-slate-100"
                             />
                           </td>
                           <td className="px-2 py-1.5">
@@ -1019,7 +996,7 @@ export default function CreateThunJaiOrderPage() {
             </div>
             <div className="mt-3 flex justify-end">
               <Button onClick={() => void createOrder()} loading={loading === "create"}>
-                <FaSave /> ສ້າງ {splitOrderCount} Order
+                <FaSave /> ສ້າງ Order
               </Button>
             </div>
           </Panel>

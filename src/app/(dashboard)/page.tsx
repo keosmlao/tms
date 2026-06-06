@@ -162,7 +162,9 @@ interface CustomerRatingSummary {
 }
 
 interface DashboardData {
-  data: SummaryData; kl: TeamData; dt: TeamData; ps: TeamData;
+  data: SummaryData;
+  thunjai?: { bill_count: CountValue; item_count: CountValue; item_qty: CountValue };
+  kl: TeamData; dt: TeamData; ps: TeamData;
   user_branch: string | null;
   branch_names?: Record<string, string>;
   trans: PendingShipment[]; trans_month: PendingShipment[]; trans_today: PendingShipment[];
@@ -1084,6 +1086,7 @@ function DeliveryKpiCard({ kpi }: { kpi: DeliveryKpi }) {
 
 export default function DashboardPage() {
   const [data, setData] = useState<DashboardData | null>(null);
+  const [activity, setActivity] = useState<Partial<DashboardData> | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [agingTick, setAgingTick] = useState(0);
@@ -1110,6 +1113,16 @@ export default function DashboardPage() {
     return () => { active = false; };
   }, []);
 
+  // Activity lists load separately so the core dashboard renders first and
+  // these heavier sections stream in when ready.
+  useEffect(() => {
+    let active = true;
+    Actions.getDashboardActivity()
+      .then((a) => { if (active) setActivity(a as Partial<DashboardData>); })
+      .catch(() => undefined);
+    return () => { active = false; };
+  }, []);
+
   useEffect(() => {
     const timer = window.setInterval(() => setAgingTick(c => c + 1), 1000);
     return () => window.clearInterval(timer);
@@ -1120,6 +1133,9 @@ export default function DashboardPage() {
     try {
       const result = await fetchDashboardData();
       setData(result);
+      Actions.getDashboardActivity()
+        .then((a) => setActivity(a as Partial<DashboardData>))
+        .catch(() => undefined);
       setError(null);
       setLastFetched(new Date());
     } catch {
@@ -1325,6 +1341,33 @@ export default function DashboardPage() {
         </div>
       )}
 
+      {/* ThunJai express — bills + products moved via ThunJai (transport 02-0005) */}
+      {data.thunjai && (
+        <div className="rounded-lg border border-violet-200/70 bg-violet-50/50 p-4 dark:border-violet-900/40 dark:bg-violet-950/20">
+          <div className="mb-3 flex items-center gap-2">
+            <div className="flex h-7 w-7 items-center justify-center rounded-lg bg-violet-500/15">
+              <FaTruck className="text-violet-600 dark:text-violet-400" size={12} />
+            </div>
+            <h2 className="text-sm font-bold text-slate-800 dark:text-white">ຂົນສົ່ງທັນໃຈ (ThunJai)</h2>
+            <span className="ml-auto text-[11px] text-slate-400">ປີ {currentYear}</span>
+          </div>
+          <div className="grid grid-cols-2 gap-3">
+            <div className="rounded-lg bg-white/70 px-3 py-2 dark:bg-white/5">
+              <p className="text-[11px] text-slate-400">ຈຳນວນບິນ</p>
+              <p className="text-2xl font-extrabold tabular-nums text-violet-700 dark:text-violet-400">
+                {toNumber(data.thunjai.bill_count).toLocaleString("en-US")}
+              </p>
+            </div>
+            <div className="rounded-lg bg-white/70 px-3 py-2 dark:bg-white/5">
+              <p className="text-[11px] text-slate-400">ຈຳນວນສິນຄ້າ</p>
+              <p className="text-2xl font-extrabold tabular-nums text-violet-700 dark:text-violet-400">
+                {toNumber(data.thunjai.item_qty).toLocaleString("en-US", { maximumFractionDigits: 0 })}
+              </p>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* ========== LIVE FLEET (cars + driver phones) ========== */}
       <LiveFleetOverview />
 
@@ -1526,7 +1569,7 @@ export default function DashboardPage() {
             <div>
               <h2 className="text-sm font-bold text-slate-800 dark:text-white">ຈັດຖ້ຽວແລ້ວ ລໍຖ້າຈັດສົ່ງ</h2>
               <p className="text-[11px] text-slate-400 dark:text-gray-500">
-                ສະແດງ {formatNumber((data.waiting_dispatch ?? []).length)} / {formatNumber(data.waiting_dispatch_count ?? 0)} ບິນ
+                ສະແດງ {formatNumber((activity?.waiting_dispatch ?? []).length)} / {formatNumber(activity?.waiting_dispatch_count ?? 0)} ບິນ
               </p>
             </div>
           </div>
@@ -1538,8 +1581,8 @@ export default function DashboardPage() {
           </Link>
         </div>
         <WaitingDispatchList
-          items={data.waiting_dispatch ?? []}
-          total={data.waiting_dispatch_count ?? 0}
+          items={activity?.waiting_dispatch ?? []}
+          total={activity?.waiting_dispatch_count ?? 0}
           agingTick={agingTick}
         />
       </div>
@@ -1554,7 +1597,7 @@ export default function DashboardPage() {
             <div>
               <h2 className="text-sm font-bold text-slate-800 dark:text-white">ລາຍການກຳລັງຈັດສົ່ງ</h2>
               <p className="text-[11px] text-slate-400 dark:text-gray-500">
-                ສະແດງ {formatNumber((data.in_progress ?? []).length)} / {formatNumber(data.in_progress_count ?? 0)} ບິນ
+                ສະແດງ {formatNumber((activity?.in_progress ?? []).length)} / {formatNumber(activity?.in_progress_count ?? 0)} ບິນ
               </p>
             </div>
           </div>
@@ -1566,8 +1609,8 @@ export default function DashboardPage() {
           </Link>
         </div>
         <InProgressList
-          items={data.in_progress ?? []}
-          total={data.in_progress_count ?? 0}
+          items={activity?.in_progress ?? []}
+          total={activity?.in_progress_count ?? 0}
           agingTick={agingTick}
         />
       </div>
@@ -1582,7 +1625,7 @@ export default function DashboardPage() {
             <div>
               <h2 className="text-sm font-bold text-slate-800 dark:text-white">ຈັດສົ່ງສຳເລັດ ແຕ່ຍັງບໍ່ປິດຖ້ຽວ</h2>
               <p className="text-[11px] text-slate-400 dark:text-gray-500">
-                ສະແດງ {formatNumber((data.delivered_pending_close ?? []).length)} / {formatNumber(data.delivered_pending_close_count ?? 0)} ບິນ
+                ສະແດງ {formatNumber((activity?.delivered_pending_close ?? []).length)} / {formatNumber(activity?.delivered_pending_close_count ?? 0)} ບິນ
               </p>
             </div>
           </div>
@@ -1594,8 +1637,8 @@ export default function DashboardPage() {
           </Link>
         </div>
         <DeliveredPendingCloseList
-          items={data.delivered_pending_close ?? []}
-          total={data.delivered_pending_close_count ?? 0}
+          items={activity?.delivered_pending_close ?? []}
+          total={activity?.delivered_pending_close_count ?? 0}
           agingTick={agingTick}
         />
       </div>

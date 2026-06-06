@@ -5,6 +5,8 @@ const { query, queryOne } = require("../lib/db");
 const { sendDeliveryFlex } = require("../lib/line");
 const { getSetting } = require("./settings");
 const { ensureDeliveryWorkflowSchema } = require("./delivery");
+const { ensureChatterSchema } = require("./chatter");
+const { isChatterAdmin } = require("../lib/chatter-helpers");
 const { getBranchScope, branchFilterJob } = require("./helpers");
 const { getFixedYearSqlFilter } = require("../lib/fixed-year");
 
@@ -418,9 +420,16 @@ async function getActivityNotifications(session, limit = 30) {
   // first request after a fresh server boot would otherwise 500 with
   // "relation does not exist".
   await ensureDeliveryWorkflowSchema();
+  await ensureChatterSchema().catch(() => undefined);
   const scope = getBranchScope(session);
   const max = Math.min(Math.max(Number(limit) || 30, 1), 80);
   const userCode = String(session?.usercode ?? "");
+  // Sales staff are notified only about conversations on their own bills;
+  // everyone else (dispatch / management) is treated as admin and sees all.
+  const isAdmin = isChatterAdmin(session);
+  // Branch-scoped dispatchers only get chatter for their own branch's bills;
+  // head office (unscoped) sees all. Sales match via sale_code/mention/follow.
+  const adminBranch = scope.scoped ? scope.branch : "";
   return query(
     `WITH activity AS (
       SELECT
@@ -509,6 +518,63 @@ async function getActivityNotifications(session, limit = 30) {
       WHERE COALESCE(a.admin_close_at, a.job_close) IS NOT NULL
         AND ${getFixedYearSqlFilter("a.doc_date")}
         ${branchFilterJob(scope, "a")}
+
+      UNION ALL
+
+      SELECT
+        'chatter_message' AS type,
+        cm.record_id AS doc_no,
+        cm.record_id AS bill_no,
+        CASE
+          WHEN (',' || COALESCE(cm.mentions, '') || ',') LIKE ('%,' || $2 || ',%')
+            THEN 'ຖືກແທັກໃນບິນ'
+          ELSE 'ຂໍ້ຄວາມໃໝ່ໃນບິນ'
+        END AS title,
+        CONCAT(COALESCE(cm.author_name, cm.author_code, '-'), ': ', LEFT(cm.body, 60)) AS body,
+        cm.created_at AS event_at,
+        CONCAT('/tracking?search=', cm.record_id) AS href,
+        'teal' AS tone
+      FROM public.odg_chatter_message cm
+      LEFT JOIN public.ic_trans it ON it.doc_no = cm.record_id
+      WHERE cm.model = 'bill'
+        AND cm.msg_type IN ('note', 'comment')
+        AND $2 <> ''
+        AND COALESCE(cm.author_code, '') <> $2
+        AND cm.created_at >= now() - interval '30 days'
+        AND (
+          (',' || COALESCE(cm.mentions, '') || ',') LIKE ('%,' || $2 || ',%')
+          OR EXISTS (SELECT 1 FROM public.odg_chatter_follower cf
+                     WHERE cf.model = 'bill' AND cf.record_id = cm.record_id AND cf.user_code = $2)
+          OR COALESCE(it.sale_code, '') = $2
+          OR EXISTS (
+                SELECT 1 FROM public.odg_employee me
+                JOIN public.odg_employee sp ON sp.department_code = me.department_code
+                WHERE me.employee_code = $2
+                  AND me.position_code IN ('11', '12')
+                  AND sp.employee_code = COALESCE(it.sale_code, ''))
+          OR ($3 AND ($4 = '' OR EXISTS (
+                SELECT 1 FROM public.ic_trans_shipment ss
+                WHERE ss.doc_no = cm.record_id AND ss.transport_code = $4)))
+        )
+
+      UNION ALL
+
+      SELECT
+        'dm' AS type,
+        cm.record_id AS doc_no,
+        NULL::text AS bill_no,
+        'ຂໍ້ຄວາມສ່ວນຕົວ' AS title,
+        CONCAT(COALESCE(cm.author_name, cm.author_code, '-'), ': ', LEFT(cm.body, 60)) AS body,
+        cm.created_at AS event_at,
+        ('?dm=' || cm.record_id) AS href,
+        'teal' AS tone
+      FROM public.odg_chatter_message cm
+      WHERE cm.model = 'dm'
+        AND cm.msg_type IN ('note', 'comment')
+        AND $2 <> ''
+        AND COALESCE(cm.author_code, '') <> $2
+        AND (cm.record_id LIKE ('dm:' || $2 || '|%') OR cm.record_id LIKE ('dm:%|' || $2))
+        AND cm.created_at >= now() - interval '30 days'
     )
     SELECT
       type,
@@ -529,7 +595,7 @@ async function getActivityNotifications(session, limit = 30) {
     WHERE event_at IS NOT NULL
     ORDER BY event_at DESC
     LIMIT $1`,
-    [max, userCode]
+    [max, userCode, isAdmin, adminBranch]
   );
 }
 

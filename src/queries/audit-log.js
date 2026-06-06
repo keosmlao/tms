@@ -67,35 +67,44 @@ async function listAuditLog(opts) {
   const params = [];
   if (fromDate) {
     params.push(fromDate);
-    where.push(`created_at::date >= $${params.length}::date`);
+    where.push(`l.created_at::date >= $${params.length}::date`);
   }
   if (toDate) {
     params.push(toDate);
-    where.push(`created_at::date <= $${params.length}::date`);
+    where.push(`l.created_at::date <= $${params.length}::date`);
   }
   if (entityType) {
     params.push(entityType);
-    where.push(`entity_type = $${params.length}`);
+    where.push(`l.entity_type = $${params.length}`);
   }
   if (entityId) {
     params.push(entityId);
-    where.push(`entity_id = $${params.length}`);
+    where.push(`l.entity_id = $${params.length}`);
   }
   if (userCode) {
     params.push(userCode);
-    where.push(`user_code = $${params.length}`);
+    where.push(`l.user_code = $${params.length}`);
   }
   if (action) {
     params.push(action);
-    where.push(`action = $${params.length}`);
+    where.push(`l.action = $${params.length}`);
   }
   const lim = Math.max(1, Math.min(1000, Number(limit) || 200));
   return query(
-    `SELECT id, action, entity_type, entity_id, user_code, ip_addr, changes,
-            to_char(created_at,'YYYY-MM-DD HH24:MI:SS') AS created_at
-     FROM public.odg_tms_audit_log
+    `SELECT l.id, l.action, l.entity_type, l.entity_id, l.user_code, l.ip_addr, l.changes,
+            COALESCE(
+              NULLIF(TRIM(e.fullname_lo), ''),
+              NULLIF(TRIM(e.nickname), ''),
+              NULLIF(TRIM(u.name_1), ''),
+              NULLIF(TRIM(l.user_code), ''),
+              'system'
+            ) AS user_name,
+            to_char(l.created_at,'YYYY-MM-DD HH24:MI:SS') AS created_at
+     FROM public.odg_tms_audit_log l
+     LEFT JOIN public.erp_user u ON u.code = l.user_code
+     LEFT JOIN public.odg_employee e ON e.employee_code = l.user_code
      ${where.length ? `WHERE ${where.join(" AND ")}` : ""}
-     ORDER BY created_at DESC
+     ORDER BY l.created_at DESC
      LIMIT ${lim}`,
     params
   );

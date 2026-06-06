@@ -24,6 +24,12 @@ async function getDashboardData(session) {
     scoped ? `AND ${alias ? alias + "." : ""}transport_code = '${userBranch}'` : "";
   const scope = { scoped, branch: userBranch ?? "" };
 
+  // Kick off the heaviest query (pending bills + remaining counts) up front so
+  // it runs concurrently with every count/KPI/list query below instead of
+  // blocking them. Awaited later where its result is first needed.
+  const { getBillsPending } = require("./bills");
+  const pendingPromise = getBillsPending(session, FIXED_YEAR_START, FIXED_YEAR_END, "all");
+
   const data = await queryOne(`
     SELECT count(doc_no) AS bill_count,
       sum(case when transport_code='02-0004' then 1 else 0 end) as pickup,
@@ -33,6 +39,18 @@ async function getDashboardData(session) {
       sum(case when transport_code ='02-0003' then 1 else 0 end) as logistic_ps
     FROM ic_trans_shipment
     WHERE ${getFixedYearSqlFilter("doc_date")} AND transport_code IS NOT NULL ${branchAnd()}
+  `);
+  // ThunJai express (transport 02-0005) — bills + products moved via the
+  // ThunJai integration (company-wide; separate from the internal fleet).
+  const thunjai = await queryOne(`
+    SELECT
+      count(DISTINCT s.doc_no)::int AS bill_count,
+      COALESCE(count(det.item_code), 0)::int AS item_count,
+      COALESCE(sum(det.qty), 0)::numeric AS item_qty
+    FROM ic_trans_shipment s
+    LEFT JOIN ic_trans_detail det
+      ON det.doc_no = s.doc_no AND det.item_code NOT LIKE '97%'
+    WHERE s.transport_code = '02-0005' AND ${getFixedYearSqlFilter("s.doc_date")}
   `);
   const teamSql = (code) =>
     `SELECT count(doc_no) AS bill_count,
@@ -56,17 +74,9 @@ async function getDashboardData(session) {
     [monthStart, nextMonthStart, fixedToday]
   );
 
-  // Single source of truth: delegate to getBillsPending so the dashboard's
-  // count is byte-for-byte identical to what /bills-pending shows for the
-  // same date range. We use the year's full range here — month_pending /
-  // today_pending are derived by filtering this list in JS below.
-  const { getBillsPending } = require("./bills");
-  const { trans: pendingWithRemaining } = await getBillsPending(
-    session,
-    FIXED_YEAR_START,
-    FIXED_YEAR_END,
-    "all"
-  );
+  // Pending bills with remaining counts (kicked off above) — single source of
+  // truth so the dashboard's count matches /bills-pending byte-for-byte.
+  const { trans: pendingWithRemaining } = await pendingPromise;
   const trans = pendingWithRemaining.slice(0, 10);
   const transMonth = pendingWithRemaining
     .filter((bill) => bill.send_date >= monthStart && bill.send_date < nextMonthStart)
@@ -316,10 +326,43 @@ async function getDashboardData(session) {
     },
   };
 
-  const inProgressBranchClause = scope.scoped
+  const normalizePendingShipments = (items) =>
+    items.map((item) => ({ ...item, time_use: formatInterval(item.time_use) }));
+
+  return {
+    data,
+    thunjai,
+    kl,
+    dt,
+    ps,
+    user_branch: scoped ? userBranch : null,
+    branch_names: branchNames,
+    trans: normalizePendingShipments(trans),
+    trans_month: normalizePendingShipments(transMonth),
+    trans_today: normalizePendingShipments(transToday),
+    pending_summary: {
+      ...pendingSummary,
+      current_date: toDisplayDate(fixedToday),
+      current_month: toDisplayMonth(fixedMonth),
+    },
+    pending_breakdown: pendingBreakdown,
+    delivery_kpi: deliveryKpi,
+    customer_rating: ratingSummary,
+  };
+}
+
+// Activity lists (in-progress / waiting-dispatch / delivered-pending-close) —
+// split out of getDashboardData so the page can load them progressively while
+// the core KPIs render immediately. The three queries run concurrently.
+async function getDashboardActivity(session) {
+  const userBranch = session?.logistic_code?.trim();
+  const scoped = !!userBranch && userBranch !== "02-0004";
+  const scope = { scoped, branch: userBranch ?? "" };
+  const listBranchClause = scope.scoped
     ? `AND EXISTS (SELECT 1 FROM ic_trans_shipment __ts WHERE __ts.doc_no = d.bill_no AND __ts.transport_code = '${scope.branch}')`
     : "";
-  const inProgressRows = await query(
+
+  const inProgressRowsP = query(
     `SELECT
       d.bill_no,
       d.doc_no,
@@ -346,15 +389,12 @@ async function getDashboardData(session) {
       AND ${getFixedYearSqlFilter("d.doc_date")}
       AND COALESCE(a.approve_status, 0) = 1
       AND COALESCE(a.job_status, 0) <> 4
-      ${inProgressBranchClause}
+      ${listBranchClause}
     ORDER BY d.sent_start ASC
     LIMIT 8`
   );
 
-  const waitingDispatchBranchClause = scope.scoped
-    ? `AND EXISTS (SELECT 1 FROM ic_trans_shipment __ts WHERE __ts.doc_no = d.bill_no AND __ts.transport_code = '${scope.branch}')`
-    : "";
-  const waitingDispatchRows = await query(
+  const waitingDispatchRowsP = query(
     `SELECT
       d.bill_no,
       d.doc_no,
@@ -382,15 +422,12 @@ async function getDashboardData(session) {
       AND ${getFixedYearSqlFilter("d.doc_date")}
       AND COALESCE(a.approve_status, 0) = 1
       AND COALESCE(a.job_status, 0) <> 4
-      ${waitingDispatchBranchClause}
+      ${listBranchClause}
     ORDER BY COALESCE(d.recipt_job, a.create_date_time_now) ASC
     LIMIT 8`
   );
 
-  const deliveredPendingCloseBranchClause = scope.scoped
-    ? `AND EXISTS (SELECT 1 FROM ic_trans_shipment __ts WHERE __ts.doc_no = d.bill_no AND __ts.transport_code = '${scope.branch}')`
-    : "";
-  const deliveredPendingCloseRows = await query(
+  const deliveredPendingCloseRowsP = query(
     `SELECT
       d.bill_no,
       d.doc_no,
@@ -438,45 +475,22 @@ async function getDashboardData(session) {
       AND ${getFixedYearSqlFilter("d.doc_date")}
       AND COALESCE(a.approve_status, 0) = 1
       AND COALESCE(a.job_status, 0) <> 4
-      ${deliveredPendingCloseBranchClause}
+      ${listBranchClause}
     ORDER BY d.sent_end DESC
     LIMIT 8`
   );
 
-  const normalizePendingShipments = (items) =>
-    items.map((item) => ({ ...item, time_use: formatInterval(item.time_use) }));
-  const inProgressCount = inProgressRows[0]?.total_in_progress_bills ?? 0;
-  const inProgress = inProgressRows.map(({ total_in_progress_bills, ...bill }) => bill);
-  const waitingDispatchCount = waitingDispatchRows[0]?.total_waiting_dispatch_bills ?? 0;
-  const waitingDispatch = waitingDispatchRows.map(({ total_waiting_dispatch_bills, ...bill }) => bill);
-  const deliveredPendingCloseCount = deliveredPendingCloseRows[0]?.total_delivered_pending_close ?? 0;
-  const deliveredPendingClose = deliveredPendingCloseRows.map(({ total_delivered_pending_close, ...bill }) => bill);
+  const [inProgressRows, waitingDispatchRows, deliveredPendingCloseRows] =
+    await Promise.all([inProgressRowsP, waitingDispatchRowsP, deliveredPendingCloseRowsP]);
 
   return {
-    data,
-    kl,
-    dt,
-    ps,
-    user_branch: scoped ? userBranch : null,
-    branch_names: branchNames,
-    trans: normalizePendingShipments(trans),
-    trans_month: normalizePendingShipments(transMonth),
-    trans_today: normalizePendingShipments(transToday),
-    in_progress: inProgress,
-    in_progress_count: inProgressCount,
-    waiting_dispatch: waitingDispatch,
-    waiting_dispatch_count: waitingDispatchCount,
-    delivered_pending_close: deliveredPendingClose,
-    delivered_pending_close_count: deliveredPendingCloseCount,
-    pending_summary: {
-      ...pendingSummary,
-      current_date: toDisplayDate(fixedToday),
-      current_month: toDisplayMonth(fixedMonth),
-    },
-    pending_breakdown: pendingBreakdown,
-    delivery_kpi: deliveryKpi,
-    customer_rating: ratingSummary,
+    in_progress: inProgressRows.map(({ total_in_progress_bills, ...bill }) => bill),
+    in_progress_count: inProgressRows[0]?.total_in_progress_bills ?? 0,
+    waiting_dispatch: waitingDispatchRows.map(({ total_waiting_dispatch_bills, ...bill }) => bill),
+    waiting_dispatch_count: waitingDispatchRows[0]?.total_waiting_dispatch_bills ?? 0,
+    delivered_pending_close: deliveredPendingCloseRows.map(({ total_delivered_pending_close, ...bill }) => bill),
+    delivered_pending_close_count: deliveredPendingCloseRows[0]?.total_delivered_pending_close ?? 0,
   };
 }
 
-module.exports = { getDashboardData };
+module.exports = { getDashboardData, getDashboardActivity };

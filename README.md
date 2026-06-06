@@ -7,6 +7,7 @@ Next.js web dashboard and API server for ODG transport management.
 - Web dashboard: dispatch planning, approval, bill status, reports, GPS tracking, fuel logs, settings.
 - Public tracking: `/track` and `/api/public/track`.
 - Mobile driver APIs: `/api/mobile/login`, `/api/mobile/jobs`, `/api/mobile/bills`, `/api/mobile/fuel`, `/api/mobile/fcm-token`.
+  Supervisor/manager mobile tokens can call `/api/mobile/jobs?scope=all` for all-driver job monitoring.
 - GPS integrations: Thai GPS realtime, daily usage, backfill.
 
 ## Environment

@@ -14,7 +14,13 @@ export interface Session {
   usercode: string;
   username: string;
   logistic_code: string;
+  department: string;
   title: string;
+  emp_department_code: string;
+  emp_department_name: string;
+  position_title: string;
+  app_role: string;
+  position_code: string;
 }
 
 interface SessionContextValue {
@@ -44,6 +50,29 @@ export function SessionProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     refresh();
   }, []);
+
+  useEffect(() => {
+    if (!session) return;
+    let active = true;
+    const beat = () => {
+      void Auth.heartbeat().catch(() => {
+        if (!active) return;
+      });
+    };
+    beat();
+    const intervalId = window.setInterval(beat, 30_000);
+    const onVisible = () => {
+      if (document.visibilityState === "visible") beat();
+    };
+    window.addEventListener("focus", beat);
+    document.addEventListener("visibilitychange", onVisible);
+    return () => {
+      active = false;
+      window.clearInterval(intervalId);
+      window.removeEventListener("focus", beat);
+      document.removeEventListener("visibilitychange", onVisible);
+    };
+  }, [session]);
 
   const logout = async () => {
     await Auth.logout();

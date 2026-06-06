@@ -15,6 +15,9 @@ export type LoginInput = z.infer<typeof LoginSchema>;
 
 export const JobsListQuerySchema = z.object({
   date: z.string().trim().optional(),
+  scope: OptionalString,
+  driver_id: OptionalString,
+  status: OptionalString,
 });
 
 export const BillsListQuerySchema = z.object({
@@ -53,6 +56,20 @@ const PickupBill = z.object({
   action: z.literal("pickup_bill"),
   bill_no: NonEmptyString,
 });
+// Receive goods at the customer's yard ('__CUSTOMER__' pickup). Photo +
+// signature are uploaded separately via attach_bill_image (pickup kinds).
+const ReceiveCustomerBill = z.object({
+  action: z.literal("receive_customer_bill"),
+  bill_no: NonEmptyString,
+  lat: LatLng,
+  lng: LatLng,
+});
+// Supervisor approves a trip so the driver can start dispatching. Gated to
+// supervisor roles in the route (not driver-scoped like the other actions).
+const ApproveJob = z.object({
+  action: z.literal("approve_job"),
+  doc_no: NonEmptyString,
+});
 const StartDispatch = z.object({
   action: z.literal("start_dispatch"),
   doc_no: NonEmptyString,
@@ -75,6 +92,9 @@ const CompleteBill = z.object({
   lng: LatLng,
   lat_end: LatLng,
   lng_end: LatLng,
+  // COD (Module B) — cash/transfer collected at delivery (optional).
+  collected_amount: z.coerce.number().nonnegative().max(10000000000).nullish(),
+  payment_method: OptionalString, // cash | transfer | none
 });
 const CancelBill = z.object({
   action: z.literal("cancel_bill"),
@@ -84,6 +104,9 @@ const CancelBill = z.object({
   lng: LatLng,
   lat_end: LatLng,
   lng_end: LatLng,
+  // Module D — standardized reason + optional reschedule date (YYYY-MM-DD).
+  reason_code: OptionalString,
+  reschedule_date: OptionalString,
 });
 const RevertCompleteBill = z.object({
   action: z.literal("revert_complete_bill"),
@@ -117,7 +140,14 @@ const AttachJobImage = z.object({
 const AttachBillImage = z.object({
   action: z.literal("attach_bill_image"),
   bill_no: NonEmptyString,
-  kind: z.enum(["primary", "delivery", "signature"]),
+  kind: z.enum([
+    "primary",
+    "delivery",
+    "signature",
+    // Proof-of-pickup captured at the customer's yard ('__CUSTOMER__' receive).
+    "pickup",
+    "pickup_signature",
+  ]),
   image_data: DataUri,
   // Edit-mode flag: when true on a `delivery` upload, the server wipes
   // existing delivery images for this bill before inserting the new one.
@@ -147,6 +177,8 @@ const FuelRefill = z.object({
 export const JobActionSchema = z.discriminatedUnion("action", [
   ReceiveJob,
   PickupBill,
+  ReceiveCustomerBill,
+  ApproveJob,
   StartDispatch,
   CheckinBill,
   CompleteBill,
