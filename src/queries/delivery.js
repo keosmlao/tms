@@ -69,6 +69,19 @@ async function ensureDeliveryWorkflowSchemaInternal(db) {
     ALTER TABLE public.odg_tms
     ADD COLUMN IF NOT EXISTS dispatch_started_at timestamp without time zone
   `);
+  // Idempotency log for mobile driver actions. The app sends a client-generated
+  // action_id with each queueable action; the server claims it once so an
+  // offline-outbox replay (or a double-submit whose first attempt's response was
+  // lost) can't apply the same action twice — e.g. re-add delivered_qty / COD.
+  await safeDdl(db, `
+    CREATE TABLE IF NOT EXISTS public.odg_tms_mobile_action_log (
+      action_id character varying PRIMARY KEY,
+      action character varying,
+      bill_no character varying,
+      doc_no character varying,
+      processed_at timestamp without time zone DEFAULT LOCALTIMESTAMP(0)
+    )
+  `);
 
   // Per-bill pickup origin override. NULL → use ic_trans_shipment.transport_code
   // as default. Special value '__CUSTOMER__' → pickup at customer's home/shop.

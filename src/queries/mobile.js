@@ -418,6 +418,44 @@ async function mobileJobAction(body) {
       }
     }
 
+    // Serialize concurrent driver actions on the same bill / trip so a
+    // double-submit (two devices, or a manual tap racing the offline-outbox
+    // flush) can't read-modify-write the same delivery twice — e.g. add
+    // delivered_qty / COD twice, or two complete_job closes. Advisory xact
+    // locks, released at COMMIT/ROLLBACK; always taken bill-then-job so the
+    // order is consistent (no deadlock).
+    if (billNo) {
+      await client.query("SELECT pg_advisory_xact_lock(hashtext($1))", [`tms_exec_bill:${billNo}`]);
+    }
+    if (docNo) {
+      await client.query("SELECT pg_advisory_xact_lock(hashtext($1))", [`tms_exec_job:${docNo}`]);
+    }
+
+    // Idempotency: claim this action's client-generated id once. A replayed or
+    // duplicated request (offline-outbox flush, or a retry after the first
+    // attempt's response was lost) finds the id already taken and is skipped
+    // instead of re-applying the mutation — the gap the status guards miss when
+    // a bill was reverted between the original send and the replay. The claim is
+    // in the same txn, so a failed action ROLLs BACK and the id stays free.
+    const actionId = asText(body.action_id);
+    if (actionId) {
+      const claim = await client.query(
+        `INSERT INTO public.odg_tms_mobile_action_log(action_id, action, bill_no, doc_no)
+         VALUES ($1, $2, $3, $4) ON CONFLICT (action_id) DO NOTHING RETURNING action_id`,
+        [actionId, action, billNo || null, docNo || null]
+      );
+      if (claim.rowCount === 0) {
+        await client.query("COMMIT");
+        return {
+          success: true,
+          idempotent_skip: true,
+          action,
+          bill_no: billNo || null,
+          doc_no: docNo || null,
+        };
+      }
+    }
+
     switch (action) {
       case "receive": {
         if (!docNo) throw new Error("doc_no is required");
@@ -441,11 +479,13 @@ async function mobileJobAction(body) {
                             '') <> COALESCE(t.origin_transport_code, '')) AS is_other_branch
            FROM public.odg_tms_detail d
            INNER JOIN odg_tms t ON t.doc_no = d.doc_no
-           WHERE d.bill_no = $1 AND ${getFixedYearSqlFilter("d.doc_date")}
+           WHERE d.bill_no = $1
+             AND t.driver = $2
+             AND ${getFixedYearSqlFilter("d.doc_date")}
            ORDER BY (CASE WHEN COALESCE(d.status, 0) NOT IN (1, 2) THEN 0 ELSE 1 END),
                     d.create_date_time_now DESC NULLS LAST
            LIMIT 1`,
-          [billNo]
+          [billNo, driverId]
         );
         const currentJob = billRow.rows[0];
         const currentDocNo = currentJob?.doc_no;
@@ -475,8 +515,8 @@ async function mobileJobAction(body) {
         await client.query(
           `UPDATE public.odg_tms_detail
            SET recipt_job = COALESCE(recipt_job, LOCALTIMESTAMP(0))
-           WHERE bill_no = $1 AND ${getFixedYearSqlFilter("doc_date")}`,
-          [billNo]
+           WHERE bill_no = $1 AND doc_no = $2 AND ${getFixedYearSqlFilter("doc_date")}`,
+          [billNo, currentDocNo]
         );
 
         // Cascade sent_start = recipt_job when picked up away from the trip's
@@ -487,13 +527,14 @@ async function mobileJobAction(body) {
            SET sent_start = COALESCE(d.sent_start, d.recipt_job, LOCALTIMESTAMP(0))
            FROM odg_tms j
            WHERE d.bill_no = $1
+             AND d.doc_no = $2
              AND j.doc_no = d.doc_no
              AND d.sent_start IS NULL
              AND COALESCE(d.pickup_transport_code,
                           (SELECT s.transport_code FROM public.ic_trans_shipment s WHERE s.doc_no = d.bill_no LIMIT 1),
                           '') <> COALESCE(j.origin_transport_code, '')
              AND ${getFixedYearSqlFilter("d.doc_date")}`,
-          [billNo]
+          [billNo, currentDocNo]
         );
 
         await client.query("COMMIT");
@@ -516,11 +557,13 @@ async function mobileJobAction(body) {
                   t.approve_status, t.job_status
            FROM public.odg_tms_detail d
            INNER JOIN odg_tms t ON t.doc_no = d.doc_no
-           WHERE d.bill_no = $1 AND ${getFixedYearSqlFilter("d.doc_date")}
+           WHERE d.bill_no = $1
+             AND t.driver = $2
+             AND ${getFixedYearSqlFilter("d.doc_date")}
            ORDER BY (CASE WHEN COALESCE(d.status, 0) NOT IN (1, 2) THEN 0 ELSE 1 END),
                     d.create_date_time_now DESC NULLS LAST
            LIMIT 1`,
-          [billNo]
+          [billNo, driverId]
         );
         const currentBill = billRow.rows[0];
         const currentDocNo = currentBill?.doc_no;
@@ -550,8 +593,8 @@ async function mobileJobAction(body) {
           `UPDATE public.odg_tms_detail
            SET recipt_job = COALESCE(recipt_job, LOCALTIMESTAMP(0)),
                lat = COALESCE($2, lat), lng = COALESCE($3, lng)
-           WHERE bill_no = $1 AND ${getFixedYearSqlFilter("doc_date")}`,
-          [billNo, lat, lng]
+           WHERE bill_no = $1 AND doc_no = $4 AND ${getFixedYearSqlFilter("doc_date")}`,
+          [billNo, lat, lng, currentDocNo]
         );
 
         // Backfill the customer's stored location when it's missing — same
@@ -696,11 +739,13 @@ async function mobileJobAction(body) {
                            '') AS effective_pickup_code
            FROM public.odg_tms_detail d
            INNER JOIN odg_tms t ON t.doc_no = d.doc_no
-           WHERE d.bill_no = $1 AND ${getFixedYearSqlFilter("d.doc_date")}
+           WHERE d.bill_no = $1
+             AND t.driver = $2
+             AND ${getFixedYearSqlFilter("d.doc_date")}
            ORDER BY (CASE WHEN COALESCE(d.status, 0) NOT IN (1, 2) THEN 0 ELSE 1 END),
                     d.create_date_time_now DESC NULLS LAST
            LIMIT 1`,
-          [billNo]
+          [billNo, driverId]
         );
         const currentBill = billRow.rows[0];
         const currentDocNo = currentBill?.doc_no;
@@ -770,8 +815,8 @@ async function mobileJobAction(body) {
                  ELSE sent_start
                END,
                lat = COALESCE($2, lat), lng = COALESCE($3, lng)
-           WHERE bill_no = $1 AND ${getFixedYearSqlFilter("doc_date")}`,
-          [billNo, lat, lng, autoReceive]
+           WHERE bill_no = $1 AND doc_no = $5 AND ${getFixedYearSqlFilter("doc_date")}`,
+          [billNo, lat, lng, autoReceive, currentDocNo]
         );
 
         await client.query(
@@ -860,6 +905,21 @@ async function mobileJobAction(body) {
         const imageData = asNullableText(body.image_data);
         if (!imageData) throw new Error("image_data is required");
 
+        // Per-trip image columns (sight/url/recipt) live on odg_tms_detail, so
+        // resolve the bill's active trip row (same most-progressed pick the
+        // close actions use) and scope the writes to it — a bill_no that exists
+        // on two trips must not get its image stamped on the wrong row.
+        const imgDocRow = await client.query(
+          `SELECT d.doc_no FROM public.odg_tms_detail d
+           INNER JOIN odg_tms t ON t.doc_no = d.doc_no
+           WHERE d.bill_no = $1 AND t.driver = $2 AND ${getFixedYearSqlFilter("d.doc_date")}
+           ORDER BY (CASE WHEN COALESCE(d.status, 0) NOT IN (1, 2) THEN 0 ELSE 1 END),
+                    d.create_date_time_now DESC NULLS LAST
+           LIMIT 1`,
+          [billNo, driverId]
+        );
+        const currentDocNo = imgDocRow.rows[0]?.doc_no ?? null;
+
         if (kind === "delivery") {
           if (body.replace) {
             // Edit flow: wipe existing delivery images for this bill before
@@ -874,15 +934,15 @@ async function mobileJobAction(body) {
           await client.query(
             `UPDATE public.odg_tms_detail
              SET sight_img = $2
-             WHERE bill_no = $1 AND ${getFixedYearSqlFilter("doc_date")}`,
-            [billNo, imageData]
+             WHERE bill_no = $1 AND doc_no = $3 AND ${getFixedYearSqlFilter("doc_date")}`,
+            [billNo, imageData, currentDocNo]
           );
         } else if (kind === "primary") {
           await client.query(
             `UPDATE public.odg_tms_detail
              SET url_img = $2
-             WHERE bill_no = $1 AND ${getFixedYearSqlFilter("doc_date")}`,
-            [billNo, imageData]
+             WHERE bill_no = $1 AND doc_no = $3 AND ${getFixedYearSqlFilter("doc_date")}`,
+            [billNo, imageData, currentDocNo]
           );
         } else if (kind === "pickup") {
           // Proof-of-pickup photo captured at the customer's home/shop for
@@ -890,16 +950,16 @@ async function mobileJobAction(body) {
           await client.query(
             `UPDATE public.odg_tms_detail
              SET recipt_img = $2
-             WHERE bill_no = $1 AND ${getFixedYearSqlFilter("doc_date")}`,
-            [billNo, imageData]
+             WHERE bill_no = $1 AND doc_no = $3 AND ${getFixedYearSqlFilter("doc_date")}`,
+            [billNo, imageData, currentDocNo]
           );
         } else if (kind === "pickup_signature") {
           // Customer's signature confirming the goods were handed over at pickup.
           await client.query(
             `UPDATE public.odg_tms_detail
              SET recipt_sign_img = $2
-             WHERE bill_no = $1 AND ${getFixedYearSqlFilter("doc_date")}`,
-            [billNo, imageData]
+             WHERE bill_no = $1 AND doc_no = $3 AND ${getFixedYearSqlFilter("doc_date")}`,
+            [billNo, imageData, currentDocNo]
           );
         } else {
           throw new Error("kind must be delivery|signature|primary|pickup|pickup_signature");
@@ -943,11 +1003,13 @@ async function mobileJobAction(body) {
                   COALESCE(d.status, 0) AS status
            FROM public.odg_tms_detail d
            INNER JOIN odg_tms t ON t.doc_no = d.doc_no
-           WHERE d.bill_no = $1 AND ${getFixedYearSqlFilter("d.doc_date")}
+           WHERE d.bill_no = $1
+             AND t.driver = $2
+             AND ${getFixedYearSqlFilter("d.doc_date")}
            ORDER BY (CASE WHEN COALESCE(d.status, 0) NOT IN (1, 2) THEN 0 ELSE 1 END),
                     d.create_date_time_now DESC NULLS LAST
            LIMIT 1`,
-          [billNo]
+          [billNo, driverId]
         );
         const currentBill = billRow.rows[0];
         const currentDocNo = currentBill?.doc_no;
@@ -978,8 +1040,8 @@ async function mobileJobAction(body) {
           await client.query(
             `UPDATE public.odg_tms_detail
              SET recipt_job = COALESCE(recipt_job, LOCALTIMESTAMP(0))
-             WHERE bill_no = $1 AND ${getFixedYearSqlFilter("doc_date")}`,
-            [billNo]
+             WHERE bill_no = $1 AND doc_no = $2 AND ${getFixedYearSqlFilter("doc_date")}`,
+            [billNo, currentDocNo]
           );
         }
         // Auto-progress through receive + dispatch when the driver skipped
@@ -1059,9 +1121,9 @@ async function mobileJobAction(body) {
         const itemRows = await client.query(
           `SELECT item_code, selected_qty, delivered_qty
            FROM public.odg_tms_detail_item
-           WHERE bill_no = $1
+           WHERE bill_no = $1 AND doc_no = $2
            ORDER BY item_code`,
-          [billNo]
+          [billNo, currentDocNo]
         );
 
         if (itemRows.rows.length === 0) {
@@ -1112,8 +1174,8 @@ async function mobileJobAction(body) {
           await client.query(
             `UPDATE public.odg_tms_detail_item
              SET delivered_qty = COALESCE(delivered_qty, 0)::numeric + $2::numeric
-             WHERE bill_no = $1 AND item_code = $3`,
-            [billNo, deliverQty, item.item_code]
+             WHERE bill_no = $1 AND item_code = $3 AND doc_no = $4`,
+            [billNo, deliverQty, item.item_code, currentDocNo]
           );
         }
 
@@ -1126,8 +1188,8 @@ async function mobileJobAction(body) {
                url_img = COALESCE($6, url_img),
                sight_img = COALESCE($7, sight_img),
                remark = COALESCE($8, remark)
-           WHERE bill_no = $1 AND ${getFixedYearSqlFilter("doc_date")}`,
-          [billNo, lat, lng, latEnd, lngEnd, deliveryImage, signatureImage, comment]
+           WHERE bill_no = $1 AND doc_no = $9 AND ${getFixedYearSqlFilter("doc_date")}`,
+          [billNo, lat, lng, latEnd, lngEnd, deliveryImage, signatureImage, comment, currentDocNo]
         );
 
         await saveDeliveryImages(billNo, deliveryImages, client);
@@ -1170,8 +1232,8 @@ async function mobileJobAction(body) {
              SET collected_amount = $2,
                  payment_method = COALESCE($3, payment_method),
                  collected_at = LOCALTIMESTAMP(0)
-             WHERE bill_no = $1 AND ${getFixedYearSqlFilter("doc_date")}`,
-            [billNo, collectedAmount, asNullableText(body.payment_method)]
+             WHERE bill_no = $1 AND doc_no = $4 AND ${getFixedYearSqlFilter("doc_date")}`,
+            [billNo, collectedAmount, asNullableText(body.payment_method), currentDocNo]
           );
         }
 
@@ -1201,11 +1263,13 @@ async function mobileJobAction(body) {
                   COALESCE(d.status, 0) AS status
            FROM public.odg_tms_detail d
            INNER JOIN odg_tms t ON t.doc_no = d.doc_no
-           WHERE d.bill_no = $1 AND ${getFixedYearSqlFilter("d.doc_date")}
+           WHERE d.bill_no = $1
+             AND t.driver = $2
+             AND ${getFixedYearSqlFilter("d.doc_date")}
            ORDER BY (CASE WHEN COALESCE(d.status, 0) NOT IN (1, 2) THEN 0 ELSE 1 END),
                     d.create_date_time_now DESC NULLS LAST
            LIMIT 1`,
-          [billNo]
+          [billNo, driverId]
         );
         const currentBill = billRow.rows[0];
         const currentDocNo = currentBill?.doc_no;
@@ -1288,8 +1352,8 @@ async function mobileJobAction(body) {
             `UPDATE public.odg_tms_detail
              SET cancel_reason_code = COALESCE($2, cancel_reason_code),
                  reschedule_date = COALESCE($3::date, reschedule_date)
-             WHERE bill_no = $1 AND ${getFixedYearSqlFilter("doc_date")}`,
-            [billNo, reasonCode, rescheduleDate]
+             WHERE bill_no = $1 AND doc_no = $4 AND ${getFixedYearSqlFilter("doc_date")}`,
+            [billNo, reasonCode, rescheduleDate, currentDocNo]
           );
         }
 
@@ -1335,11 +1399,13 @@ async function mobileJobAction(body) {
                   COALESCE(d.status, 0) AS status
            FROM public.odg_tms_detail d
            INNER JOIN odg_tms t ON t.doc_no = d.doc_no
-           WHERE d.bill_no = $1 AND ${getFixedYearSqlFilter("d.doc_date")}
+           WHERE d.bill_no = $1
+             AND t.driver = $2
+             AND ${getFixedYearSqlFilter("d.doc_date")}
            ORDER BY (CASE WHEN COALESCE(d.status, 0) NOT IN (1, 2) THEN 0 ELSE 1 END),
                     d.create_date_time_now DESC NULLS LAST
            LIMIT 1`,
-          [billNo]
+          [billNo, driverId]
         );
         const currentBill = billRow.rows[0];
         const currentDocNo = currentBill?.doc_no;
@@ -1350,6 +1416,12 @@ async function mobileJobAction(body) {
         if (Number(currentBill.job_status ?? 0) >= 3) {
           throw new Error("ປິດຖ້ຽວແລ້ວ ບໍ່ສາມາດຍົກເລີກສຳເລັດໄດ້");
         }
+
+        // Serialize against complete_job (which holds tms_exec_job via doc_no):
+        // reopening a bill (status 1→0) must not interleave with a trip-close
+        // that already read open_bill_count=0, or the trip would close with an
+        // open bill.
+        await client.query("SELECT pg_advisory_xact_lock(hashtext($1))", [`tms_exec_job:${currentDocNo}`]);
 
         await client.query(
           `UPDATE public.odg_tms_detail
@@ -1370,8 +1442,8 @@ async function mobileJobAction(body) {
         await client.query(
           `UPDATE public.odg_tms_detail_item
            SET delivered_qty = 0
-           WHERE bill_no = $1`,
-          [billNo]
+           WHERE bill_no = $1 AND doc_no = $2`,
+          [billNo, currentDocNo]
         );
 
         await client.query(
@@ -1404,11 +1476,13 @@ async function mobileJobAction(body) {
                   COALESCE(d.status, 0) AS status
            FROM public.odg_tms_detail d
            INNER JOIN odg_tms t ON t.doc_no = d.doc_no
-           WHERE d.bill_no = $1 AND ${getFixedYearSqlFilter("d.doc_date")}
+           WHERE d.bill_no = $1
+             AND t.driver = $2
+             AND ${getFixedYearSqlFilter("d.doc_date")}
            ORDER BY (CASE WHEN COALESCE(d.status, 0) NOT IN (1, 2) THEN 0 ELSE 1 END),
                     d.create_date_time_now DESC NULLS LAST
            LIMIT 1`,
-          [billNo]
+          [billNo, driverId]
         );
         const currentBill = billRow.rows[0];
         const currentDocNo = currentBill?.doc_no;
@@ -1423,9 +1497,9 @@ async function mobileJobAction(body) {
         const itemRows = await client.query(
           `SELECT item_code, selected_qty
            FROM public.odg_tms_detail_item
-           WHERE bill_no = $1
+           WHERE bill_no = $1 AND doc_no = $2
            ORDER BY item_code`,
-          [billNo]
+          [billNo, currentDocNo]
         );
         if (itemRows.rows.length === 0) {
           throw new Error("No delivery items found for this bill");
@@ -1444,8 +1518,8 @@ async function mobileJobAction(body) {
           await client.query(
             `UPDATE public.odg_tms_detail_item
              SET delivered_qty = $2
-             WHERE bill_no = $1 AND item_code = $3`,
-            [billNo, newQty, item.item_code]
+             WHERE bill_no = $1 AND item_code = $3 AND doc_no = $4`,
+            [billNo, newQty, item.item_code, currentDocNo]
           );
         }
 
