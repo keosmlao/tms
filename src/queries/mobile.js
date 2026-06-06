@@ -404,7 +404,11 @@ async function mobileJobAction(body) {
       case "pickup_bill": {
         if (!billNo) throw new Error("bill_no is required");
         const billRow = await client.query(
-          `SELECT d.doc_no, t.approve_status, t.job_status
+          `SELECT d.doc_no, t.approve_status, t.job_status,
+                  (COALESCE(NULLIF(TRIM(d.pickup_transport_code), ''),
+                            (SELECT s.transport_code FROM public.ic_trans_shipment s
+                             WHERE s.doc_no = d.bill_no LIMIT 1),
+                            '') <> COALESCE(t.origin_transport_code, '')) AS is_other_branch
            FROM public.odg_tms_detail d
            INNER JOIN odg_tms t ON t.doc_no = d.doc_no
            WHERE d.bill_no = $1 AND ${getFixedYearSqlFilter("d.doc_date")}
@@ -417,6 +421,12 @@ async function mobileJobAction(body) {
         const currentDocNo = currentJob?.doc_no;
         if (!currentDocNo) throw new Error("Bill was not found");
         if (Number(currentJob.approve_status ?? 0) !== 1) throw new Error("ຖ້ຽວນີ້ຍັງບໍ່ຖືກອະນຸມັດ");
+        // Bills sitting at ANOTHER branch's warehouse can only be picked up once
+        // the trip has actually started dispatching (job_status >= 2). Own-branch
+        // bills load first, before dispatch starts.
+        if (currentJob.is_other_branch && Number(currentJob.job_status ?? 0) < 2) {
+          throw new Error("ບິນສາຂາອື່ນ: ຕ້ອງເລີ່ມຈັດສົ່ງກ່ອນຈຶ່ງເບີກໄດ້");
+        }
         // Auto-receive if the driver hasn't tapped "ຮັບຖ້ຽວ" yet — saves a step
         // since picking up implies the trip is in hand.
         if (Number(currentJob.job_status ?? 0) === 0) {
