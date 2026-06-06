@@ -253,6 +253,8 @@ async function createJob(session, data) {
 
   const client = await pool.connect();
   let docNo = null;
+  // Declared out here so the post-commit notification block can read the count.
+  let normalizedBills = [];
   try {
     await client.query("BEGIN");
     // Serialize dispatch of the SAME bill across concurrent trips. The xact lock
@@ -265,7 +267,7 @@ async function createJob(session, data) {
     // Authoritative validation, under the lock. Remaining qty for every bill is
     // fetched in ONE batched query (not N) to keep the locked section short.
     const remainingMap = await getRemainingBillProductsMap(billNos);
-    const normalizedBills = [];
+    normalizedBills = [];
     for (const bill of billsList) {
       normalizedBills.push(normalizeBill(bill, remainingMap.get(String(bill.bill_no)) ?? []));
     }
