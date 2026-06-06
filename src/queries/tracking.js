@@ -651,6 +651,7 @@ async function trackBillPublic(billNo) {
             COALESCE(a.forward_transport_code, '') as forward_transport_code,
             COALESCE(fwd.name_1, '') as forward_transport_name,
             a.lat, a.lng, a.lat_end, a.lng_end,
+            acd.latitude::float as dest_lat, acd.longitude::float as dest_lng,
             COALESCE(a.url_img, '') as url_img,
             COALESCE(a.sight_img, '') as sight_img,
             COALESCE(img.delivery_images, ARRAY[]::text[]) as delivery_images,
@@ -670,6 +671,8 @@ async function trackBillPublic(billNo) {
      FROM odg_tms_detail a
      LEFT JOIN odg_tms_car c ON c.code = a.car
      LEFT JOIN odg_tms j ON j.doc_no = a.doc_no
+     LEFT JOIN ic_trans_shipment its ON its.doc_no = a.bill_no
+     LEFT JOIN ar_customer_detail acd ON acd.ar_code = its.cust_code
      LEFT JOIN odg_tms_driver d ON d.code = j.driver
      LEFT JOIN biotime_employee b2 ON b2.code = j.driver
      LEFT JOIN transport_type ott ON ott.code = j.origin_transport_code
@@ -734,11 +737,55 @@ async function trackBillPublic(billNo) {
     console.warn("[trackBillPublic] gps lookup failed:", err?.message ?? err);
   }
 
-  // Strip private fields (car_imei, car_code) before returning.
-  const { car_imei: _imei, car_code: _code, ...safe } = row;
+  // Live ETA: straight-line distance from the driver's current position to the
+  // customer, at an urban average speed. Only while the bill is still in
+  // progress (status 0) and we have both a live position and a customer point.
+  let eta = null;
+  if (
+    car_position &&
+    Number(row.bill_status) === 0 &&
+    row.dest_lat != null &&
+    row.dest_lng != null
+  ) {
+    const km = haversineKm(
+      car_position.lat,
+      car_position.lng,
+      Number(row.dest_lat),
+      Number(row.dest_lng)
+    );
+    if (Number.isFinite(km)) {
+      eta = {
+        distance_km: Math.round(km * 10) / 10,
+        minutes: Math.max(1, Math.round((km / 25) * 60)), // ~25 km/h urban avg
+      };
+    }
+  }
+
+  // Strip private fields (car_imei, car_code, dest_*) before returning.
+  const {
+    car_imei: _imei,
+    car_code: _code,
+    dest_lat: _dlat,
+    dest_lng: _dlng,
+    ...safe
+  } = row;
   void _imei;
   void _code;
-  return { ...safe, items, car_position, attempts };
+  void _dlat;
+  void _dlng;
+  return { ...safe, items, car_position, attempts, eta };
+}
+
+// Great-circle distance in km between two lat/lng points (Haversine).
+function haversineKm(lat1, lng1, lat2, lng2) {
+  const toRad = (d) => (d * Math.PI) / 180;
+  const R = 6371; // km
+  const dLat = toRad(lat2 - lat1);
+  const dLng = toRad(lng2 - lng1);
+  const a =
+    Math.sin(dLat / 2) ** 2 +
+    Math.cos(toRad(lat1)) * Math.cos(toRad(lat2)) * Math.sin(dLng / 2) ** 2;
+  return 2 * R * Math.asin(Math.min(1, Math.sqrt(a)));
 }
 
 // Bills currently in active delivery — used by the tracking search to power

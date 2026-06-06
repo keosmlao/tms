@@ -123,6 +123,7 @@ interface PublicTrackingResult {
   items: TrackingItem[];
   attempts?: TrackingAttempt[];
   car_position: CarPosition | null;
+  eta?: { distance_km: number; minutes: number } | null;
 }
 
 const STATUS_FLOW = [
@@ -264,6 +265,24 @@ function TrackPageInner() {
         {/* Result */}
         {!loading && result && (
           <div className="space-y-5">
+            {/* Live ETA — only while the driver is on the way. */}
+            {result.eta && (
+              <div className="flex items-center gap-3 rounded-xl bg-gradient-to-r from-teal-600 to-sky-600 px-4 py-3 text-white shadow-lg">
+                <FaTruck size={22} className="shrink-0 animate-pulse" />
+                <div className="flex-1">
+                  <p className="text-[11px] font-semibold uppercase tracking-wider text-white/80">
+                    ກຳລັງມາສົ່ງ — ຄາດຮອດ
+                  </p>
+                  <p className="text-lg font-bold leading-tight">
+                    ~{result.eta.minutes} ນາທີ
+                    <span className="ml-2 text-sm font-medium text-white/85">
+                      ({result.eta.distance_km} ກມ)
+                    </span>
+                  </p>
+                </div>
+              </div>
+            )}
+
             <ProgressCard list={result.list} status={result.bill_status} />
 
             {(result.driver || result.driver_photo) && (
