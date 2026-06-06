@@ -1,4 +1,4 @@
-const { query, queryOne } = require("../lib/db");
+const { pool, query, queryOne } = require("../lib/db");
 
 // ==================== Cars ====================
 
@@ -48,12 +48,15 @@ async function getTransportEmployeesByCodes(codes) {
   );
 }
 
-async function replaceCarDriverAssignments(carCode, driverCodes, userCreate) {
-  await ensureTmsCarAssignmentTables();
-  await queryOne("DELETE FROM public.odg_tms_car_driver WHERE car_code=$1", [carCode]);
+// Runs on the supplied transaction client so the DELETE + re-INSERTs are atomic
+// (the caller wraps them in BEGIN/COMMIT). Without this, a failed INSERT
+// mid-loop left the car with its old assignments deleted and the new ones only
+// partially written. getTransportEmployeesByCodes is a read (shared pool is ok).
+async function replaceCarDriverAssignments(client, carCode, driverCodes, userCreate) {
+  await client.query("DELETE FROM public.odg_tms_car_driver WHERE car_code=$1", [carCode]);
   const drivers = await getTransportEmployeesByCodes(Array.from(new Set(driverCodes.filter(Boolean))));
   for (const driver of drivers) {
-    await queryOne(
+    await client.query(
       `INSERT INTO public.odg_tms_car_driver(car_code, driver_code, driver_name, user_create, create_date_time_now)
        VALUES ($1, $2, $3, $4, LOCALTIMESTAMP(0))`,
       [carCode, driver.code, driver.name_1, userCreate]
@@ -61,9 +64,8 @@ async function replaceCarDriverAssignments(carCode, driverCodes, userCreate) {
   }
 }
 
-async function replaceCarWorkerAssignments(carCode, workerCodes, excludedDriverCodes, userCreate) {
-  await ensureTmsCarAssignmentTables();
-  await queryOne("DELETE FROM public.odg_tms_car_worker WHERE car_code=$1", [carCode]);
+async function replaceCarWorkerAssignments(client, carCode, workerCodes, excludedDriverCodes, userCreate) {
+  await client.query("DELETE FROM public.odg_tms_car_worker WHERE car_code=$1", [carCode]);
   const normalizedWorkers = Array.from(
     new Set(
       workerCodes
@@ -73,7 +75,7 @@ async function replaceCarWorkerAssignments(carCode, workerCodes, excludedDriverC
   );
   const workers = await getTransportEmployeesByCodes(normalizedWorkers);
   for (const worker of workers) {
-    await queryOne(
+    await client.query(
       `INSERT INTO public.odg_tms_car_worker(car_code, worker_code, worker_name, user_create, create_date_time_now)
        VALUES ($1, $2, $3, $4, LOCALTIMESTAMP(0))`,
       [carCode, worker.code, worker.name_1, userCreate]
@@ -140,12 +142,22 @@ async function addCarProfile(session, data) {
   const tankNo = data.tank_no?.trim() ?? "";
   const carType = data.car_type?.trim() ?? "";
 
-  await queryOne(
-    "INSERT INTO public.odg_tms_car(code, name_1, imei, plate_no, tank_no, car_type, create_date_time_now) VALUES ($1, $2, $3, $4, $5, $6, LOCALTIMESTAMP(0))",
-    [data.code, data.name_1, imei, plateNo, tankNo, carType]
-  );
-  await replaceCarDriverAssignments(data.code, driverCodes, userCreate);
-  await replaceCarWorkerAssignments(data.code, data.workerCodes, driverCodes, userCreate);
+  const client = await pool.connect();
+  try {
+    await client.query("BEGIN");
+    await client.query(
+      "INSERT INTO public.odg_tms_car(code, name_1, imei, plate_no, tank_no, car_type, create_date_time_now) VALUES ($1, $2, $3, $4, $5, $6, LOCALTIMESTAMP(0))",
+      [data.code, data.name_1, imei, plateNo, tankNo, carType]
+    );
+    await replaceCarDriverAssignments(client, data.code, driverCodes, userCreate);
+    await replaceCarWorkerAssignments(client, data.code, data.workerCodes, driverCodes, userCreate);
+    await client.query("COMMIT");
+  } catch (e) {
+    await client.query("ROLLBACK").catch(() => {});
+    throw e;
+  } finally {
+    client.release();
+  }
 }
 
 async function updateCarProfile(session, data) {
@@ -157,16 +169,36 @@ async function updateCarProfile(session, data) {
   const tankNo = data.tank_no?.trim() ?? "";
   const carType = data.car_type?.trim() ?? "";
 
-  await queryOne("UPDATE public.odg_tms_car SET name_1=$1, imei=$2, plate_no=$3, tank_no=$4, car_type=$5 WHERE code=$6", [data.name_1, imei, plateNo, tankNo, carType, data.code]);
-  await replaceCarDriverAssignments(data.code, driverCodes, userCreate);
-  await replaceCarWorkerAssignments(data.code, data.workerCodes, driverCodes, userCreate);
+  const client = await pool.connect();
+  try {
+    await client.query("BEGIN");
+    await client.query("UPDATE public.odg_tms_car SET name_1=$1, imei=$2, plate_no=$3, tank_no=$4, car_type=$5 WHERE code=$6", [data.name_1, imei, plateNo, tankNo, carType, data.code]);
+    await replaceCarDriverAssignments(client, data.code, driverCodes, userCreate);
+    await replaceCarWorkerAssignments(client, data.code, data.workerCodes, driverCodes, userCreate);
+    await client.query("COMMIT");
+  } catch (e) {
+    await client.query("ROLLBACK").catch(() => {});
+    throw e;
+  } finally {
+    client.release();
+  }
 }
 
 async function deleteCarProfile(code) {
   await ensureTmsCarAssignmentTables();
-  await queryOne("DELETE FROM public.odg_tms_car_driver WHERE car_code=$1", [code]);
-  await queryOne("DELETE FROM public.odg_tms_car_worker WHERE car_code=$1", [code]);
-  await queryOne("DELETE FROM public.odg_tms_car WHERE code=$1", [code]);
+  const client = await pool.connect();
+  try {
+    await client.query("BEGIN");
+    await client.query("DELETE FROM public.odg_tms_car_driver WHERE car_code=$1", [code]);
+    await client.query("DELETE FROM public.odg_tms_car_worker WHERE car_code=$1", [code]);
+    await client.query("DELETE FROM public.odg_tms_car WHERE code=$1", [code]);
+    await client.query("COMMIT");
+  } catch (e) {
+    await client.query("ROLLBACK").catch(() => {});
+    throw e;
+  } finally {
+    client.release();
+  }
 }
 
 // ==================== Drivers & Workers ====================

@@ -1,4 +1,4 @@
-const { query, queryOne } = require("../lib/db");
+const { pool, query } = require("../lib/db");
 const { getFixedYearSqlFilter } = require("../lib/fixed-year");
 const {
   getBranchScope,
@@ -16,20 +16,36 @@ async function getBillShipmentData(session, search) {
 }
 
 async function saveBillShipment(session, docNo, transportCode) {
-  const result = await queryOne(`SELECT (SELECT EXISTS (SELECT 1 FROM odg_tms_shipment WHERE doc_no = $1)) AS tms_shipment, (SELECT EXISTS (SELECT 1 FROM ic_trans_shipment WHERE doc_no = $1)) AS trans_shipment`, [docNo]);
-  if (!result) return;
-  if (!result.tms_shipment && !result.trans_shipment) {
-    await queryOne("INSERT INTO odg_tms_shipment (doc_no, transport_code, user_create) VALUES ($1,$2,$3)", [docNo, transportCode, session.usercode]);
-    await queryOne(`INSERT INTO ic_trans_shipment (doc_no, doc_date, trans_flag, cust_code, transport_code, check_status) SELECT doc_no, doc_date, trans_flag, cust_code, $1, 0 FROM ic_trans WHERE doc_no = $2`, [transportCode, docNo]);
-  } else if (!result.tms_shipment && result.trans_shipment) {
-    await queryOne("INSERT INTO odg_tms_shipment (doc_no, transport_code, user_create) VALUES ($1,$2,$3)", [docNo, transportCode, session.usercode]);
-    await queryOne("UPDATE ic_trans_shipment SET transport_code=$1 WHERE doc_no=$2", [transportCode, docNo]);
-  } else if (result.tms_shipment && !result.trans_shipment) {
-    await queryOne("UPDATE odg_tms_shipment SET transport_code=$1, user_create=$2 WHERE doc_no=$3", [transportCode, session.usercode, docNo]);
-    await queryOne(`INSERT INTO ic_trans_shipment (doc_no, doc_date, trans_flag, cust_code, transport_code, check_status) SELECT doc_no, doc_date, trans_flag, cust_code, $1, 0 FROM ic_trans WHERE doc_no = $2`, [transportCode, docNo]);
-  } else {
-    await queryOne("UPDATE odg_tms_shipment SET transport_code=$1, user_create=$2 WHERE doc_no=$3", [transportCode, session.usercode, docNo]);
-    await queryOne("UPDATE ic_trans_shipment SET transport_code=$1 WHERE doc_no=$2", [transportCode, docNo]);
+  // The two cross-table writes (odg_tms_shipment + ic_trans_shipment) must land
+  // together, or the bill's transport assignment desyncs between the tables the
+  // rest of the app joins on. Read + writes run in one transaction.
+  const client = await pool.connect();
+  try {
+    await client.query("BEGIN");
+    const result = (await client.query(`SELECT (SELECT EXISTS (SELECT 1 FROM odg_tms_shipment WHERE doc_no = $1)) AS tms_shipment, (SELECT EXISTS (SELECT 1 FROM ic_trans_shipment WHERE doc_no = $1)) AS trans_shipment`, [docNo])).rows[0];
+    if (!result) {
+      await client.query("COMMIT");
+      return;
+    }
+    if (!result.tms_shipment && !result.trans_shipment) {
+      await client.query("INSERT INTO odg_tms_shipment (doc_no, transport_code, user_create) VALUES ($1,$2,$3)", [docNo, transportCode, session.usercode]);
+      await client.query(`INSERT INTO ic_trans_shipment (doc_no, doc_date, trans_flag, cust_code, transport_code, check_status) SELECT doc_no, doc_date, trans_flag, cust_code, $1, 0 FROM ic_trans WHERE doc_no = $2`, [transportCode, docNo]);
+    } else if (!result.tms_shipment && result.trans_shipment) {
+      await client.query("INSERT INTO odg_tms_shipment (doc_no, transport_code, user_create) VALUES ($1,$2,$3)", [docNo, transportCode, session.usercode]);
+      await client.query("UPDATE ic_trans_shipment SET transport_code=$1 WHERE doc_no=$2", [transportCode, docNo]);
+    } else if (result.tms_shipment && !result.trans_shipment) {
+      await client.query("UPDATE odg_tms_shipment SET transport_code=$1, user_create=$2 WHERE doc_no=$3", [transportCode, session.usercode, docNo]);
+      await client.query(`INSERT INTO ic_trans_shipment (doc_no, doc_date, trans_flag, cust_code, transport_code, check_status) SELECT doc_no, doc_date, trans_flag, cust_code, $1, 0 FROM ic_trans WHERE doc_no = $2`, [transportCode, docNo]);
+    } else {
+      await client.query("UPDATE odg_tms_shipment SET transport_code=$1, user_create=$2 WHERE doc_no=$3", [transportCode, session.usercode, docNo]);
+      await client.query("UPDATE ic_trans_shipment SET transport_code=$1 WHERE doc_no=$2", [transportCode, docNo]);
+    }
+    await client.query("COMMIT");
+  } catch (e) {
+    await client.query("ROLLBACK").catch(() => {});
+    throw e;
+  } finally {
+    client.release();
   }
 }
 
