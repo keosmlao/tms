@@ -459,7 +459,7 @@ export default function AddJobClient({
           })),
           forward_transport_code: b.forward_transport_code || undefined,
           pickup_transport_code: b.pickup_transport_code || null,
-          delivery_condition: b.delivery_condition || undefined,
+          delivery_condition: b.delivery_condition || "to_customer",
         };
       }
       return map;
@@ -643,6 +643,9 @@ export default function AddJobClient({
         [billNo]: {
           bill,
           items: products.map((p) => ({ ...p, selectedQty: p.qty })),
+          // Default to the common case (ສົ່ງລູກຄ້າ) so the trip is savable
+          // immediately; the dispatcher can switch it per bill.
+          delivery_condition: "to_customer",
         },
       }));
     } catch (e) {
@@ -667,6 +670,8 @@ export default function AddJobClient({
           ...next[bill.doc_no],
           bill,
           items: [...existing, { ...product, selectedQty: product.qty }],
+          delivery_condition:
+            next[bill.doc_no]?.delivery_condition ?? "to_customer",
         };
       }
       return next;
