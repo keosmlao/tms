@@ -656,7 +656,35 @@ async function getBillsPending(session, fromDate, toDate, transportCode) {
   // Use the shared summary helper so this list always agrees with the
   // "ຕົວທີ່ເພີ່ມ" (available bills) list — both reflect the same
   // re-dispatchable amount (cancelled bills + partial delivery leftovers).
-  const countedRows = await applyRemainingCounts(transRaw);
+  // applyRemainingCounts (the heavy one), the cancelled-delivery lookup, the
+  // schedule map and the todo map all depend only on transRaw/billNos and are
+  // independent of each other — run them concurrently so the lighter lookups
+  // overlap with applyRemainingCounts instead of stacking after it.
+  const [countedRows, cancelledRows, scheduleMap, todoMap] = await Promise.all([
+    applyRemainingCounts(transRaw),
+    query(
+      `SELECT DISTINCT ON (d.bill_no)
+          d.bill_no,
+          d.doc_no as cancelled_delivery_job,
+          COALESCE(d.remark, '') as cancelled_delivery_remark,
+          COALESCE(NULLIF(TRIM(drv.name_1), ''), a.driver, '') as cancelled_delivery_driver,
+          COALESCE(NULLIF(TRIM(car.name_1), ''), a.car, '') as cancelled_delivery_car,
+          to_char(COALESCE(d.sent_end, d.create_date_time_now), 'DD-MM-YYYY HH24:MI') as cancelled_delivery_at,
+          GREATEST(FLOOR(EXTRACT(EPOCH FROM (now() - COALESCE(d.sent_end, d.create_date_time_now)))), 0)::bigint as cancelled_secs_ago
+        FROM public.odg_tms_detail d
+        LEFT JOIN public.odg_tms a ON a.doc_no = d.doc_no
+        LEFT JOIN public.odg_tms_driver drv ON drv.code = a.driver
+        LEFT JOIN public.odg_tms_car car ON car.code = a.car
+        WHERE d.bill_no = ANY($1::varchar[])
+          AND COALESCE(d.status, 0) = 2
+        ORDER BY d.bill_no, COALESCE(d.sent_end, d.create_date_time_now) DESC`,
+      [billNos]
+    ),
+    // Schedule + remark stamps for bills the admin has flagged as overdue.
+    getPendingBillScheduleMap(billNos),
+    // Aggregated todo counts/earliest deadline for the row indicator.
+    getBillTodoSummaryMap(billNos),
+  ]);
   const summaries = new Map(
     countedRows.map((row) => [
       row.doc_no,
@@ -668,33 +696,7 @@ async function getBillsPending(session, fromDate, toDate, transportCode) {
       },
     ])
   );
-
-  const cancelledRows = await query(
-    `SELECT DISTINCT ON (d.bill_no)
-        d.bill_no,
-        d.doc_no as cancelled_delivery_job,
-        COALESCE(d.remark, '') as cancelled_delivery_remark,
-        COALESCE(NULLIF(TRIM(drv.name_1), ''), a.driver, '') as cancelled_delivery_driver,
-        COALESCE(NULLIF(TRIM(car.name_1), ''), a.car, '') as cancelled_delivery_car,
-        to_char(COALESCE(d.sent_end, d.create_date_time_now), 'DD-MM-YYYY HH24:MI') as cancelled_delivery_at,
-        GREATEST(FLOOR(EXTRACT(EPOCH FROM (now() - COALESCE(d.sent_end, d.create_date_time_now)))), 0)::bigint as cancelled_secs_ago
-      FROM public.odg_tms_detail d
-      LEFT JOIN public.odg_tms a ON a.doc_no = d.doc_no
-      LEFT JOIN public.odg_tms_driver drv ON drv.code = a.driver
-      LEFT JOIN public.odg_tms_car car ON car.code = a.car
-      WHERE d.bill_no = ANY($1::varchar[])
-        AND COALESCE(d.status, 0) = 2
-      ORDER BY d.bill_no, COALESCE(d.sent_end, d.create_date_time_now) DESC`,
-    [billNos]
-  );
   const cancelledMap = new Map(cancelledRows.map((row) => [row.bill_no, row]));
-
-  // Schedule + remark stamps for bills the admin has flagged as overdue.
-  const scheduleMap = await getPendingBillScheduleMap(billNos);
-
-  // Aggregated todo counts/earliest deadline so the row indicator can render
-  // without fetching every individual todo upfront.
-  const todoMap = await getBillTodoSummaryMap(billNos);
 
   const trans = transRaw
     .map((bill) => {
