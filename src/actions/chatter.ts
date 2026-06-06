@@ -44,7 +44,9 @@ export async function getChatterBundle(model: string, recordId: string) {
     svcListActivities(model, recordId),
     svcListFollowers(model, recordId),
   ]);
-  void svcMarkRead({ model, recordId, userCode: s.usercode });
+  // Best-effort read-marker — never let it reject the request (markChatterRead
+  // has no internal catch, unlike the notify*/push* helpers).
+  void svcMarkRead({ model, recordId, userCode: s.usercode }).catch(() => {});
   return { messages, activities, followers };
 }
 

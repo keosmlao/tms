@@ -302,6 +302,13 @@ export async function createThunJaiOrder(input: unknown) {
     };
   });
   if (products.length === 0) throw new Error("At least one product is required");
+  // A COD parcel with price 0 would ship to the courier collecting nothing —
+  // reject it instead of silently sending 0.
+  products.forEach((p, i) => {
+    if (p.is_cod && (p.price == null || p.price <= 0)) {
+      throw new Error(`Product ${i + 1}: COD ต้องระบุราคาเก็บเงินมากกว่า 0`);
+    }
+  });
 
   const settings = await readSettings();
   if (
