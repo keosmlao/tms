@@ -308,30 +308,44 @@ async function notifyJobDispatchStarted(docNo) {
   try {
     const dispatchBills = await query(
       `SELECT d.bill_no, to_char(j.dispatch_started_at, 'DD-MM HH24:MI') AS dispatch_at,
-              COALESCE(cust.telephone, '') AS cust_phone
+              COALESCE(s.cust_code, '') AS cust_code,
+              COALESCE(NULLIF(TRIM(cust.name_1), ''), '') AS cust_name,
+              COALESCE(NULLIF(TRIM(carn.name_1), ''), '') AS car_name,
+              COALESCE(NULLIF(TRIM(drv.name_1), ''), '') AS driver_name
        FROM public.odg_tms_detail d
        LEFT JOIN public.odg_tms j ON j.doc_no = d.doc_no
        LEFT JOIN public.ic_trans_shipment s ON s.doc_no = d.bill_no
        LEFT JOIN ar_customer cust ON cust.code = s.cust_code
+       LEFT JOIN public.odg_tms_car carn ON carn.code = j.car
+       LEFT JOIN public.odg_tms_driver drv ON drv.code = j.driver
        WHERE d.doc_no=$1
          AND COALESCE(d.status, 0) NOT IN (1, 2)
          AND ${getFixedYearSqlFilter("d.doc_date")}`,
       [docNo]
     );
-    const { sendCustomerSms } = require("../lib/sms");
+    const { getCustomerLineId } = require("./customer-line");
+    const { sendDeliveryFlex } = require("../lib/line");
     const base = process.env.PUBLIC_BASE_URL || "https://tms.odienmall.com";
     for (const b of dispatchBills) {
       void notifyBillStatus(b.bill_no, "🚚 ເລີ່ມຈັດສົ່ງ", {
         dispatchAt: b.dispatch_at,
       });
-      // Auto-notify the customer that their order is on the way, with the live
-      // tracking + ETA link. Best-effort; a no-op until an SMS gateway is set.
-      if (b.cust_phone) {
-        const link = `${base}/track?bill=${encodeURIComponent(b.bill_no)}`;
-        const text =
-          `ສິນຄ້າຂອງທ່ານ (ບິນ ${b.bill_no}) ກຳລັງຈັດສົ່ງ 🚚\n` +
-          `ຕິດຕາມສົດ + ເວລາຄາດຮອດ: ${link}`;
-        void sendCustomerSms(b.cust_phone, text);
+      // Auto-notify the CUSTOMER via LINE — only those who have linked their
+      // LINE account (odg_tms_customer_line). Customers without LINE are skipped.
+      if (b.cust_code) {
+        const lineId = await getCustomerLineId(b.cust_code);
+        if (lineId) {
+          void sendDeliveryFlex({
+            to: lineId,
+            statusLabel: "🚚 ສິນຄ້າຂອງທ່ານກຳລັງຈັດສົ່ງ",
+            color: "sky",
+            billNo: b.bill_no,
+            customerName: b.cust_name,
+            carName: b.car_name,
+            driverName: b.driver_name,
+            trackingUrl: `${base}/track?bill=${encodeURIComponent(b.bill_no)}`,
+          });
+        }
       }
     }
   } catch (err) {

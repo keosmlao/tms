@@ -75,6 +75,35 @@ async function sendLineText(to, text) {
   return pushMessages(to, [{ type: "text", text: String(text ?? "").slice(0, 5000) }]);
 }
 
+// Channel secret for verifying inbound webhook signatures.
+async function getChannelSecret() {
+  const db = await getSetting("line.channel_secret", "");
+  return db || process.env.LINE_CHANNEL_SECRET || "";
+}
+
+// Reply to an inbound webhook event using its short-lived replyToken.
+async function replyText(replyToken, text) {
+  const cfg = await getLineConfig();
+  if (!cfg.token || !replyToken) return { success: false };
+  try {
+    const res = await fetch("https://api.line.me/v2/bot/message/reply", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${cfg.token}`,
+      },
+      body: JSON.stringify({
+        replyToken,
+        messages: [{ type: "text", text: String(text ?? "").slice(0, 5000) }],
+      }),
+    });
+    return { success: res.ok };
+  } catch (err) {
+    console.warn("[line] reply error:", err?.message ?? err);
+    return { success: false };
+  }
+}
+
 // Status-color palette mapped to LINE Flex hex.
 const STATUS_COLORS = {
   default: "#0E7C6B",
@@ -308,4 +337,10 @@ async function sendDeliveryFlex(input) {
   );
 }
 
-module.exports = { sendDeliveryFlex, sendLineText, pushMessages };
+module.exports = {
+  sendDeliveryFlex,
+  sendLineText,
+  pushMessages,
+  replyText,
+  getChannelSecret,
+};
