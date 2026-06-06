@@ -71,12 +71,21 @@ async function computeSummary(session) {
   const c = ctx(session);
   const { getCustomerRatingSummary } = require("./customer-rating");
 
+  // "complete" = the bill is on a non-cancelled delivery trip (a TMS-owned fact
+  // in odg_tms_detail), NOT ic_trans_shipment.check_status — that column belongs
+  // to SML and can be reset 1→0 outside our control, which would otherwise
+  // under-count completes / inflate "still". Trip membership is the same thing
+  // check_status=1 was meant to record, but SML can't tamper with it.
   const teamSql = (code) =>
-    `SELECT count(doc_no) AS bill_count,
-       sum(case when check_status=0 then 1 else 0 end) as still,
-       sum(case when check_status=1 then 1 else 0 end) as complete
-     FROM ic_trans_shipment
-     WHERE ${getFixedYearSqlFilter("doc_date")} AND transport_code='${code}'`;
+    `SELECT count(s.doc_no) AS bill_count,
+       count(*) FILTER (WHERE disp.bill_no IS NULL) as still,
+       count(*) FILTER (WHERE disp.bill_no IS NOT NULL) as complete
+     FROM ic_trans_shipment s
+     LEFT JOIN (
+       SELECT DISTINCT bill_no FROM public.odg_tms_detail
+       WHERE COALESCE(status, 0) <> 2 AND ${getFixedYearSqlFilter("doc_date")}
+     ) disp ON disp.bill_no = s.doc_no
+     WHERE ${getFixedYearSqlFilter("s.doc_date")} AND s.transport_code='${code}'`;
   const emptyTeam = { bill_count: 0, still: 0, complete: 0 };
 
   const [data, thunjai, kl, dt, ps, completeSummary, branchNameRows, ratingSummary] =
@@ -113,11 +122,17 @@ async function computeSummary(session) {
         ? queryOne(teamSql("02-0003"))
         : Promise.resolve(emptyTeam),
       queryOne(
+        // complete = on a non-cancelled trip (TMS-owned), not check_status=1 — see
+        // the teamSql note: SML can reset check_status and skew these counts.
         `SELECT
-          count(*) FILTER (WHERE a.doc_date = $3::date AND a.check_status=1) AS today_complete,
-          count(*) FILTER (WHERE a.doc_date >= $1::date AND a.doc_date < $2::date AND a.check_status=1) AS month_complete,
-          count(*) FILTER (WHERE a.check_status=1) AS year_complete
+          count(*) FILTER (WHERE a.doc_date = $3::date AND disp.bill_no IS NOT NULL) AS today_complete,
+          count(*) FILTER (WHERE a.doc_date >= $1::date AND a.doc_date < $2::date AND disp.bill_no IS NOT NULL) AS month_complete,
+          count(*) FILTER (WHERE disp.bill_no IS NOT NULL) AS year_complete
         FROM ic_trans_shipment a
+        LEFT JOIN (
+          SELECT DISTINCT bill_no FROM public.odg_tms_detail
+          WHERE COALESCE(status, 0) <> 2 AND ${getFixedYearSqlFilter("doc_date")}
+        ) disp ON disp.bill_no = a.doc_no
         WHERE a.transport_code NOT IN ('02-0004')
           ${c.branchAnd("a")}
           AND ${getFixedYearSqlFilter("a.doc_date")}`,
