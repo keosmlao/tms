@@ -307,16 +307,32 @@ function normalizeItems(value) {
 async function notifyJobDispatchStarted(docNo) {
   try {
     const dispatchBills = await query(
-      `SELECT d.bill_no, to_char(j.dispatch_started_at, 'DD-MM HH24:MI') AS dispatch_at
+      `SELECT d.bill_no, to_char(j.dispatch_started_at, 'DD-MM HH24:MI') AS dispatch_at,
+              COALESCE(cust.telephone, '') AS cust_phone
        FROM public.odg_tms_detail d
        LEFT JOIN public.odg_tms j ON j.doc_no = d.doc_no
-       WHERE d.doc_no=$1 AND ${getFixedYearSqlFilter("d.doc_date")}`,
+       LEFT JOIN public.ic_trans_shipment s ON s.doc_no = d.bill_no
+       LEFT JOIN ar_customer cust ON cust.code = s.cust_code
+       WHERE d.doc_no=$1
+         AND COALESCE(d.status, 0) NOT IN (1, 2)
+         AND ${getFixedYearSqlFilter("d.doc_date")}`,
       [docNo]
     );
+    const { sendCustomerSms } = require("../lib/sms");
+    const base = process.env.PUBLIC_BASE_URL || "https://tms.odienmall.com";
     for (const b of dispatchBills) {
       void notifyBillStatus(b.bill_no, "🚚 ເລີ່ມຈັດສົ່ງ", {
         dispatchAt: b.dispatch_at,
       });
+      // Auto-notify the customer that their order is on the way, with the live
+      // tracking + ETA link. Best-effort; a no-op until an SMS gateway is set.
+      if (b.cust_phone) {
+        const link = `${base}/track?bill=${encodeURIComponent(b.bill_no)}`;
+        const text =
+          `ສິນຄ້າຂອງທ່ານ (ບິນ ${b.bill_no}) ກຳລັງຈັດສົ່ງ 🚚\n` +
+          `ຕິດຕາມສົດ + ເວລາຄາດຮອດ: ${link}`;
+        void sendCustomerSms(b.cust_phone, text);
+      }
     }
   } catch (err) {
     console.warn("[mobile] dispatch notification failed:", err?.message ?? err);
