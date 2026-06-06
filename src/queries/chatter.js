@@ -276,15 +276,27 @@ async function postChatterMessage({ model, recordId, body, msgType, mentions, at
       if (recipients.length > 0) {
         const who = String(authorName || authorCode || "").trim();
         const preview = text ? text.slice(0, 80) : "ໄດ້ແນບໄຟລ໌";
-        const { pushToEmployees } = require("./push");
+        const { pushToEmployees, pushToDriver } = require("./push");
         if (isDm) {
           // In-app push only. DMs are private — do NOT send to the external LINE
           // channel, and never label the conversation key as a "bill".
-          await pushToEmployees(recipients, "💬 ຂໍ້ຄວາມໃໝ່", `${who}: ${preview}`, {
+          const dmData = {
             type: "dm",
             dm: r,
             href: `/?dm=${encodeURIComponent(r)}`,
-          });
+          };
+          await pushToEmployees(
+            recipients,
+            "💬 ຂໍ້ຄວາມໃໝ່",
+            `${who}: ${preview}`,
+            dmData
+          );
+          // Driver apps register their FCM under odg_tms_fcm_tokens
+          // (pushToDriver), not the web app_fcm_token table — push there too so
+          // driver recipients of a DM are notified.
+          for (const code of recipients) {
+            void pushToDriver(code, "💬 ຂໍ້ຄວາມໃໝ່", `${who}: ${preview}`, dmData);
+          }
         } else {
           await pushToEmployees(recipients, `ບິນ ${r}`, `${who}: ${preview}`, {
             type: "chatter",
