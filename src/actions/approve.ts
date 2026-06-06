@@ -1,6 +1,6 @@
 "use server";
 
-import { requireSession } from "./_helpers";
+import { requireSession, requireDispatchAccess } from "./_helpers";
 import {
   getApproveList as svcGetApproveList,
   approveJob as svcApproveJob,
@@ -14,7 +14,7 @@ export async function getApproveList() {
 }
 
 export async function approveJob(docNo: string) {
-  const s = await requireSession();
+  const s = await requireDispatchAccess();
   return svcApproveJob(s, docNo);
 }
 

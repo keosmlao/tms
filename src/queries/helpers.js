@@ -108,6 +108,14 @@ const ensureJobListIndexes = once(async () => {
     CREATE INDEX IF NOT EXISTS idx_odg_tms_doc_date_status
     ON public.odg_tms (doc_date, approve_status, job_status)
   `);
+  // Enforce one detail row per (trip, bill). Best-effort: while legacy duplicate
+  // rows still exist the unique index can't build (error 23505, swallowed by
+  // safeDdl) — run scripts/migrate-dedup-detail-unique.sql to clean up, then
+  // this auto-creates on the next call and rejects future duplicates.
+  await safeDdl(`
+    CREATE UNIQUE INDEX IF NOT EXISTS uq_odg_tms_detail_doc_bill
+    ON public.odg_tms_detail (doc_no, bill_no)
+  `);
 });
 
 async function ensureTmsWorkerTable() {
@@ -249,6 +257,104 @@ async function getRemainingBillProducts(billNo) {
     qty: Number(row.qty ?? 0),
     unit_code: row.unit_code,
   }));
+}
+
+// Batched version of getRemainingBillProducts: the SAME per-item remaining math
+// for many bills in one query. Returns Map<bill_no, [{item_code, item_name,
+// qty, unit_code}]> (only items with qty > 0). Used by createJob/addBillsToJob
+// to validate a whole trip's bills without an N+1 query-per-bill inside the
+// (advisory-locked) transaction.
+async function getRemainingBillProductsMap(billNos) {
+  await ensureTmsDetailItemTable();
+  const map = new Map();
+  if (!Array.isArray(billNos) || billNos.length === 0) return map;
+
+  const rows = await query(
+    `WITH bill_items AS (
+      SELECT
+        d.doc_no AS bill_no,
+        d.item_code,
+        MAX(d.item_name) AS item_name,
+        SUM(COALESCE(d.qty, 0))::numeric AS total_qty,
+        MAX(d.unit_code) AS unit_code
+      FROM ic_trans_detail d
+      WHERE d.doc_no = ANY($1::varchar[]) AND d.item_code NOT LIKE '97%'
+      GROUP BY d.doc_no, d.item_code
+    ),
+    active_locked AS (
+      SELECT item.bill_no, item.item_code,
+             COALESCE(SUM(item.selected_qty), 0)::numeric AS locked_qty
+      FROM public.odg_tms_detail_item item
+      INNER JOIN public.odg_tms_detail det
+        ON det.bill_no = item.bill_no AND det.doc_no = item.doc_no
+      WHERE item.bill_no = ANY($1::varchar[])
+        AND COALESCE(det.status, 0) NOT IN (1, 2)
+      GROUP BY item.bill_no, item.item_code
+    ),
+    delivered AS (
+      SELECT item.bill_no, item.item_code,
+             COALESCE(SUM(
+               CASE
+                 WHEN COALESCE(det.status, 0) = 1
+                  AND COALESCE(item.delivered_qty, 0) = 0
+                   THEN COALESCE(item.selected_qty, 0)
+                 ELSE COALESCE(item.delivered_qty, 0)
+               END
+             ), 0)::numeric AS delivered_qty
+      FROM public.odg_tms_detail_item item
+      INNER JOIN public.odg_tms_detail det
+        ON det.bill_no = item.bill_no AND det.doc_no = item.doc_no
+      WHERE item.bill_no = ANY($1::varchar[])
+        AND COALESCE(det.status, 0) IN (1, 2)
+      GROUP BY item.bill_no, item.item_code
+    ),
+    returned AS (
+      SELECT rd.ref_doc_no AS bill_no, rd.item_code,
+             COALESCE(SUM(ABS(COALESCE(rd.qty, 0))), 0)::numeric AS returned_qty
+      FROM ic_trans_detail rd
+      INNER JOIN ic_trans r ON r.doc_no = rd.doc_no AND r.trans_flag = 48
+      WHERE rd.ref_doc_no = ANY($1::varchar[])
+        AND rd.item_code NOT LIKE '97%'
+      GROUP BY rd.ref_doc_no, rd.item_code
+    )
+    SELECT
+      bi.bill_no,
+      bi.item_code,
+      bi.item_name,
+      bi.unit_code,
+      GREATEST(
+        bi.total_qty
+        - COALESCE(al.locked_qty, 0)
+        - COALESCE(dl.delivered_qty, 0)
+        - COALESCE(rt.returned_qty, 0),
+        0
+      )::numeric AS qty
+    FROM bill_items bi
+    LEFT JOIN active_locked al ON al.bill_no = bi.bill_no AND al.item_code = bi.item_code
+    LEFT JOIN delivered dl ON dl.bill_no = bi.bill_no AND dl.item_code = bi.item_code
+    LEFT JOIN returned rt ON rt.bill_no = bi.bill_no AND rt.item_code = bi.item_code
+    WHERE GREATEST(
+      bi.total_qty
+      - COALESCE(al.locked_qty, 0)
+      - COALESCE(dl.delivered_qty, 0)
+      - COALESCE(rt.returned_qty, 0),
+      0
+    ) > 0
+    ORDER BY bi.bill_no, bi.item_code`,
+    [billNos]
+  );
+
+  for (const row of rows) {
+    const list = map.get(row.bill_no) ?? [];
+    list.push({
+      item_code: row.item_code,
+      item_name: row.item_name,
+      qty: Number(row.qty ?? 0),
+      unit_code: row.unit_code,
+    });
+    map.set(row.bill_no, list);
+  }
+  return map;
 }
 
 async function getRemainingSummaryMap(billNos) {
@@ -406,6 +512,7 @@ module.exports = {
   ensurePendingJobListIndex,
   ensureTmsDetailItemTable,
   getRemainingBillProducts,
+  getRemainingBillProductsMap,
   getRemainingSummaryMap,
   getBranchScope,
   branchFilterShipment,

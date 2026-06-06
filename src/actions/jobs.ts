@@ -1,6 +1,6 @@
 "use server";
 
-import { requireSession } from "./_helpers";
+import { requireSession, requireDispatchAccess } from "./_helpers";
 import {
   getJobs as svcGetJobs,
   createJob as svcCreateJob,
@@ -31,27 +31,27 @@ export async function getJobs() {
 }
 
 export async function createJob(data: unknown) {
-  const s = await requireSession();
+  const s = await requireDispatchAccess();
   return svcCreateJob(s, data);
 }
 
 export async function updateJob(docNo: string, data: unknown) {
-  const s = await requireSession();
+  const s = await requireDispatchAccess();
   return svcUpdateJob(s, docNo, data);
 }
 
 export async function getJobForEdit(docNo: string) {
-  await requireSession();
+  await requireDispatchAccess();
   return svcGetJobForEdit(docNo);
 }
 
 export async function deleteJob(docNo: string) {
-  await requireSession();
+  await requireDispatchAccess();
   return svcDeleteJob(docNo);
 }
 
 export async function closeJob(docNo: string) {
-  const s = await requireSession();
+  const s = await requireDispatchAccess();
   return svcCloseJob(s, docNo);
 }
 
@@ -77,12 +77,12 @@ export async function getJobPrintData(docNo: string) {
 
 // Draft / search bills (logically part of job creation flow)
 export async function addBillToDraft(data: unknown) {
-  const s = await requireSession();
+  const s = await requireDispatchAccess();
   return svcAddBillToDraft(s, data);
 }
 
 export async function removeBillFromDraft(billNo: string) {
-  const s = await requireSession();
+  const s = await requireDispatchAccess();
   return svcRemoveBillFromDraft(s, billNo);
 }
 
@@ -107,7 +107,7 @@ export async function addBillsToJob(
   docNo: string,
   bills: AddBillsToJobEntry[] | string[]
 ) {
-  await requireSession();
+  await requireDispatchAccess();
   return svcAddBillsToJob(docNo, bills);
 }
 
@@ -146,6 +146,6 @@ export async function moveBillToJob(
   billNo: string,
   destDocNo: string
 ) {
-  await requireSession();
+  await requireDispatchAccess();
   return svcMoveBillToJob(sourceDocNo, billNo, destDocNo);
 }

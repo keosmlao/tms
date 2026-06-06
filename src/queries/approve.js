@@ -14,15 +14,32 @@ async function getApproveList(session) {
 }
 
 async function approveJob(session, docNo) {
-  await queryOne(`UPDATE odg_tms SET approve_status=1, approve_user=$1 WHERE doc_no=$2 AND ${getFixedYearSqlFilter("doc_date")}`, [session.usercode, docNo]);
-
-  // Notify the driver that the job is now approved and ready to receive.
+  // Don't approve a trip that can't actually be dispatched: a driver-less or
+  // car-less trip can never be received, and an empty trip (every bill
+  // cancelled) has nothing to deliver.
   const job = await queryOne(
-    `SELECT driver, date_logistic FROM odg_tms
-     WHERE doc_no = $1 AND ${getFixedYearSqlFilter("doc_date")}`,
+    `SELECT
+       NULLIF(TRIM(a.driver), '') AS driver,
+       NULLIF(TRIM(a.car), '') AS car,
+       a.date_logistic AS date_logistic,
+       (SELECT COUNT(*) FROM public.odg_tms_detail d
+         WHERE d.doc_no = a.doc_no
+           AND ${getFixedYearSqlFilter("d.doc_date")}
+           AND COALESCE(d.status, 0) <> 2) AS open_bills
+     FROM odg_tms a
+     WHERE a.doc_no=$1 AND ${getFixedYearSqlFilter("a.doc_date")}`,
     [docNo]
   );
-  if (job?.driver) {
+  if (!job) throw new Error("ບໍ່ພົບຖ້ຽວ");
+  if (!job.driver) throw new Error("ຖ້ຽວນີ້ຍັງບໍ່ໄດ້ກຳນົດຄົນຂັບ — ບໍ່ສາມາດອະນຸມັດ");
+  if (!job.car) throw new Error("ຖ້ຽວນີ້ຍັງບໍ່ໄດ້ກຳນົດລົດ — ບໍ່ສາມາດອະນຸມັດ");
+  if (Number(job.open_bills) < 1) throw new Error("ຖ້ຽວນີ້ບໍ່ມີບິນທີ່ຈັດສົ່ງໄດ້ — ບໍ່ສາມາດອະນຸມັດ");
+
+  await queryOne(`UPDATE odg_tms SET approve_status=1, approve_user=$1 WHERE doc_no=$2 AND ${getFixedYearSqlFilter("doc_date")}`, [session.usercode, docNo]);
+
+  // Notify the driver that the job is now approved and ready to receive
+  // (the trip was already fetched + validated above).
+  if (job.driver) {
     const logisticDate = job.date_logistic
       ? new Date(job.date_logistic).toLocaleDateString("lo-LA")
       : "";

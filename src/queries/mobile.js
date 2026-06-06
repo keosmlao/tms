@@ -1359,7 +1359,10 @@ async function mobileJobAction(body) {
                lng_end = NULL,
                url_img = NULL,
                sight_img = NULL,
-               remark = NULL
+               remark = NULL,
+               collected_amount = NULL,
+               payment_method = NULL,
+               collected_at = NULL
            WHERE bill_no = $1 AND doc_no = $2 AND ${getFixedYearSqlFilter("doc_date")}`,
           [billNo, currentDocNo]
         );

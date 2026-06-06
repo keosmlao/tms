@@ -13,12 +13,15 @@ const {
   ensureTmsWorkerTable,
   ensurePendingJobListIndex,
   ensureTmsDetailItemTable,
-  getRemainingBillProducts,
+  getRemainingBillProductsMap,
   getRemainingSummaryMap,
 } = require("./helpers");
 const { pushToDriver } = require("./push");
 const { notifyJobCreated, notifyJobCreatedToSales } = require("./notifications");
 const { ensurePendingBillSchema } = require("./pending-bill");
+
+// The three internal delivery branches a trip can belong to (origin_transport_code).
+const DELIVERY_BRANCH_CODES = ["02-0001", "02-0002", "02-0003"];
 
 function nextJobDocNoFromMax(maxDocNo, fixedMonth) {
   const pfx = fixedMonth.replace("-", "");
@@ -149,59 +152,74 @@ async function createJob(session, data) {
     ? data.bills
     : await query(`SELECT bill_date, bill_no, cust_code, count_item, telephone, parent_bill_no FROM odg_tms_listbill_draft WHERE user_create=$1 AND ${getFixedYearSqlFilter("bill_date")}`, [session.usercode]);
 
-  const normalizedBills = await Promise.all(
-    billsList.map(async (bill) => {
-      const rawRemainingProducts = await getRemainingBillProducts(bill.bill_no);
-      const remainingProducts = rawRemainingProducts.length > 0
-        ? rawRemainingProducts
-        : (bill.items ?? []).map((item) => ({
+  // Build + validate one bill's items against its remaining (re-dispatchable)
+  // quantity. Runs INSIDE the transaction, after the bill is advisory-locked, so
+  // the remaining count reflects every committed reservation and can't be raced
+  // by a concurrent dispatch of the same bill.
+  const normalizeBill = (bill, rawRemainingProducts) => {
+    const remainingProducts = rawRemainingProducts.length > 0
+      ? rawRemainingProducts
+      : (bill.items ?? []).map((item) => ({
+          item_code: item.item_code,
+          item_name: item.item_name,
+          qty: Number(item.qty ?? item.selectedQty ?? 0),
+          unit_code: item.unit_code,
+        }));
+    const remainingByItem = new Map(remainingProducts.map((item) => [item.item_code, item]));
+    const billItems = bill.items;
+
+    const itemsToSave =
+      billItems && billItems.length > 0
+        ? billItems.map((item) => {
+            const remainingItem = remainingByItem.get(item.item_code);
+            const selectedQty = Number(item.selectedQty ?? 0);
+            if (!remainingItem) {
+              throw new Error(`ບິນ ${bill.bill_no} ລາຍການ ${item.item_code} ຖືກຈັດຄົບແລ້ວ`);
+            }
+            if (!Number.isFinite(selectedQty) || selectedQty <= 0) {
+              throw new Error(`ຈໍານວນຈັດສົ່ງຂອງ ${item.item_code} ບໍ່ຖືກຕ້ອງ`);
+            }
+            if (selectedQty > remainingItem.qty) {
+              throw new Error(`ບິນ ${bill.bill_no} ລາຍການ ${item.item_code} ເຫຼືອຈັດໄດ້ພຽງ ${remainingItem.qty}`);
+            }
+            return {
+              item_code: item.item_code,
+              item_name: item.item_name || remainingItem.item_name,
+              qty: remainingItem.qty,
+              selectedQty,
+              unit_code: item.unit_code || remainingItem.unit_code,
+            };
+          })
+        : remainingProducts.map((item) => ({
             item_code: item.item_code,
             item_name: item.item_name,
-            qty: Number(item.qty ?? item.selectedQty ?? 0),
+            qty: item.qty,
+            selectedQty: item.qty,
             unit_code: item.unit_code,
           }));
-      const remainingByItem = new Map(remainingProducts.map((item) => [item.item_code, item]));
-      const billItems = bill.items;
 
-      const itemsToSave =
-        billItems && billItems.length > 0
-          ? billItems.map((item) => {
-              const remainingItem = remainingByItem.get(item.item_code);
-              const selectedQty = Number(item.selectedQty ?? 0);
-              if (!remainingItem) {
-                throw new Error(`ບິນ ${bill.bill_no} ລາຍການ ${item.item_code} ຖືກຈັດຄົບແລ້ວ`);
-              }
-              if (!Number.isFinite(selectedQty) || selectedQty <= 0) {
-                throw new Error(`ຈໍານວນຈັດສົ່ງຂອງ ${item.item_code} ບໍ່ຖືກຕ້ອງ`);
-              }
-              if (selectedQty > remainingItem.qty) {
-                throw new Error(`ບິນ ${bill.bill_no} ລາຍການ ${item.item_code} ເຫຼືອຈັດໄດ້ພຽງ ${remainingItem.qty}`);
-              }
-              return {
-                item_code: item.item_code,
-                item_name: item.item_name || remainingItem.item_name,
-                qty: remainingItem.qty,
-                selectedQty,
-                unit_code: item.unit_code || remainingItem.unit_code,
-              };
-            })
-          : remainingProducts.map((item) => ({
-              item_code: item.item_code,
-              item_name: item.item_name,
-              qty: item.qty,
-              selectedQty: item.qty,
-              unit_code: item.unit_code,
-            }));
+    if (itemsToSave.length === 0) {
+      throw new Error(`ບິນ ${bill.bill_no} ບໍ່ມີລາຍການຄົງເຫຼືອໃຫ້ຈັດຖ້ຽວ`);
+    }
+    return { ...bill, count_item: itemsToSave.length, items: itemsToSave };
+  };
 
-      if (itemsToSave.length === 0) {
-        throw new Error(`ບິນ ${bill.bill_no} ບໍ່ມີລາຍການຄົງເຫຼືອໃຫ້ຈັດຖ້ຽວ`);
-      }
-
-      return { ...bill, count_item: itemsToSave.length, items: itemsToSave };
-    })
-  );
-
-  const originBranch = (session.logistic_code ?? "").trim() || null;
+  // origin_transport_code = which delivery branch this trip belongs to. A branch
+  // admin is locked to their own branch (session.logistic_code); a manager
+  // (unscoped) picks it in the form and sends it as forward_transport_code —
+  // persist that choice (M6) instead of dropping it, so the trip shows up under
+  // the right branch in scoped reports/lists.
+  const sessionBranch = (session.logistic_code ?? "").trim();
+  const isScopedBranch = !!sessionBranch && sessionBranch !== "02-0004";
+  const selectedBranch = String(data.forward_transport_code ?? "").trim();
+  const originBranch = isScopedBranch
+    ? sessionBranch
+    : DELIVERY_BRANCH_CODES.includes(selectedBranch)
+      ? selectedBranch
+      : null;
+  if (!originBranch) {
+    throw new Error("ກະລຸນາເລືອກສາຂາຂົນສົ່ງ");
+  }
   // Optional route/round; auto-DDL creates the columns on first run.
   const { ensureDeliveryRouteSchema } = require("./delivery-route");
   const { ensureDeliveryRoundSchema } = require("./delivery-round");
@@ -213,10 +231,45 @@ async function createJob(session, data) {
   const deliveryRoundCode = data.delivery_round_code
     ? String(data.delivery_round_code).trim() || null
     : null;
+
+  // Server-side guards — the add-job page enforces these client-side, but the
+  // action is directly callable so it must not trust the client.
+  if (!data.car || !String(data.car).trim()) {
+    throw new Error("ກະລຸນາເລືອກລົດກ່ອນຈັດຖ້ຽວ");
+  }
+  if (!deliveryRouteCode) {
+    throw new Error("ກະລຸນາເລືອກສາຍຈັດສົ່ງ");
+  }
+  if (!deliveryRoundCode) {
+    throw new Error("ກະລຸນາເລືອກຮອບຈັດສົ່ງ");
+  }
+  if (!Array.isArray(billsList) || billsList.length === 0) {
+    throw new Error("ກະລຸນາເລືອກບິນຢ່າງໜ້ອຍ 1 ບິນ");
+  }
+
+  // Distinct bill numbers, sorted so concurrent createJob calls take the
+  // per-bill locks in the same order (deadlock-free).
+  const billNos = Array.from(new Set(billsList.map((b) => String(b.bill_no)))).sort();
+
   const client = await pool.connect();
   let docNo = null;
   try {
     await client.query("BEGIN");
+    // Serialize dispatch of the SAME bill across concurrent trips. The xact lock
+    // is held until COMMIT/ROLLBACK, so a second dispatcher blocks here until the
+    // first finishes, then re-reads the (now-reduced) remaining qty below — this
+    // closes the over-allocation race where two trips claimed the same units.
+    for (const billNo of billNos) {
+      await client.query("SELECT pg_advisory_xact_lock(hashtext($1))", [`tms_bill:${billNo}`]);
+    }
+    // Authoritative validation, under the lock. Remaining qty for every bill is
+    // fetched in ONE batched query (not N) to keep the locked section short.
+    const remainingMap = await getRemainingBillProductsMap(billNos);
+    const normalizedBills = [];
+    for (const bill of billsList) {
+      normalizedBills.push(normalizeBill(bill, remainingMap.get(String(bill.bill_no)) ?? []));
+    }
+
     docNo = await getNextJobDocNo(client, fixedDocDate);
 
     await client.query(
@@ -278,6 +331,18 @@ async function createJob(session, data) {
       }
     }
 
+    // Remove the dispatched bills from the available / pending pool so they
+    // don't reappear in the bill search / job-init lists. createJob previously
+    // relied only on the selected_qty reservation, which getJobInit/searchBills
+    // don't look at (they filter check_status=0) — matching addBillsToJob &
+    // updateJob here keeps the state machine consistent.
+    if (billNos.length > 0) {
+      await client.query(
+        `UPDATE ic_trans_shipment SET check_status=1
+         WHERE doc_no = ANY($1::varchar[]) AND ${getFixedYearSqlFilter("doc_date")}`,
+        [billNos]
+      );
+    }
     await client.query("DELETE FROM public.odg_tms_listbill_draft WHERE user_create=$1", [session.usercode]);
     await client.query("COMMIT");
   } catch (error) {
@@ -378,10 +443,25 @@ async function addBillsToJob(docNo, bills) {
     throw new Error("ບິນທີ່ເລືອກມີຢູ່ໃນຖ້ຽວແລ້ວ");
   }
 
+  // Distinct bill numbers, sorted so concurrent writers take the per-bill locks
+  // in the same order (deadlock-free) — same key space as createJob/updateJob.
+  const billNos = Array.from(new Set(billsToAdd.map((b) => String(b.bill_no)))).sort();
+
   let added = 0;
-  for (const entry of billsToAdd) {
-    const billNo = entry.bill_no;
-    const meta = await queryOne(
+  const client = await pool.connect();
+  try {
+    await client.query("BEGIN");
+    // Serialize dispatch of the SAME bill across concurrent trips so the
+    // remaining-qty re-check below can't be raced into over-allocation. Held
+    // until COMMIT/ROLLBACK.
+    for (const lockBillNo of billNos) {
+      await client.query("SELECT pg_advisory_xact_lock(hashtext($1))", [`tms_bill:${lockBillNo}`]);
+    }
+    // Remaining qty for every bill in ONE batched query (not N) under the lock.
+    const remainingMap = await getRemainingBillProductsMap(billNos);
+    for (const entry of billsToAdd) {
+      const billNo = entry.bill_no;
+      const meta = await queryOne(
       `SELECT to_char(t.doc_date,'YYYY-MM-DD') as bill_date, a.cust_code, b.telephone
        FROM ic_trans_shipment a
        LEFT JOIN ic_trans t ON t.doc_no=a.doc_no
@@ -398,7 +478,7 @@ async function addBillsToJob(docNo, bills) {
     // Match createJob's normalization: validate the caller's selected items
     // against the remaining quantities, falling back to "all remaining" when
     // the caller didn't pick specific items.
-    const rawRemainingProducts = await getRemainingBillProducts(billNo);
+    const rawRemainingProducts = remainingMap.get(String(billNo)) ?? [];
     const remainingProducts = rawRemainingProducts.length > 0
       ? rawRemainingProducts
       : (entry.items ?? []).map((item) => ({
@@ -445,7 +525,7 @@ async function addBillsToJob(docNo, bills) {
       throw new Error(`ບິນ ${billNo} ບໍ່ມີລາຍການຄົງເຫຼືອໃຫ້ຈັດຖ້ຽວ`);
     }
 
-    await queryOne(
+    await client.query(
       `INSERT INTO public.odg_tms_detail
         (doc_no, doc_date, car, bill_no, bill_date, cust_code,
          create_date_time_now, date_logistic, count_item, telephone)
@@ -464,7 +544,7 @@ async function addBillsToJob(docNo, bills) {
     );
 
     for (const item of itemsToSave) {
-      await queryOne(
+      await client.query(
         `INSERT INTO public.odg_tms_detail_item
           (doc_no, bill_no, item_code, item_name, qty, selected_qty, unit_code)
          VALUES ($1,$2,$3,$4,$5,$6,$7)`,
@@ -480,24 +560,31 @@ async function addBillsToJob(docNo, bills) {
       );
     }
 
-    await queryOne(
-      `UPDATE ic_trans_shipment SET check_status=1
-       WHERE doc_no=$1 AND ${getFixedYearSqlFilter("doc_date")}`,
-      [billNo]
-    );
-    added += 1;
-  }
+      await client.query(
+        `UPDATE ic_trans_shipment SET check_status=1
+         WHERE doc_no=$1 AND ${getFixedYearSqlFilter("doc_date")}`,
+        [billNo]
+      );
+      added += 1;
+    }
 
-  // Refresh the bill count cached on the job header so list pages show it.
-  await queryOne(
-    `UPDATE public.odg_tms
-     SET item_bill = (
-       SELECT COUNT(*) FROM public.odg_tms_detail
-       WHERE doc_no=$1 AND ${getFixedYearSqlFilter("doc_date")}
-     )
-     WHERE doc_no=$1 AND ${getFixedYearSqlFilter("doc_date")}`,
-    [docNo]
-  );
+    // Refresh the bill count cached on the job header so list pages show it.
+    await client.query(
+      `UPDATE public.odg_tms
+       SET item_bill = (
+         SELECT COUNT(*) FROM public.odg_tms_detail
+         WHERE doc_no=$1 AND ${getFixedYearSqlFilter("doc_date")}
+       )
+       WHERE doc_no=$1 AND ${getFixedYearSqlFilter("doc_date")}`,
+      [docNo]
+    );
+    await client.query("COMMIT");
+  } catch (error) {
+    await client.query("ROLLBACK").catch(() => {});
+    throw error;
+  } finally {
+    client.release();
+  }
 
   if (added > 0 && job.driver) {
     void pushToDriver(
@@ -519,12 +606,41 @@ async function deleteJob(docNo) {
     `SELECT driver FROM odg_tms WHERE doc_no=$1 AND ${getFixedYearSqlFilter("doc_date")}`,
     [docNo]
   );
-  await queryOne(`UPDATE ic_trans_shipment SET check_status=0 WHERE doc_no IN (SELECT bill_no FROM odg_tms_detail WHERE doc_no=$1 AND ${getFixedYearSqlFilter("doc_date")})`, [docNo]);
-  await queryOne("DELETE FROM public.odg_tms_worker WHERE doc_no=$1", [docNo]);
-  await queryOne("DELETE FROM public.odg_tms_detail_item WHERE doc_no=$1", [docNo]);
-  await queryOne("DELETE FROM public.odg_tms_travel_history WHERE doc_no=$1", [docNo]);
-  await queryOne(`DELETE FROM public.odg_tms WHERE doc_no=$1 AND ${getFixedYearSqlFilter("doc_date")}`, [docNo]);
-  await queryOne(`DELETE FROM public.odg_tms_detail WHERE doc_no=$1 AND ${getFixedYearSqlFilter("doc_date")}`, [docNo]);
+
+  // All deletes run in one transaction so a mid-sequence failure can't leave a
+  // half-deleted trip (header gone but details orphaned, or vice-versa). The
+  // detail-dependent statements (check_status release, delivery-image cleanup)
+  // must run BEFORE the detail rows are removed.
+  const client = await pool.connect();
+  try {
+    await client.query("BEGIN");
+    // Bills return to the pending pool.
+    await client.query(
+      `UPDATE ic_trans_shipment SET check_status=0
+       WHERE doc_no IN (SELECT bill_no FROM odg_tms_detail WHERE doc_no=$1 AND ${getFixedYearSqlFilter("doc_date")})`,
+      [docNo]
+    );
+    // Delivery proof images are keyed by bill_no, not doc_no — delete them up
+    // front (while the detail rows still resolve the bill list) so they don't
+    // become unreachable orphans after the trip is gone.
+    await client.query(
+      `DELETE FROM public.odg_tms_delivery_images
+       WHERE bill_no IN (SELECT bill_no FROM odg_tms_detail WHERE doc_no=$1 AND ${getFixedYearSqlFilter("doc_date")})`,
+      [docNo]
+    );
+    await client.query("DELETE FROM public.odg_tms_worker WHERE doc_no=$1", [docNo]);
+    await client.query("DELETE FROM public.odg_tms_detail_item WHERE doc_no=$1", [docNo]);
+    await client.query("DELETE FROM public.odg_tms_travel_history WHERE doc_no=$1", [docNo]);
+    await client.query(`DELETE FROM public.odg_tms WHERE doc_no=$1 AND ${getFixedYearSqlFilter("doc_date")}`, [docNo]);
+    await client.query(`DELETE FROM public.odg_tms_detail WHERE doc_no=$1 AND ${getFixedYearSqlFilter("doc_date")}`, [docNo]);
+    await client.query("COMMIT");
+  } catch (error) {
+    await client.query("ROLLBACK").catch(() => {});
+    throw error;
+  } finally {
+    client.release();
+  }
+
   if (job?.driver) {
     void pushToDriver(
       job.driver,
@@ -667,34 +783,37 @@ async function getJobForEdit(docNo) {
   };
 }
 
-// Same logic as helpers.getRemainingBillProducts but excludes a specific
-// doc_no from the locked-by-active-jobs subtraction. Runs against the
-// supplied client so it sees the transaction's uncommitted state.
-async function _getRemainingBillProductsExcludingJob(client, billNo, excludeDocNo) {
+// Batched _getRemainingBillProductsExcludingJob — per-item remaining for many
+// bills in ONE query on the supplied client (sees the txn's uncommitted state),
+// excluding the given doc_no from the active-lock subtraction. Returns
+// Map<bill_no, items[]>. Mirrors the single-bill version exactly (like it, it
+// does NOT subtract returns).
+async function _getRemainingBillProductsMapExcludingJob(client, billNos, excludeDocNo) {
+  const map = new Map();
+  if (!Array.isArray(billNos) || billNos.length === 0) return map;
   const result = await client.query(
     `WITH bill_items AS (
-       SELECT
-         d.item_code,
-         MAX(d.item_name) AS item_name,
-         SUM(COALESCE(d.qty, 0))::numeric AS total_qty,
-         MAX(d.unit_code) AS unit_code
+       SELECT d.doc_no AS bill_no, d.item_code,
+              MAX(d.item_name) AS item_name,
+              SUM(COALESCE(d.qty, 0))::numeric AS total_qty,
+              MAX(d.unit_code) AS unit_code
        FROM ic_trans_detail d
-       WHERE d.doc_no = $1 AND d.item_code NOT LIKE '97%'
-       GROUP BY d.item_code
+       WHERE d.doc_no = ANY($1::varchar[]) AND d.item_code NOT LIKE '97%'
+       GROUP BY d.doc_no, d.item_code
      ),
      active_locked AS (
-       SELECT item.item_code,
+       SELECT item.bill_no, item.item_code,
               COALESCE(SUM(item.selected_qty), 0)::numeric AS locked_qty
        FROM public.odg_tms_detail_item item
        INNER JOIN public.odg_tms_detail det
          ON det.bill_no = item.bill_no AND det.doc_no = item.doc_no
-       WHERE item.bill_no = $1
+       WHERE item.bill_no = ANY($1::varchar[])
          AND item.doc_no <> $2
          AND COALESCE(det.status, 0) NOT IN (1, 2)
-       GROUP BY item.item_code
+       GROUP BY item.bill_no, item.item_code
      ),
      delivered AS (
-       SELECT item.item_code,
+       SELECT item.bill_no, item.item_code,
               COALESCE(SUM(
                 CASE
                   WHEN COALESCE(det.status, 0) = 1
@@ -706,27 +825,30 @@ async function _getRemainingBillProductsExcludingJob(client, billNo, excludeDocN
        FROM public.odg_tms_detail_item item
        INNER JOIN public.odg_tms_detail det
          ON det.bill_no = item.bill_no AND det.doc_no = item.doc_no
-       WHERE item.bill_no = $1
+       WHERE item.bill_no = ANY($1::varchar[])
          AND COALESCE(det.status, 0) IN (1, 2)
-       GROUP BY item.item_code
+       GROUP BY item.bill_no, item.item_code
      )
-     SELECT
-       bi.item_code, bi.item_name,
-       GREATEST(bi.total_qty - COALESCE(al.locked_qty, 0) - COALESCE(dl.delivered_qty, 0), 0)::numeric AS qty,
-       bi.unit_code
+     SELECT bi.bill_no, bi.item_code, bi.item_name, bi.unit_code,
+            GREATEST(bi.total_qty - COALESCE(al.locked_qty, 0) - COALESCE(dl.delivered_qty, 0), 0)::numeric AS qty
      FROM bill_items bi
-     LEFT JOIN active_locked al ON al.item_code = bi.item_code
-     LEFT JOIN delivered dl ON dl.item_code = bi.item_code
+     LEFT JOIN active_locked al ON al.bill_no = bi.bill_no AND al.item_code = bi.item_code
+     LEFT JOIN delivered dl ON dl.bill_no = bi.bill_no AND dl.item_code = bi.item_code
      WHERE GREATEST(bi.total_qty - COALESCE(al.locked_qty, 0) - COALESCE(dl.delivered_qty, 0), 0) > 0
-     ORDER BY bi.item_code`,
-    [billNo, excludeDocNo]
+     ORDER BY bi.bill_no, bi.item_code`,
+    [billNos, excludeDocNo]
   );
-  return result.rows.map((r) => ({
-    item_code: r.item_code,
-    item_name: r.item_name,
-    qty: Number(r.qty ?? 0),
-    unit_code: r.unit_code,
-  }));
+  for (const r of result.rows) {
+    const list = map.get(r.bill_no) ?? [];
+    list.push({
+      item_code: r.item_code,
+      item_name: r.item_name,
+      qty: Number(r.qty ?? 0),
+      unit_code: r.unit_code,
+    });
+    map.set(r.bill_no, list);
+  }
+  return map;
 }
 
 // Atomically replaces the bill list, items, and workers of a job.
@@ -794,11 +916,22 @@ async function updateJob(session, docNo, data) {
   try {
     await client.query("BEGIN");
 
-    // Validate every bill's items against fresh remaining (excluding this job)
+    // Lock the bills being (re)reserved on this trip in the same key space as
+    // createJob / addBillsToJob, sorted for deadlock-free ordering, so a
+    // concurrent dispatch of the same bill can't race the remaining-qty
+    // re-check below into over-allocation.
+    const lockBillNos = Array.from(newBillNos).sort();
+    for (const lockBillNo of lockBillNos) {
+      await client.query("SELECT pg_advisory_xact_lock(hashtext($1))", [`tms_bill:${lockBillNo}`]);
+    }
+
+    // Validate every bill's items against fresh remaining (excluding this job).
+    // One batched query (not N) under the lock.
+    const remainingMap = await _getRemainingBillProductsMapExcludingJob(client, lockBillNos, docNo);
     const normalizedBills = [];
     for (const bill of inputBills) {
       const billNo = String(bill.bill_no);
-      const rawRemaining = await _getRemainingBillProductsExcludingJob(client, billNo, docNo);
+      const rawRemaining = remainingMap.get(billNo) ?? [];
       const remaining = rawRemaining.length > 0
         ? rawRemaining
         : (bill.items ?? []).map((item) => ({
