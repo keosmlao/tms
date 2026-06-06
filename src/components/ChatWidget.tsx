@@ -135,8 +135,12 @@ export default function ChatWidget() {
   const filtered = q
     ? people.filter((p) => p.name.toLowerCase().includes(q) || (p.title || "").toLowerCase().includes(q))
     : people;
-  const onlinePeople = filtered.filter((p) => p.online);
-  const offlinePeople = filtered.filter((p) => !p.online);
+  // Unread conversations get their own group pinned to the top; the
+  // online/offline groups below list only already-read ones (no duplicates).
+  const unreadPeople = filtered.filter((p) => (p.unread || 0) > 0);
+  const readPeople = filtered.filter((p) => !(p.unread || 0));
+  const onlinePeople = readPeople.filter((p) => p.online);
+  const offlinePeople = readPeople.filter((p) => !p.online);
 
   const personRow = (p: Person) => (
     <button
@@ -288,6 +292,14 @@ export default function ChatWidget() {
                   <p className="py-8 text-center text-[11px] text-slate-400">ບໍ່ພົບຄົນ</p>
                 ) : (
                   <>
+                    {unreadPeople.length > 0 && (
+                      <>
+                        <div className="bg-rose-50 px-3 py-1.5 text-[10px] font-bold uppercase tracking-wider text-rose-600 dark:bg-rose-500/10 dark:text-rose-400">
+                          ✉ ຍັງບໍ່ໄດ້ອ່ານ {unreadPeople.length}
+                        </div>
+                        {unreadPeople.map(personRow)}
+                      </>
+                    )}
                     {onlinePeople.length > 0 && (
                       <>
                         <div className="bg-slate-50 px-3 py-1.5 text-[10px] font-bold uppercase tracking-wider text-emerald-600 dark:bg-white/[0.02] dark:text-emerald-400">
