@@ -19,6 +19,7 @@ import {
   FaUserTie,
   FaTruck,
   FaCalendarDay,
+  FaCalendarAlt,
   FaChartLine,
   FaChartArea,
   FaMoon,
@@ -315,16 +316,31 @@ export default function Sidebar({
           </div>
         )}
 
-        {/* Quick-access shortcuts */}
-        {!isSaleLogin && !showCollapsed && (
+        {/* Quick-access shortcuts (ທາງລັດ) — label visible to everyone */}
+        {!showCollapsed && (
           <div className="px-5 pt-3 pb-1">
             <p className="text-[10px] font-semibold uppercase tracking-[0.2em] text-slate-500">
               ທາງລັດ
             </p>
           </div>
         )}
-        {!isSaleLogin && (
-          <div className="px-3 space-y-1">
+        <div className="px-3 space-y-1">
+          {/* Calendar — shortcut visible to everyone incl. sales */}
+          <Link
+            href="/calendar"
+            className={`group flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-medium transition-all duration-200 ${
+              pathname === "/calendar"
+                ? "bg-teal-400/14 text-white ring-1 ring-teal-300/20"
+                : "text-slate-400 hover:bg-white/8 hover:text-white"
+            } ${showCollapsed ? "justify-center" : ""}`}
+            onClick={() => setMobileOpen(false)}
+            title={showCollapsed ? "ປະຕິທິນຈັດສົ່ງ" : undefined}
+          >
+            <FaCalendarAlt size={16} className={pathname === "/calendar" ? "text-teal-200" : "transition-colors group-hover:text-teal-200"} />
+            {!showCollapsed && <span>ປະຕິທິນຈັດສົ່ງ</span>}
+          </Link>
+          {!isSaleLogin && (
+            <>
             <Link
               href="/inbox"
               className={`group flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-medium transition-all duration-200 ${
@@ -364,8 +380,9 @@ export default function Sidebar({
               <FaChartLine size={16} className={pathname === "/reports/monthly-delivery" ? "text-teal-200" : "transition-colors group-hover:text-teal-200"} />
               {!showCollapsed && <span>KPI ຈັດສົ່ງ/ເດືອນ</span>}
             </Link>
-          </div>
-        )}
+            </>
+          )}
+        </div>
 
         {/* Section label */}
         {!showCollapsed && (

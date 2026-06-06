@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import {
   FaArrowRight,
   FaBoxOpen,
@@ -180,6 +180,22 @@ interface DashboardData {
   customer_rating?: CustomerRatingSummary;
 }
 
+// Progressive slices returned by the three split server actions. The page
+// fetches them in parallel and renders each section as its slice arrives.
+type SummarySlice = Pick<
+  DashboardData,
+  "data" | "thunjai" | "kl" | "dt" | "ps" | "user_branch" | "branch_names" | "customer_rating"
+> & { pending_summary: Partial<PendingSummary> };
+type KpiSlice = { delivery_kpi: DeliveryKpi };
+type PendingSlice = {
+  trans: PendingShipment[];
+  trans_month: PendingShipment[];
+  trans_today: PendingShipment[];
+  pending_summary: Partial<PendingSummary>;
+  pending_breakdown: PendingBreakdown;
+  still: Record<string, number>;
+};
+
 // ==================== Helpers ====================
 
 const numberFormatter = new Intl.NumberFormat("en-US");
@@ -216,9 +232,7 @@ function getAgingClassName(value: CountValue) {
   return "bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 ring-emerald-500/20";
 }
 
-async function fetchDashboardData() {
-  return (await Actions.getDashboardData()) as unknown as DashboardData;
-}
+const EMPTY_TEAM: TeamData = { bill_count: 0, still: 0, complete: 0 };
 
 // ==================== UI Pieces ====================
 
@@ -236,20 +250,30 @@ function HeroKpiTile({
   caption,
   icon,
   accent,
+  loading = false,
 }: {
   label: string;
   value: CountValue;
   caption?: string;
   icon: React.ReactNode;
   accent: string;
+  loading?: boolean;
 }) {
   return (
     <div className="relative overflow-hidden rounded-lg border border-white/12 bg-white/8 p-4 backdrop-blur-xl transition-all hover:bg-white/12">
       <div className="relative flex items-start justify-between gap-3">
         <div className="min-w-0">
           <p className="text-[10px] font-semibold uppercase tracking-[0.18em] text-white/60">{label}</p>
-          <p className="mt-1 text-3xl font-bold text-white leading-none tabular-nums">{formatNumber(value)}</p>
-          {caption && <p className="mt-1 text-[11px] text-white/70">{caption}</p>}
+          {loading ? (
+            <span className="mt-1 block h-7 w-16 animate-pulse rounded bg-white/20" />
+          ) : (
+            <p className="mt-1 text-3xl font-bold text-white leading-none tabular-nums">{formatNumber(value)}</p>
+          )}
+          {loading ? (
+            <span className="mt-1.5 block h-2.5 w-24 animate-pulse rounded bg-white/10" />
+          ) : (
+            caption && <p className="mt-1 text-[11px] text-white/70">{caption}</p>
+          )}
         </div>
         <div className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-lg ${accent} text-white shadow-sm`}>
           {icon}
@@ -1084,8 +1108,26 @@ function DeliveryKpiCard({ kpi }: { kpi: DeliveryKpi }) {
   );
 }
 
+// Placeholder shown while a slow slice (KPI / pending) is still loading, so the
+// section's space is reserved and the user sees it is on the way.
+function SectionSkeleton({ height = "h-28", title }: { height?: string; title?: string }) {
+  return (
+    <div className="rounded-lg border border-slate-200/70 bg-white/80 p-4 dark:border-slate-800 dark:bg-slate-900/65">
+      {title && (
+        <div className="mb-3 flex items-center gap-2">
+          <div className="h-7 w-7 animate-pulse rounded-lg bg-slate-200/70 dark:bg-white/5" />
+          <div className="h-3.5 w-44 animate-pulse rounded bg-slate-200/70 dark:bg-white/5" />
+        </div>
+      )}
+      <div className={`w-full animate-pulse rounded-lg bg-slate-100 dark:bg-white/5 ${height}`} />
+    </div>
+  );
+}
+
 export default function DashboardPage() {
-  const [data, setData] = useState<DashboardData | null>(null);
+  const [summary, setSummary] = useState<SummarySlice | null>(null);
+  const [kpi, setKpi] = useState<KpiSlice | null>(null);
+  const [pending, setPending] = useState<PendingSlice | null>(null);
   const [activity, setActivity] = useState<Partial<DashboardData> | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -1093,87 +1135,92 @@ export default function DashboardPage() {
   const [pendingTab, setPendingTab] = useState<PendingTab>("today");
   const [lastFetched, setLastFetched] = useState<Date | null>(null);
 
-  useEffect(() => {
-    let active = true;
-    const load = async () => {
-      try {
-        const result = await fetchDashboardData();
-        if (!active) return;
-        setData(result);
-        setError(null);
-        setLastFetched(new Date());
-      } catch (e) {
-        console.error(e);
-        if (active) setError("ບໍ່ສາມາດໂຫຼດຂໍ້ມູນໄດ້");
-      } finally {
-        if (active) setLoading(false);
-      }
-    };
-    void load();
-    return () => { active = false; };
+  // Fetch the three core slices + activity in parallel. Each updates its own
+  // state, so its section renders the instant that slice lands — the slow
+  // pending slice no longer blocks the hero / KPIs / fast cards. Summary gates
+  // first paint; the rest stream in behind skeletons.
+  const loadAll = useCallback((force = false) => {
+    setLoading(true);
+    Actions.getDashboardSummary(force)
+      .then((s) => { setSummary(s as SummarySlice); setError(null); setLastFetched(new Date()); })
+      .catch((e) => { console.error(e); setError("ບໍ່ສາມາດໂຫຼດຂໍ້ມູນໄດ້"); })
+      .finally(() => setLoading(false));
+    Actions.getDashboardKpi(force)
+      .then((k) => setKpi(k as KpiSlice))
+      .catch(() => undefined);
+    Actions.getDashboardPending(force)
+      .then((p) => setPending(p as PendingSlice))
+      .catch(() => undefined);
+    Actions.getDashboardActivity()
+      .then((a) => setActivity(a as Partial<DashboardData>))
+      .catch(() => undefined);
   }, []);
 
-  // Activity lists load separately so the core dashboard renders first and
-  // these heavier sections stream in when ready.
-  useEffect(() => {
-    let active = true;
-    Actions.getDashboardActivity()
-      .then((a) => { if (active) setActivity(a as Partial<DashboardData>); })
-      .catch(() => undefined);
-    return () => { active = false; };
-  }, []);
+  useEffect(() => { loadAll(false); }, [loadAll]);
 
   useEffect(() => {
     const timer = window.setInterval(() => setAgingTick(c => c + 1), 1000);
     return () => window.clearInterval(timer);
   }, []);
 
-  const handleRefresh = async () => {
-    setLoading(true);
-    try {
-      const result = await fetchDashboardData();
-      setData(result);
-      Actions.getDashboardActivity()
-        .then((a) => setActivity(a as Partial<DashboardData>))
-        .catch(() => undefined);
-      setError(null);
-      setLastFetched(new Date());
-    } catch {
-      setError("ບໍ່ສາມາດອັບເດດຂໍ້ມູນໄດ້");
-    } finally {
-      setLoading(false);
+  const handleRefresh = () => loadAll(true);
+
+  const pendingReady = !!pending;
+
+  // Merge the slices into one DashboardData-shaped object so the render below can
+  // keep reading `data.xxx` (guarded for the slices that haven't arrived yet).
+  const data: Partial<DashboardData> = useMemo(() => {
+    const merged: Partial<DashboardData> = {};
+    if (summary) Object.assign(merged, summary);
+    if (kpi) merged.delivery_kpi = kpi.delivery_kpi;
+    if (pending) {
+      merged.trans = pending.trans;
+      merged.trans_month = pending.trans_month;
+      merged.trans_today = pending.trans_today;
+      merged.pending_breakdown = pending.pending_breakdown;
+      merged.pending_summary = {
+        ...(summary?.pending_summary ?? {}),
+        ...pending.pending_summary,
+      } as PendingSummary;
+      if (summary) {
+        merged.kl = { ...summary.kl, still: pending.still["02-0001"] };
+        merged.dt = { ...summary.dt, still: pending.still["02-0002"] };
+        merged.ps = { ...summary.ps, still: pending.still["02-0003"] };
+      }
     }
-  };
+    return merged;
+  }, [summary, kpi, pending]);
 
   const computed = useMemo(() => {
-    if (!data) return null;
-    const summary = data.data;
-    const totalBills = toNumber(summary.bill_count);
-    const logistic = toNumber(summary.logistic);
-    const odLogistic = toNumber(summary.logistic_od);
-    const dtLogistic = toNumber(summary.logistic_dt);
-    const psLogistic = toNumber(summary.logistic_ps);
+    if (!data.data) return null;
+    const sd = data.data;
+    const totalBills = toNumber(sd.bill_count);
+    const logistic = toNumber(sd.logistic);
+    const odLogistic = toNumber(sd.logistic_od);
+    const dtLogistic = toNumber(sd.logistic_dt);
+    const psLogistic = toNumber(sd.logistic_ps);
 
     const branchNames = data.branch_names ?? {};
     const nameFor = (code: string, fallback: string) =>
       branchNames[code]?.trim() || fallback;
 
     const allTeams = [
-      { code: "KL", branch: "02-0001", name: nameFor("02-0001", "KL"), stats: data.kl, color: "sky" as const },
-      { code: "DT", branch: "02-0002", name: nameFor("02-0002", "DT"), stats: data.dt, color: "emerald" as const },
-      { code: "PS", branch: "02-0003", name: nameFor("02-0003", "PS"), stats: data.ps, color: "amber" as const },
+      { code: "KL", branch: "02-0001", name: nameFor("02-0001", "KL"), stats: data.kl ?? EMPTY_TEAM, color: "sky" as const },
+      { code: "DT", branch: "02-0002", name: nameFor("02-0002", "DT"), stats: data.dt ?? EMPTY_TEAM, color: "emerald" as const },
+      { code: "PS", branch: "02-0003", name: nameFor("02-0003", "PS"), stats: data.ps ?? EMPTY_TEAM, color: "amber" as const },
     ];
     const teams = data.user_branch ? allTeams.filter((t) => t.branch === data.user_branch) : allTeams;
 
-    // Use the pending-summary year total directly so the Hero "ຄ້າງສົ່ງ" KPI
-    // matches the count on /bills-pending (and dashboard's own ປີ tab).
-    // The per-team `still` field excludes manual bills + bills outside the
-    // 3 hard-coded branch buckets, so summing teams under-counts.
-    const totalPending = toNumber(data.pending_summary.year_pending);
+    // Pending-derived metrics are null until the pending slice lands; the hero
+    // tiles + completion donuts render a skeleton in the meantime. The year
+    // total comes straight from pending_summary so the "ຄ້າງສົ່ງ" KPI matches
+    // /bills-pending exactly.
+    const hasPending = !!data.pending_breakdown;
+    const totalPending = hasPending ? toNumber(data.pending_summary?.year_pending) : null;
     const totalComplete = teams.reduce((s, t) => s + toNumber(t.stats.complete), 0);
-    const totalLogisticWork = totalComplete + totalPending;
-    const completionRate = getPercent(totalComplete, totalPending + totalComplete);
-    const logisticWorkRate = getPercent(totalLogisticWork, totalBills);
+    const totalLogisticWork = totalPending == null ? null : totalComplete + totalPending;
+    const completionRate = totalPending == null ? null : getPercent(totalComplete, totalPending + totalComplete);
+    const logisticWorkRate = totalLogisticWork == null ? null : getPercent(totalLogisticWork, totalBills);
     const logisticRate = getPercent(logistic, totalBills);
 
     const allCarrierMix = [
@@ -1197,7 +1244,7 @@ export default function DashboardPage() {
     };
   }, [data]);
 
-  if (loading && !data) {
+  if (loading && !summary) {
     return (
       <div className="flex flex-col items-center justify-center py-32">
         <FaSpinner className="mb-4 animate-spin text-4xl text-teal-700 dark:text-teal-300" />
@@ -1206,7 +1253,7 @@ export default function DashboardPage() {
     );
   }
 
-  if (!data || !computed) {
+  if (!summary || !computed) {
     return (
       <div className="rounded-lg border border-rose-200 bg-rose-50 p-6 text-rose-700 dark:border-rose-800 dark:bg-rose-950/30 dark:text-rose-300">
         <div className="flex items-start gap-3">
@@ -1215,7 +1262,7 @@ export default function DashboardPage() {
             <h1 className="font-semibold">Dashboard ບໍ່ພ້ອມໃຊ້ງານ</h1>
             <p className="text-sm mt-1">{error ?? "ບໍ່ສາມາດໂຫຼດຂໍ້ມູນໄດ້"}</p>
             <button
-              onClick={() => void handleRefresh()}
+              onClick={() => handleRefresh()}
               className="mt-3 px-4 py-2 bg-rose-600 text-white rounded-lg text-xs font-medium hover:bg-rose-700 flex items-center gap-2"
             >
               <FaSyncAlt /> ລອງໃໝ່
@@ -1240,10 +1287,11 @@ export default function DashboardPage() {
   } = computed;
   const currentYear = FIXED_YEAR;
 
+  const ps = data.pending_summary;
   const pendingLists: Record<PendingTab, { count: CountValue; items: PendingShipment[]; subtitle: string }> = {
-    year: { count: totalPending, items: data.trans, subtitle: `ປີ ${currentYear}` },
-    month: { count: data.pending_summary.month_count, items: data.trans_month, subtitle: `ເດືອນ ${data.pending_summary.current_month}` },
-    today: { count: data.pending_summary.today_count, items: data.trans_today, subtitle: `ວັນ ${data.pending_summary.current_date}` },
+    year: { count: totalPending ?? 0, items: data.trans ?? [], subtitle: `ປີ ${currentYear}` },
+    month: { count: ps?.month_count, items: data.trans_month ?? [], subtitle: `ເດືອນ ${ps?.current_month ?? ""}` },
+    today: { count: ps?.today_count, items: data.trans_today ?? [], subtitle: `ວັນ ${ps?.current_date ?? ""}` },
   };
   const currentPending = pendingLists[pendingTab];
 
@@ -1310,22 +1358,24 @@ export default function DashboardPage() {
             />
             <HeroKpiTile
               label="ຕ້ອງຂົນສົ່ງ"
-              value={totalLogisticWork}
-              caption={`${logisticWorkRate}% ຂອງບິນທັງໝົດ`}
+              value={totalLogisticWork ?? 0}
+              loading={totalLogisticWork == null}
+              caption={logisticWorkRate == null ? undefined : `${logisticWorkRate}% ຂອງບິນທັງໝົດ`}
               icon={<FaTruck size={14} />}
               accent="bg-sky-600"
             />
             <HeroKpiTile
               label="ສົ່ງສຳເລັດ"
               value={totalComplete}
-              caption={`${completionRate}% ສຳເລັດ`}
+              caption={completionRate == null ? undefined : `${completionRate}% ສຳເລັດ`}
               icon={<FaCheckCircle size={14} />}
               accent="bg-emerald-600"
             />
             <HeroKpiTile
               label="ຄ້າງສົ່ງ"
-              value={totalPending}
-              caption={`${getPercent(totalPending, totalPending + totalComplete)}% ລໍຖ້າ`}
+              value={totalPending ?? 0}
+              loading={totalPending == null}
+              caption={totalPending == null ? undefined : `${getPercent(totalPending, totalPending + totalComplete)}% ລໍຖ້າ`}
               icon={<FaClock size={14} />}
               accent="bg-amber-600"
             />
@@ -1372,7 +1422,9 @@ export default function DashboardPage() {
       <LiveFleetOverview />
 
       {/* ========== PENDING BREAKDOWN ========== */}
-      {data.pending_breakdown && (
+      {!data.pending_breakdown ? (
+        <SectionSkeleton title="ສະຖານະບິນຄ້າງສົ່ງ" height="h-20" />
+      ) : (
         <Link
           href="/bills-pending"
           className="block rounded-lg border border-slate-200/70 bg-white/80 p-4 transition-all hover:-translate-y-0.5 hover:shadow-lg dark:border-slate-800 dark:bg-slate-900/65"
@@ -1428,7 +1480,11 @@ export default function DashboardPage() {
       )}
 
       {/* ========== DELIVERY KPI ========== */}
-      {data.delivery_kpi && <DeliveryKpiCard kpi={data.delivery_kpi} />}
+      {data.delivery_kpi ? (
+        <DeliveryKpiCard kpi={data.delivery_kpi} />
+      ) : (
+        <SectionSkeleton title="KPI ການຈັດສົ່ງ" height="h-32" />
+      )}
 
       {/* ========== CUSTOMER RATING ========== */}
       {data.customer_rating && data.customer_rating.total > 0 && (
@@ -1494,21 +1550,22 @@ export default function DashboardPage() {
           </div>
           <p className="text-[11px] text-slate-400 dark:text-gray-500">ແຍກຕາມ ວັນ · ເດືອນ · ປີ</p>
 
+          {pendingReady ? (
           <div className="mt-4 grid grid-cols-1 sm:grid-cols-3 gap-3">
             <MiniDonut
               label="ວັນນີ້"
-              sublabel={data.pending_summary.current_date}
-              complete={toNumber(data.pending_summary.today_complete)}
-              pending={toNumber(data.pending_summary.today_pending)}
+              sublabel={ps?.current_date}
+              complete={toNumber(ps?.today_complete)}
+              pending={toNumber(ps?.today_pending)}
               gradientFrom="#06b6d4"
               gradientTo="#0e7c6b"
               gradientId="grad-today"
             />
             <MiniDonut
               label="ເດືອນນີ້"
-              sublabel={data.pending_summary.current_month}
-              complete={toNumber(data.pending_summary.month_complete)}
-              pending={toNumber(data.pending_summary.month_pending)}
+              sublabel={ps?.current_month}
+              complete={toNumber(ps?.month_complete)}
+              pending={toNumber(ps?.month_pending)}
               gradientFrom="#10b981"
               gradientTo="#0e7c6b"
               gradientId="grad-month"
@@ -1516,13 +1573,20 @@ export default function DashboardPage() {
             <MiniDonut
               label="ປີ"
               sublabel={String(currentYear)}
-              complete={toNumber(data.pending_summary.year_complete)}
-              pending={toNumber(data.pending_summary.year_pending)}
+              complete={toNumber(ps?.year_complete)}
+              pending={toNumber(ps?.year_pending)}
               gradientFrom="#f59e0b"
               gradientTo="#0e7c6b"
               gradientId="grad-year"
             />
           </div>
+          ) : (
+          <div className="mt-4 grid grid-cols-1 sm:grid-cols-3 gap-3">
+            {[0, 1, 2].map((i) => (
+              <div key={i} className="h-[170px] animate-pulse rounded-lg bg-slate-100 dark:bg-white/5" />
+            ))}
+          </div>
+          )}
         </div>
 
         {/* Carrier mix */}
@@ -1663,12 +1727,14 @@ export default function DashboardPage() {
           </Link>
         </div>
 
+        {pendingReady ? (
+        <>
         {/* Tabs */}
         <div className="px-5 pt-3">
           <div className="inline-flex items-center gap-1 rounded-lg bg-slate-100 p-1 dark:bg-slate-800/70">
             {([
-              { key: "today" as const, label: "ວັນນີ້", count: data.pending_summary.today_count },
-              { key: "month" as const, label: "ເດືອນນີ້", count: data.pending_summary.month_count },
+              { key: "today" as const, label: "ວັນນີ້", count: ps?.today_count },
+              { key: "month" as const, label: "ເດືອນນີ້", count: ps?.month_count },
               { key: "year" as const, label: `ປີ ${currentYear}`, count: totalPending },
             ]).map((tab) => (
               <button
@@ -1699,6 +1765,12 @@ export default function DashboardPage() {
           emptyMessage={`ບໍ່ມີລາຍການໃນ${currentPending.subtitle}`}
           agingTick={agingTick}
         />
+        </>
+        ) : (
+          <div className="flex items-center justify-center py-16">
+            <FaSpinner className="animate-spin text-2xl text-slate-300" />
+          </div>
+        )}
       </div>
     </div>
   );

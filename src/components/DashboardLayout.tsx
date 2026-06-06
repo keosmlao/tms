@@ -16,8 +16,11 @@ export default function DashboardLayout({ children }: { children: ReactNode }) {
   const isSaleLogin = isSalesLogin(session);
 
   useEffect(() => {
-    // Sales staff are confined to their own undelivered-bill tracking page.
-    const allowed = pathname.startsWith("/tracking/sales");
+    // Sales staff are confined to their own undelivered-bill tracking page,
+    // plus the shared delivery calendar (everyone may view it).
+    const allowed =
+      pathname.startsWith("/tracking/sales") ||
+      pathname.startsWith("/calendar");
     if (isSaleLogin && !allowed) {
       router.replace("/tracking/sales");
     }

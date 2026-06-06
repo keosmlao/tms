@@ -3,13 +3,34 @@
 import { requireSession } from "./_helpers";
 import {
   getDashboardData as svc,
+  getDashboardSummary as svcSummary,
+  getDashboardKpi as svcKpi,
+  getDashboardPending as svcPending,
   getDashboardActivity as svcActivity,
 } from "@/queries/dashboard.js";
 import { getDriverLeaderboard as svcDriverLeaderboard } from "@/queries/driver-leaderboard.js";
 
-export async function getDashboardData() {
+export async function getDashboardData(force = false) {
   const s = await requireSession();
-  return svc(s);
+  return svc(s, force);
+}
+
+// Progressive slices — the dashboard page fetches these three in parallel and
+// renders each section as its slice lands (summary ~fast, kpi ~medium,
+// pending ~slow). force=true bypasses the per-slice cache (manual refresh).
+export async function getDashboardSummary(force = false) {
+  const s = await requireSession();
+  return svcSummary(s, force);
+}
+
+export async function getDashboardKpi(force = false) {
+  const s = await requireSession();
+  return svcKpi(s, force);
+}
+
+export async function getDashboardPending(force = false) {
+  const s = await requireSession();
+  return svcPending(s, force);
 }
 
 // Activity lists (in-progress / waiting / delivered-pending-close) — loaded

@@ -44,6 +44,7 @@ export interface AvailableBill {
   count_item: number;
   origin_transport_code?: string;
   origin_transport_name?: string;
+  delivery_transport_code?: string | null;
   scheduled_date?: string | null;
   scheduled_date_display?: string | null;
   delivery_route_code?: string | null;
@@ -75,7 +76,16 @@ interface AddedBillGroup {
   items: SelectedProduct[];
   forward_transport_code?: string;
   pickup_transport_code?: string | null;
+  delivery_condition?: string;
 }
+
+// Mandatory delivery condition chosen per bill when adding it to a trip.
+export const DELIVERY_CONDITIONS: { code: string; label: string }[] = [
+  { code: "to_customer", label: "ສົ່ງລູກຄ້າ" },
+  { code: "to_branch", label: "ສົ່ງສາຂາ" },
+  { code: "to_carrier", label: "ສົ່ງຂົນສົ່ງ" },
+  { code: "to_bus", label: "ຝາກລົດເມ" },
+];
 
 interface TransportBranch {
   code: string;
@@ -103,6 +113,7 @@ export interface JobForEdit {
     count_item: number;
     forward_transport_code: string | null;
     pickup_transport_code: string | null;
+    delivery_condition: string | null;
     items: Array<{
       item_code: string;
       item_name: string;
@@ -149,6 +160,10 @@ const routeLabel = (route: {
   return route.name + (path ? ` (${path})` : "");
 };
 
+// Shared flat control surface (replaces the removed glass-* utilities).
+const CONTROL =
+  "rounded-md border border-slate-300 bg-white text-slate-800 outline-none transition-colors focus:border-teal-500 focus:ring-1 focus:ring-teal-500/30 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-100";
+
 const SearchDropdown = ({
   refEl,
   show,
@@ -175,7 +190,7 @@ const SearchDropdown = ({
   compact?: boolean;
 }) => (
   <div ref={refEl} className="relative">
-    <div className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 dark:text-slate-500">
+    <div className="pointer-events-none absolute left-2.5 top-1/2 -translate-y-1/2 text-slate-400 dark:text-slate-500">
       {icon ?? <FaSearch className="text-xs" />}
     </div>
     <input
@@ -187,17 +202,19 @@ const SearchDropdown = ({
       }}
       onFocus={() => setShow(true)}
       placeholder={placeholder}
-      className={`${compact ? "h-9 text-xs" : "h-11 text-sm"} w-full rounded-xl border border-slate-200 bg-white pl-9 pr-9 text-slate-800 outline-none transition-all focus:border-teal-400 focus:ring-2 focus:ring-teal-500/20 dark:border-slate-800 dark:bg-slate-900 dark:text-slate-100`}
+      className={`${CONTROL} w-full pl-8 pr-8 ${
+        compact ? "h-9 text-sm" : "h-10 text-sm"
+      }`}
     />
     <button
       type="button"
       onClick={() => setShow(!show)}
-      className="absolute right-2 top-1/2 -translate-y-1/2 rounded-md p-1.5 text-slate-400 transition-colors hover:bg-slate-100 hover:text-slate-600 dark:hover:bg-slate-800 dark:hover:text-slate-300"
+      className="absolute right-1.5 top-1/2 -translate-y-1/2 rounded p-1 text-slate-400 transition-colors hover:bg-slate-100 hover:text-teal-600 dark:hover:bg-slate-800"
     >
       <FaChevronDown className={`text-xs transition-transform duration-200 ${show ? "rotate-180" : ""}`} />
     </button>
     {show && (
-      <div className="absolute z-30 mt-1.5 max-h-56 w-full overflow-y-auto rounded-xl border border-slate-200 bg-white p-1 shadow-lg dark:border-slate-800 dark:bg-slate-950">
+      <div className="absolute z-30 mt-1 max-h-60 w-full overflow-y-auto rounded-md border border-slate-200 bg-white p-1 shadow-lg dark:border-slate-700 dark:bg-slate-900">
         {items.length > 0 ? (
           items.map((item) => (
             <button
@@ -207,18 +224,18 @@ const SearchDropdown = ({
                 onSelect(item.code, item.name_1);
                 setShow(false);
               }}
-              className={`flex w-full items-center justify-between rounded-lg px-3 py-2 text-xs transition-colors ${
+              className={`flex w-full items-center justify-between gap-3 rounded px-2.5 py-2 text-sm transition-colors ${
                 value === item.code
-                  ? "bg-teal-50 text-teal-700 dark:bg-teal-950/50 dark:text-teal-300"
-                  : "text-slate-700 hover:bg-slate-50 dark:text-slate-300 dark:hover:bg-slate-900"
+                  ? "bg-teal-50 font-semibold text-teal-700 dark:bg-teal-500/15 dark:text-teal-300"
+                  : "text-slate-700 hover:bg-slate-100 dark:text-slate-300 dark:hover:bg-slate-800"
               }`}
             >
-              <span className="font-medium truncate">{item.name_1}</span>
-              <span className="ml-3 text-[10px] text-slate-400 dark:text-slate-500 font-mono">{item.code}</span>
+              <span className="truncate font-medium">{item.name_1}</span>
+              <span className="shrink-0 font-mono text-[11px] text-slate-400 dark:text-slate-500">{item.code}</span>
             </button>
           ))
         ) : (
-          <p className="px-3 py-3 text-center text-sm text-slate-400 dark:text-slate-500">ບໍ່ພົບ</p>
+          <p className="px-3 py-3 text-center text-sm text-slate-400 dark:text-slate-500">ບໍ່ພົບຂໍ້ມູນ</p>
         )}
       </div>
     )}
@@ -287,6 +304,28 @@ export default function AddJobClient({
 
   const { session } = useSession();
   const ownBranch = (session?.logistic_code ?? "").trim();
+  // Branch model for trip creation:
+  //  - Branch admin (logistic_code = one of the 3 delivery branches): locked to
+  //    their own branch (server already scopes their bills).
+  //  - Manager / head office (unscoped, e.g. 02-0004 or blank): must pick which
+  //    branch's trip they're building.
+  const DELIVERY_BRANCH_CODES = ["02-0001", "02-0002", "02-0003"];
+  const isBranchAdmin = !!ownBranch && DELIVERY_BRANCH_CODES.includes(ownBranch);
+  const branchOptions = transportBranches.filter((b) => DELIVERY_BRANCH_CODES.includes(b.code));
+  const [selectedBranch, setSelectedBranch] = useState(
+    isEdit ? initialJob.forward_transport_code || "" : ""
+  );
+  // Lock a branch admin to their own branch once the session resolves.
+  useEffect(() => {
+    if (isBranchAdmin) setSelectedBranch(ownBranch);
+  }, [isBranchAdmin, ownBranch]);
+  const handleBranchChange = (code: string) => {
+    setSelectedBranch(code);
+    // Route/round belong to a branch's day — reset them when the branch changes.
+    setDeliveryRouteCode("");
+    setRouteSearch("");
+    setDeliveryRoundCode("");
+  };
 
   useEffect(() => {
     void Actions.listDeliveryRoutes(true)
@@ -420,6 +459,7 @@ export default function AddJobClient({
           })),
           forward_transport_code: b.forward_transport_code || undefined,
           pickup_transport_code: b.pickup_transport_code || null,
+          delivery_condition: b.delivery_condition || undefined,
         };
       }
       return map;
@@ -479,7 +519,6 @@ export default function AddJobClient({
   const deferredDriverSearch = useDeferredValue(driverSearch);
   const deferredWorkerSearch = useDeferredValue(workerSearch);
   const deferredRouteSearch = useDeferredValue(routeSearch);
-
   // Persist draft (create mode only — edit mode shouldn't pollute the create draft)
   useEffect(() => {
     if (isEdit) return;
@@ -692,6 +731,28 @@ export default function AddJobClient({
     });
   };
 
+  // Pick the mandatory delivery condition. "ສົ່ງສາຂາ" (to_branch) keeps a
+  // forward branch (defaults to the first option); every other condition clears
+  // it so the completion path treats the bill as a direct hand-off/customer.
+  const setBillDeliveryCondition = (billNo: string, code: string) => {
+    setAddedByBill((prev) => {
+      const group = prev[billNo];
+      if (!group) return prev;
+      const nextForward =
+        code === "to_branch"
+          ? group.forward_transport_code || forwardableBranches[0]?.code || undefined
+          : undefined;
+      return {
+        ...prev,
+        [billNo]: {
+          ...group,
+          delivery_condition: code,
+          forward_transport_code: nextForward,
+        },
+      };
+    });
+  };
+
   const handleRemoveBill = (billNo: string) =>
     setAddedByBill((prev) => {
       const next = { ...prev };
@@ -723,6 +784,7 @@ export default function AddJobClient({
         telephone: group.bill.telephone,
         forward_transport_code: group.forward_transport_code || null,
         pickup_transport_code: group.pickup_transport_code || null,
+        delivery_condition: group.delivery_condition || null,
         items: group.items.map((p) => ({
           item_code: p.item_code,
           item_name: p.item_name,
@@ -741,6 +803,7 @@ export default function AddJobClient({
         delivery_route_code: deliveryRouteCode || null,
         delivery_round_code: deliveryRoundCode || null,
         workers: selectedWorkers,
+        forward_transport_code: selectedBranch || null,
         bills,
       };
 
@@ -770,15 +833,25 @@ export default function AddJobClient({
   const totalAddedItems = Object.values(addedByBill).reduce((s, g) => s + g.items.length, 0);
   const totalAddedBills = Object.keys(addedByBill).length;
 
-  const step1Valid = Boolean(car && driver && docDate && dateLog && deliveryRouteCode && deliveryRoundCode);
-  const canSave = step1Valid && totalAddedBills > 0 && Boolean(docNo);
+  const branchChosen = isBranchAdmin || Boolean(selectedBranch);
+  // Every added bill must have a delivery condition; "ສົ່ງສາຂາ" also needs a branch.
+  const billsMissingCondition = Object.values(addedByBill).filter(
+    (g) => !g.delivery_condition || (g.delivery_condition === "to_branch" && !g.forward_transport_code)
+  ).length;
+  const step1Valid = Boolean(
+    branchChosen && car && driver && docDate && dateLog && deliveryRouteCode && deliveryRoundCode
+  );
+  const canSave = step1Valid && totalAddedBills > 0 && billsMissingCondition === 0 && Boolean(docNo);
 
   const validationHints: string[] = [];
+  if (!branchChosen) validationHints.push("ເລືອກສາຂາ");
+  if (!dateLog) validationHints.push("ເລືອກວັນທີຈັດສົ່ງ");
   if (!car) validationHints.push("ເລືອກລົດ");
   if (!driver) validationHints.push("ເລືອກຄົນຂັບ");
   if (!deliveryRouteCode) validationHints.push("ເລືອກເສັ້ນທາງ");
   if (!deliveryRoundCode) validationHints.push("ເລືອກຮອບ");
   if (totalAddedBills === 0) validationHints.push("ເພີ່ມບິນ");
+  if (billsMissingCondition > 0) validationHints.push(`ເລືອກເງື່ອນໄຂການຈັດສົ່ງ (${billsMissingCondition} ບິນ)`);
 
   const filteredCars = cars.filter(
     (item) =>
@@ -786,8 +859,55 @@ export default function AddJobClient({
       item.name_1.toLowerCase().includes(deferredCarSearch.toLowerCase()) ||
       item.code.toLowerCase().includes(deferredCarSearch.toLowerCase())
   );
+  // Ready bills scoped to the chosen branch. A branch admin's pool is already
+  // server-scoped; a manager sees nothing until they pick a branch.
+  const branchBills = useMemo(() => {
+    if (isBranchAdmin) return availableBills;
+    if (!selectedBranch) return [];
+    return availableBills.filter(
+      (b) => (b.delivery_transport_code ?? "").trim() === selectedBranch
+    );
+  }, [availableBills, isBranchAdmin, selectedBranch]);
+
+  // Bills that still need delivery on the selected date (dateLog), counted per
+  // route and per round, from the ready-to-dispatch pool. Used to (a) show only
+  // routes that actually have bills that day and (b) show the bill count.
+  const routeBillCounts = useMemo(() => {
+    const m: Record<string, number> = {};
+    if (!dateLog) return m;
+    for (const b of branchBills) {
+      if (b.scheduled_date !== dateLog) continue;
+      const rc = (b.delivery_route_code ?? "").trim();
+      if (!rc) continue;
+      m[rc] = (m[rc] ?? 0) + 1;
+    }
+    return m;
+  }, [branchBills, dateLog]);
+
+  // Round counts are scoped to the selected route (once chosen) so the round
+  // dropdown reflects how many bills sit in each round of that route/day.
+  const roundBillCounts = useMemo(() => {
+    const m: Record<string, number> = {};
+    if (!dateLog) return m;
+    for (const b of branchBills) {
+      if (b.scheduled_date !== dateLog) continue;
+      if (deliveryRouteCode && (b.delivery_route_code ?? "").trim() !== deliveryRouteCode) continue;
+      const rd = (b.delivery_round_code ?? "").trim();
+      if (!rd) continue;
+      m[rd] = (m[rd] ?? 0) + 1;
+    }
+    return m;
+  }, [branchBills, dateLog, deliveryRouteCode]);
+
+  // Only routes with bills to deliver that day (always keep the currently
+  // selected route so an edit/preset never disappears), label with the count.
   const filteredRoutes: Option[] = deliveryRoutes
-    .map((r) => ({ code: r.code, name_1: routeLabel(r) }))
+    .filter((r) => (routeBillCounts[r.code] ?? 0) > 0 || r.code === deliveryRouteCode)
+    .map((r) => {
+      const n = routeBillCounts[r.code] ?? 0;
+      const base = routeLabel(r);
+      return { code: r.code, name_1: n > 0 ? `${base} · ${n} ບິນ` : base };
+    })
     .filter(
       (item) =>
         !deferredRouteSearch ||
@@ -810,7 +930,7 @@ export default function AddJobClient({
   // Available column = bills NOT yet in addedByBill (or partially with remaining items)
   const availableColumnBills = useMemo(() => {
     if (!dateLog || !deliveryRouteCode || !deliveryRoundCode) return [];
-    return availableBills
+    return branchBills
       .filter((b) => !addedByBill[b.doc_no]) // exclude already-added (kanban-style)
       .filter(
         (b) =>
@@ -825,7 +945,7 @@ export default function AddJobClient({
           (b.cust_name || "").toLowerCase().includes(normalizedSearchText) ||
           b.cust_code.toLowerCase().includes(normalizedSearchText)
       );
-  }, [availableBills, addedByBill, normalizedSearchText, dateLog, deliveryRouteCode, deliveryRoundCode]);
+  }, [branchBills, addedByBill, normalizedSearchText, dateLog, deliveryRouteCode, deliveryRoundCode]);
 
   const availableEmptyText = !dateLog || !deliveryRouteCode || !deliveryRoundCode
     ? "ເລືອກວັນຈັດສົ່ງ, ເສັ້ນທາງ ແລະ ຮອບກ່ອນ"
@@ -838,33 +958,44 @@ export default function AddJobClient({
     [addedByBill]
   );
 
+  // Add every bill currently shown in the available column (with all its items).
+  const [addingAll, setAddingAll] = useState(false);
+  const handleAddAll = async () => {
+    if (availableColumnBills.length === 0 || addingAll) return;
+    setAddingAll(true);
+    try {
+      for (const b of availableColumnBills) {
+        await handleAddBillFull(b.doc_no);
+      }
+    } finally {
+      setAddingAll(false);
+    }
+  };
   return (
-    <div className="min-h-screen bg-slate-50 text-slate-900 dark:bg-slate-950 dark:text-slate-100">
+    <div className="-m-4 min-h-screen bg-slate-100 text-slate-900 md:-m-5 lg:-m-6 dark:bg-slate-950 dark:text-slate-100">
       {/* Top header */}
-      <div className="sticky top-0 z-30 border-b border-slate-200 bg-white/95 backdrop-blur-xl dark:border-slate-800 dark:bg-slate-950/95">
-        <div className="mx-auto flex w-full max-w-[1600px] items-center gap-3 px-4 py-3 sm:px-6">
+      <div className="sticky top-0 z-30 border-b border-slate-200 bg-white dark:border-slate-800 dark:bg-slate-900">
+        <div className="mx-auto flex w-full max-w-[1700px] items-center gap-3 px-4 py-2.5 sm:px-6">
           <Link
             href="/jobs"
-            className="flex h-10 w-10 flex-shrink-0 items-center justify-center rounded-full border border-slate-200 bg-white text-slate-600 transition-all hover:border-slate-300 hover:bg-slate-50 dark:border-slate-800 dark:bg-slate-900 dark:text-slate-300 dark:hover:bg-slate-800"
+            className="flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-md border border-slate-300 bg-white text-slate-600 transition-colors hover:bg-slate-100 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-300 dark:hover:bg-slate-800"
           >
             <FaArrowLeft className="text-sm" />
           </Link>
 
           <div className="min-w-0 flex-1">
-            <h1 className="truncate text-base font-bold text-slate-950 dark:text-white">
+            <h1 className="truncate text-base font-bold leading-tight text-slate-900 dark:text-white">
               {isEdit ? "ແກ້ໄຂຖ້ຽວຈັດສົ່ງ" : "ສ້າງຖ້ຽວຈັດສົ່ງ"}
             </h1>
-            <p className="truncate text-[11px] text-slate-500 dark:text-slate-400 font-mono">
-              {docNo || "..."}
-            </p>
+            <span className="font-mono text-[11px] font-semibold text-slate-400 dark:text-slate-500">{docNo || "—"}</span>
           </div>
 
           <button
             type="button"
             onClick={() => setShowInfoForm((v) => !v)}
-            className="hidden items-center gap-2 rounded-full border border-slate-200 bg-white px-3 py-1.5 text-xs font-semibold text-slate-700 transition-all hover:border-slate-300 hover:bg-slate-50 dark:border-slate-800 dark:bg-slate-900 dark:text-slate-200 sm:flex"
+            className="hidden items-center gap-2 rounded-md border border-slate-300 bg-white px-3 py-2 text-xs font-semibold text-slate-700 transition-colors hover:bg-slate-100 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-200 dark:hover:bg-slate-800 lg:flex"
           >
-            <FaInfoCircle size={11} />
+            <FaInfoCircle size={11} className="text-teal-600 dark:text-teal-400" />
             {showInfoForm ? "ເຊື່ອງຂໍ້ມູນຖ້ຽວ" : "ສະແດງຂໍ້ມູນຖ້ຽວ"}
             <FaChevronDown className={`text-[10px] transition-transform ${showInfoForm ? "rotate-180" : ""}`} />
           </button>
@@ -880,15 +1011,15 @@ export default function AddJobClient({
               {totalAddedBills} ບິນ · {totalAddedItems} ລາຍການ
             </Chip>
           </div>
-
+ 
           <button
             type="button"
             onClick={() => void handleSave()}
             disabled={saving}
-            className={`flex flex-shrink-0 items-center gap-2 rounded-xl px-4 py-2.5 text-sm font-semibold text-white shadow-sm transition-all sm:px-5 ${
+            className={`flex flex-shrink-0 items-center gap-2 rounded-md px-4 py-2 text-sm font-bold text-white transition-colors ${
               canSave
-                ? "bg-emerald-600 hover:bg-emerald-500"
-                : "bg-slate-300 hover:bg-slate-400 dark:bg-slate-700"
+                ? "bg-teal-600 hover:bg-teal-700"
+                : "cursor-not-allowed bg-slate-300 text-slate-500 dark:bg-slate-700 dark:text-slate-500"
             } disabled:cursor-not-allowed disabled:opacity-60`}
           >
             {saving ? <FaSpinner className="animate-spin" size={13} /> : <FaSave size={13} />}
@@ -901,19 +1032,27 @@ export default function AddJobClient({
             </span>
           </button>
         </div>
-
+ 
         {validationHints.length > 0 && (
-          <div className="border-t border-amber-200 bg-amber-50 px-4 py-2 text-[11px] font-semibold text-amber-700 dark:border-amber-900 dark:bg-amber-950/40 dark:text-amber-300 lg:hidden">
+          <div className="border-t border-amber-200 bg-amber-50 px-4 py-1.5 text-[11px] font-semibold text-amber-700 dark:border-amber-900 dark:bg-amber-950/40 dark:text-amber-300 sm:px-6">
             ⚠ ຍັງເຫຼືອ: {validationHints.join(" · ")}
           </div>
         )}
       </div>
 
-      {/* Job info strip */}
-      {showInfoForm && (
-        <div className="border-b border-slate-200 bg-white dark:border-slate-800 dark:bg-slate-900">
-          <div className="mx-auto w-full max-w-[1600px] px-4 py-4 sm:px-6">
+      {/* Body: settings sidebar + bills */}
+      <div
+        className={`mx-auto grid w-full max-w-[1700px] items-start gap-4 px-4 py-4 sm:px-6 ${
+          showInfoForm ? "lg:grid-cols-[330px_minmax(0,1fr)]" : "lg:grid-cols-1"
+        }`}
+      >
+        {showInfoForm && (
+          <aside className="lg:sticky lg:top-[57px] lg:max-h-[calc(100vh-73px)] lg:self-start lg:overflow-y-auto lg:pr-1">
             <JobInfoStrip
+              isBranchAdmin={isBranchAdmin}
+              selectedBranch={selectedBranch}
+              onBranchChange={handleBranchChange}
+              branchOptions={branchOptions}
               docDate={docDate}
               setDocDate={setDocDate}
               dateLog={dateLog}
@@ -929,6 +1068,7 @@ export default function AddJobClient({
               deliveryRoundCode={deliveryRoundCode}
               setDeliveryRoundCode={setDeliveryRoundCode}
               deliveryRounds={deliveryRounds}
+              roundBillCounts={roundBillCounts}
               car={car}
               setCar={setCar}
               filteredCars={filteredCars}
@@ -955,13 +1095,11 @@ export default function AddJobClient({
               selectedWorkers={selectedWorkers}
               setSelectedWorkers={setSelectedWorkers}
             />
-          </div>
-        </div>
-      )}
+          </aside>
+        )}
 
-      {/* Kanban */}
-      <div className="mx-auto w-full max-w-[1600px] px-4 py-5 sm:px-6">
-        <div className="grid gap-4 lg:grid-cols-2">
+        {/* Bills */}
+        <div className="grid min-w-0 gap-4 md:grid-cols-2">
           {/* Available column */}
           <KanbanColumn
             tone="slate"
@@ -985,23 +1123,36 @@ export default function AddJobClient({
               setDragOverColumn(null);
             }}
             header={
-              <div className="space-y-2">
+              <div className="space-y-2.5">
                 <div className="relative">
-                  <FaSearch className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-xs text-slate-400" />
+                  <FaSearch className="pointer-events-none absolute left-2.5 top-1/2 -translate-y-1/2 text-xs text-slate-400" />
                   <input
                     type="text"
                     value={searchText}
                     onChange={(e) => setSearchText(e.target.value)}
                     placeholder="ຄົ້ນຫາເລກບິນ, ລະຫັດ ຫຼື ຊື່ລູກຄ້າ..."
-                    className="h-10 w-full rounded-xl border border-slate-200 bg-white pl-9 pr-9 text-sm outline-none transition-all focus:border-teal-400 focus:ring-2 focus:ring-teal-500/20 dark:border-slate-800 dark:bg-slate-900"
+                    className={`${CONTROL} h-9 w-full pl-8 pr-8 text-sm`}
                   />
                   {searchingIcTrans && (
-                    <FaSpinner className="absolute right-3 top-1/2 -translate-y-1/2 animate-spin text-xs text-slate-400" />
+                    <FaSpinner className="absolute right-2.5 top-1/2 -translate-y-1/2 animate-spin text-xs text-teal-500" />
                   )}
                 </div>
-                <p className="text-[11px] text-slate-500 dark:text-slate-400">
-                  ສະແດງສະເພາະບິນທີ່ກົງກັບວັນຈັດສົ່ງ ແລະ ຮອບທີ່ເລືອກ
-                </p>
+                <div className="flex items-center justify-between gap-2">
+                  <p className="text-[11px] font-medium text-slate-400 dark:text-slate-500">
+                    ສະແດງສະເພາະບິນທີ່ກົງກັບວັນຈັດສົ່ງ ແລະ ຮອບທີ່ເລືອກ
+                  </p>
+                  {availableColumnBills.length > 0 && (
+                    <button
+                      type="button"
+                      onClick={handleAddAll}
+                      disabled={addingAll}
+                      className="inline-flex shrink-0 cursor-pointer items-center gap-1.5 rounded-md bg-teal-600 px-2.5 py-1.5 text-[11px] font-bold text-white transition-colors hover:bg-teal-700 active:scale-95 disabled:opacity-50"
+                    >
+                      {addingAll ? <FaSpinner className="animate-spin" size={10} /> : <FaPlus size={10} />}
+                      ເພີ່ມທັງໝົດ ({availableColumnBills.length})
+                    </button>
+                  )}
+                </div>
               </div>
             }
           >
@@ -1058,12 +1209,9 @@ export default function AddJobClient({
               setDragOverColumn(null);
             }}
             header={
-              <div className="flex items-center gap-3 text-[11px] text-slate-500 dark:text-slate-400">
-                <span>
-                  <span className="font-bold text-teal-600 dark:text-teal-400">
-                    {totalAddedItems}
-                  </span>{" "}
-                  ລາຍການ
+              <div className="flex items-center gap-3 text-[11px]">
+                <span className="inline-flex items-center gap-1.5 rounded-md border border-teal-200 bg-teal-50 px-2 py-0.5 text-[11px] font-bold text-teal-700 dark:border-teal-800 dark:bg-teal-950/40 dark:text-teal-300">
+                  {totalAddedItems} ລາຍການ
                 </span>
                 {totalAddedBills > 0 && (
                   <button
@@ -1072,7 +1220,7 @@ export default function AddJobClient({
                       setAddedByBill({});
                       setExpandedInJob(null);
                     }}
-                    className="ml-auto inline-flex items-center gap-1 rounded-lg px-2 py-1 text-[11px] font-semibold text-red-500 transition-colors hover:bg-red-50 dark:hover:bg-red-950/30"
+                    className="ml-auto inline-flex cursor-pointer items-center gap-1 rounded-md px-2 py-1 text-[11px] font-bold text-rose-500 transition-colors hover:bg-rose-50 hover:text-rose-600 dark:hover:bg-rose-950/30 active:scale-95"
                   >
                     <FaTrash size={9} /> ລ້າງທັງໝົດ
                   </button>
@@ -1112,6 +1260,7 @@ export default function AddJobClient({
                     transportBranches={transportBranches}
                     onSetForwardCode={(code) => setBillForwardCode(billNo, code)}
                     onSetPickupCode={(code) => setBillPickupCode(billNo, code)}
+                    onSetDeliveryCondition={(code) => setBillDeliveryCondition(billNo, code)}
                     qtyDrafts={qtyDrafts}
                     setQtyDrafts={setQtyDrafts}
                     commitItemQty={commitItemQty}
@@ -1125,7 +1274,6 @@ export default function AddJobClient({
     </div>
   );
 }
-
 /* ============================== Kanban Column ============================== */
 
 function KanbanColumn({
@@ -1149,38 +1297,40 @@ function KanbanColumn({
   onDragLeave?: React.DragEventHandler<HTMLDivElement>;
   onDrop?: React.DragEventHandler<HTMLDivElement>;
 }) {
-  const accent =
-    tone === "teal"
-      ? "border-teal-200 bg-gradient-to-b from-teal-50/40 to-transparent dark:border-teal-900/50"
-      : "border-slate-200 bg-white dark:border-slate-800 dark:bg-slate-900";
-  const titleColor =
-    tone === "teal"
-      ? "text-teal-700 dark:text-teal-300"
-      : "text-slate-700 dark:text-slate-200";
-  const dotColor = tone === "teal" ? "bg-teal-500" : "bg-slate-400";
+  const isTeal = tone === "teal";
+  const surface = isTeal
+    ? "border-teal-300 dark:border-teal-800"
+    : "border-slate-200 dark:border-slate-800";
+  const headerBar = isTeal
+    ? "border-teal-200 bg-teal-50 dark:border-teal-900 dark:bg-teal-950/30"
+    : "border-slate-200 bg-slate-50 dark:border-slate-800 dark:bg-slate-800/40";
+  const titleColor = isTeal
+    ? "text-teal-700 dark:text-teal-300"
+    : "text-slate-700 dark:text-slate-200";
 
   return (
     <div
       onDragOver={onDragOver}
       onDragLeave={onDragLeave}
       onDrop={onDrop}
-      className={`relative rounded-2xl border ${accent} ${highlighted ? "ring-2 ring-teal-400 ring-offset-2 dark:ring-offset-slate-950" : ""} transition-all`}
+      className={`flex flex-col rounded-lg border bg-white dark:bg-slate-900 ${surface} ${
+        highlighted ? "ring-2 ring-teal-500 ring-offset-1 dark:ring-offset-slate-950" : ""
+      }`}
     >
-      <div className="flex items-center justify-between gap-3 border-b border-slate-200 px-4 py-3 dark:border-slate-800">
+      <div className={`flex items-center justify-between gap-3 rounded-t-lg border-b px-3 py-2 ${headerBar}`}>
         <div className="flex items-center gap-2">
-          <span className={`h-2 w-2 rounded-full ${dotColor}`} />
           <h2 className={`text-sm font-bold ${titleColor}`}>{title}</h2>
-          <span className="rounded-full bg-slate-100 px-2 py-0.5 text-[10px] font-bold text-slate-700 dark:bg-slate-800 dark:text-slate-200">
+          <span className="rounded bg-slate-200 px-1.5 py-0.5 text-[11px] font-bold text-slate-700 dark:bg-slate-700 dark:text-slate-200">
             {count}
           </span>
         </div>
       </div>
       {header && (
-        <div className="border-b border-slate-200 px-4 py-3 dark:border-slate-800">
+        <div className="border-b border-slate-200 px-3 py-2.5 dark:border-slate-800">
           {header}
         </div>
       )}
-      <div className="p-3 lg:max-h-[calc(100vh-280px)] lg:overflow-y-auto">
+      <div className="p-2.5 lg:max-h-[calc(100vh-210px)] lg:overflow-y-auto">
         {children}
       </div>
     </div>
@@ -1209,15 +1359,20 @@ function AvailableCard({
       draggable
       onDragStart={onDragStart}
       onDragEnd={onDragEnd}
-      className={`group flex cursor-grab items-center gap-3 rounded-xl border border-slate-200 bg-white px-3 py-3 transition-all hover:border-teal-300 hover:shadow-md active:cursor-grabbing dark:border-slate-800 dark:bg-slate-900/80 dark:hover:border-teal-700 ${dragging ? "opacity-40" : ""}`}
+      className={`group flex cursor-grab items-center gap-2.5 rounded-md border border-slate-200 bg-white px-2.5 py-2 transition-colors hover:border-teal-300 hover:bg-teal-50/40 active:cursor-grabbing dark:border-slate-800 dark:bg-slate-900 dark:hover:border-teal-800 dark:hover:bg-teal-950/20 ${dragging ? "opacity-40" : ""}`}
     >
-      <div className="flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-lg bg-slate-100 text-slate-500 dark:bg-slate-800 dark:text-slate-400">
+      <div className="flex h-8 w-8 flex-shrink-0 items-center justify-center rounded border border-slate-200 bg-slate-100 text-slate-500 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-400">
         <FaBoxOpen size={12} />
       </div>
       <div className="min-w-0 flex-1">
-        <p className="truncate text-sm font-bold text-slate-900 dark:text-slate-100">
-          {bill.doc_no}
-        </p>
+        <div className="flex items-center gap-2">
+          <p className="truncate text-sm font-bold text-slate-900 dark:text-slate-100">
+            {bill.doc_no}
+          </p>
+          <span className="shrink-0 rounded bg-slate-100 px-1.5 py-0.5 text-[10px] font-bold text-slate-600 dark:bg-slate-800 dark:text-slate-300">
+            {bill.count_item} ລາຍການ
+          </span>
+        </div>
         <p className="mt-0.5 truncate text-[11px] text-slate-500 dark:text-slate-400">
           {bill.cust_name || bill.cust_code} · {bill.doc_date}
         </p>
@@ -1232,13 +1387,13 @@ function AvailableCard({
         {(bill.scheduled_date_display || bill.delivery_round_name) && (
           <div className="mt-1 flex flex-wrap items-center gap-1">
             {bill.scheduled_date_display && (
-              <span className="inline-flex items-center gap-1 rounded-full bg-sky-500/10 px-1.5 py-0.5 text-[9px] font-semibold text-sky-700 dark:text-sky-400">
+              <span className="inline-flex items-center gap-1 rounded border border-sky-200 bg-sky-50 px-1.5 py-0.5 text-[10px] font-bold text-sky-700 dark:border-sky-900 dark:bg-sky-950/40 dark:text-sky-300">
                 📅 {bill.scheduled_date_display}
               </span>
             )}
             {bill.delivery_round_name && (
               <span
-                className="inline-flex items-center gap-1 rounded-full bg-amber-500/10 px-1.5 py-0.5 text-[9px] font-semibold text-amber-700 dark:text-amber-400"
+                className="inline-flex items-center gap-1 rounded border border-amber-200 bg-amber-50 px-1.5 py-0.5 text-[10px] font-bold text-amber-700 dark:border-amber-900 dark:bg-amber-950/40 dark:text-amber-300"
                 title={bill.delivery_round_time_label || ""}
               >
                 🕐 {bill.delivery_round_name}
@@ -1249,7 +1404,7 @@ function AvailableCard({
         {bill.incoming_forwarded && (
           <div className="mt-1 flex flex-wrap items-center gap-1">
             <span
-              className="inline-flex items-center gap-1 rounded-full border border-sky-500/30 bg-sky-500/10 px-1.5 py-0.5 text-[9px] font-semibold text-sky-700 dark:text-sky-400"
+              className="inline-flex items-center gap-1 rounded border border-sky-200 bg-sky-50 px-1.5 py-0.5 text-[10px] font-bold text-sky-700 dark:border-sky-900 dark:bg-sky-950/40 dark:text-sky-300"
               title={bill.forwarded_at ? `Forwarded ${bill.forwarded_at}` : ""}
             >
               <FaArrowRight size={8} />
@@ -1258,14 +1413,11 @@ function AvailableCard({
           </div>
         )}
       </div>
-      <span className="rounded-full bg-slate-100 px-2 py-0.5 text-[10px] font-semibold text-slate-700 dark:bg-slate-800 dark:text-slate-300">
-        {bill.count_item} ລາຍການ
-      </span>
       <button
         type="button"
         onClick={onAdd}
         disabled={loading}
-        className="flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-lg bg-teal-600 text-white transition-all hover:bg-teal-500 active:scale-95 disabled:opacity-50"
+        className="flex h-7 w-7 flex-shrink-0 cursor-pointer items-center justify-center rounded bg-teal-600 text-white transition-colors hover:bg-teal-700 active:scale-95 disabled:opacity-50"
         title="ເພີ່ມເຂົ້າຖ້ຽວ"
       >
         {loading ? <FaSpinner className="animate-spin" size={11} /> : <FaPlus size={11} />}
@@ -1291,6 +1443,7 @@ function InJobCard({
   transportBranches,
   onSetForwardCode,
   onSetPickupCode,
+  onSetDeliveryCondition,
   qtyDrafts,
   setQtyDrafts,
   commitItemQty,
@@ -1311,6 +1464,7 @@ function InJobCard({
   transportBranches: TransportBranch[];
   onSetForwardCode: (code: string | null) => void;
   onSetPickupCode: (code: string | null) => void;
+  onSetDeliveryCondition: (code: string) => void;
   qtyDrafts: Record<string, string>;
   setQtyDrafts: React.Dispatch<React.SetStateAction<Record<string, string>>>;
   commitItemQty: (billNo: string, itemCode: string, maxQty: number) => void;
@@ -1329,14 +1483,14 @@ function InJobCard({
       draggable
       onDragStart={onDragStart}
       onDragEnd={onDragEnd}
-      className={`overflow-hidden rounded-xl border border-teal-200 bg-white shadow-sm transition-all hover:shadow-md dark:border-teal-900/60 dark:bg-slate-900 ${dragging ? "opacity-40" : ""}`}
+      className={`overflow-hidden rounded-md border border-teal-300 bg-white dark:border-teal-800 dark:bg-slate-900 ${dragging ? "opacity-40" : ""}`}
     >
-      <div className="flex items-center gap-3 px-3 py-3">
+      <div className="flex items-center gap-2.5 px-2.5 py-2">
         <div
-          className={`flex h-9 w-9 flex-shrink-0 cursor-grab items-center justify-center rounded-lg ${
+          className={`flex h-8 w-8 flex-shrink-0 cursor-grab items-center justify-center rounded border ${
             isPartial
-              ? "bg-amber-100 text-amber-700 dark:bg-amber-950/40 dark:text-amber-300"
-              : "bg-emerald-100 text-emerald-700 dark:bg-emerald-950/40 dark:text-emerald-300"
+              ? "border-amber-200 bg-amber-50 text-amber-700 dark:border-amber-900 dark:bg-amber-950/40 dark:text-amber-300"
+              : "border-emerald-200 bg-emerald-50 text-emerald-700 dark:border-emerald-900 dark:bg-emerald-950/40 dark:text-emerald-300"
           }`}
           title="ລາກໄປຊ້າຍເພື່ອລົບ"
         >
@@ -1348,12 +1502,12 @@ function InJobCard({
           className="flex min-w-0 flex-1 items-center gap-2 text-left"
         >
           <div className="min-w-0 flex-1">
-            <div className="flex items-center gap-2 flex-wrap">
+            <div className="flex flex-wrap items-center gap-2">
               <p className="truncate text-sm font-bold text-slate-900 dark:text-slate-100">
                 {billNo}
               </p>
               {isPartial && (
-                <span className="rounded-full bg-amber-100 px-2 py-0.5 text-[10px] font-semibold text-amber-700 dark:bg-amber-950/40 dark:text-amber-300">
+                <span className="rounded border border-amber-200 bg-amber-50 px-1.5 py-0.5 text-[10px] font-bold text-amber-700 dark:border-amber-900 dark:bg-amber-950/40 dark:text-amber-300">
                   ບາງສ່ວນ
                 </span>
               )}
@@ -1370,7 +1524,7 @@ function InJobCard({
               </p>
             )}
           </div>
-          <span className="rounded-full bg-teal-100 px-2 py-0.5 text-[10px] font-semibold text-teal-700 dark:bg-teal-950/40 dark:text-teal-300">
+          <span className="rounded border border-teal-200 bg-teal-50 px-2 py-0.5 text-[10px] font-bold text-teal-700 dark:border-teal-800 dark:bg-teal-950/40 dark:text-teal-300">
             {addedCount}/{totalOriginal}
           </span>
           <FaChevronDown
@@ -1380,21 +1534,21 @@ function InJobCard({
         <button
           type="button"
           onClick={onRemoveBill}
-          className="flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-lg text-red-500 transition-colors hover:bg-red-50 dark:hover:bg-red-950/30"
+          className="flex h-7 w-7 flex-shrink-0 cursor-pointer items-center justify-center rounded text-rose-500 transition-colors hover:bg-rose-50 dark:hover:bg-rose-950/30"
           title="ລົບ"
         >
           <FaTimes size={12} />
         </button>
       </div>
 
-      <div className="flex flex-wrap items-center gap-1.5 border-t border-slate-100 bg-slate-50/60 px-3 py-2 dark:border-slate-800 dark:bg-slate-900/40">
-        <span className="text-[10px] font-semibold text-slate-500 dark:text-slate-400">
+      <div className="flex flex-wrap items-center gap-1.5 border-t border-slate-200 bg-slate-50 px-2.5 py-2 dark:border-slate-800 dark:bg-slate-800/30">
+        <span className="text-[11px] font-bold text-slate-500 dark:text-slate-400">
           🏬 ຮັບເຄື່ອງ:
         </span>
         <select
           value={group.pickup_transport_code ?? ""}
           onChange={(e) => onSetPickupCode(e.target.value === "" ? null : e.target.value)}
-          className="h-7 rounded-md border border-slate-200 bg-white px-1.5 text-[10px] outline-none focus:border-teal-400 focus:ring-2 focus:ring-teal-500/20 dark:border-slate-700 dark:bg-slate-900"
+          className={`${CONTROL} h-7 px-2 text-[11px] font-medium`}
           title="ຈຸດທີ່ຄົນຂັບໄປຮັບສິນຄ້າຂອງບິນນີ້"
         >
           <option value="">
@@ -1409,43 +1563,49 @@ function InJobCard({
         </select>
       </div>
 
-      <div className="flex flex-wrap items-center gap-1.5 border-t border-slate-100 bg-slate-50/60 px-3 py-2 dark:border-slate-800 dark:bg-slate-900/40">
-        <span className="text-[10px] font-semibold text-slate-500 dark:text-slate-400">
-          ປາຍທາງ:
+      <div className="flex flex-wrap items-center gap-1.5 border-t border-slate-200 bg-slate-50 px-2.5 py-2 dark:border-slate-800 dark:bg-slate-800/30">
+        <span className="text-[11px] font-bold text-slate-500 dark:text-slate-400">
+          ປາຍທາງ: <span className="text-rose-500">*</span>
         </span>
-        <button
-          type="button"
-          onClick={() => onSetForwardCode(null)}
-          className={`rounded-full px-2.5 py-1 text-[10px] font-semibold transition-all ${
-            !group.forward_transport_code
-              ? "bg-emerald-100 text-emerald-700 dark:bg-emerald-950/40 dark:text-emerald-300"
-              : "bg-slate-100 text-slate-600 hover:bg-slate-200 dark:bg-slate-800 dark:text-slate-300"
-          }`}
-        >
-          ສົ່ງລູກຄ້າ
-        </button>
-        <button
-          type="button"
-          onClick={() => {
-            if (!group.forward_transport_code && forwardableBranches.length > 0) {
-              onSetForwardCode(forwardableBranches[0].code);
-            }
-          }}
-          disabled={forwardableBranches.length === 0}
-          className={`rounded-full px-2.5 py-1 text-[10px] font-semibold transition-all disabled:opacity-50 ${
-            group.forward_transport_code
-              ? "bg-sky-100 text-sky-700 dark:bg-sky-950/40 dark:text-sky-300"
-              : "bg-slate-100 text-slate-600 hover:bg-slate-200 dark:bg-slate-800 dark:text-slate-300"
-          }`}
-        >
-          ສົ່ງຕໍ່ສາຂາ
-        </button>
-        {group.forward_transport_code && (
+        {DELIVERY_CONDITIONS.map((c) => {
+          const active = group.delivery_condition === c.code;
+          let btnClass = "";
+          if (c.code === "to_customer") {
+            btnClass = active
+              ? "border border-sky-600 bg-sky-600 text-white"
+              : "border border-sky-200 bg-sky-50 text-sky-700 hover:bg-sky-100 dark:border-sky-900 dark:bg-sky-950/30 dark:text-sky-300 dark:hover:bg-sky-950/50";
+          } else if (c.code === "to_branch") {
+            btnClass = active
+              ? "border border-emerald-600 bg-emerald-600 text-white"
+              : "border border-emerald-200 bg-emerald-50 text-emerald-700 hover:bg-emerald-100 dark:border-emerald-900 dark:bg-emerald-950/30 dark:text-emerald-300 dark:hover:bg-emerald-950/50";
+          } else if (c.code === "to_carrier") {
+            btnClass = active
+              ? "border border-indigo-600 bg-indigo-600 text-white"
+              : "border border-indigo-200 bg-indigo-50 text-indigo-700 hover:bg-indigo-100 dark:border-indigo-900 dark:bg-indigo-950/30 dark:text-indigo-300 dark:hover:bg-indigo-950/50";
+          } else {
+            // to_bus
+            btnClass = active
+              ? "border border-violet-600 bg-violet-600 text-white"
+              : "border border-violet-200 bg-violet-50 text-violet-700 hover:bg-violet-100 dark:border-violet-900 dark:bg-violet-950/30 dark:text-violet-300 dark:hover:bg-violet-950/50";
+          }
+          return (
+            <button
+              key={c.code}
+              type="button"
+              onClick={() => onSetDeliveryCondition(c.code)}
+              className={`cursor-pointer rounded px-2.5 py-1 text-[11px] font-bold transition-colors active:scale-95 ${btnClass}`}
+            >
+              {c.label}
+            </button>
+          );
+        })}
+        {group.delivery_condition === "to_branch" && (
           <select
-            value={group.forward_transport_code}
-            onChange={(e) => onSetForwardCode(e.target.value)}
-            className="h-7 rounded-md border border-sky-200 bg-white px-1.5 text-[10px] outline-none focus:border-sky-400 focus:ring-2 focus:ring-sky-500/20 dark:border-sky-800 dark:bg-slate-900"
+            value={group.forward_transport_code ?? ""}
+            onChange={(e) => onSetForwardCode(e.target.value || null)}
+            className={`${CONTROL} h-7 px-2 text-[11px] font-medium`}
           >
+            <option value="">- ເລືອກສາຂາ -</option>
             {forwardableBranches.map((b) => (
               <option key={b.code} value={b.code}>
                 {b.name_1} ({b.code})
@@ -1453,18 +1613,21 @@ function InJobCard({
             ))}
           </select>
         )}
+        {!group.delivery_condition && (
+          <span className="text-[11px] font-semibold text-rose-500">ກະລຸນາເລືອກ</span>
+        )}
       </div>
 
       {expanded && (
-        <div className="border-t border-slate-100 bg-slate-50 px-3 py-3 dark:border-slate-800 dark:bg-slate-900/50">
+        <div className="border-t border-slate-200 bg-slate-50 px-2.5 py-2.5 dark:border-slate-800 dark:bg-slate-800/20">
           {loading || !products ? (
             <div className="flex items-center justify-center gap-2 py-5 text-xs text-slate-500">
-              <FaSpinner className="animate-spin" size={11} /> ກຳລັງໂຫຼດ...
+              <FaSpinner className="animate-spin text-teal-500" size={11} /> ກຳລັງໂຫຼດ...
             </div>
           ) : products.length === 0 ? (
             <p className="py-3 text-center text-xs text-slate-500">ບໍ່ມີສິນຄ້າ</p>
           ) : (
-            <div className="space-y-1.5">
+            <div className="space-y-1">
               {products.map((p) => {
                 const added = group.items.find((i) => i.item_code === p.item_code);
                 const isAdded = !!added;
@@ -1473,28 +1636,28 @@ function InJobCard({
                 return (
                   <div
                     key={p.item_code}
-                    className={`flex items-center gap-2 rounded-lg border px-2.5 py-2 ${
+                    className={`flex items-center gap-2 rounded border px-2.5 py-1.5 ${
                       isAdded
-                        ? "border-teal-200 bg-white dark:border-teal-800 dark:bg-slate-900"
-                        : "border-slate-200 bg-slate-50 dark:border-slate-700 dark:bg-slate-900/50"
+                        ? "border-teal-200 bg-teal-50/60 dark:border-teal-900 dark:bg-teal-950/20"
+                        : "border-slate-200 bg-white dark:border-slate-800 dark:bg-slate-900"
                     }`}
                   >
                     <button
                       type="button"
                       onClick={() => toggleAddedItem(group.bill, p)}
-                      className={`flex h-5 w-5 flex-shrink-0 items-center justify-center rounded transition-colors ${
+                      className={`flex h-5 w-5 flex-shrink-0 cursor-pointer items-center justify-center rounded transition-colors active:scale-95 ${
                         isAdded
                           ? "bg-teal-600 text-white"
-                          : "border border-slate-300 dark:border-slate-600"
+                          : "border border-slate-300 bg-white hover:bg-slate-100 dark:border-slate-700 dark:bg-slate-900 dark:hover:bg-slate-800"
                       }`}
                     >
                       {isAdded && <FaCheck size={9} />}
                     </button>
                     <div className="min-w-0 flex-1">
-                      <p className="truncate text-[11px] font-semibold text-slate-800 dark:text-slate-100">
+                      <p className="truncate text-[11px] font-bold text-slate-800 dark:text-slate-100">
                         {p.item_name}
                       </p>
-                      <p className="truncate font-mono text-[9px] text-slate-400">
+                      <p className="truncate font-mono text-[10px] text-slate-400">
                         {p.item_code}
                       </p>
                     </div>
@@ -1511,12 +1674,12 @@ function InJobCard({
                           }))
                         }
                         onBlur={() => commitItemQty(billNo, p.item_code, p.qty)}
-                        className="h-7 w-14 rounded-md border border-teal-300 bg-white px-1.5 text-center text-[11px] font-bold text-teal-700 outline-none focus:ring-2 focus:ring-teal-500/20 dark:border-teal-700 dark:bg-slate-900 dark:text-teal-300"
+                        className="h-7 w-14 rounded border border-teal-400 bg-white px-1.5 text-center text-[11px] font-bold text-teal-700 outline-none focus:ring-1 focus:ring-teal-500/40 dark:border-teal-700 dark:bg-slate-900 dark:text-teal-300"
                       />
                     ) : (
-                      <span className="text-[11px] font-bold text-slate-500">{p.qty}</span>
+                      <span className="text-[11px] font-bold text-slate-500 dark:text-slate-400">{p.qty}</span>
                     )}
-                    <span className="text-[10px] text-slate-400 w-12 truncate">
+                    <span className="w-12 truncate text-[10px] text-slate-400">
                       / {p.qty} {p.unit_code}
                     </span>
                   </div>
@@ -1533,26 +1696,33 @@ function InJobCard({
 function DropHint({ highlighted }: { highlighted?: boolean }) {
   return (
     <div
-      className={`flex flex-col items-center justify-center gap-3 rounded-xl border-2 border-dashed py-12 transition-all ${
+      className={`flex flex-col items-center justify-center gap-3 rounded-md border-2 border-dashed py-12 transition-colors ${
         highlighted
-          ? "border-teal-400 bg-teal-50 dark:border-teal-600 dark:bg-teal-950/40"
-          : "border-slate-300 bg-slate-50/50 dark:border-slate-700 dark:bg-slate-900/30"
+          ? "border-teal-500 bg-teal-50 dark:border-teal-600 dark:bg-teal-950/20"
+          : "border-slate-300 bg-slate-50 dark:border-slate-700 dark:bg-slate-900/40"
       }`}
     >
-      <div className="flex h-12 w-12 items-center justify-center rounded-2xl bg-white shadow-sm dark:bg-slate-800">
-        <FaArrowRight className="text-teal-500" />
+      <div className={`flex h-11 w-11 items-center justify-center rounded-md border ${
+        highlighted
+          ? "border-teal-300 bg-white dark:border-teal-700 dark:bg-slate-900"
+          : "border-slate-200 bg-white dark:border-slate-700 dark:bg-slate-900"
+      }`}>
+        <FaArrowRight className={`text-sm ${highlighted ? "text-teal-600" : "text-slate-400"}`} />
       </div>
-      <p className="text-sm font-semibold text-slate-600 dark:text-slate-300">
+      <p className={`text-sm font-bold ${highlighted ? "text-teal-600 dark:text-teal-400" : "text-slate-600 dark:text-slate-300"}`}>
         ລາກບິນມາວາງທີ່ນີ້
       </p>
-      <p className="text-[11px] text-slate-400">ຫຼື ກົດ + ຢູ່ບິນດ້ານຊ້າຍ</p>
+      <p className="text-[11px] font-medium text-slate-400 dark:text-slate-500">ຫຼື ກົດ + ຢູ່ບິນດ້ານຊ້າຍ</p>
     </div>
   );
 }
-
 /* ============================== Job Info Strip ============================== */
 
 function JobInfoStrip(props: {
+  isBranchAdmin: boolean;
+  selectedBranch: string;
+  onBranchChange: (code: string) => void;
+  branchOptions: TransportBranch[];
   docDate: string;
   setDocDate: (v: string) => void;
   dateLog: string;
@@ -1568,6 +1738,7 @@ function JobInfoStrip(props: {
   deliveryRoundCode: string;
   setDeliveryRoundCode: (v: string) => void;
   deliveryRounds: Array<{ code: string; name: string; time_label?: string }>;
+  roundBillCounts: Record<string, number>;
   car: string;
   setCar: (v: string) => void;
   filteredCars: Option[];
@@ -1595,19 +1766,39 @@ function JobInfoStrip(props: {
   setSelectedWorkers: React.Dispatch<React.SetStateAction<string[]>>;
 }) {
   return (
-    <section className="overflow-visible rounded-2xl border border-slate-200 bg-white shadow-sm dark:border-slate-800 dark:bg-slate-900">
-      <div className="flex flex-col gap-1 border-b border-slate-100 px-4 py-3 dark:border-slate-800 sm:flex-row sm:items-center sm:justify-between">
-        <div>
-          <p className="text-[10px] font-bold uppercase tracking-[0.18em] text-teal-600 dark:text-teal-400">
-            ຕັ້ງຄ່າການຈັດສົ່ງ
-          </p>
-          <h2 className="text-sm font-bold text-slate-800 dark:text-white">ຂໍ້ມູນຖ້ຽວຈັດສົ່ງ</h2>
-        </div>
-        <p className="text-[11px] text-slate-400">ເລືອກໃຫ້ຄົບເພື່ອດຶງບິນຕາມແຜນ</p>
+    <section className="overflow-visible rounded-lg border border-slate-200 bg-white dark:border-slate-800 dark:bg-slate-900">
+      <div className="border-b border-slate-200 px-3 py-2.5 dark:border-slate-800">
+        <p className="text-[10px] font-semibold uppercase tracking-wider text-teal-600 dark:text-teal-400">
+          ຕັ້ງຄ່າການຈັດສົ່ງ
+        </p>
+        <h2 className="text-sm font-bold text-slate-800 dark:text-white">ຂໍ້ມູນຖ້ຽວຈັດສົ່ງ</h2>
+        <p className="mt-0.5 text-[11px] text-slate-400 dark:text-slate-500">ເລືອກໃຫ້ຄົບເພື່ອດຶງບິນຕາມແຜນ</p>
       </div>
 
-      <div className="grid gap-4 p-4 xl:grid-cols-[minmax(0,1.35fr)_minmax(0,1fr)_minmax(260px,0.8fr)]">
+      <div className="divide-y divide-slate-200 dark:divide-slate-800">
         <InfoGroup title="ແຜນສົ່ງ" icon={<FaCalendarAlt size={12} />}>
+          <Field label="ສາຂາຂົນສົ່ງ" required icon={<FaTruck size={10} />}>
+            {props.isBranchAdmin ? (
+              <div className="flex h-10 w-full items-center rounded-md border border-slate-200 bg-slate-50 px-3 text-sm font-semibold text-slate-700 dark:border-slate-800 dark:bg-slate-800/40 dark:text-slate-200">
+                {props.branchOptions.find((b) => b.code === props.selectedBranch)?.name_1 ||
+                  props.selectedBranch ||
+                  "-"}
+              </div>
+            ) : (
+              <select
+                value={props.selectedBranch}
+                onChange={(e) => props.onBranchChange(e.target.value)}
+                className="h-10 w-full rounded-md border border-slate-300 bg-white px-3 text-sm text-slate-800 outline-none transition-colors focus:border-teal-500 focus:ring-1 focus:ring-teal-500/30 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-100"
+              >
+                <option value="">- ເລືອກສາຂາ -</option>
+                {props.branchOptions.map((b) => (
+                  <option key={b.code} value={b.code}>
+                    {b.name_1 || b.code}
+                  </option>
+                ))}
+              </select>
+            )}
+          </Field>
           <div className="grid gap-3 sm:grid-cols-2">
             <Field label="ວັນທີເອກະສານ" icon={<FaCalendarAlt size={10} />}>
               <input
@@ -1616,17 +1807,17 @@ function JobInfoStrip(props: {
                 min={FIXED_YEAR_START}
                 max={FIXED_YEAR_END}
                 onChange={(e) => props.setDocDate(e.target.value)}
-                className="h-10 w-full rounded-xl border border-slate-200 bg-white px-3 text-sm outline-none transition-all focus:border-teal-400 focus:ring-2 focus:ring-teal-500/20 dark:border-slate-800 dark:bg-slate-950"
+                className="h-10 w-full rounded-md border border-slate-300 bg-white px-3 text-sm text-slate-800 outline-none transition-colors focus:border-teal-500 focus:ring-1 focus:ring-teal-500/30 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-100"
               />
             </Field>
-            <Field label="ວັນທີຈັດສົ່ງ" icon={<FaCalendarAlt size={10} />}>
+            <Field label="ວັນທີຈັດສົ່ງ" required icon={<FaCalendarAlt size={10} />}>
               <input
                 type="date"
                 value={props.dateLog}
                 min={FIXED_YEAR_START}
                 max={FIXED_YEAR_END}
                 onChange={(e) => props.setDateLog(e.target.value)}
-                className="h-10 w-full rounded-xl border border-slate-200 bg-white px-3 text-sm outline-none transition-all focus:border-teal-400 focus:ring-2 focus:ring-teal-500/20 dark:border-slate-800 dark:bg-slate-950"
+                className="h-10 w-full rounded-md border border-slate-300 bg-white px-3 text-sm text-slate-800 outline-none transition-colors focus:border-teal-500 focus:ring-1 focus:ring-teal-500/30 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-100"
               />
             </Field>
           </div>
@@ -1655,15 +1846,19 @@ function JobInfoStrip(props: {
             <select
               value={props.deliveryRoundCode}
               onChange={(e) => props.setDeliveryRoundCode(e.target.value)}
-              className="h-10 w-full rounded-xl border border-slate-200 bg-white px-3 text-sm outline-none transition-all focus:border-teal-400 focus:ring-2 focus:ring-teal-500/20 dark:border-slate-800 dark:bg-slate-950"
+              className="h-10 w-full rounded-md border border-slate-300 bg-white px-3 text-sm text-slate-800 outline-none transition-colors focus:border-teal-500 focus:ring-1 focus:ring-teal-500/30 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-100"
             >
               <option value="">- ບໍ່ກຳນົດ -</option>
-              {props.deliveryRounds.map((r) => (
-                <option key={r.code} value={r.code}>
-                  {r.name}
-                  {r.time_label ? ` (${r.time_label})` : ""}
-                </option>
-              ))}
+              {props.deliveryRounds.map((r) => {
+                const n = props.roundBillCounts[r.code] ?? 0;
+                return (
+                  <option key={r.code} value={r.code}>
+                    {r.name}
+                    {r.time_label ? ` (${r.time_label})` : ""}
+                    {n > 0 ? ` · ${n} ບິນ` : ""}
+                  </option>
+                );
+              })}
             </select>
           </Field>
         </InfoGroup>
@@ -1735,7 +1930,7 @@ function JobInfoStrip(props: {
             />
           </Field>
 
-          <div className="min-h-10 rounded-xl border border-dashed border-slate-200 bg-slate-50/60 p-2 dark:border-slate-800 dark:bg-slate-950/40">
+          <div className="min-h-[56px] rounded-md border border-dashed border-slate-300 bg-slate-50 p-2 dark:border-slate-700 dark:bg-slate-900/40">
             {props.selectedWorkers.length > 0 ? (
               <div className="flex flex-wrap gap-1.5">
                 {props.selectedWorkers.map((wc) => {
@@ -1743,7 +1938,7 @@ function JobInfoStrip(props: {
                   return (
                     <span
                       key={wc}
-                      className="inline-flex items-center gap-1.5 rounded-full bg-teal-50 px-2.5 py-1 text-[11px] font-medium text-teal-700 dark:bg-teal-950/50 dark:text-teal-300"
+                      className="inline-flex items-center gap-1.5 rounded border border-teal-200 bg-teal-50 px-2 py-1 text-[11px] font-semibold text-teal-700 transition-colors hover:bg-teal-100 dark:border-teal-800 dark:bg-teal-950/40 dark:text-teal-300"
                     >
                       {w?.name_1 || wc}
                       <button
@@ -1751,7 +1946,7 @@ function JobInfoStrip(props: {
                         onClick={() =>
                           props.setSelectedWorkers((cur) => cur.filter((c) => c !== wc))
                         }
-                        className="text-teal-400 transition-colors hover:text-red-500"
+                        className="text-teal-500 hover:text-rose-500 transition-colors cursor-pointer p-0.5"
                       >
                         <FaTimes size={8} />
                       </button>
@@ -1760,7 +1955,7 @@ function JobInfoStrip(props: {
                 })}
               </div>
             ) : (
-              <p className="px-1 py-1 text-[11px] text-slate-400">
+              <p className="px-1 py-3 text-center text-[11px] text-slate-400 dark:text-slate-500 italic">
                 ຍັງບໍ່ໄດ້ເລືອກກຳມະກອນ
               </p>
             )}
@@ -1770,7 +1965,6 @@ function JobInfoStrip(props: {
     </section>
   );
 }
-
 /* ============================== Shared UI ============================== */
 
 function Field({
@@ -1786,10 +1980,10 @@ function Field({
 }) {
   return (
     <div>
-      <label className="mb-1 flex items-center gap-1 text-[10px] font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400">
+      <label className="mb-1 flex items-center gap-1 text-[11px] font-semibold text-slate-500 dark:text-slate-400">
         {icon}
         {label}
-        {required && <span className="text-red-500">*</span>}
+        {required && <span className="text-rose-500">*</span>}
       </label>
       {children}
     </div>
@@ -1806,14 +2000,14 @@ function InfoGroup({
   children: React.ReactNode;
 }) {
   return (
-    <div className="rounded-xl border border-slate-200/70 bg-slate-50/70 p-3 dark:border-slate-800 dark:bg-slate-950/40">
-      <div className="mb-3 flex items-center gap-2">
-        <span className="flex h-8 w-8 items-center justify-center rounded-lg bg-teal-50 text-teal-700 dark:bg-teal-950/50 dark:text-teal-300">
+    <div className="px-3 py-3">
+      <div className="mb-2.5 flex items-center gap-2">
+        <span className="flex h-6 w-6 items-center justify-center rounded border border-teal-200 bg-teal-50 text-teal-600 dark:border-teal-900 dark:bg-teal-950/40 dark:text-teal-400">
           {icon}
         </span>
-        <h3 className="text-xs font-bold text-slate-700 dark:text-slate-200">{title}</h3>
+        <h3 className="text-xs font-bold uppercase tracking-wide text-slate-600 dark:text-slate-300">{title}</h3>
       </div>
-      <div className="space-y-3">{children}</div>
+      <div className="space-y-2.5">{children}</div>
     </div>
   );
 }
@@ -1829,10 +2023,10 @@ function Chip({
 }) {
   return (
     <span
-      className={`inline-flex max-w-[180px] items-center gap-1.5 truncate rounded-full border px-3 py-1.5 text-[11px] font-semibold ${
+      className={`inline-flex max-w-[180px] items-center gap-1.5 truncate rounded-md border px-2.5 py-1 text-[11px] font-semibold ${
         ok
-          ? "border-teal-200 bg-teal-50 text-teal-700 dark:border-teal-900 dark:bg-teal-950/40 dark:text-teal-300"
-          : "border-amber-200 bg-amber-50 text-amber-700 dark:border-amber-900 dark:bg-amber-950/40 dark:text-amber-300"
+          ? "border-teal-200 bg-teal-50 text-teal-700 dark:border-teal-800 dark:bg-teal-950/40 dark:text-teal-300"
+          : "border-amber-200 bg-amber-50 text-amber-700 dark:border-amber-800 dark:bg-amber-950/40 dark:text-amber-300"
       }`}
     >
       {icon}
@@ -1851,12 +2045,12 @@ function EmptyState({
   sub?: string;
 }) {
   return (
-    <div className="px-4 py-12 text-center">
-      <div className="mx-auto mb-3 flex h-14 w-14 items-center justify-center rounded-2xl bg-slate-100 text-slate-400 dark:bg-slate-800 dark:text-slate-500">
+    <div className="px-4 py-10 text-center">
+      <div className="mx-auto mb-3 flex h-12 w-12 items-center justify-center rounded-md border border-slate-200 bg-slate-100 text-slate-400 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-500">
         {icon}
       </div>
       <p className="text-sm font-semibold text-slate-700 dark:text-slate-200">{title}</p>
-      {sub && <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">{sub}</p>}
+      {sub && <p className="mx-auto mt-1 max-w-xs text-xs leading-relaxed text-slate-400 dark:text-slate-500">{sub}</p>}
     </div>
   );
 }

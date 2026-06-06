@@ -12,46 +12,65 @@ const {
   toDisplayMonth,
 } = require("./helpers");
 
-async function getDashboardData(session) {
+// ── Short-TTL cache (per slice, per branch) ──
+// The dashboard is a read-only overview reloaded on every visit. Each slice
+// runs against the REMOTE database; cache for a few seconds and coalesce
+// concurrent callers onto one in-flight computation. The page passes force=true
+// (manual refresh) to bypass.
+const CACHE_TTL_MS = 15_000;
+const caches = new Map(); // `${kind}:${branch}` -> { expires:number, promise:Promise }
+
+function branchKey(session) {
+  const b = session?.logistic_code?.trim();
+  return b && b !== "02-0004" ? b : "all";
+}
+
+function cached(kind, session, force, fn) {
+  const key = `${kind}:${branchKey(session)}`;
+  const now = Date.now();
+  if (!force) {
+    const hit = caches.get(key);
+    if (hit && hit.expires > now) return hit.promise;
+  }
+  const promise = fn().catch((err) => {
+    if (caches.get(key)?.promise === promise) caches.delete(key);
+    throw err;
+  });
+  caches.set(key, { expires: now + CACHE_TTL_MS, promise });
+  return promise;
+}
+
+// Common per-request context (dates + branch scope) shared by every slice.
+function ctx(session) {
   const fixedToday = getFixedTodayDate();
   const fixedMonth = fixedToday.slice(0, 7);
   const monthStart = `${fixedMonth}-01`;
   const nextMonthStart = getNextMonthStart(fixedMonth);
-
   const userBranch = session?.logistic_code?.trim();
   const scoped = !!userBranch && userBranch !== "02-0004";
   const branchAnd = (alias = "") =>
     scoped ? `AND ${alias ? alias + "." : ""}transport_code = '${userBranch}'` : "";
   const scope = { scoped, branch: userBranch ?? "" };
+  return { fixedToday, fixedMonth, monthStart, nextMonthStart, userBranch, scoped, branchAnd, scope };
+}
 
-  // Kick off the heaviest query (pending bills + remaining counts) up front so
-  // it runs concurrently with every count/KPI/list query below instead of
-  // blocking them. Awaited later where its result is first needed.
-  const { getBillsPending } = require("./bills");
-  const pendingPromise = getBillsPending(session, FIXED_YEAR_START, FIXED_YEAR_END, "all");
+const BRANCH_NAMES_SQL = `SELECT code, COALESCE(NULLIF(TRIM(name_1), ''), code) AS name
+   FROM transport_type
+   WHERE code IN ('02-0001','02-0002','02-0003')`;
 
-  const data = await queryOne(`
-    SELECT count(doc_no) AS bill_count,
-      sum(case when transport_code='02-0004' then 1 else 0 end) as pickup,
-      sum(case when transport_code !='02-0004' then 1 else 0 end) as logistic,
-      sum(case when transport_code ='02-0001' then 1 else 0 end) as logistic_od,
-      sum(case when transport_code ='02-0002' then 1 else 0 end) as logistic_dt,
-      sum(case when transport_code ='02-0003' then 1 else 0 end) as logistic_ps
-    FROM ic_trans_shipment
-    WHERE ${getFixedYearSqlFilter("doc_date")} AND transport_code IS NOT NULL ${branchAnd()}
-  `);
-  // ThunJai express (transport 02-0005) — bills + products moved via the
-  // ThunJai integration (company-wide; separate from the internal fleet).
-  const thunjai = await queryOne(`
-    SELECT
-      count(DISTINCT s.doc_no)::int AS bill_count,
-      COALESCE(count(det.item_code), 0)::int AS item_count,
-      COALESCE(sum(det.qty), 0)::numeric AS item_qty
-    FROM ic_trans_shipment s
-    LEFT JOIN ic_trans_detail det
-      ON det.doc_no = s.doc_no AND det.item_code NOT LIKE '97%'
-    WHERE s.transport_code = '02-0005' AND ${getFixedYearSqlFilter("s.doc_date")}
-  `);
+// ════════════════════════════════════════════════════════════════════════
+// Slice 1 — SUMMARY (fast: shipment counts, teams, completes, rating, thunjai)
+// Everything that does NOT need the heavy pending-bills scan, so it returns in
+// ~250ms and the page can paint the hero / teams / carrier mix immediately.
+// ════════════════════════════════════════════════════════════════════════
+function getDashboardSummary(session, force = false) {
+  return cached("summary", session, force, () => computeSummary(session));
+}
+
+async function computeSummary(session) {
+  const c = ctx(session);
+  const { getCustomerRatingSummary } = require("./customer-rating");
+
   const teamSql = (code) =>
     `SELECT count(doc_no) AS bill_count,
        sum(case when check_status=0 then 1 else 0 end) as still,
@@ -59,145 +78,193 @@ async function getDashboardData(session) {
      FROM ic_trans_shipment
      WHERE ${getFixedYearSqlFilter("doc_date")} AND transport_code='${code}'`;
   const emptyTeam = { bill_count: 0, still: 0, complete: 0 };
-  let kl = !scoped || userBranch === "02-0001" ? await queryOne(teamSql("02-0001")) : emptyTeam;
-  let dt = !scoped || userBranch === "02-0002" ? await queryOne(teamSql("02-0002")) : emptyTeam;
-  let ps = !scoped || userBranch === "02-0003" ? await queryOne(teamSql("02-0003")) : emptyTeam;
-  const completeSummary = await queryOne(
-    `SELECT
-      count(*) FILTER (WHERE a.doc_date = $3::date AND a.check_status=1) AS today_complete,
-      count(*) FILTER (WHERE a.doc_date >= $1::date AND a.doc_date < $2::date AND a.check_status=1) AS month_complete,
-      count(*) FILTER (WHERE a.check_status=1) AS year_complete
-    FROM ic_trans_shipment a
-    WHERE a.transport_code NOT IN ('02-0004')
-      ${branchAnd("a")}
-      AND ${getFixedYearSqlFilter("a.doc_date")}`,
-    [monthStart, nextMonthStart, fixedToday]
-  );
 
-  // Pending bills with remaining counts (kicked off above) — single source of
-  // truth so the dashboard's count matches /bills-pending byte-for-byte.
-  const { trans: pendingWithRemaining } = await pendingPromise;
-  const trans = pendingWithRemaining.slice(0, 10);
-  const transMonth = pendingWithRemaining
-    .filter((bill) => bill.send_date >= monthStart && bill.send_date < nextMonthStart)
-    .slice(0, 10);
-  const transToday = pendingWithRemaining
-    .filter((bill) => bill.send_date === fixedToday)
-    .slice(0, 10);
-  const branchPendingCount = (code) =>
-    pendingWithRemaining.filter((bill) => bill.transport_code === code).length;
-  kl = { ...kl, still: branchPendingCount("02-0001") };
-  dt = { ...dt, still: branchPendingCount("02-0002") };
-  ps = { ...ps, still: branchPendingCount("02-0003") };
-  const pendingSummary = {
-    ...completeSummary,
-    month_count: pendingWithRemaining.filter(
-      (bill) => bill.send_date >= monthStart && bill.send_date < nextMonthStart
-    ).length,
-    today_count: pendingWithRemaining.filter((bill) => bill.send_date === fixedToday).length,
-    today_pending: pendingWithRemaining.filter((bill) => bill.send_date === fixedToday).length,
-    month_pending: pendingWithRemaining.filter(
-      (bill) => bill.send_date >= monthStart && bill.send_date < nextMonthStart
-    ).length,
-    year_pending: pendingWithRemaining.length,
+  const [data, thunjai, kl, dt, ps, completeSummary, branchNameRows, ratingSummary] =
+    await Promise.all([
+      queryOne(`
+        SELECT count(doc_no) AS bill_count,
+          sum(case when transport_code='02-0004' then 1 else 0 end) as pickup,
+          sum(case when transport_code !='02-0004' then 1 else 0 end) as logistic,
+          sum(case when transport_code ='02-0001' then 1 else 0 end) as logistic_od,
+          sum(case when transport_code ='02-0002' then 1 else 0 end) as logistic_dt,
+          sum(case when transport_code ='02-0003' then 1 else 0 end) as logistic_ps
+        FROM ic_trans_shipment
+        WHERE ${getFixedYearSqlFilter("doc_date")} AND transport_code IS NOT NULL ${c.branchAnd()}
+      `),
+      // ThunJai express (transport 02-0005) — bills + products via the ThunJai
+      // integration (company-wide; separate from the internal fleet).
+      queryOne(`
+        SELECT
+          count(DISTINCT s.doc_no)::int AS bill_count,
+          COALESCE(count(det.item_code), 0)::int AS item_count,
+          COALESCE(sum(det.qty), 0)::numeric AS item_qty
+        FROM ic_trans_shipment s
+        LEFT JOIN ic_trans_detail det
+          ON det.doc_no = s.doc_no AND det.item_code NOT LIKE '97%'
+        WHERE s.transport_code = '02-0005' AND ${getFixedYearSqlFilter("s.doc_date")}
+      `),
+      !c.scoped || c.userBranch === "02-0001"
+        ? queryOne(teamSql("02-0001"))
+        : Promise.resolve(emptyTeam),
+      !c.scoped || c.userBranch === "02-0002"
+        ? queryOne(teamSql("02-0002"))
+        : Promise.resolve(emptyTeam),
+      !c.scoped || c.userBranch === "02-0003"
+        ? queryOne(teamSql("02-0003"))
+        : Promise.resolve(emptyTeam),
+      queryOne(
+        `SELECT
+          count(*) FILTER (WHERE a.doc_date = $3::date AND a.check_status=1) AS today_complete,
+          count(*) FILTER (WHERE a.doc_date >= $1::date AND a.doc_date < $2::date AND a.check_status=1) AS month_complete,
+          count(*) FILTER (WHERE a.check_status=1) AS year_complete
+        FROM ic_trans_shipment a
+        WHERE a.transport_code NOT IN ('02-0004')
+          ${c.branchAnd("a")}
+          AND ${getFixedYearSqlFilter("a.doc_date")}`,
+        [c.monthStart, c.nextMonthStart, c.fixedToday]
+      ),
+      query(BRANCH_NAMES_SQL),
+      getCustomerRatingSummary().catch(() => ({
+        total: 0,
+        avg_stars: null,
+        positive: 0,
+        negative: 0,
+      })),
+    ]);
+
+  const branch_names = Object.fromEntries(branchNameRows.map((r) => [r.code, r.name]));
+  return {
+    data,
+    thunjai,
+    // `still` is owned by the pending slice (it reflects remaining-count bills);
+    // start at 0 so the team cards render their `complete` half immediately and
+    // fill `still` in when the pending slice lands.
+    kl: { ...kl, still: 0 },
+    dt: { ...dt, still: 0 },
+    ps: { ...ps, still: 0 },
+    user_branch: c.scoped ? c.userBranch : null,
+    branch_names,
+    customer_rating: ratingSummary,
+    // Only the completed-side counts here; the pending slice supplies the rest.
+    pending_summary: {
+      today_complete: completeSummary?.today_complete ?? 0,
+      month_complete: completeSummary?.month_complete ?? 0,
+      year_complete: completeSummary?.year_complete ?? 0,
+      current_date: toDisplayDate(c.fixedToday),
+      current_month: toDisplayMonth(c.fixedMonth),
+    },
   };
+}
 
-  // Breakdown for the pending KPI strip. Computed in JS from the same
-  // pendingWithRemaining list to stay consistent with /bills-pending.
-  //   overdue        — ANY pending bill whose effective scheduled_date is past
-  //   past_send_date — bills that are contacted+ready, but the delivery date
-  //                    has already slipped past today (escalation queue)
-  //   contacted      — has any contact action_status set
-  //   uncontacted    — no action_status yet
-  //   ready          — contacted_ready, dispatch-eligible
-  const pendingBreakdown = {
-    total: pendingWithRemaining.length,
-    overdue: pendingWithRemaining.filter(
-      (bill) => bill.scheduled_date && bill.scheduled_date < fixedToday
-    ).length,
-    past_send_date: pendingWithRemaining.filter(
-      (bill) =>
-        bill.action_status === "contacted_ready" &&
-        bill.scheduled_date &&
-        bill.scheduled_date < fixedToday
-    ).length,
-    contacted: pendingWithRemaining.filter((bill) => bill.action_status).length,
-    uncontacted: pendingWithRemaining.filter((bill) => !bill.action_status).length,
-    ready: pendingWithRemaining.filter(
-      (bill) => bill.action_status === "contacted_ready"
-    ).length,
-  };
+// ════════════════════════════════════════════════════════════════════════
+// Slice 2 — DELIVERY KPI (medium: completed-bill metrics + 30-day trend)
+// ════════════════════════════════════════════════════════════════════════
+function getDashboardKpi(session, force = false) {
+  return cached("kpi", session, force, () => computeKpi(session));
+}
 
-  const branchNameRows = await query(
-    `SELECT code, COALESCE(NULLIF(TRIM(name_1), ''), code) AS name
-     FROM transport_type
-     WHERE code IN ('02-0001','02-0002','02-0003')`
-  );
+async function computeKpi(session) {
+  const c = ctx(session);
+  const { getSettings } = require("./settings");
+  const kpiBranchClause = c.scope.scoped
+    ? `AND EXISTS (SELECT 1 FROM ic_trans_shipment __ts WHERE __ts.doc_no = d.bill_no AND __ts.transport_code = '${c.scope.branch}')`
+    : "";
+
+  const [branchNameRows, kpiRows, trendRows, kpiSettings] = await Promise.all([
+    query(BRANCH_NAMES_SQL),
+    query(
+      `WITH delivered AS (
+         SELECT
+           COALESCE(s.transport_code, '') AS branch_code,
+           d.sent_end::date AS delivered_date,
+           EXTRACT(EPOCH FROM (d.sent_end - d.sent_start))::float8 AS delivery_seconds,
+           CASE WHEN a.job_close IS NOT NULL
+                THEN EXTRACT(EPOCH FROM (a.job_close - d.sent_end))::float8
+           END AS close_seconds,
+           CASE
+             WHEN COALESCE(pb.scheduled_date::date, t.send_date::date, d.bill_date::date) IS NULL THEN NULL
+             WHEN d.sent_end::date <= COALESCE(pb.scheduled_date::date, t.send_date::date, d.bill_date::date) THEN true
+             ELSE false
+           END AS is_on_time
+         FROM public.odg_tms_detail d
+         INNER JOIN public.odg_tms a ON a.doc_no = d.doc_no
+         LEFT JOIN public.odg_tms_pending_bill pb ON pb.bill_no = d.bill_no
+         LEFT JOIN ic_trans t ON t.doc_no = d.bill_no
+         LEFT JOIN ic_trans_shipment s ON s.doc_no = d.bill_no
+         WHERE d.status = 1
+           AND d.sent_end IS NOT NULL
+           AND COALESCE(a.approve_status, 0) = 1
+           AND ${getFixedYearSqlFilter("d.doc_date")}
+           ${kpiBranchClause}
+       ),
+       bucket AS (
+         SELECT branch_code, period, delivery_seconds, close_seconds, is_on_time
+         FROM delivered
+         CROSS JOIN LATERAL (
+           VALUES
+             ('today', delivered_date = $3::date),
+             ('month', delivered_date >= $1::date AND delivered_date < $2::date),
+             ('year', true)
+         ) AS p(period, matches)
+         WHERE p.matches
+       )
+       SELECT
+         branch_code,
+         period,
+         COUNT(*) AS total,
+         COUNT(*) FILTER (WHERE is_on_time = true) AS on_time,
+         COUNT(*) FILTER (WHERE is_on_time = false) AS breach,
+         AVG(delivery_seconds) AS avg_delivery,
+         AVG(close_seconds) AS avg_close
+       FROM bucket
+       GROUP BY GROUPING SETS ((period), (branch_code, period))`,
+      [c.monthStart, c.nextMonthStart, c.fixedToday]
+    ),
+    query(
+      `WITH delivered AS (
+         SELECT
+           d.sent_end::date AS delivered_date,
+           EXTRACT(EPOCH FROM (d.sent_end - d.sent_start))::float8 AS delivery_seconds,
+           CASE WHEN a.job_close IS NOT NULL
+                THEN EXTRACT(EPOCH FROM (a.job_close - d.sent_end))::float8
+           END AS close_seconds,
+           CASE
+             WHEN COALESCE(pb.scheduled_date::date, t.send_date::date, d.bill_date::date) IS NULL THEN NULL
+             WHEN d.sent_end::date <= COALESCE(pb.scheduled_date::date, t.send_date::date, d.bill_date::date) THEN true
+             ELSE false
+           END AS is_on_time
+         FROM public.odg_tms_detail d
+         INNER JOIN public.odg_tms a ON a.doc_no = d.doc_no
+         LEFT JOIN public.odg_tms_pending_bill pb ON pb.bill_no = d.bill_no
+         LEFT JOIN ic_trans t ON t.doc_no = d.bill_no
+         WHERE d.status = 1
+           AND d.sent_end IS NOT NULL
+           AND COALESCE(a.approve_status, 0) = 1
+           AND d.sent_end::date >= ($1::date - INTERVAL '29 days')
+           AND d.sent_end::date <= $1::date
+           ${kpiBranchClause}
+       )
+       SELECT
+         to_char(delivered_date, 'YYYY-MM-DD') AS day,
+         COUNT(*) AS total,
+         COUNT(*) FILTER (WHERE is_on_time = true) AS on_time,
+         COUNT(*) FILTER (WHERE is_on_time = false) AS breach,
+         AVG(delivery_seconds) AS avg_delivery,
+         AVG(close_seconds) AS avg_close
+       FROM delivered
+       GROUP BY delivered_date
+       ORDER BY delivered_date ASC`,
+      [c.fixedToday]
+    ),
+    getSettings([
+      "kpi.target_on_time_rate",
+      "kpi.target_avg_delivery_minutes",
+      "kpi.target_avg_close_minutes",
+    ]),
+  ]);
+
   const branchNames = Object.fromEntries(branchNameRows.map((r) => [r.code, r.name]));
 
-  // Delivery KPIs measured on completed bills (status=1, sent_end set):
-  //   on_time   — sent_end::date <= target (scheduled_date | send_date | bill_date)
-  //   breach    — sent_end::date >  target
-  //   delivery  — avg seconds from sent_start → sent_end
-  //   close     — avg seconds from sent_end → odg_tms.job_close
-  // Window selected on the bill's actual delivery date (sent_end::date) so a
-  // late bill closed today counts toward today's stats.
-  const kpiBranchClause = scope.scoped
-    ? `AND EXISTS (SELECT 1 FROM ic_trans_shipment __ts WHERE __ts.doc_no = d.bill_no AND __ts.transport_code = '${scope.branch}')`
-    : "";
-  // The delivered CTE adds a `branch_code` from the bill's shipment record so
-  // we can compute the same KPI bucket per-branch in one pass.
-  const kpiRows = await query(
-    `WITH delivered AS (
-       SELECT
-         COALESCE(s.transport_code, '') AS branch_code,
-         d.sent_end::date AS delivered_date,
-         EXTRACT(EPOCH FROM (d.sent_end - d.sent_start))::float8 AS delivery_seconds,
-         CASE WHEN a.job_close IS NOT NULL
-              THEN EXTRACT(EPOCH FROM (a.job_close - d.sent_end))::float8
-         END AS close_seconds,
-         CASE
-           WHEN COALESCE(pb.scheduled_date::date, t.send_date::date, d.bill_date::date) IS NULL THEN NULL
-           WHEN d.sent_end::date <= COALESCE(pb.scheduled_date::date, t.send_date::date, d.bill_date::date) THEN true
-           ELSE false
-         END AS is_on_time
-       FROM public.odg_tms_detail d
-       INNER JOIN public.odg_tms a ON a.doc_no = d.doc_no
-       LEFT JOIN public.odg_tms_pending_bill pb ON pb.bill_no = d.bill_no
-       LEFT JOIN ic_trans t ON t.doc_no = d.bill_no
-       LEFT JOIN ic_trans_shipment s ON s.doc_no = d.bill_no
-       WHERE d.status = 1
-         AND d.sent_end IS NOT NULL
-         AND COALESCE(a.approve_status, 0) = 1
-         AND ${getFixedYearSqlFilter("d.doc_date")}
-         ${kpiBranchClause}
-     ),
-     bucket AS (
-       SELECT branch_code, period, delivery_seconds, close_seconds, is_on_time
-       FROM delivered
-       CROSS JOIN LATERAL (
-         VALUES
-           ('today', delivered_date = $3::date),
-           ('month', delivered_date >= $1::date AND delivered_date < $2::date),
-           ('year', true)
-       ) AS p(period, matches)
-       WHERE p.matches
-     )
-     SELECT
-       branch_code,
-       period,
-       COUNT(*) AS total,
-       COUNT(*) FILTER (WHERE is_on_time = true) AS on_time,
-       COUNT(*) FILTER (WHERE is_on_time = false) AS breach,
-       AVG(delivery_seconds) AS avg_delivery,
-       AVG(close_seconds) AS avg_close
-     FROM bucket
-     GROUP BY GROUPING SETS ((period), (branch_code, period))`,
-    [monthStart, nextMonthStart, fixedToday]
-  );
-  // Split rows into all-branches summary (branch_code IS NULL from rollup) and
-  // per-branch breakdown. Postgres GROUPING SETS marks the rollup row with
-  // branch_code = NULL.
   const overallByPeriod = new Map();
   const perBranchByPeriod = new Map();
   for (const row of kpiRows) {
@@ -234,48 +301,11 @@ async function getDashboardData(session) {
       }))
       .sort((a, b) => a.branch_code.localeCompare(b.branch_code));
   };
-  // 30-day rolling trend for KPI sparkline. One row per day with the same
-  // on-time / breach / avg-delivery / avg-close metrics as the snapshot.
-  const trendRows = await query(
-    `WITH delivered AS (
-       SELECT
-         d.sent_end::date AS delivered_date,
-         EXTRACT(EPOCH FROM (d.sent_end - d.sent_start))::float8 AS delivery_seconds,
-         CASE WHEN a.job_close IS NOT NULL
-              THEN EXTRACT(EPOCH FROM (a.job_close - d.sent_end))::float8
-         END AS close_seconds,
-         CASE
-           WHEN COALESCE(pb.scheduled_date::date, t.send_date::date, d.bill_date::date) IS NULL THEN NULL
-           WHEN d.sent_end::date <= COALESCE(pb.scheduled_date::date, t.send_date::date, d.bill_date::date) THEN true
-           ELSE false
-         END AS is_on_time
-       FROM public.odg_tms_detail d
-       INNER JOIN public.odg_tms a ON a.doc_no = d.doc_no
-       LEFT JOIN public.odg_tms_pending_bill pb ON pb.bill_no = d.bill_no
-       LEFT JOIN ic_trans t ON t.doc_no = d.bill_no
-       WHERE d.status = 1
-         AND d.sent_end IS NOT NULL
-         AND COALESCE(a.approve_status, 0) = 1
-         AND d.sent_end::date >= ($1::date - INTERVAL '29 days')
-         AND d.sent_end::date <= $1::date
-         ${kpiBranchClause}
-     )
-     SELECT
-       to_char(delivered_date, 'YYYY-MM-DD') AS day,
-       COUNT(*) AS total,
-       COUNT(*) FILTER (WHERE is_on_time = true) AS on_time,
-       COUNT(*) FILTER (WHERE is_on_time = false) AS breach,
-       AVG(delivery_seconds) AS avg_delivery,
-       AVG(close_seconds) AS avg_close
-     FROM delivered
-     GROUP BY delivered_date
-     ORDER BY delivered_date ASC`,
-    [fixedToday]
-  );
+
   const trendMap = new Map(trendRows.map((row) => [row.day, row]));
   const deliveryKpiTrend = [];
   for (let i = 29; i >= 0; i--) {
-    const d = new Date(`${fixedToday}T00:00:00`);
+    const d = new Date(`${c.fixedToday}T00:00:00`);
     d.setDate(d.getDate() - i);
     const key = d.toISOString().slice(0, 10);
     const row = trendMap.get(key);
@@ -289,71 +319,134 @@ async function getDashboardData(session) {
     });
   }
 
-  const { getCustomerRatingSummary } = require("./customer-rating");
-  const ratingSummary = await getCustomerRatingSummary().catch(() => ({
-    total: 0,
-    avg_stars: null,
-    positive: 0,
-    negative: 0,
-  }));
-
-  const { getSettings } = require("./settings");
-  const kpiSettings = await getSettings([
-    "kpi.target_on_time_rate",
-    "kpi.target_avg_delivery_minutes",
-    "kpi.target_avg_close_minutes",
-  ]);
   const parseTarget = (raw) => {
     const trimmed = String(raw ?? "").trim();
     if (!trimmed) return null;
     const n = Number(trimmed);
     return Number.isFinite(n) ? n : null;
   };
-  const deliveryKpi = {
-    today: kpiBuild("today"),
-    month: kpiBuild("month"),
-    year: kpiBuild("year"),
-    by_branch: {
-      today: kpiBranchesBuild("today"),
-      month: kpiBranchesBuild("month"),
-      year: kpiBranchesBuild("year"),
-    },
-    trend_30d: deliveryKpiTrend,
-    targets: {
-      on_time_rate: parseTarget(kpiSettings["kpi.target_on_time_rate"]),
-      avg_delivery_minutes: parseTarget(kpiSettings["kpi.target_avg_delivery_minutes"]),
-      avg_close_minutes: parseTarget(kpiSettings["kpi.target_avg_close_minutes"]),
+
+  return {
+    delivery_kpi: {
+      today: kpiBuild("today"),
+      month: kpiBuild("month"),
+      year: kpiBuild("year"),
+      by_branch: {
+        today: kpiBranchesBuild("today"),
+        month: kpiBranchesBuild("month"),
+        year: kpiBranchesBuild("year"),
+      },
+      trend_30d: deliveryKpiTrend,
+      targets: {
+        on_time_rate: parseTarget(kpiSettings["kpi.target_on_time_rate"]),
+        avg_delivery_minutes: parseTarget(kpiSettings["kpi.target_avg_delivery_minutes"]),
+        avg_close_minutes: parseTarget(kpiSettings["kpi.target_avg_close_minutes"]),
+      },
     },
   };
+}
 
-  const normalizePendingShipments = (items) =>
+// ════════════════════════════════════════════════════════════════════════
+// Slice 3 — PENDING (slow: whole-year pending bills + remaining counts)
+// The single heaviest part (~0.9s). Isolated so it streams in last while the
+// rest of the dashboard is already on screen.
+// ════════════════════════════════════════════════════════════════════════
+function getDashboardPending(session, force = false) {
+  return cached("pending", session, force, () => computePending(session));
+}
+
+async function computePending(session) {
+  const c = ctx(session);
+  const { getBillsPending } = require("./bills");
+  const { trans: pendingWithRemaining } = await getBillsPending(
+    session,
+    FIXED_YEAR_START,
+    FIXED_YEAR_END,
+    "all"
+  );
+
+  const inMonth = (bill) =>
+    bill.send_date >= c.monthStart && bill.send_date < c.nextMonthStart;
+  const isToday = (bill) => bill.send_date === c.fixedToday;
+
+  const trans = pendingWithRemaining.slice(0, 10);
+  const transMonth = pendingWithRemaining.filter(inMonth).slice(0, 10);
+  const transToday = pendingWithRemaining.filter(isToday).slice(0, 10);
+  const branchPendingCount = (code) =>
+    pendingWithRemaining.filter((bill) => bill.transport_code === code).length;
+
+  const monthCount = pendingWithRemaining.filter(inMonth).length;
+  const todayCount = pendingWithRemaining.filter(isToday).length;
+
+  const pendingBreakdown = {
+    total: pendingWithRemaining.length,
+    overdue: pendingWithRemaining.filter(
+      (bill) => bill.scheduled_date && bill.scheduled_date < c.fixedToday
+    ).length,
+    past_send_date: pendingWithRemaining.filter(
+      (bill) =>
+        bill.action_status === "contacted_ready" &&
+        bill.scheduled_date &&
+        bill.scheduled_date < c.fixedToday
+    ).length,
+    contacted: pendingWithRemaining.filter((bill) => bill.action_status).length,
+    uncontacted: pendingWithRemaining.filter((bill) => !bill.action_status).length,
+    ready: pendingWithRemaining.filter((bill) => bill.action_status === "contacted_ready").length,
+  };
+
+  const normalize = (items) =>
     items.map((item) => ({ ...item, time_use: formatInterval(item.time_use) }));
 
   return {
-    data,
-    thunjai,
-    kl,
-    dt,
-    ps,
-    user_branch: scoped ? userBranch : null,
-    branch_names: branchNames,
-    trans: normalizePendingShipments(trans),
-    trans_month: normalizePendingShipments(transMonth),
-    trans_today: normalizePendingShipments(transToday),
+    trans: normalize(trans),
+    trans_month: normalize(transMonth),
+    trans_today: normalize(transToday),
     pending_summary: {
-      ...pendingSummary,
-      current_date: toDisplayDate(fixedToday),
-      current_month: toDisplayMonth(fixedMonth),
+      month_count: monthCount,
+      today_count: todayCount,
+      today_pending: todayCount,
+      month_pending: monthCount,
+      year_pending: pendingWithRemaining.length,
     },
     pending_breakdown: pendingBreakdown,
-    delivery_kpi: deliveryKpi,
-    customer_rating: ratingSummary,
+    still: {
+      "02-0001": branchPendingCount("02-0001"),
+      "02-0002": branchPendingCount("02-0002"),
+      "02-0003": branchPendingCount("02-0003"),
+    },
+  };
+}
+
+// Combined payload (back-compat for any caller that wants it all at once).
+// The dashboard page itself fetches the three slices separately for progressive
+// rendering; this just stitches them back into the original shape.
+async function getDashboardData(session, force = false) {
+  const [s, k, p] = await Promise.all([
+    getDashboardSummary(session, force),
+    getDashboardKpi(session, force),
+    getDashboardPending(session, force),
+  ]);
+  return {
+    data: s.data,
+    thunjai: s.thunjai,
+    kl: { ...s.kl, still: p.still["02-0001"] },
+    dt: { ...s.dt, still: p.still["02-0002"] },
+    ps: { ...s.ps, still: p.still["02-0003"] },
+    user_branch: s.user_branch,
+    branch_names: s.branch_names,
+    trans: p.trans,
+    trans_month: p.trans_month,
+    trans_today: p.trans_today,
+    pending_summary: { ...s.pending_summary, ...p.pending_summary },
+    pending_breakdown: p.pending_breakdown,
+    delivery_kpi: k.delivery_kpi,
+    customer_rating: s.customer_rating,
   };
 }
 
 // Activity lists (in-progress / waiting-dispatch / delivered-pending-close) —
-// split out of getDashboardData so the page can load them progressively while
-// the core KPIs render immediately. The three queries run concurrently.
+// loaded separately so the page can stream them in. The three queries run
+// concurrently.
 async function getDashboardActivity(session) {
   const userBranch = session?.logistic_code?.trim();
   const scoped = !!userBranch && userBranch !== "02-0004";
@@ -493,4 +586,10 @@ async function getDashboardActivity(session) {
   };
 }
 
-module.exports = { getDashboardData, getDashboardActivity };
+module.exports = {
+  getDashboardData,
+  getDashboardSummary,
+  getDashboardKpi,
+  getDashboardPending,
+  getDashboardActivity,
+};

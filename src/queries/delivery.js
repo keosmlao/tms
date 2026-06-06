@@ -78,6 +78,14 @@ async function ensureDeliveryWorkflowSchemaInternal(db) {
     ADD COLUMN IF NOT EXISTS pickup_transport_code character varying
   `);
 
+  // Mandatory delivery condition picked when a bill is added to a trip:
+  //   to_customer (ສົ່ງລູກຄ້າ) · to_branch (ສົ່ງສາຂາ, pairs with
+  //   forward_transport_code) · to_carrier (ສົ່ງຂົນສົ່ງ) · to_bus (ຝາກລົດເມ).
+  await safeDdl(db, `
+    ALTER TABLE public.odg_tms_detail
+    ADD COLUMN IF NOT EXISTS delivery_condition character varying
+  `);
+
   // Parent sale bill key — when one customer order is split across multiple
   // warehouses (or branches), each sub-bill gets its own bill_no but shares
   // the parent_bill_no so the driver app can group them in the UI and (later)

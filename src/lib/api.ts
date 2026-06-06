@@ -6,6 +6,7 @@ import * as bills from "@/actions/bills";
 import * as dashboard from "@/actions/dashboard";
 import * as deliveryRound from "@/actions/delivery-round";
 import * as deliveryRoute from "@/actions/delivery-route";
+import * as deliveryCalendar from "@/actions/delivery-calendar";
 import * as carType from "@/actions/car-type";
 import * as chatter from "@/actions/chatter";
 import * as fuel from "@/actions/fuel";
@@ -23,6 +24,9 @@ import * as tracking from "@/actions/tracking";
 export const Actions = {
   // Dashboard
   getDashboardData: dashboard.getDashboardData,
+  getDashboardSummary: dashboard.getDashboardSummary,
+  getDashboardKpi: dashboard.getDashboardKpi,
+  getDashboardPending: dashboard.getDashboardPending,
   getDashboardActivity: dashboard.getDashboardActivity,
   getDriverLeaderboard: dashboard.getDriverLeaderboard,
 
@@ -244,6 +248,10 @@ export const Actions = {
   getDeliveryRoute: deliveryRoute.getDeliveryRoute,
   upsertDeliveryRoute: deliveryRoute.upsertDeliveryRoute,
   deleteDeliveryRoute: deliveryRoute.deleteDeliveryRoute,
+
+  // Delivery calendar (ປະຕິທິນຈັດສົ່ງ)
+  getDeliveryCalendar: deliveryCalendar.getDeliveryCalendar,
+  getDeliveryCalendarDay: deliveryCalendar.getDeliveryCalendarDay,
 };
 
 export const Auth = {

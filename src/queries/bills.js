@@ -38,6 +38,16 @@ const MANUAL_IC_TRANS_FLAGS = [56, 72, 44, 48];
 const TRANSFER_BILL_FLAG = 72;
 const SERVICE_SOURCE_TYPE = "odservice.tb_product";
 
+// The "ລໍຖ້າຈັດຖ້ຽວ" (bills-pending) queue only dispatches the three internal
+// delivery branches: 02-0001 ໂອດ້ຽນ/ຂົວຫຼວງ · 02-0002 ດອນຕິ້ວ · 02-0003 ປາກເຊ.
+// Every other transport code — customer self-pickup (02-0004), ThunJai
+// (02-0005), technician-pickup (02-0006), and any other branch — is handled
+// outside this queue and must NOT appear here.
+const DELIVERY_BRANCH_CODES = ["02-0001", "02-0002", "02-0003"];
+function deliveryBranchListSql() {
+  return DELIVERY_BRANCH_CODES.map((c) => `'${c}'`).join(", ");
+}
+
 function manualFlagListSql() {
   return MANUAL_IC_TRANS_FLAGS.join(",");
 }
@@ -189,6 +199,10 @@ async function getAvailableBills(session) {
       ${SCHEDULED_BILL_FIELDS},
       COALESCE(a.transport_code, '') as origin_transport_code,
       COALESCE(tt.name_1, '') as origin_transport_name,
+      -- Effective delivery branch (pending override wins, else the shipment's) —
+      -- used by the create-trip page so a manager can pick a branch and a branch
+      -- admin defaults to their own.
+      COALESCE(NULLIF(TRIM(pb.transport_code), ''), a.transport_code, '') as delivery_transport_code,
       CASE WHEN fwd.bill_no IS NULL THEN false ELSE true END as incoming_forwarded,
       COALESCE(fwd.origin_transport_code, '') as forward_from_transport_code,
       COALESCE(fwd.origin_transport_name, '') as forward_from_transport_name,
@@ -477,7 +491,12 @@ const { getBillTodoSummaryMap } = require("./bill-todo");
 async function getManualPendingRowsForPending(fromDate, toDate, transportCode = "all") {
   const filterByTransport = transportCode && transportCode !== "all";
   const params = filterByTransport ? [fromDate, toDate, transportCode] : [fromDate, toDate];
-  const transportWhere = filterByTransport ? "AND pb.transport_code = $3" : "";
+  // For the unscoped ("all") view, restrict manual/service ready bills to the
+  // three internal delivery branches — mirrors the shipment query so other
+  // branches/methods don't leak into the dispatch queue.
+  const transportWhere = filterByTransport
+    ? "AND pb.transport_code = $3"
+    : `AND COALESCE(NULLIF(TRIM(pb.transport_code), ''), '') IN (${deliveryBranchListSql()})`;
   const icRows = await query(
     `SELECT
       a.doc_no,
@@ -580,11 +599,11 @@ async function getBillsPending(session, fromDate, toDate, transportCode) {
   const scope = getBranchScope(session);
   const effectiveCode = scope.scoped ? scope.branch : transportCode;
   const params = effectiveCode === "all" ? [fromDate, toDate] : [fromDate, toDate, effectiveCode];
-  // Exclude transport types handled outside the internal delivery queue:
-  //   02-0004 ลูกค้ารับเอง · 02-0005 ขนส่งทันใจ (ThunJai) · 02-0006 ช่างโอเดียนมารับเอง
-  // Match on the effective transport (pending override, else the shipment's).
+  // Only the three internal delivery branches belong in this queue. Match on the
+  // effective transport (pending override, else the shipment's) so a bill the
+  // admin re-assigned to another branch/method drops out accordingly.
   const where = effectiveCode === "all"
-    ? "COALESCE(NULLIF(TRIM(pbov.transport_code), ''), a.transport_code) NOT IN ('02-0004', '02-0005', '02-0006')"
+    ? `COALESCE(NULLIF(TRIM(pbov.transport_code), ''), a.transport_code) IN (${deliveryBranchListSql()})`
     : "a.transport_code=$3";
   const [shipmentRaw, manualRaw, listtrans] = await Promise.all([
     query(
@@ -626,7 +645,7 @@ async function getBillsPending(session, fromDate, toDate, transportCode) {
     getManualPendingRowsForPending(fromDate, toDate, effectiveCode),
     scope.scoped
       ? query("SELECT code, name_1 FROM transport_type WHERE code=$1", [scope.branch])
-      : query("SELECT code, name_1 FROM transport_type WHERE code NOT LIKE '01-%' ORDER BY code ASC"),
+      : query(`SELECT code, name_1 FROM transport_type WHERE code IN (${deliveryBranchListSql()}) ORDER BY code ASC`),
   ]);
 
   const shipmentDocNos = new Set(shipmentRaw.map((bill) => bill.doc_no));

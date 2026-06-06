@@ -235,10 +235,13 @@ async function createJob(session, data) {
       const parentBillNo = bill.parent_bill_no && String(bill.parent_bill_no).trim()
         ? String(bill.parent_bill_no).trim()
         : null;
+      const deliveryCondition = bill.delivery_condition && String(bill.delivery_condition).trim()
+        ? String(bill.delivery_condition).trim()
+        : null;
       await client.query(
-        `INSERT INTO public.odg_tms_detail(doc_no, doc_date, car, bill_no, bill_date, cust_code, create_date_time_now, date_logistic, count_item, telephone, forward_transport_code, pickup_transport_code, parent_bill_no)
-         VALUES ($1,$2,$3,$4,$5,$6,LOCALTIMESTAMP(0),$7,$8,$9,$10,$11,$12)`,
-        [docNo, fixedDocDate, data.car, bill.bill_no, coerceDateToFixedYear(bill.bill_date), bill.cust_code, fixedDateLog, bill.count_item, bill.telephone, forwardCode, pickupCode, parentBillNo]
+        `INSERT INTO public.odg_tms_detail(doc_no, doc_date, car, bill_no, bill_date, cust_code, create_date_time_now, date_logistic, count_item, telephone, forward_transport_code, pickup_transport_code, parent_bill_no, delivery_condition)
+         VALUES ($1,$2,$3,$4,$5,$6,LOCALTIMESTAMP(0),$7,$8,$9,$10,$11,$12,$13)`,
+        [docNo, fixedDocDate, data.car, bill.bill_no, coerceDateToFixedYear(bill.bill_date), bill.cust_code, fixedDateLog, bill.count_item, bill.telephone, forwardCode, pickupCode, parentBillNo, deliveryCondition]
       );
       if (bill.items && bill.items.length > 0) {
         for (const item of bill.items) {
@@ -565,7 +568,7 @@ async function getJobForEdit(docNo) {
   const billsRows = await query(
     `SELECT a.bill_no, to_char(a.bill_date,'YYYY-MM-DD') as bill_date,
             a.cust_code, b.name_1 as cust_name, a.count_item, a.telephone,
-            a.forward_transport_code, a.pickup_transport_code
+            a.forward_transport_code, a.pickup_transport_code, a.delivery_condition
      FROM public.odg_tms_detail a
      LEFT JOIN ar_customer b ON b.code=a.cust_code
      WHERE a.doc_no=$1 AND ${getFixedYearSqlFilter("a.doc_date")}
@@ -633,6 +636,7 @@ async function getJobForEdit(docNo) {
       count_item: products.length || Number(b.count_item ?? 0),
       forward_transport_code: b.forward_transport_code || null,
       pickup_transport_code: b.pickup_transport_code || null,
+      delivery_condition: b.delivery_condition || null,
       items: itemsByBill.get(b.bill_no) ?? [],
       products,
     };
@@ -907,12 +911,16 @@ async function updateJob(session, docNo, data) {
         bill.parent_bill_no && String(bill.parent_bill_no).trim()
           ? String(bill.parent_bill_no).trim()
           : null;
+      const deliveryCondition =
+        bill.delivery_condition && String(bill.delivery_condition).trim()
+          ? String(bill.delivery_condition).trim()
+          : null;
       await client.query(
         `INSERT INTO public.odg_tms_detail
          (doc_no, doc_date, car, bill_no, bill_date, cust_code,
           create_date_time_now, date_logistic, count_item, telephone,
-          forward_transport_code, pickup_transport_code, parent_bill_no)
-         VALUES ($1,$2,$3,$4,$5,$6,LOCALTIMESTAMP(0),$7,$8,$9,$10,$11,$12)`,
+          forward_transport_code, pickup_transport_code, parent_bill_no, delivery_condition)
+         VALUES ($1,$2,$3,$4,$5,$6,LOCALTIMESTAMP(0),$7,$8,$9,$10,$11,$12,$13)`,
         [
           docNo,
           fixedDocDate,
@@ -926,6 +934,7 @@ async function updateJob(session, docNo, data) {
           forwardCode,
           pickupCode,
           parentBillNo,
+          deliveryCondition,
         ]
       );
       for (const item of bill.items) {
