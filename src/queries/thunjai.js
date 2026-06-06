@@ -63,47 +63,56 @@ async function getSettings(keys) {
   return out;
 }
 
-async function setSetting(key, value, userCode) {
+async function setSettings(entries, userCode) {
+  // One atomic multi-row upsert — the ThunJai config form saves all keys or
+  // none, instead of a per-key loop that could persist half on a mid-save error.
+  const pairs = Object.entries(entries ?? {})
+    .map(([key, value]) => [String(key ?? "").trim(), value == null ? null : String(value)])
+    .filter(([k]) => k);
+  if (pairs.length === 0) return { success: true };
   await ensureThunJaiSchema();
-  const k = String(key ?? "").trim();
-  if (!k) throw new Error("ThunJai setting key is required");
-  const v = value == null ? null : String(value);
   const u = userCode ? String(userCode).trim() || null : null;
+  const keys = pairs.map(([k]) => k);
   const oldRows = await query(
-    `SELECT value FROM public.odg_thunjai_setting WHERE key = $1`,
-    [k]
+    `SELECT key, value FROM public.odg_thunjai_setting WHERE key = ANY($1::varchar[])`,
+    [keys]
   );
-  const oldValue = oldRows[0]?.value ?? null;
+  const oldMap = new Map(oldRows.map((r) => [r.key, r.value ?? null]));
+  const params = [u];
+  const valuesSql = pairs
+    .map(([k, v]) => {
+      params.push(k);
+      const ki = params.length;
+      params.push(v);
+      return `($${ki}, $${params.length}, $1, LOCALTIMESTAMP(0))`;
+    })
+    .join(", ");
   await pool.query(
     `INSERT INTO public.odg_thunjai_setting (key, value, updated_by, updated_at)
-     VALUES ($1, $2, $3, LOCALTIMESTAMP(0))
+     VALUES ${valuesSql}
      ON CONFLICT (key) DO UPDATE
        SET value = EXCLUDED.value,
            updated_by = EXCLUDED.updated_by,
            updated_at = LOCALTIMESTAMP(0)`,
-    [k, v, u]
+    params
   );
-  if (oldValue !== v) {
-    const sensitive = /pwd|password|secret|token|key/i.test(k);
-    await recordAudit({
-      action: "thunjai.setting.update",
-      entityType: "thunjai_setting",
-      entityId: k,
-      userCode: u,
-      changes: {
-        key: k,
-        old_value: sensitive && oldValue ? "***" : oldValue,
-        new_value: sensitive && v ? "***" : v,
-        masked: sensitive,
-      },
-    });
-  }
-  return { success: true };
-}
-
-async function setSettings(entries, userCode) {
-  for (const [key, value] of Object.entries(entries ?? {})) {
-    await setSetting(key, value, userCode);
+  for (const [k, v] of pairs) {
+    const oldValue = oldMap.get(k) ?? null;
+    if (oldValue !== v) {
+      const sensitive = /pwd|password|secret|token|key/i.test(k);
+      await recordAudit({
+        action: "thunjai.setting.update",
+        entityType: "thunjai_setting",
+        entityId: k,
+        userCode: u,
+        changes: {
+          key: k,
+          old_value: sensitive && oldValue ? "***" : oldValue,
+          new_value: sensitive && v ? "***" : v,
+          masked: sensitive,
+        },
+      });
+    }
   }
   return { success: true };
 }

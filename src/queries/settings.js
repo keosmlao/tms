@@ -125,9 +125,54 @@ async function setSetting(key, value, userCode) {
 }
 
 async function setSettings(entries, userCode) {
-  // entries: { key: value, ... }
-  for (const [key, value] of Object.entries(entries ?? {})) {
-    await setSetting(key, value, userCode);
+  // All keys persist together (one atomic multi-row upsert) or none — a
+  // mid-save failure no longer leaves the settings form half-applied, and the
+  // read-modify-write on old_value can't interleave across keys.
+  const pairs = Object.entries(entries ?? {})
+    .map(([key, value]) => [String(key ?? "").trim(), value == null ? null : String(value)])
+    .filter(([k]) => k);
+  if (pairs.length === 0) return { success: true };
+  await ensureSettingsSchema();
+  const u = userCode ? String(userCode).trim() || null : null;
+  const keys = pairs.map(([k]) => k);
+  const oldRows = await query(
+    `SELECT key, value FROM public.odg_tms_setting WHERE key = ANY($1::varchar[])`,
+    [keys]
+  );
+  const oldMap = new Map(oldRows.map((r) => [r.key, r.value ?? null]));
+  const params = [u];
+  const valuesSql = pairs
+    .map(([k, v]) => {
+      params.push(k);
+      const ki = params.length;
+      params.push(v);
+      return `($${ki}, $${params.length}, $1, LOCALTIMESTAMP(0))`;
+    })
+    .join(", ");
+  await pool.query(
+    `INSERT INTO public.odg_tms_setting (key, value, updated_by, updated_at)
+     VALUES ${valuesSql}
+     ON CONFLICT (key) DO UPDATE
+       SET value = EXCLUDED.value,
+           updated_by = EXCLUDED.updated_by,
+           updated_at = LOCALTIMESTAMP(0)`,
+    params
+  );
+  // Cache refresh + best-effort audit, after the write committed.
+  const c = getCache();
+  for (const [k, v] of pairs) {
+    if (v == null) c.map.delete(k);
+    else c.map.set(k, v);
+    const oldValue = oldMap.get(k) ?? null;
+    if (oldValue !== v) {
+      await recordAudit({
+        action: "setting.update",
+        entityType: "setting",
+        entityId: k,
+        userCode: u,
+        changes: { key: k, old_value: oldValue, new_value: v },
+      });
+    }
   }
   return { success: true };
 }
