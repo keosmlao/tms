@@ -44,6 +44,13 @@ export async function proxy(request: NextRequest) {
     return NextResponse.next();
   }
 
+  // Public static downloads from /public (the driver APK) must be reachable
+  // without a session — otherwise the auth redirect serves the login HTML in
+  // place of the file and in-app updates silently break.
+  if (pathname.endsWith(".apk")) {
+    return NextResponse.next();
+  }
+
   if (!valid) {
     const url = request.nextUrl.clone();
     url.pathname = "/login";
