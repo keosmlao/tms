@@ -1,9 +1,8 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { Fragment, useEffect, useMemo, useState } from "react";
 import {
   FaBox,
-  FaCalendarAlt,
   FaChevronDown,
   FaChevronRight,
   FaClock,
@@ -96,6 +95,11 @@ interface RouteBillGroup {
 
 function toNumber(value: number | string | null | undefined) {
   return Number(value ?? 0);
+}
+
+function formatDistance(km: number | null) {
+  if (km == null) return "-";
+  return km < 1 ? `${Math.round(km * 1000)} m` : `${km.toFixed(1)} ກມ`;
 }
 
 function billGroupLabel(bill: WaitingRouteBill, routeMap: Map<string, DeliveryRoute>) {
@@ -326,7 +330,7 @@ export default function BillsWaitingRoutesPage() {
   };
 
   return (
-    <div className="space-y-5">
+    <div className="space-y-4">
       <StatusPageHeader
         title="ບິນລໍຖ້າຈັດຖ້ຽວຕາມເສັ້ນທາງ"
         subtitle="ເສັ້ນທາງ + ວັນທີ + ຮອບ + ລາຍການບິນ"
@@ -343,29 +347,29 @@ export default function BillsWaitingRoutesPage() {
         ]}
       />
 
-      <section className="rounded-lg border border-slate-200/50 bg-white/70 p-4 shadow-sm dark:border-white/10 dark:bg-white/[0.04]">
-        <div className="grid gap-3 md:grid-cols-[minmax(0,1fr)_260px]">
+      <section className="rounded-lg border border-slate-200/50 bg-white/70 p-3 shadow-sm dark:border-white/10 dark:bg-white/[0.04]">
+        <div className="grid gap-2 sm:grid-cols-[minmax(0,1fr)_220px_auto] sm:items-end">
           <label className="block">
-            <span className="mb-1.5 block text-xs font-medium text-slate-600 dark:text-slate-300">
-              <FaSearch className="mr-1.5 inline text-slate-400" size={11} />
+            <span className="mb-1 block text-[11px] font-medium text-slate-600 dark:text-slate-300">
+              <FaSearch className="mr-1 inline text-slate-400" size={10} />
               ຄົ້ນຫາ
             </span>
             <input
               value={searchText}
               onChange={(event) => setSearchText(event.target.value)}
-              placeholder="ຄົ້ນຫາເລກບິນ, ລູກຄ້າ, ເສັ້ນທາງ..."
-              className="w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs text-slate-700 outline-none transition-all focus:border-emerald-400 focus:ring-2 focus:ring-emerald-500/20 dark:border-white/10 dark:bg-slate-950 dark:text-slate-200"
+              placeholder="ເລກບິນ, ລູກຄ້າ, ເສັ້ນທາງ..."
+              className="w-full rounded-md border border-slate-200 bg-white px-2.5 py-1.5 text-xs text-slate-700 outline-none transition-all focus:border-emerald-400 focus:ring-2 focus:ring-emerald-500/20 dark:border-white/10 dark:bg-slate-950 dark:text-slate-200"
             />
           </label>
           <label className="block">
-            <span className="mb-1.5 block text-xs font-medium text-slate-600 dark:text-slate-300">
-              <FaRoute className="mr-1.5 inline text-slate-400" size={11} />
+            <span className="mb-1 block text-[11px] font-medium text-slate-600 dark:text-slate-300">
+              <FaRoute className="mr-1 inline text-slate-400" size={10} />
               ເສັ້ນທາງ
             </span>
             <select
               value={selectedRoute}
               onChange={(event) => setSelectedRoute(event.target.value)}
-              className="w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs text-slate-700 outline-none transition-all focus:border-emerald-400 focus:ring-2 focus:ring-emerald-500/20 dark:border-white/10 dark:bg-slate-950 dark:text-slate-200"
+              className="w-full rounded-md border border-slate-200 bg-white px-2.5 py-1.5 text-xs text-slate-700 outline-none transition-all focus:border-emerald-400 focus:ring-2 focus:ring-emerald-500/20 dark:border-white/10 dark:bg-slate-950 dark:text-slate-200"
             >
               <option value="all">ທັງໝົດ</option>
               {routeOptions.map((route) => (
@@ -375,195 +379,168 @@ export default function BillsWaitingRoutesPage() {
               ))}
             </select>
           </label>
-        </div>
-        <div className="mt-3 flex items-center justify-end">
-          <label className="inline-flex items-center gap-2 cursor-pointer">
+          <label className="inline-flex cursor-pointer items-center gap-1.5 pb-1.5">
             <input
               type="checkbox"
               checked={sortByDistance}
               onChange={(e) => setSortByDistance(e.target.checked)}
               className="rounded border-slate-300 text-emerald-600 focus:ring-emerald-500"
             />
-            <span className="text-[11px] text-slate-600 dark:text-slate-300">
-              ຈັດຮຽງຕາມໄລຍະທາງຈາກຕົ້ນທາງ (ໃກ້→ໄກ)
+            <span className="whitespace-nowrap text-[11px] text-slate-600 dark:text-slate-300">
+              ຮຽງຕາມໄລຍະ (ໃກ້→ໄກ)
             </span>
           </label>
         </div>
       </section>
 
       {loading ? (
-        <div className="rounded-lg border border-slate-200/50 bg-white/70 py-14 text-center text-xs text-slate-400 shadow-sm dark:border-white/10 dark:bg-white/[0.04]">
+        <div className="rounded-lg border border-slate-200/50 bg-white/70 py-12 text-center text-xs text-slate-400 shadow-sm dark:border-white/10 dark:bg-white/[0.04]">
           <FaSpinner className="mx-auto mb-2 animate-spin" size={18} />
           ກຳລັງໂຫຼດ...
         </div>
       ) : routeGroups.length === 0 ? (
-        <div className="rounded-lg border border-slate-200/50 bg-white/70 py-14 text-center text-xs text-slate-400 shadow-sm dark:border-white/10 dark:bg-white/[0.04]">
+        <div className="rounded-lg border border-slate-200/50 bg-white/70 py-12 text-center text-xs text-slate-400 shadow-sm dark:border-white/10 dark:bg-white/[0.04]">
           ບໍ່ມີບິນລໍຖ້າຈັດຖ້ຽວທີ່ກຳນົດເສັ້ນທາງແລະຮອບແລ້ວ
         </div>
       ) : (
-        <div className="space-y-5">
-          {routeGroups.map((routeGroup) => (
-            <section
-              key={routeGroup.key}
-              className="overflow-hidden rounded-lg border border-slate-200/60 bg-white shadow-sm dark:border-white/10 dark:bg-slate-900"
-            >
-              <div className="border-b border-slate-200/60 bg-emerald-50/80 px-4 py-3 dark:border-white/10 dark:bg-emerald-950/20">
-                <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
-                  <div className="min-w-0">
-                    <p className="flex items-center gap-2 text-base font-bold text-slate-800 dark:text-white">
-                      <FaRoute className="shrink-0 text-emerald-600 dark:text-emerald-400" size={13} />
-                      <span className="truncate">{routeGroup.routeName}</span>
-                    </p>
-                    <p className="mt-1 text-[11px] text-slate-500 dark:text-slate-400">
-                      {routeGroup.dates.length} ວັນທີ · {routeGroup.billCount} ບິນ · {routeGroup.itemCount} ລາຍການ
-                    </p>
-                  </div>
-                  <span className="shrink-0 rounded-full bg-emerald-600 px-3 py-1 text-[11px] font-bold text-white">
-                    ເສັ້ນທາງ
+        <div className="space-y-3">
+          {routeGroups.map((routeGroup) => {
+            const route = routeMap.get(routeGroup.routeCode);
+            const flatBills = routeGroup.dates.flatMap((dateGroup) =>
+              dateGroup.rounds.flatMap((roundGroup) => roundGroup.bills)
+            );
+            return (
+              <section
+                key={routeGroup.key}
+                className="overflow-hidden rounded-lg border border-slate-200/60 bg-white shadow-sm dark:border-white/10 dark:bg-slate-900"
+              >
+                <div className="flex items-center justify-between gap-2 border-b border-slate-200/60 bg-emerald-50/80 px-3 py-1.5 dark:border-white/10 dark:bg-emerald-950/20">
+                  <p className="flex min-w-0 items-center gap-1.5 text-[13px] font-bold text-slate-800 dark:text-white">
+                    <FaRoute className="shrink-0 text-emerald-600 dark:text-emerald-400" size={12} />
+                    <span className="truncate">{routeGroup.routeName}</span>
+                  </p>
+                  <span className="shrink-0 text-[11px] font-medium text-slate-500 dark:text-slate-400">
+                    {routeGroup.dates.length} ວັນທີ · {routeGroup.billCount} ບິນ · {routeGroup.itemCount} ລາຍການ
                   </span>
                 </div>
-              </div>
 
-              <div className="space-y-4 p-4">
-                {routeGroup.dates.map((dateGroup) => (
-                  <div
-                    key={dateGroup.key}
-                    className="rounded-lg border border-slate-200/60 bg-slate-50/70 dark:border-white/10 dark:bg-slate-950/40"
-                  >
-                    <div className="flex flex-col gap-1 border-b border-slate-200/60 px-3 py-2 dark:border-white/10 sm:flex-row sm:items-center sm:justify-between">
-                      <p className="flex items-center gap-2 text-sm font-bold text-slate-800 dark:text-white">
-                        <FaCalendarAlt className="text-slate-400" size={12} />
-                        {dateGroup.date}
-                      </p>
-                      <p className="text-[11px] text-slate-500 dark:text-slate-400">
-                        {dateGroup.rounds.length} ຮອບ · {dateGroup.billCount} ບິນ
-                      </p>
-                    </div>
-
-                    <div className="space-y-3 p-3">
-                      {dateGroup.rounds.map((roundGroup) => (
-                        <div
-                          key={roundGroup.key}
-                          className="overflow-hidden rounded-lg border border-slate-200/70 bg-white dark:border-white/10 dark:bg-slate-900"
-                        >
-                          <div className="flex flex-col gap-1 border-b border-slate-200/60 px-3 py-2 dark:border-white/10 sm:flex-row sm:items-center sm:justify-between">
-                            <p className="flex items-center gap-2 text-xs font-bold text-slate-700 dark:text-slate-200">
-                              <FaClock className="text-amber-500" size={11} />
-                              {roundGroup.roundName}
-                              <span className="font-medium text-slate-400">({roundGroup.time})</span>
-                            </p>
-                            <p className="text-[11px] font-semibold text-amber-700 dark:text-amber-400">
-                              {roundGroup.bills.length} ບິນ · {roundGroup.itemCount} ລາຍການ
-                            </p>
-                          </div>
-
-                          <div className="divide-y divide-slate-200/60 dark:divide-white/10">
-                            {roundGroup.bills.map((bill) => {
-                              const route = routeMap.get(routeGroup.routeCode);
-                              const distanceKm = billDistanceFromRoute(bill, route);
-                              return (
-                              <div key={bill.doc_no}>
-                                <div className="px-3 py-3">
-                                  <button
-                                    type="button"
-                                    onClick={() => void toggleProducts(bill.doc_no)}
-                                    className="w-full min-w-0 text-left"
-                                  >
-                                    <div className="flex flex-wrap items-center gap-2">
-                                      <span className="flex h-5 w-5 items-center justify-center rounded-md bg-slate-100 text-slate-500 dark:bg-white/10 dark:text-slate-300">
-                                        {expandedBill === bill.doc_no ? (
-                                          <FaChevronDown size={10} />
-                                        ) : (
-                                          <FaChevronRight size={10} />
-                                        )}
-                                      </span>
-                                      <p className="font-mono text-sm font-bold text-slate-800 dark:text-white">
-                                        {bill.doc_no}
-                                      </p>
-                                      <span className="rounded-full bg-slate-100 px-2 py-0.5 text-[10px] font-semibold text-slate-500 dark:bg-white/10 dark:text-slate-300">
-                                        {toNumber(bill.count_item)} ລາຍການ
-                                      </span>
-                                      {distanceKm != null && (
-                                        <span className="rounded-full bg-emerald-500/10 px-2 py-0.5 text-[10px] font-semibold text-emerald-700 dark:text-emerald-400">
-                                          {distanceKm < 1 ? `${Math.round(distanceKm * 1000)} m` : `${distanceKm.toFixed(1)} ກມ`}
-                                        </span>
-                                      )}
-                                      {bill.incoming_forwarded && (
-                                        <span className="rounded-full bg-sky-500/10 px-2 py-0.5 text-[10px] font-semibold text-sky-700 dark:text-sky-400">
-                                          ສົ່ງຕໍ່
-                                        </span>
-                                      )}
-                                    </div>
-                                    <p className="mt-1 truncate pl-7 text-[11px] text-slate-500 dark:text-slate-400">
-                                      {bill.cust_name || bill.cust_code || "-"} · ວັນບິນ {bill.doc_date || "-"}
-                                    </p>
-                                    {bill.incoming_forwarded && (
-                                      <p className="mt-0.5 truncate pl-7 text-[10px] text-sky-600 dark:text-sky-400">
-                                        ຈາກ {bill.forward_from_transport_name || "-"} · {bill.forwarded_at || "-"}
-                                      </p>
-                                    )}
-                                  </button>
+                <div className="overflow-x-auto">
+                  <table className="w-full text-[11px]">
+                    <thead className="border-b border-slate-200/60 bg-slate-50 text-slate-500 dark:border-white/10 dark:bg-white/5 dark:text-slate-400">
+                      <tr>
+                        <th className="w-5"></th>
+                        <th className="px-2 py-1.5 text-left font-semibold">ເລກບິນ</th>
+                        <th className="px-2 py-1.5 text-left font-semibold">ລູກຄ້າ</th>
+                        <th className="px-2 py-1.5 text-left font-semibold">ວັນສົ່ງ</th>
+                        <th className="px-2 py-1.5 text-left font-semibold">ຮອບ</th>
+                        <th className="px-2 py-1.5 text-right font-semibold">ລາຍການ</th>
+                        <th className="px-2 py-1.5 text-right font-semibold">ໄລຍະ</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-slate-200/60 dark:divide-white/10">
+                      {flatBills.map((bill) => {
+                        const label = billGroupLabel(bill, routeMap);
+                        const distanceKm = billDistanceFromRoute(bill, route);
+                        const expanded = expandedBill === bill.doc_no;
+                        return (
+                          <Fragment key={bill.doc_no}>
+                            <tr
+                              onClick={() => void toggleProducts(bill.doc_no)}
+                              className={`cursor-pointer transition-colors hover:bg-emerald-50/50 dark:hover:bg-white/[0.03] ${
+                                expanded ? "bg-emerald-50/50 dark:bg-white/[0.03]" : ""
+                              }`}
+                            >
+                              <td className="py-1.5 pl-2 align-middle text-slate-400">
+                                {expanded ? <FaChevronDown size={9} /> : <FaChevronRight size={9} />}
+                              </td>
+                              <td className="px-2 py-1.5 align-middle">
+                                <div className="flex items-center gap-1.5">
+                                  <span className="font-mono font-bold text-slate-800 dark:text-white">
+                                    {bill.doc_no}
+                                  </span>
+                                  {bill.incoming_forwarded && (
+                                    <span
+                                      className="rounded bg-sky-500/10 px-1 py-px text-[9px] font-semibold text-sky-700 dark:text-sky-400"
+                                      title={`ສົ່ງຕໍ່ຈาก ${bill.forward_from_transport_name || "-"} · ${bill.forwarded_at || "-"}`}
+                                    >
+                                      ສົ່ງຕໍ່
+                                    </span>
+                                  )}
                                 </div>
-
-                                {expandedBill === bill.doc_no && (
-                                  <div className="border-t border-slate-200/60 bg-slate-50/80 px-3 py-3 dark:border-white/10 dark:bg-slate-950/40">
-                                    {loadingProducts === bill.doc_no ? (
-                                      <div className="flex items-center justify-center gap-2 py-5 text-[11px] text-slate-400">
-                                        <FaSpinner className="animate-spin" size={12} />
-                                        ກຳລັງໂຫຼດລາຍການສິນຄ້າ...
-                                      </div>
-                                    ) : (productsByBill[bill.doc_no] ?? []).length === 0 ? (
-                                      <p className="py-4 text-center text-[11px] text-slate-400">
-                                        ບໍ່ພົບລາຍການສິນຄ້າ
-                                      </p>
-                                    ) : (
-                                      <div className="overflow-hidden rounded-lg border border-slate-200/70 bg-white dark:border-white/10 dark:bg-slate-900">
-                                        <table className="w-full text-[11px]">
-                                          <thead className="bg-slate-50 text-slate-500 dark:bg-white/5 dark:text-slate-400">
-                                            <tr>
-                                              <th className="w-10 px-2 py-2 text-left font-semibold">#</th>
-                                              <th className="px-2 py-2 text-left font-semibold">ລະຫັດ</th>
-                                              <th className="px-2 py-2 text-left font-semibold">ຊື່ສິນຄ້າ</th>
-                                              <th className="px-2 py-2 text-right font-semibold">ຈຳນວນ</th>
-                                              <th className="px-2 py-2 text-left font-semibold">ຫົວໜ່ວຍ</th>
-                                            </tr>
-                                          </thead>
-                                          <tbody className="divide-y divide-slate-200/60 dark:divide-white/10">
-                                            {productsByBill[bill.doc_no].map((product, index) => (
-                                              <tr key={`${bill.doc_no}-${product.item_code}-${index}`}>
-                                                <td className="px-2 py-2 text-slate-400">{index + 1}</td>
-                                                <td className="px-2 py-2 font-mono text-[10px] text-slate-500 dark:text-slate-400">
-                                                  {product.item_code}
-                                                </td>
-                                                <td className="px-2 py-2 text-slate-700 dark:text-slate-200">
-                                                  {product.item_name}
-                                                </td>
-                                                <td className="px-2 py-2 text-right font-bold text-emerald-600 dark:text-emerald-400">
-                                                  {product.qty}
-                                                </td>
-                                                <td className="px-2 py-2 text-slate-500 dark:text-slate-400">
-                                                  {product.unit_code}
-                                                </td>
-                                              </tr>
-                                            ))}
-                                          </tbody>
-                                        </table>
-                                      </div>
-                                    )}
-                                  </div>
+                              </td>
+                              <td className="max-w-[160px] truncate px-2 py-1.5 align-middle text-slate-600 dark:text-slate-300">
+                                {bill.cust_name || bill.cust_code || "-"}
+                              </td>
+                              <td className="whitespace-nowrap px-2 py-1.5 align-middle text-slate-600 dark:text-slate-300">
+                                {label.date}
+                              </td>
+                              <td className="whitespace-nowrap px-2 py-1.5 align-middle text-slate-600 dark:text-slate-300">
+                                {label.roundName}
+                                {label.time !== "-" && (
+                                  <span className="ml-1 text-slate-400">{label.time}</span>
                                 )}
-                              </div>
-                              );
-                            })}
-                          </div>
-                        </div>
-                      ))}
-                    </div>
-                  </div>
-                ))}
-              </div>
-            </section>
-          ))}
+                              </td>
+                              <td className="px-2 py-1.5 text-right align-middle font-semibold text-slate-700 dark:text-slate-200">
+                                {toNumber(bill.count_item)}
+                              </td>
+                              <td className="whitespace-nowrap px-2 py-1.5 text-right align-middle text-emerald-700 dark:text-emerald-400">
+                                {formatDistance(distanceKm)}
+                              </td>
+                            </tr>
+                            {expanded && (
+                              <tr>
+                                <td colSpan={7} className="bg-slate-50/80 px-3 py-2 dark:bg-slate-950/40">
+                                  {loadingProducts === bill.doc_no ? (
+                                    <div className="flex items-center justify-center gap-2 py-3 text-[11px] text-slate-400">
+                                      <FaSpinner className="animate-spin" size={11} />
+                                      ກຳລັງໂຫຼດລາຍການສິນຄ້າ...
+                                    </div>
+                                  ) : (productsByBill[bill.doc_no] ?? []).length === 0 ? (
+                                    <p className="py-2 text-center text-[11px] text-slate-400">
+                                      ບໍ່ພົບລາຍການສິນຄ້າ
+                                    </p>
+                                  ) : (
+                                    <table className="w-full text-[10px]">
+                                      <thead className="text-slate-400">
+                                        <tr>
+                                          <th className="px-2 py-1 text-left font-semibold">ລະຫັດ</th>
+                                          <th className="px-2 py-1 text-left font-semibold">ຊື່ສິນຄ້າ</th>
+                                          <th className="px-2 py-1 text-right font-semibold">ຈຳນວນ</th>
+                                          <th className="px-2 py-1 text-left font-semibold">ຫົວໜ່ວຍ</th>
+                                        </tr>
+                                      </thead>
+                                      <tbody>
+                                        {productsByBill[bill.doc_no].map((product, index) => (
+                                          <tr key={`${bill.doc_no}-${product.item_code}-${index}`}>
+                                            <td className="px-2 py-0.5 font-mono text-slate-500 dark:text-slate-400">
+                                              {product.item_code}
+                                            </td>
+                                            <td className="px-2 py-0.5 text-slate-700 dark:text-slate-200">
+                                              {product.item_name}
+                                            </td>
+                                            <td className="px-2 py-0.5 text-right font-bold text-emerald-600 dark:text-emerald-400">
+                                              {product.qty}
+                                            </td>
+                                            <td className="px-2 py-0.5 text-slate-500 dark:text-slate-400">
+                                              {product.unit_code}
+                                            </td>
+                                          </tr>
+                                        ))}
+                                      </tbody>
+                                    </table>
+                                  )}
+                                </td>
+                              </tr>
+                            )}
+                          </Fragment>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                </div>
+              </section>
+            );
+          })}
         </div>
       )}
     </div>
