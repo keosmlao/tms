@@ -604,7 +604,7 @@ async function getBillsPending(session, fromDate, toDate, transportCode) {
   // admin re-assigned to another branch/method drops out accordingly.
   const where = effectiveCode === "all"
     ? `COALESCE(NULLIF(TRIM(pbov.transport_code), ''), a.transport_code) IN (${deliveryBranchListSql()})`
-    : "a.transport_code=$3";
+    : `COALESCE(NULLIF(TRIM(pbov.transport_code), ''), a.transport_code)=$3`;
   const [shipmentRaw, manualRaw, listtrans] = await Promise.all([
     query(
       `SELECT
@@ -813,13 +813,20 @@ async function getBillsPending(session, fromDate, toDate, transportCode) {
 
 async function updateBillTransport(docNo, transportCode) {
   const code = String(transportCode ?? "").trim() || null;
+  await ensurePendingBillSchema();
   // bills-pending reads/filters the transport from odg_tms_pending_bill
   // (pb.transport_code), so the change MUST land there or it reverts on refresh.
-  // Every bill shown in that screen already has a pending_bill row. Keep
+  // A fresh sale bill (flag 44) shows in the queue via the shipment LEFT JOIN
+  // with NO pending_bill row yet, so a plain UPDATE was a no-op and the override
+  // was silently lost — UPSERT so the row is created when missing. Keep
   // ic_trans_shipment in sync for the downstream job / waiting-sent views that
   // still read transport from it (no-op when the bill has no shipment row).
   await query(
-    `UPDATE public.odg_tms_pending_bill SET transport_code=$1, updated_at=LOCALTIMESTAMP(0) WHERE bill_no=$2`,
+    `INSERT INTO public.odg_tms_pending_bill (bill_no, transport_code, updated_at)
+     VALUES ($2, $1, LOCALTIMESTAMP(0))
+     ON CONFLICT (bill_no) DO UPDATE
+       SET transport_code = EXCLUDED.transport_code,
+           updated_at = LOCALTIMESTAMP(0)`,
     [code, docNo]
   );
   await query(
