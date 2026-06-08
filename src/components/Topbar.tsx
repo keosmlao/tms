@@ -50,6 +50,7 @@ const pageTitles: Record<string, string> = {
   "/manage/delivery-rounds": "ຮອບການຈັດສົ່ງ",
   "/tracking": "ຕິດຕາມ",
   "/tracking/sales": "ບິນສົ່ງບໍ່ສຳເລັດ",
+  "/tracking/sales/delivered": "ບິນສົ່ງສຳເລັດ",
   "/tracking/cars-map": "ແຜນທີ່ລົດ",
   "/location": "ຕໍາແໜ່ງລົດ",
 };

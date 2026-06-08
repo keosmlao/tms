@@ -660,7 +660,7 @@ async function getBillsPending(session, fromDate, toDate, transportCode) {
   // schedule map and the todo map all depend only on transRaw/billNos and are
   // independent of each other — run them concurrently so the lighter lookups
   // overlap with applyRemainingCounts instead of stacking after it.
-  const [countedRows, cancelledRows, scheduleMap, todoMap] = await Promise.all([
+  const [countedRows, cancelledRows, scheduleMap, todoMap, activeDispatchRows] = await Promise.all([
     applyRemainingCounts(transRaw),
     query(
       `SELECT DISTINCT ON (d.bill_no)
@@ -684,7 +684,20 @@ async function getBillsPending(session, fromDate, toDate, transportCode) {
     getPendingBillScheduleMap(billNos),
     // Aggregated todo counts/earliest deadline for the row indicator.
     getBillTodoSummaryMap(billNos),
+    // Bills already sitting on an OPEN trip (status NULL/0/3 — not delivered=1,
+    // not cancelled=2) must not show in this triage queue. The shipment path
+    // already drops them via check_status=1, but manual/transfer bills (flag 72)
+    // have no check_status gate, so a dispatched ໂອນ bill kept re-appearing here.
+    // Same rule getJobInit/searchBills use for the "addable bills" list.
+    query(
+      `SELECT DISTINCT bill_no FROM public.odg_tms_detail
+       WHERE bill_no = ANY($1::varchar[])
+         AND COALESCE(status, 0) NOT IN (1, 2)
+         AND ${getFixedYearSqlFilter("doc_date")}`,
+      [billNos]
+    ),
   ]);
+  const activeDispatchSet = new Set(activeDispatchRows.map((r) => r.bill_no));
   const summaries = new Map(
     countedRows.map((row) => [
       row.doc_no,
@@ -789,6 +802,9 @@ async function getBillsPending(session, fromDate, toDate, transportCode) {
     // so keep them visible even when every unit is locked in an active job
     // (remaining_count = 0). Same rationale as the search modal — see the
     // comment in getServiceBillProducts.
+    // Hide bills already on an open trip (manual/transfer bills lack the
+    // check_status gate the shipment path relies on).
+    .filter((bill) => !activeDispatchSet.has(bill.doc_no))
     .filter((bill) => bill.source_type === SERVICE_SOURCE_TYPE || bill.remaining_count > 0)
     .map((bill, index) => ({ ...bill, row_num: index + 1 }));
 

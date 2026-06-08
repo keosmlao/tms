@@ -6,6 +6,7 @@ import {
   FaCheckCircle,
   FaChevronRight,
   FaClock,
+  FaExternalLinkAlt,
   FaExclamationTriangle,
   FaFileInvoice,
   FaFlagCheckered,
@@ -32,6 +33,13 @@ import { getSalesRole } from "@/lib/sales-role";
 import L from "leaflet";
 import "leaflet/dist/leaflet.css";
 import Chatter from "@/components/Chatter";
+import { WhatsappLink, buildBillWhatsappMessage } from "@/components/whatsapp-link";
+
+function customerTrackingUrl(billNo: string) {
+  const env = process.env.NEXT_PUBLIC_BASE_URL;
+  const base = env ? env.replace(/\/$/, "") : typeof window !== "undefined" ? window.location.origin : "";
+  return `${base}/track?bill=${encodeURIComponent(billNo)}`;
+}
 
 interface SalesBillRow {
   bill_no: string;
@@ -40,6 +48,7 @@ interface SalesBillRow {
   send_date_display?: string | null;
   send_date?: string | null;
   customer_name: string;
+  telephone?: string;
   salesperson: string;
   car_plate: string;
   driver_phone: string;
@@ -685,7 +694,34 @@ export default function SalesTrackingPage() {
                     <td className="max-w-[150px] truncate px-2.5 py-1.5 text-[11px] text-slate-500">{row.car_plate || row.car || row.transport_name || "-"}</td>
                     <td className="max-w-[120px] truncate px-2.5 py-1.5 text-[11px] text-slate-500">{readOnlyMode ? row.salesperson || row.sale_code || "-" : row.salesperson || "-"}</td>
                     <td className="whitespace-nowrap px-2.5 py-1.5 text-right text-[11px] text-slate-500">{row.attempt_count}·{row.completed_count}✓</td>
-                    <td className="px-1 text-slate-300"><FaChevronRight size={10} /></td>
+                    <td className="whitespace-nowrap px-1 text-right">
+                      <span className="inline-flex items-center gap-0.5">
+                        <a
+                          href={customerTrackingUrl(row.bill_no)}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          onClick={(e) => e.stopPropagation()}
+                          title="ເປີດໜ້າຕິດຕາມ"
+                          className="inline-flex items-center justify-center rounded-md p-1 text-sky-600 hover:bg-sky-500/15 dark:text-sky-400"
+                        >
+                          <FaExternalLinkAlt size={11} />
+                        </a>
+                        {row.telephone && (
+                          <WhatsappLink
+                            phone={row.telephone}
+                            message={buildBillWhatsappMessage({
+                              billNo: row.bill_no,
+                              customerName: row.customer_name,
+                              carName: row.car_plate || row.car,
+                              driverName: row.driver,
+                              trackingUrl: customerTrackingUrl(row.bill_no),
+                            })}
+                            size={13}
+                          />
+                        )}
+                        <FaChevronRight size={10} className="text-slate-300" />
+                      </span>
+                    </td>
                   </tr>
                 );
               })}
@@ -722,6 +758,29 @@ export default function SalesTrackingPage() {
               </div>
               <div className="flex shrink-0 items-center gap-1.5">
                 {detailLoading && <FaSpinner className="animate-spin text-teal-500" size={13} />}
+                <a
+                  href={customerTrackingUrl(selectedRow.bill_no)}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  title="ເປີດໜ້າຕິດຕາມ"
+                  className="inline-flex items-center justify-center rounded-md p-1.5 text-sky-600 hover:bg-sky-500/15 dark:text-sky-400"
+                >
+                  <FaExternalLinkAlt size={13} />
+                </a>
+                {selectedRow.telephone && (
+                  <WhatsappLink
+                    phone={selectedRow.telephone}
+                    message={buildBillWhatsappMessage({
+                      billNo: selectedRow.bill_no,
+                      customerName: selectedRow.customer_name,
+                      carName: selectedRow.car_plate || selectedRow.car,
+                      driverName: selectedRow.driver,
+                      trackingUrl: customerTrackingUrl(selectedRow.bill_no),
+                    })}
+                    size={15}
+                    title="ສົ່ງ link ຕິດຕາມໃຫ້ລູກຄ້າ"
+                  />
+                )}
                 <StageBadge stage={selectedRow.current_stage} />
                 <button
                   type="button"

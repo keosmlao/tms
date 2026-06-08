@@ -140,6 +140,7 @@ export const Actions = {
   // Tracking
   trackBill: tracking.trackBill,
   getSalesBillTrackingList: tracking.getSalesBillTrackingList,
+  getSalesDeliveredBillTrackingList: tracking.getSalesDeliveredBillTrackingList,
   trackSalesBill: tracking.trackSalesBill,
   searchActiveDeliveryBills: tracking.searchActiveDeliveryBills,
   getGpsRealtime: tracking.getGpsRealtime,

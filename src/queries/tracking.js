@@ -481,6 +481,12 @@ async function getSalesBillTrackingList(session, opts = {}) {
   const fromDate = String(opts.fromDate ?? "").trim() || "1900-01-01";
   const toDate = String(opts.toDate ?? "").trim() || "2999-12-31";
   const search = String(opts.search ?? "").trim();
+  // Default view = undelivered bills (status <> 1). deliveredOnly flips it to
+  // the completed-delivery tracking list sales uses to send tracking links.
+  const deliveredOnly = !!opts.deliveredOnly;
+  const statusClause = deliveredOnly
+    ? "AND COALESCE(latest.status, 0) = 1"
+    : "AND COALESCE(latest.status, 0) <> 1";
   const params = [deptScope ? empDept : userCode, fromDate, toDate, deptScope, scopeRole, scopeLabel];
   const scopeClause = deptScope
     ? "COALESCE(NULLIF(TRIM(sale_e.department_code), ''), '') = $1"
@@ -506,6 +512,7 @@ async function getSalesBillTrackingList(session, opts = {}) {
        to_char(t.send_date,'YYYY-MM-DD') AS send_date,
        COALESCE(NULLIF(TRIM(c.name_1), ''), t.cust_code, '-') AS customer_name,
        COALESCE(NULLIF(TRIM(t.cust_code), ''), '') AS cust_code,
+       COALESCE(NULLIF(TRIM(c.telephone), ''), '') AS telephone,
        COALESCE(NULLIF(TRIM(t.remark), ''), '') AS sales_remark,
        COALESCE(NULLIF(TRIM(t.sale_code), ''), '') AS sale_code,
        COALESCE(NULLIF(TRIM(sale_e.fullname_lo), ''), NULLIF(TRIM(sale_e.nickname), ''), NULLIF(TRIM(t.sale_code), ''), '') AS salesperson,
@@ -586,7 +593,7 @@ async function getSalesBillTrackingList(session, opts = {}) {
        AND COALESCE(NULLIF(TRIM(s.transport_code), ''), '') NOT IN ('', '02-0004')
        AND COALESCE(t.send_date, t.doc_date)::date BETWEEN $2::date AND $3::date
        AND ${getFixedYearSqlFilter("t.doc_date")}
-       AND COALESCE(latest.status, 0) <> 1
+       ${statusClause}
        ${searchClause}
      ORDER BY COALESCE(t.send_date, t.doc_date) DESC, t.doc_no DESC
      LIMIT 500`,

@@ -46,6 +46,17 @@ export async function getSalesBillTrackingList(input?: {
   return svcGetSalesBillTrackingList(s, input ?? {});
 }
 
+// Completed-delivery tracking list for sales — same scoping as the undelivered
+// view but only status=1 bills, used to send customers a tracking link.
+export async function getSalesDeliveredBillTrackingList(input?: {
+  fromDate?: string;
+  toDate?: string;
+  search?: string;
+}) {
+  const s = await requireSession();
+  return svcGetSalesBillTrackingList(s, { ...(input ?? {}), deliveredOnly: true });
+}
+
 export async function trackSalesBill(billNo: string) {
   const s = await requireSession();
   return svcTrackSalesBill(s, billNo);

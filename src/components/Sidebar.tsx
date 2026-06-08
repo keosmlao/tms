@@ -172,6 +172,7 @@ export default function Sidebar({
               items: [
                 { label: "ບິນສົ່ງບໍ່ສຳເລັດ", href: "/tracking/sales", icon: <FaFileInvoice size={13} /> },
                 { label: "ກຳນົດວັນຈັດສົ່ງ", href: "/tracking/sales/daily-bills", icon: <FaCalendarDay size={13} /> },
+                { label: "ບິນສົ່ງສຳເລັດ", href: "/tracking/sales/delivered", icon: <FaCheckCircle size={13} /> },
               ],
             },
           ]
