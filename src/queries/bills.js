@@ -513,8 +513,8 @@ async function getManualPendingRowsForPending(fromDate, toDate, transportCode = 
       COALESCE(NULLIF(TRIM(od.department_name_lo), ''), oe.department_code, '') as department,
       COALESCE(pb.transport_code, '') as transport_code,
       COALESCE(NULLIF(TRIM(tt.name_1), ''), NULLIF(TRIM(pb.transport_code), ''), '') as transport,
-      to_char(COALESCE(pb.updated_at, a.create_date_time_now),'DD-MM-YYYY HH24:MI') as time_open,
-      now() - COALESCE(pb.updated_at, a.create_date_time_now) as time_use,
+      to_char(COALESCE(a.create_date_time_now, pb.updated_at),'DD-MM-YYYY HH24:MI') as time_open,
+      now() - COALESCE(a.create_date_time_now, pb.updated_at) as time_use,
       true as manual_pending_bill,
       a.trans_flag as source_trans_flag,
       'ic_trans' as source_type
@@ -812,7 +812,20 @@ async function getBillsPending(session, fromDate, toDate, transportCode) {
 }
 
 async function updateBillTransport(docNo, transportCode) {
-  await query(`UPDATE ic_trans_shipment SET transport_code=$1 WHERE doc_no=$2 AND ${getFixedYearSqlFilter("doc_date")}`, [transportCode, docNo]);
+  const code = String(transportCode ?? "").trim() || null;
+  // bills-pending reads/filters the transport from odg_tms_pending_bill
+  // (pb.transport_code), so the change MUST land there or it reverts on refresh.
+  // Every bill shown in that screen already has a pending_bill row. Keep
+  // ic_trans_shipment in sync for the downstream job / waiting-sent views that
+  // still read transport from it (no-op when the bill has no shipment row).
+  await query(
+    `UPDATE public.odg_tms_pending_bill SET transport_code=$1, updated_at=LOCALTIMESTAMP(0) WHERE bill_no=$2`,
+    [code, docNo]
+  );
+  await query(
+    `UPDATE ic_trans_shipment SET transport_code=$1 WHERE doc_no=$2 AND ${getFixedYearSqlFilter("doc_date")}`,
+    [code, docNo]
+  );
 }
 
 async function getBillProducts(docNo) {
