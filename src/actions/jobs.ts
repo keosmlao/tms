@@ -23,6 +23,7 @@ import {
   getJobsWaitingPickup as svcGetJobsWaitingPickup,
   listPickupReadyJobs as svcListPickupReadyJobs,
   moveBillToJob as svcMoveBillToJob,
+  reclassifyDeliveredBillToBranch as svcReclassifyDeliveredBillToBranch,
 } from "@/queries/jobs.js";
 
 export async function getJobs() {
@@ -148,4 +149,15 @@ export async function moveBillToJob(
 ) {
   await requireDispatchAccess();
   return svcMoveBillToJob(sourceDocNo, billNo, destDocNo);
+}
+
+// Correct a completed "ສົ່ງລູກຄ້າ" stop that should have been "ສົ່ງສາຂາ":
+// forward it onward to the given branch, reusing the existing delivery data.
+export async function reclassifyDeliveredBillToBranch(
+  docNo: string,
+  billNo: string,
+  forwardTransportCode: string
+) {
+  const s = await requireDispatchAccess();
+  return svcReclassifyDeliveredBillToBranch(s, docNo, billNo, forwardTransportCode);
 }

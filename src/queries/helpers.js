@@ -212,6 +212,9 @@ async function getRemainingBillProducts(billNo) {
         ON det.bill_no = item.bill_no AND det.doc_no = item.doc_no
       WHERE item.bill_no = $1
         AND COALESCE(det.status, 0) IN (1, 2)
+        -- A forward-to-branch leg isn't a customer delivery — exclude it so the
+        -- forwarded qty stays re-dispatchable at the receiving branch.
+        AND NULLIF(TRIM(det.forward_transport_code), '') IS NULL
       GROUP BY item.item_code
     ),
     returned AS (
@@ -306,6 +309,9 @@ async function getRemainingBillProductsMap(billNos) {
         ON det.bill_no = item.bill_no AND det.doc_no = item.doc_no
       WHERE item.bill_no = ANY($1::varchar[])
         AND COALESCE(det.status, 0) IN (1, 2)
+        -- A forward-to-branch leg isn't a customer delivery — exclude it so the
+        -- forwarded qty stays re-dispatchable at the receiving branch.
+        AND NULLIF(TRIM(det.forward_transport_code), '') IS NULL
       GROUP BY item.bill_no, item.item_code
     ),
     returned AS (
@@ -404,6 +410,9 @@ async function getRemainingSummaryMap(billNos) {
         ON det.bill_no = item.bill_no AND det.doc_no = item.doc_no
       WHERE item.bill_no = ANY($1::varchar[])
         AND COALESCE(det.status, 0) IN (1, 2)
+        -- A forward-to-branch leg isn't a customer delivery — exclude it so the
+        -- forwarded qty stays re-dispatchable at the receiving branch.
+        AND NULLIF(TRIM(det.forward_transport_code), '') IS NULL
       GROUP BY item.bill_no, item.item_code
     ),
     -- Goods returned / credit-noted against the sale bill. A return is its own

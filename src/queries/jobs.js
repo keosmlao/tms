@@ -17,7 +17,8 @@ const {
   getRemainingSummaryMap,
 } = require("./helpers");
 const { pushToDriver } = require("./push");
-const { notifyJobCreated, notifyJobCreatedToSales } = require("./notifications");
+const { notifyJobCreated, notifyJobCreatedToSales, notifyBillForwardedToBranch } = require("./notifications");
+const { recordAudit } = require("./audit-log");
 const { ensurePendingBillSchema } = require("./pending-bill");
 
 // The three internal delivery branches a trip can belong to (origin_transport_code).
@@ -829,6 +830,9 @@ async function _getRemainingBillProductsMapExcludingJob(client, billNos, exclude
          ON det.bill_no = item.bill_no AND det.doc_no = item.doc_no
        WHERE item.bill_no = ANY($1::varchar[])
          AND COALESCE(det.status, 0) IN (1, 2)
+         -- A forward-to-branch leg isn't a customer delivery — exclude it so the
+         -- forwarded qty stays re-dispatchable at the receiving branch.
+         AND NULLIF(TRIM(det.forward_transport_code), '') IS NULL
        GROUP BY item.bill_no, item.item_code
      )
      SELECT bi.bill_no, bi.item_code, bi.item_name, bi.unit_code,
@@ -1778,6 +1782,124 @@ async function moveBillToJob(sourceDocNo, billNo, destDocNo) {
   }
 }
 
+// Re-classify an ALREADY-COMPLETED "ສົ່ງລູກຄ້າ" (to_customer) stop as
+// "ສົ່ງສາຂາ" (to_branch) without re-keying anything — the dispatcher picked the
+// wrong destination and the driver has already closed the stop. This reproduces
+// the exact end-state the native to_branch completion path leaves behind
+// (mobile complete_bill → forwardToBranch): the detail row is flagged forwarded
+// + relabelled, the per-item delivered_qty is zeroed (nothing actually reached
+// the customer on this mis-classified leg), and the shipment is moved to the
+// receiving branch and released (check_status=0) so that branch's
+// available-bills queue can dispatch it onward to the customer.
+// Allowed only on a completed (status=1) stop that isn't already a forward.
+async function reclassifyDeliveredBillToBranch(session, docNo, billNo, forwardTransportCode) {
+  await ensureForwardBranchColumn();
+  // delivery_condition lives on the delivery-workflow schema.
+  await ensureDeliveryWorkflowSchema(pool);
+
+  const doc = String(docNo ?? "").trim();
+  const bill = String(billNo ?? "").trim();
+  const branch = String(forwardTransportCode ?? "").trim();
+  if (!doc || !bill) throw new Error("ຕ້ອງລະບຸ doc_no ແລະ bill_no");
+  if (!branch) throw new Error("ກະລຸນາເລືອກສາຂາປາຍທາງ");
+
+  // Forward target must be a real internal delivery branch (transport_type
+  // 02-xxxx) — never the customer self-pickup pseudo-branch 02-0004.
+  const branchRow = await queryOne(
+    `SELECT code, name_1 FROM public.transport_type
+     WHERE code = $1 AND code LIKE '02-%' AND code <> '02-0004'`,
+    [branch]
+  );
+  if (!branchRow) throw new Error("ສາຂາປາຍທາງບໍ່ຖືກຕ້ອງ");
+
+  const client = await pool.connect();
+  try {
+    await client.query("BEGIN");
+    const lock = await client.query(
+      `SELECT COALESCE(status, 0) AS status,
+              NULLIF(TRIM(forward_transport_code), '') AS forward_transport_code
+       FROM public.odg_tms_detail
+       WHERE doc_no = $1 AND bill_no = $2 AND ${getFixedYearSqlFilter("doc_date")}
+       FOR UPDATE`,
+      [doc, bill]
+    );
+    if (lock.rows.length === 0) throw new Error("ບໍ່ພົບບິນໃນຖ້ຽວນີ້");
+    const detail = lock.rows[0];
+    if (Number(detail.status) !== 1) {
+      throw new Error("ແກ້ໄດ້ສະເພາະບິນທີ່ສົ່ງສຳເລັດແລ້ວ");
+    }
+    if (detail.forward_transport_code) {
+      throw new Error("ບິນນີ້ເປັນ 'ສົ່ງສາຂາ' ຢູ່ແລ້ວ");
+    }
+
+    // Can't forward to the very branch that just delivered it.
+    const trip = await client.query(
+      `SELECT COALESCE(origin_transport_code, '') AS origin_transport_code
+       FROM public.odg_tms WHERE doc_no = $1`,
+      [doc]
+    );
+    const origin = trip.rows[0]?.origin_transport_code ?? "";
+    if (origin && origin === branch) {
+      throw new Error("ສາຂາປາຍທາງຊ້ຳກັບສາຂາທີ່ຈັດສົ່ງ");
+    }
+
+    await client.query(
+      `UPDATE public.odg_tms_detail
+       SET forward_transport_code = $3, delivery_condition = 'to_branch'
+       WHERE doc_no = $1 AND bill_no = $2 AND ${getFixedYearSqlFilter("doc_date")}`,
+      [doc, bill, branch]
+    );
+    // Nothing reached the customer on this mis-classified leg — reset the
+    // per-item delivered_qty so the forwarded bill carries its full quantity to
+    // the receiving branch, matching a native to_branch completion (which never
+    // records per-item customer delivery on the forward leg).
+    await client.query(
+      `UPDATE public.odg_tms_detail_item
+       SET delivered_qty = 0
+       WHERE doc_no = $1 AND bill_no = $2`,
+      [doc, bill]
+    );
+    // Move the shipment to the receiving branch and release it — the same
+    // UPDATE the native forward-completion path runs (mobile.js complete_bill).
+    await client.query(
+      `UPDATE ic_trans_shipment SET transport_code = $2, check_status = 0 WHERE doc_no = $1`,
+      [bill, branch]
+    );
+
+    await client.query("COMMIT");
+
+    // Best-effort, post-commit side effects (neither can roll back the change).
+    void recordAudit({
+      action: "reclassify_to_branch",
+      entityType: "bill",
+      entityId: bill,
+      userCode: session?.usercode ?? null,
+      changes: {
+        doc_no: doc,
+        from: "to_customer",
+        to: "to_branch",
+        forward_transport_code: branchRow.code,
+        forward_transport_name: branchRow.name_1,
+      },
+    });
+    // Heads-up to the receiving branch (the bill also appears in their queue).
+    void notifyBillForwardedToBranch(bill, branchRow.code, branchRow.name_1);
+
+    return {
+      success: true,
+      doc_no: doc,
+      bill_no: bill,
+      forward_transport_code: branchRow.code,
+      forward_transport_name: branchRow.name_1,
+    };
+  } catch (err) {
+    await client.query("ROLLBACK").catch(() => {});
+    throw err;
+  } finally {
+    client.release();
+  }
+}
+
 module.exports = {
   getJobs,
   createJob,
@@ -1800,4 +1922,5 @@ module.exports = {
   getJobsWaitingPickup,
   listPickupReadyJobs,
   moveBillToJob,
+  reclassifyDeliveredBillToBranch,
 };

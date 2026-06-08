@@ -636,9 +636,58 @@ async function markAllActivityNotificationsRead(session, limit = 80) {
   return { success: true, marked: rows.length };
 }
 
+// Best-effort heads-up to the receiving branch's staff that a delivered bill was
+// re-routed to them as "ສົ່ງຕໍ່ສາຂາ" and now sits in their available queue for
+// onward delivery. Fire-and-forget — it only reaches users who have a registered
+// push token (driver app or sales app); the bill also simply appears in their
+// available-bills list regardless of whether the push lands.
+async function notifyBillForwardedToBranch(billNo, branchCode, branchName) {
+  try {
+    const code = String(branchCode ?? "").trim();
+    const bill = String(billNo ?? "").trim();
+    if (!code || !bill) return;
+
+    const recipients = await query(
+      `SELECT code FROM erp_user WHERE NULLIF(TRIM(logistic_code), '') = $1`,
+      [code]
+    );
+    const codes = recipients.map((r) => r.code).filter(Boolean);
+    if (codes.length === 0) return;
+
+    const meta = await queryOne(
+      `SELECT COALESCE(NULLIF(TRIM(c.name_1), ''), s.cust_code, '') AS cust_name
+       FROM public.ic_trans_shipment s
+       LEFT JOIN ar_customer c ON c.code = s.cust_code
+       WHERE s.doc_no = $1 LIMIT 1`,
+      [bill]
+    ).catch(() => null);
+
+    const title = "📦 ມີບິນສົ່ງຕໍ່ເຂົ້າສາຂາ";
+    const body = [
+      `ບິນ ${bill}`,
+      meta?.cust_name ? `ລູກຄ້າ ${meta.cust_name}` : null,
+      `➡️ ${branchName || code} — ກະລຸນາຈັດສົ່ງຕໍ່ຫາລູກຄ້າ`,
+    ]
+      .filter(Boolean)
+      .join("\n");
+    const data = { type: "bill_forwarded", bill_no: bill, branch_code: code };
+
+    // Try both token tables (driver app + sales/web app); each no-ops cleanly
+    // for recipients without a token.
+    const { pushToDriver, pushToEmployees } = require("./push");
+    await Promise.allSettled([
+      ...codes.map((c) => pushToDriver(c, title, body, data)),
+      pushToEmployees(codes, title, body, data),
+    ]);
+  } catch (err) {
+    console.warn("[notify] forwarded-to-branch failed:", err?.message ?? err);
+  }
+}
+
 module.exports = {
   notifyJobCreated,
   notifyJobCreatedToSales,
+  notifyBillForwardedToBranch,
   notifyBillStatus,
   notifyCustomerLine,
   notifySalesLine,
