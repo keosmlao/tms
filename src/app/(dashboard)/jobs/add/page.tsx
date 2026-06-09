@@ -303,19 +303,35 @@ export default function AddJobClient({
   const [showInfoForm, setShowInfoForm] = useState(true);
 
   const { session } = useSession();
-  const ownBranch = (session?.logistic_code ?? "").trim();
-  // Branch model for trip creation:
-  //  - Branch admin (logistic_code = one of the 3 delivery branches): locked to
-  //    their own branch (server already scopes their bills).
-  //  - Manager / head office (unscoped, e.g. 02-0004 or blank): must pick which
-  //    branch's trip they're building.
   const DELIVERY_BRANCH_CODES = ["02-0001", "02-0002", "02-0003"];
-  const isBranchAdmin = !!ownBranch && DELIVERY_BRANCH_CODES.includes(ownBranch);
-  const branchOptions = transportBranches.filter((b) => DELIVERY_BRANCH_CODES.includes(b.code));
+  // Branch model for trip creation. A user may be assigned ONE or MORE delivery
+  // branches; the dispatch set (branch_codes) wins, else the legacy single
+  // logistic_code.
+  //  - Exactly one branch  → locked to it (server already scopes their bills).
+  //  - More than one branch → must pick which of THEIR branches this trip is for.
+  //  - No branch scope (manager / head office) → must pick any delivery branch.
+  // Live delivery-branch set from the server (getJobAddPageData) takes precedence
+  // over the cached client session, so a fresh admin assignment is reflected
+  // without a re-login. Falls back to the session token until the server replies.
+  const [assignedBranches, setAssignedBranches] = useState<string[] | null>(null);
+  // Client-side fallback until the server (getJobAddPageData) replies. Mirror the
+  // server's getBranchScope: keep every assigned branch except customer
+  // self-pickup (02-0004) — a worker may be assigned a branch beyond the three
+  // internal ones (e.g. 02-0007 ໂພນສະອາດ).
+  const sessionBranches = (session?.branch_codes || session?.logistic_code || "")
+    .split(",")
+    .map((s) => s.trim())
+    .filter((c) => c && c !== "02-0004");
+  const myBranches = assignedBranches ?? sessionBranches;
+  const ownBranch = myBranches[0] ?? "";
+  const isBranchAdmin = myBranches.length === 1;
+  const branchOptions = transportBranches.filter((b) =>
+    myBranches.length > 0 ? myBranches.includes(b.code) : DELIVERY_BRANCH_CODES.includes(b.code)
+  );
   const [selectedBranch, setSelectedBranch] = useState(
     isEdit ? initialJob.forward_transport_code || "" : ""
   );
-  // Lock a branch admin to their own branch once the session resolves.
+  // Lock a single-branch user to their own branch once the session resolves.
   useEffect(() => {
     if (isBranchAdmin) setSelectedBranch(ownBranch);
   }, [isBranchAdmin, ownBranch]);
@@ -350,7 +366,11 @@ export default function AddJobClient({
       .catch((e) => console.error(e));
   }, []);
 
-  const forwardableBranches = transportBranches.filter((b) => b.code !== ownBranch);
+  // "ສົ່ງສາຂາ" (forward to branch) can target any branch other than the one
+  // dispatching this trip — exclude the selected origin (fall back to ownBranch).
+  const forwardableBranches = transportBranches.filter(
+    (b) => b.code !== (selectedBranch || ownBranch)
+  );
 
   // Initial page data + fallback
   useEffect(() => {
@@ -414,6 +434,8 @@ export default function AddJobClient({
           workers?: Option[];
           bills?: AvailableBill[];
         });
+        const mb = (data as { my_branches?: string[] })?.my_branches;
+        if (active && Array.isArray(mb)) setAssignedBranches(mb);
 
         const hasCars = Array.isArray(data?.cars) && data.cars.length > 0;
         const hasDrivers = Array.isArray(data?.drivers) && data.drivers.length > 0;

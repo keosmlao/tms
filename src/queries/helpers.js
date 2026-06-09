@@ -480,29 +480,46 @@ async function getRemainingSummaryMap(billNos) {
   return result;
 }
 
+// Web dispatch scope. A user may be scoped to a SET of transport branches:
+// `branch_codes` (the multi-branch dispatch assignment) wins, else the legacy
+// single `logistic_code`. 02-0004 (customer self-pickup) is never a real scope.
+//   scope.branches      — array of branch codes (may be 1 or many)
+//   scope.branch        — branches[0], kept for callers that need a single value
+//   scope.branchListSql — quoted, comma-joined list for `IN (...)` clauses
 function getBranchScope(session) {
-  const branch = session?.logistic_code?.trim() ?? "";
-  const scoped = !!branch && branch !== "02-0004";
-  return { scoped, branch, branchOrNull: scoped ? branch : null };
+  const raw = (session?.branch_codes ?? session?.logistic_code ?? "").trim();
+  const branches = raw
+    .split(",")
+    .map((c) => c.trim())
+    .filter((c) => c && c !== "02-0004");
+  const scoped = branches.length > 0;
+  const branchListSql = branches.map((c) => `'${c.replace(/'/g, "''")}'`).join(", ");
+  return {
+    scoped,
+    branches,
+    branch: scoped ? branches[0] : "",
+    branchListSql,
+    branchOrNull: scoped ? branches[0] : null,
+  };
 }
 
 function branchFilterShipment(scope, alias = "") {
   if (!scope.scoped) return "";
   const prefix = alias ? `${alias}.` : "";
-  return `AND ${prefix}transport_code = '${scope.branch}'`;
+  return `AND ${prefix}transport_code IN (${scope.branchListSql})`;
 }
 
 function branchFilterJob(scope, jobAlias) {
   if (!scope.scoped) return "";
   return `AND (
-    ${jobAlias}.origin_transport_code = '${scope.branch}'
+    ${jobAlias}.origin_transport_code IN (${scope.branchListSql})
     OR (
       ${jobAlias}.origin_transport_code IS NULL
       AND EXISTS (
         SELECT 1 FROM public.odg_tms_detail __dd
         JOIN public.ic_trans_shipment __ss ON __ss.doc_no = __dd.bill_no
         WHERE __dd.doc_no = ${jobAlias}.doc_no
-          AND __ss.transport_code = '${scope.branch}'
+          AND __ss.transport_code IN (${scope.branchListSql})
       )
     )
   )`;

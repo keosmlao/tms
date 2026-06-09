@@ -104,7 +104,7 @@ async function getPendingTrackingRow(session, search) {
   await ensureDeliveryRouteSchema();
   await ensureDeliveryRoundSchema();
   const scope = getBranchScope(session);
-  const branchClause = scope.scoped ? `AND s.transport_code = '${scope.branch}'` : "";
+  const branchClause = scope.scoped ? `AND s.transport_code IN (${scope.branchListSql})` : "";
   const serviceBranchClause = scope.scoped ? "AND false" : "";
   const text = String(search ?? "").trim().toUpperCase();
   const [shipmentRow, serviceRow] = await Promise.all([
@@ -285,7 +285,7 @@ async function trackBill(session, search) {
   await ensureDeliveryWorkflowSchema();
   const scope = getBranchScope(session);
   const branchClause = scope.scoped
-    ? `AND EXISTS (SELECT 1 FROM public.ic_trans_shipment __ts WHERE __ts.doc_no = a.bill_no AND __ts.transport_code = '${scope.branch}')`
+    ? `AND EXISTS (SELECT 1 FROM public.ic_trans_shipment __ts WHERE __ts.doc_no = a.bill_no AND __ts.transport_code IN (${scope.branchListSql}))`
     : "";
   const row = await queryOne(`SELECT a.doc_no, to_char(a.doc_date,'DD-MM-YYYY') as doc_date, bill_no, to_char(bill_date,'DD-MM-YYYY') as bill_date,
       a.car as car_code, c.name_1 as car, d.name_1 as driver, b2.code as driver_code,
@@ -811,7 +811,7 @@ async function searchActiveDeliveryBills(session, q) {
     searchClause = `AND (UPPER(d.bill_no) LIKE $${params.length} OR UPPER(d.cust_code) LIKE $${params.length} OR UPPER(COALESCE(cu.name_1,'')) LIKE $${params.length})`;
   }
   const branchClause = scope.scoped
-    ? `AND EXISTS (SELECT 1 FROM public.ic_trans_shipment __ts WHERE __ts.doc_no = d.bill_no AND __ts.transport_code = '${scope.branch}')`
+    ? `AND EXISTS (SELECT 1 FROM public.ic_trans_shipment __ts WHERE __ts.doc_no = d.bill_no AND __ts.transport_code IN (${scope.branchListSql}))`
     : "";
   const activeRows = await query(
     `SELECT
@@ -880,7 +880,7 @@ async function searchActiveDeliveryBills(session, q) {
          AND COALESCE(d.status, 0) NOT IN (1, 2)
          AND ${getFixedYearSqlFilter("d.doc_date")}
      )
-       ${scope.scoped ? `AND s.transport_code = '${scope.branch}'` : ""}
+       ${scope.scoped ? `AND s.transport_code IN (${scope.branchListSql})` : ""}
        ${pendingSearchClause}
      ORDER BY pb.updated_at DESC NULLS LAST
      LIMIT 30`,
@@ -891,7 +891,7 @@ async function searchActiveDeliveryBills(session, q) {
   let icRows = [];
   if (text) {
     const icBranch = scope.scoped
-      ? `AND EXISTS (SELECT 1 FROM public.ic_trans_shipment __ts WHERE __ts.doc_no = t.doc_no AND __ts.transport_code = '${scope.branch}')`
+      ? `AND EXISTS (SELECT 1 FROM public.ic_trans_shipment __ts WHERE __ts.doc_no = t.doc_no AND __ts.transport_code IN (${scope.branchListSql}))`
       : "";
     icRows = await query(
       `SELECT

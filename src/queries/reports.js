@@ -37,7 +37,7 @@ async function getReportByCar(session, fromDate, toDate, carId) {
 
 async function getReportByBill(session, fromDate, toDate) {
   const scope = getBranchScope(session);
-  return query(`SELECT to_char(a.create_date_time_now,'DD-MM-YYYY HH24:MI') as doc_date, a.doc_no, bill_no, to_char(bill_date,'DD-MM-YYYY') as bill_date, b.name_1 as cust_code, to_char(a.date_logistic,'DD-MM-YYYY') as date_logistic, a.status, url_img, COALESCE(a.sight_img,'') as sight_img, COALESCE(img.delivery_images, ARRAY[]::text[]) as delivery_images, case when sent_start IS NULL then 'ລໍຖ້າຈັດສົ່ງ / ເບີກເຄື່ອງ' when sent_start IS NOT NULL AND sent_end IS NULL then 'ກຳລັງຈັດສົ່ງ' else case when a.status=1 then 'ຈັດສົ່ງສຳເລັດ' else 'ຍົກເລີກຈັດສົ່ງ' end end as status_trans, d.name_1 as car, e.name_1 as driver, count_item, a.remark, to_char(a.recipt_job,'DD-MM-YYYY HH24:MI') as recipt_job, to_char(a.sent_start,'DD-MM-YYYY HH24:MI') as sent_start, to_char(a.sent_end,'DD-MM-YYYY HH24:MI') as sent_end FROM public.odg_tms_detail a LEFT JOIN ar_customer b ON b.code=a.cust_code LEFT JOIN odg_tms c ON c.doc_no=a.doc_no LEFT JOIN public.odg_tms_car d ON d.code=a.car LEFT JOIN public.odg_tms_driver e ON e.code=c.driver LEFT JOIN public.ic_trans_shipment s ON s.doc_no=a.bill_no LEFT JOIN LATERAL (SELECT array_agg(di.image_data ORDER BY di.created_at ASC, di.roworder ASC) as delivery_images FROM public.odg_tms_delivery_images di WHERE di.bill_no = a.bill_no) img ON true WHERE a.doc_date BETWEEN $1 AND $2 ${scope.scoped ? `AND s.transport_code = '${scope.branch}'` : ""} ORDER BY a.roworder`, [fromDate, toDate]);
+  return query(`SELECT to_char(a.create_date_time_now,'DD-MM-YYYY HH24:MI') as doc_date, a.doc_no, bill_no, to_char(bill_date,'DD-MM-YYYY') as bill_date, b.name_1 as cust_code, to_char(a.date_logistic,'DD-MM-YYYY') as date_logistic, a.status, url_img, COALESCE(a.sight_img,'') as sight_img, COALESCE(img.delivery_images, ARRAY[]::text[]) as delivery_images, case when sent_start IS NULL then 'ລໍຖ້າຈັດສົ່ງ / ເບີກເຄື່ອງ' when sent_start IS NOT NULL AND sent_end IS NULL then 'ກຳລັງຈັດສົ່ງ' else case when a.status=1 then 'ຈັດສົ່ງສຳເລັດ' else 'ຍົກເລີກຈັດສົ່ງ' end end as status_trans, d.name_1 as car, e.name_1 as driver, count_item, a.remark, to_char(a.recipt_job,'DD-MM-YYYY HH24:MI') as recipt_job, to_char(a.sent_start,'DD-MM-YYYY HH24:MI') as sent_start, to_char(a.sent_end,'DD-MM-YYYY HH24:MI') as sent_end FROM public.odg_tms_detail a LEFT JOIN ar_customer b ON b.code=a.cust_code LEFT JOIN odg_tms c ON c.doc_no=a.doc_no LEFT JOIN public.odg_tms_car d ON d.code=a.car LEFT JOIN public.odg_tms_driver e ON e.code=c.driver LEFT JOIN public.ic_trans_shipment s ON s.doc_no=a.bill_no LEFT JOIN LATERAL (SELECT array_agg(di.image_data ORDER BY di.created_at ASC, di.roworder ASC) as delivery_images FROM public.odg_tms_delivery_images di WHERE di.bill_no = a.bill_no) img ON true WHERE a.doc_date BETWEEN $1 AND $2 ${scope.scoped ? `AND s.transport_code IN (${scope.branchListSql})` : ""} ORDER BY a.roworder`, [fromDate, toDate]);
 }
 
 async function getReportMonthlyCar(session, monthly) {
@@ -76,7 +76,7 @@ async function getReportMonthlyDriver(session, monthly) {
     ? `AND EXISTS (
         SELECT 1 FROM public.odg_tms_detail __dd
         JOIN public.ic_trans_shipment __ss ON __ss.doc_no = __dd.bill_no
-        WHERE __dd.doc_no = a.doc_no AND __ss.transport_code = '${scope.branch}'
+        WHERE __dd.doc_no = a.doc_no AND __ss.transport_code IN (${scope.branchListSql})
       )`
     : "";
   const counts = await query(
@@ -141,8 +141,8 @@ async function getReportMonthlyDelivery(session, monthly) {
       ? `${year + 1}-01-01`
       : `${year}-${String(month + 1).padStart(2, "0")}-01`;
   const branchCodeSql = MONTHLY_DELIVERY_BRANCH_CODES.map((code) => `'${code}'`).join(",");
-  const openedBranchClause = scope.scoped ? `AND s.transport_code = '${scope.branch}'` : "";
-  const deliveredBranchClause = scope.scoped ? `AND s.transport_code = '${scope.branch}'` : "";
+  const openedBranchClause = scope.scoped ? `AND s.transport_code IN (${scope.branchListSql})` : "";
+  const deliveredBranchClause = scope.scoped ? `AND s.transport_code IN (${scope.branchListSql})` : "";
   const rows = await query(
     `WITH params AS (
        SELECT $1::timestamp AS start_at, $2::timestamp AS end_at
@@ -710,7 +710,7 @@ async function getReportPendingDaily(session, fromDate, toDate) {
 async function getReportByDeliveryStatus(session, fromDate, toDate, status) {
   const scope = getBranchScope(session);
   const branchClause = scope.scoped
-    ? `AND s.transport_code = '${scope.branch}'`
+    ? `AND s.transport_code IN (${scope.branchListSql})`
     : "";
   const rows = await query(
     `SELECT

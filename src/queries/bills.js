@@ -488,15 +488,18 @@ const {
 } = require("./pending-bill");
 const { getBillTodoSummaryMap } = require("./bill-todo");
 
-async function getManualPendingRowsForPending(fromDate, toDate, transportCode = "all") {
-  const filterByTransport = transportCode && transportCode !== "all";
+async function getManualPendingRowsForPending(fromDate, toDate, transportCode = "all", branchListSql = null) {
+  // branchListSql (a pre-quoted, controlled set from getBranchScope) restricts a
+  // branch-scoped user to their assigned branches. Otherwise the unscoped UI
+  // filter applies: a single chosen branch, else the three delivery branches.
+  const scopedList = !!branchListSql && branchListSql.length > 0;
+  const filterByTransport = !scopedList && transportCode && transportCode !== "all";
   const params = filterByTransport ? [fromDate, toDate, transportCode] : [fromDate, toDate];
-  // For the unscoped ("all") view, restrict manual/service ready bills to the
-  // three internal delivery branches — mirrors the shipment query so other
-  // branches/methods don't leak into the dispatch queue.
-  const transportWhere = filterByTransport
-    ? "AND pb.transport_code = $3"
-    : `AND COALESCE(NULLIF(TRIM(pb.transport_code), ''), '') IN (${deliveryBranchListSql()})`;
+  const transportWhere = scopedList
+    ? `AND pb.transport_code IN (${branchListSql})`
+    : filterByTransport
+      ? "AND pb.transport_code = $3"
+      : `AND COALESCE(NULLIF(TRIM(pb.transport_code), ''), '') IN (${deliveryBranchListSql()})`;
   const icRows = await query(
     `SELECT
       a.doc_no,
@@ -597,14 +600,21 @@ async function getBillsPending(session, fromDate, toDate, transportCode) {
   await ensureTmsDetailItemTable();
   await ensurePendingBillSchema();
   const scope = getBranchScope(session);
-  const effectiveCode = scope.scoped ? scope.branch : transportCode;
-  const params = effectiveCode === "all" ? [fromDate, toDate] : [fromDate, toDate, effectiveCode];
-  // Only the three internal delivery branches belong in this queue. Match on the
-  // effective transport (pending override, else the shipment's) so a bill the
-  // admin re-assigned to another branch/method drops out accordingly.
-  const where = effectiveCode === "all"
-    ? `COALESCE(NULLIF(TRIM(pbov.transport_code), ''), a.transport_code) IN (${deliveryBranchListSql()})`
-    : `COALESCE(NULLIF(TRIM(pbov.transport_code), ''), a.transport_code)=$3`;
+  // A branch-scoped user sees only their assigned branch SET; an unscoped user
+  // honours the UI's transportCode filter ("all" → the three delivery branches,
+  // else a single chosen branch). Match on the effective transport (pending
+  // override, else the shipment's) so a re-assigned bill drops out accordingly.
+  let where, params;
+  if (scope.scoped) {
+    where = `COALESCE(NULLIF(TRIM(pbov.transport_code), ''), a.transport_code) IN (${scope.branchListSql})`;
+    params = [fromDate, toDate];
+  } else if (transportCode === "all") {
+    where = `COALESCE(NULLIF(TRIM(pbov.transport_code), ''), a.transport_code) IN (${deliveryBranchListSql()})`;
+    params = [fromDate, toDate];
+  } else {
+    where = `COALESCE(NULLIF(TRIM(pbov.transport_code), ''), a.transport_code)=$3`;
+    params = [fromDate, toDate, transportCode];
+  }
   const [shipmentRaw, manualRaw, listtrans] = await Promise.all([
     query(
       `SELECT
@@ -642,9 +652,14 @@ async function getBillsPending(session, fromDate, toDate, transportCode) {
       ORDER BY COALESCE(b.send_date, b.doc_date) ASC, b.doc_date ASC`,
       params
     ),
-    getManualPendingRowsForPending(fromDate, toDate, effectiveCode),
+    getManualPendingRowsForPending(
+      fromDate,
+      toDate,
+      scope.scoped ? null : transportCode,
+      scope.scoped ? scope.branchListSql : null
+    ),
     scope.scoped
-      ? query("SELECT code, name_1 FROM transport_type WHERE code=$1", [scope.branch])
+      ? query(`SELECT code, name_1 FROM transport_type WHERE code IN (${scope.branchListSql}) ORDER BY code ASC`)
       : query(`SELECT code, name_1 FROM transport_type WHERE code IN (${deliveryBranchListSql()}) ORDER BY code ASC`),
   ]);
 
@@ -653,6 +668,15 @@ async function getBillsPending(session, fromDate, toDate, transportCode) {
   if (transRaw.length === 0) return { trans: [], listtrans };
 
   const billNos = transRaw.map((bill) => bill.doc_no);
+  // Service bills (tb_product) are "re-deliverable for repeat servicing", so the
+  // service summary deliberately ignores delivered_qty — a delivered service
+  // bill keeps remaining_count > 0 and would otherwise sit in pending forever.
+  // We drop it once its CURRENT scheduled cycle has been fulfilled (see
+  // deliveredServiceRows); only service rows are eligible, so a partially-
+  // delivered ic_trans bill is never affected.
+  const serviceBillNos = transRaw
+    .filter((bill) => bill.source_type === SERVICE_SOURCE_TYPE)
+    .map((bill) => bill.doc_no);
   // Use the shared summary helper so this list always agrees with the
   // "ຕົວທີ່ເພີ່ມ" (available bills) list — both reflect the same
   // re-dispatchable amount (cancelled bills + partial delivery leftovers).
@@ -660,7 +684,7 @@ async function getBillsPending(session, fromDate, toDate, transportCode) {
   // schedule map and the todo map all depend only on transRaw/billNos and are
   // independent of each other — run them concurrently so the lighter lookups
   // overlap with applyRemainingCounts instead of stacking after it.
-  const [countedRows, cancelledRows, scheduleMap, todoMap, activeDispatchRows] = await Promise.all([
+  const [countedRows, cancelledRows, scheduleMap, todoMap, activeDispatchRows, forwardedAwayRows, deliveredServiceRows] = await Promise.all([
     applyRemainingCounts(transRaw),
     query(
       `SELECT DISTINCT ON (d.bill_no)
@@ -696,8 +720,46 @@ async function getBillsPending(session, fromDate, toDate, transportCode) {
          AND ${getFixedYearSqlFilter("doc_date")}`,
       [billNos]
     ),
+    // Bills already handed off to another branch via a COMPLETED "ສົ່ງສາຂາ"
+    // (forward-to-branch) stop have left this triage queue — their onward
+    // delivery to the customer is dispatched from the RECEIVING branch's
+    // available-bills / incoming-forwarded list (getAvailableBills*), not here.
+    // Commit 3998cf6 stopped counting forward legs as "delivered" in the shared
+    // remaining-qty CTE (correct for the available queue), which made these
+    // forwarded bills re-surface in the originating branch's pending list. We
+    // drop them here the same way activeDispatchSet drops in-flight bills.
+    query(
+      `SELECT DISTINCT bill_no FROM public.odg_tms_detail
+       WHERE bill_no = ANY($1::varchar[])
+         AND COALESCE(status, 0) = 1
+         AND NULLIF(TRIM(forward_transport_code), '') IS NOT NULL
+         AND ${getFixedYearSqlFilter("doc_date")}`,
+      [billNos]
+    ),
+    // Service bills whose CURRENT scheduled cycle has been delivered. A service
+    // bill is re-deliverable, so we can't net out delivered_qty like an ic_trans
+    // bill — instead we drop it once it has a completed customer delivery
+    // (status=1, not a branch forward) on or after its scheduled day. A bill
+    // re-scheduled to a LATER date for repeat servicing keeps showing because
+    // its old delivery's sent_end falls before the new scheduled_date.
+    serviceBillNos.length === 0
+      ? Promise.resolve([])
+      : query(
+          `SELECT DISTINCT d.bill_no
+             FROM public.odg_tms_detail d
+             JOIN public.odg_tms_pending_bill pb ON pb.bill_no = d.bill_no
+            WHERE d.bill_no = ANY($1::varchar[])
+              AND COALESCE(d.status, 0) = 1
+              AND NULLIF(TRIM(d.forward_transport_code), '') IS NULL
+              AND ${getFixedYearSqlFilter("d.doc_date")}
+              AND pb.scheduled_date IS NOT NULL
+              AND COALESCE(d.sent_end, d.create_date_time_now)::date >= pb.scheduled_date::date`,
+          [serviceBillNos]
+        ),
   ]);
   const activeDispatchSet = new Set(activeDispatchRows.map((r) => r.bill_no));
+  const forwardedAwaySet = new Set(forwardedAwayRows.map((r) => r.bill_no));
+  const deliveredServiceSet = new Set(deliveredServiceRows.map((r) => r.bill_no));
   const summaries = new Map(
     countedRows.map((row) => [
       row.doc_no,
@@ -805,6 +867,13 @@ async function getBillsPending(session, fromDate, toDate, transportCode) {
     // Hide bills already on an open trip (manual/transfer bills lack the
     // check_status gate the shipment path relies on).
     .filter((bill) => !activeDispatchSet.has(bill.doc_no))
+    // Hide bills handed off to another branch ("ສົ່ງສາຂາ" completed) — they are
+    // re-dispatched onward from the receiving branch's available list, not here.
+    .filter((bill) => !forwardedAwaySet.has(bill.doc_no))
+    // Hide service bills whose current scheduled delivery is already done — the
+    // service summary can't net out delivered_qty (re-deliverable), so this is
+    // what makes a completed service stop leave the queue.
+    .filter((bill) => !deliveredServiceSet.has(bill.doc_no))
     .filter((bill) => bill.source_type === SERVICE_SOURCE_TYPE || bill.remaining_count > 0)
     .map((bill, index) => ({ ...bill, row_num: index + 1 }));
 

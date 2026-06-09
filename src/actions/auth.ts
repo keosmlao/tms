@@ -5,7 +5,7 @@ import {
   setSessionCookie,
   clearSessionCookie,
 } from "@/lib/auth";
-import { queryOne } from "@/lib/db.js";
+import { queryOne, query } from "@/lib/db.js";
 import { headers } from "next/headers";
 
 async function requestAuditMeta() {
@@ -52,6 +52,17 @@ export async function login(username: string, password: string) {
      WHERE e.employee_code = $1 LIMIT 1`,
     [user.code]
   );
+  // A transport worker can be assigned MORE than one branch for the web dispatch
+  // screens (odg_tms_worker_dispatch_branch). When set, this widens getBranchScope
+  // to that set; otherwise the screens keep using the single logistic_code.
+  const dispatchBranchRows = await query(
+    "SELECT transport_code FROM public.odg_tms_worker_dispatch_branch WHERE worker_code = $1 ORDER BY transport_code",
+    [user.code]
+  ).catch(() => []);
+  const branch_codes = dispatchBranchRows
+    .map((r: { transport_code: string }) => String(r.transport_code ?? "").trim())
+    .filter(Boolean)
+    .join(",");
   await setSessionCookie({
     usercode: user.code,
     username: user.name_1,
@@ -63,6 +74,7 @@ export async function login(username: string, password: string) {
     position_title: emp?.position_title ?? "",
     app_role: emp?.app_role ?? "",
     position_code: emp?.position_code ?? "",
+    branch_codes,
   });
   const { touchUserPresence } = await import("@/queries/presence.js");
   await ((touchUserPresence as unknown) as (input: Record<string, unknown>) => Promise<unknown>)({
@@ -127,5 +139,10 @@ export async function logout() {
 }
 
 export async function me() {
-  return await getSession();
+  const session = await getSession();
+  if (!session) return null;
+  // Resolve the live multi-branch dispatch set so the client session (and the
+  // trip-creation branch picker) reflect admin re-assignments without re-login.
+  const { withLiveBranchCodes } = await import("./_helpers");
+  return withLiveBranchCodes(session);
 }

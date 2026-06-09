@@ -12,6 +12,9 @@ export interface Session {
   position_title: string;
   app_role: string;
   position_code: string;
+  // Comma-separated set of transport branch codes this user may see on the web
+  // dispatch screens. Empty = fall back to logistic_code (legacy single branch).
+  branch_codes: string;
 }
 
 const COOKIE_NAME = "token";
@@ -58,6 +61,7 @@ export async function getSession(): Promise<Session | null> {
     position_title: String(payload.position_title ?? ""),
     app_role: String(payload.app_role ?? ""),
     position_code: String(payload.position_code ?? ""),
+    branch_codes: String(payload.branch_codes ?? ""),
   };
 }
 

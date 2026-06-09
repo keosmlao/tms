@@ -429,7 +429,7 @@ async function getActivityNotifications(session, limit = 30) {
   const isAdmin = isChatterAdmin(session);
   // Branch-scoped dispatchers only get chatter for their own branch's bills;
   // head office (unscoped) sees all. Sales match via sale_code/mention/follow.
-  const adminBranch = scope.scoped ? scope.branch : "";
+  const adminBranches = scope.scoped ? scope.branches : [];
   return query(
     `WITH activity AS (
       SELECT
@@ -552,9 +552,9 @@ async function getActivityNotifications(session, limit = 30) {
                 WHERE me.employee_code = $2
                   AND me.position_code IN ('11', '12')
                   AND sp.employee_code = COALESCE(it.sale_code, ''))
-          OR ($3 AND ($4 = '' OR EXISTS (
+          OR ($3 AND (cardinality($4::text[]) = 0 OR EXISTS (
                 SELECT 1 FROM public.ic_trans_shipment ss
-                WHERE ss.doc_no = cm.record_id AND ss.transport_code = $4)))
+                WHERE ss.doc_no = cm.record_id AND ss.transport_code = ANY($4::text[]))))
         )
 
       UNION ALL
@@ -595,7 +595,7 @@ async function getActivityNotifications(session, limit = 30) {
     WHERE event_at IS NOT NULL
     ORDER BY event_at DESC
     LIMIT $1`,
-    [max, userCode, isAdmin, adminBranch]
+    [max, userCode, isAdmin, adminBranches]
   );
 }
 

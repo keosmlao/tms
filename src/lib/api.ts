@@ -129,6 +129,8 @@ export const Actions = {
   getDispatchWorkersWithBranch: masterData.getDispatchWorkersWithBranch,
   setWorkerBranch: masterData.setWorkerBranch,
   setWorkerProfile: masterData.setWorkerProfile,
+  getWorkerDispatchBranches: masterData.getWorkerDispatchBranches,
+  setWorkerDispatchBranches: masterData.setWorkerDispatchBranches,
   getTransportBranches: masterData.getTransportBranches,
 
   // Warehouse workers

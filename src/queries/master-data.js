@@ -272,6 +272,19 @@ async function ensureWorkerBranchTable() {
   `);
   await query(`ALTER TABLE public.odg_tms_worker_branch ADD COLUMN IF NOT EXISTS position_code character varying`);
   await query(`ALTER TABLE public.odg_tms_worker_branch ALTER COLUMN transport_code DROP NOT NULL`);
+  // Multi-branch dispatch visibility: a transport admin can be assigned MORE than
+  // one branch here (one row per branch). This is separate from the single
+  // "home" branch in odg_tms_worker_branch (which mobile/todo/notify still read),
+  // and only widens the WEB dispatch screens via getBranchScope at login.
+  await query(`
+    CREATE TABLE IF NOT EXISTS public.odg_tms_worker_dispatch_branch (
+      worker_code character varying NOT NULL,
+      transport_code character varying NOT NULL,
+      updated_at timestamp without time zone DEFAULT LOCALTIMESTAMP(0),
+      updated_by character varying,
+      CONSTRAINT odg_tms_worker_dispatch_branch_pk PRIMARY KEY (worker_code, transport_code)
+    )
+  `);
 }
 
 async function getTransportBranches() {
@@ -293,15 +306,89 @@ async function getDispatchWorkersWithBranch() {
         WHEN 'manager' THEN 'ຜູ້ຈັດການສາງແລະຂົນສົ່ງ'
         WHEN 'admin' THEN 'ແອັດມິນ (ຈັດຖ້ຽວ/ປິດຖ້ຽວ/ລາຍງານ)'
         ELSE NULL
-      END AS position_name
+      END AS position_name,
+      COALESCE(db.codes, ARRAY[]::text[]) AS dispatch_branch_codes
     FROM public.odg_employee e
     LEFT JOIN public.odg_department d ON d.department_code = e.department_code
     LEFT JOIN public.odg_tms_worker_branch wb ON wb.worker_code = e.employee_code
     LEFT JOIN public.transport_type tt ON tt.code = wb.transport_code
+    LEFT JOIN LATERAL (
+      SELECT array_agg(x.transport_code ORDER BY x.transport_code) AS codes
+      FROM public.odg_tms_worker_dispatch_branch x
+      WHERE x.worker_code = e.employee_code
+    ) db ON true
     WHERE e.employment_status = 'ACTIVE'
       AND (d.department_name_lo ILIKE '%ຂົນສົ່ງ%' OR d.department_name_lo ILIKE '%ສາງ%')
     ORDER BY name_1 ASC, e.employee_code ASC`
   );
+}
+
+// Lean, hot-path resolver used by the session helpers on EVERY request to keep
+// the multi-branch dispatch scope live (no re-login after an admin re-assigns).
+// Returns the comma-joined set, "" when none / not yet set. Deliberately skips
+// the ensure-table DDL and swallows a missing-table error so it never adds load
+// or fails a request.
+async function resolveDispatchBranchCodes(workerCode) {
+  const code = String(workerCode ?? "").trim();
+  if (!code) return "";
+  try {
+    const rows = await query(
+      "SELECT transport_code FROM public.odg_tms_worker_dispatch_branch WHERE worker_code = $1 ORDER BY transport_code",
+      [code]
+    );
+    return rows.map((r) => String(r.transport_code ?? "").trim()).filter(Boolean).join(",");
+  } catch {
+    return "";
+  }
+}
+
+// The set of branches a transport worker may see on the WEB dispatch screens.
+async function getWorkerDispatchBranches(workerCode) {
+  await ensureWorkerBranchTable();
+  const code = String(workerCode ?? "").trim();
+  if (!code) return [];
+  const rows = await query(
+    `SELECT transport_code FROM public.odg_tms_worker_dispatch_branch
+     WHERE worker_code = $1 ORDER BY transport_code`,
+    [code]
+  );
+  return rows.map((r) => r.transport_code);
+}
+
+// Replace a worker's dispatch-branch set with the given list (admin-only). Only
+// real internal delivery branches (02-xxxx, not 02-0004 self-pickup) are stored.
+async function setWorkerDispatchBranches(session, workerCode, transportCodes) {
+  await ensureWorkerBranchTable();
+  const code = String(workerCode ?? "").trim();
+  if (!code) throw new Error("ຕ້ອງລະບຸ worker");
+  const valid = await query(
+    `SELECT code FROM public.transport_type WHERE code LIKE '02-%' AND code <> '02-0004'`
+  );
+  const allowed = new Set(valid.map((r) => r.code));
+  const codes = Array.from(
+    new Set((Array.isArray(transportCodes) ? transportCodes : []).map((c) => String(c ?? "").trim()))
+  ).filter((c) => allowed.has(c));
+  const client = await pool.connect();
+  try {
+    await client.query("BEGIN");
+    await client.query("DELETE FROM public.odg_tms_worker_dispatch_branch WHERE worker_code = $1", [code]);
+    for (const tc of codes) {
+      await client.query(
+        `INSERT INTO public.odg_tms_worker_dispatch_branch(worker_code, transport_code, updated_at, updated_by)
+         VALUES ($1, $2, LOCALTIMESTAMP(0), $3)
+         ON CONFLICT (worker_code, transport_code) DO UPDATE
+           SET updated_at = LOCALTIMESTAMP(0), updated_by = EXCLUDED.updated_by`,
+        [code, tc, session?.usercode ?? null]
+      );
+    }
+    await client.query("COMMIT");
+  } catch (err) {
+    await client.query("ROLLBACK").catch(() => {});
+    throw err;
+  } finally {
+    client.release();
+  }
+  return { success: true, worker_code: code, dispatch_branch_codes: codes };
 }
 
 async function setWorkerProfile(session, workerCode, transportCode, positionCode) {
@@ -359,6 +446,9 @@ module.exports = {
   getDispatchWorkersWithBranch,
   setWorkerBranch,
   setWorkerProfile,
+  getWorkerDispatchBranches,
+  setWorkerDispatchBranches,
+  resolveDispatchBranchCodes,
   getTransportBranches,
   getDrivers,
   addDriver,

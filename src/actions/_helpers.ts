@@ -1,10 +1,19 @@
 import { getSession, type Session } from "@/lib/auth";
 import { isSalesLogin } from "@/lib/sales-role";
+import { resolveDispatchBranchCodes } from "@/queries/master-data.js";
+
+// Refresh the multi-branch dispatch set from the DB on every request so an admin
+// re-assignment takes effect WITHOUT the user re-logging in. Falls back to the
+// JWT-baked value if the lookup yields nothing (or fails).
+export async function withLiveBranchCodes(session: Session): Promise<Session> {
+  const live = await resolveDispatchBranchCodes(session.usercode);
+  return live ? { ...session, branch_codes: live } : session;
+}
 
 export async function requireSession(): Promise<Session> {
   const session = await getSession();
   if (!session) throw new Error("Unauthorized");
-  return session;
+  return withLiveBranchCodes(session);
 }
 
 // Dispatch management — creating / approving / editing / deleting / closing

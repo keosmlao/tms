@@ -10,6 +10,7 @@ const {
   getNextMonthStart,
   toDisplayDate,
   toDisplayMonth,
+  getBranchScope,
 } = require("./helpers");
 
 // ── Short-TTL cache (per slice, per branch) ──
@@ -46,12 +47,14 @@ function ctx(session) {
   const fixedMonth = fixedToday.slice(0, 7);
   const monthStart = `${fixedMonth}-01`;
   const nextMonthStart = getNextMonthStart(fixedMonth);
-  const userBranch = session?.logistic_code?.trim();
-  const scoped = !!userBranch && userBranch !== "02-0004";
+  const scope = getBranchScope(session);
   const branchAnd = (alias = "") =>
-    scoped ? `AND ${alias ? alias + "." : ""}transport_code = '${userBranch}'` : "";
-  const scope = { scoped, branch: userBranch ?? "" };
-  return { fixedToday, fixedMonth, monthStart, nextMonthStart, userBranch, scoped, branchAnd, scope };
+    scope.scoped ? `AND ${alias ? alias + "." : ""}transport_code IN (${scope.branchListSql})` : "";
+  return {
+    fixedToday, fixedMonth, monthStart, nextMonthStart,
+    userBranch: scope.branch, scoped: scope.scoped, branches: scope.branches,
+    branchAnd, scope,
+  };
 }
 
 const BRANCH_NAMES_SQL = `SELECT code, COALESCE(NULLIF(TRIM(name_1), ''), code) AS name
@@ -112,13 +115,13 @@ async function computeSummary(session) {
           ON det.doc_no = s.doc_no AND det.item_code NOT LIKE '97%'
         WHERE s.transport_code = '02-0005' AND ${getFixedYearSqlFilter("s.doc_date")}
       `),
-      !c.scoped || c.userBranch === "02-0001"
+      !c.scoped || c.branches.includes("02-0001")
         ? queryOne(teamSql("02-0001"))
         : Promise.resolve(emptyTeam),
-      !c.scoped || c.userBranch === "02-0002"
+      !c.scoped || c.branches.includes("02-0002")
         ? queryOne(teamSql("02-0002"))
         : Promise.resolve(emptyTeam),
-      !c.scoped || c.userBranch === "02-0003"
+      !c.scoped || c.branches.includes("02-0003")
         ? queryOne(teamSql("02-0003"))
         : Promise.resolve(emptyTeam),
       queryOne(
@@ -182,7 +185,7 @@ async function computeKpi(session) {
   const c = ctx(session);
   const { getSettings } = require("./settings");
   const kpiBranchClause = c.scope.scoped
-    ? `AND EXISTS (SELECT 1 FROM ic_trans_shipment __ts WHERE __ts.doc_no = d.bill_no AND __ts.transport_code = '${c.scope.branch}')`
+    ? `AND EXISTS (SELECT 1 FROM ic_trans_shipment __ts WHERE __ts.doc_no = d.bill_no AND __ts.transport_code IN (${c.scope.branchListSql}))`
     : "";
 
   const [branchNameRows, kpiRows, trendRows, kpiSettings] = await Promise.all([
@@ -463,11 +466,9 @@ async function getDashboardData(session, force = false) {
 // loaded separately so the page can stream them in. The three queries run
 // concurrently.
 async function getDashboardActivity(session) {
-  const userBranch = session?.logistic_code?.trim();
-  const scoped = !!userBranch && userBranch !== "02-0004";
-  const scope = { scoped, branch: userBranch ?? "" };
+  const scope = getBranchScope(session);
   const listBranchClause = scope.scoped
-    ? `AND EXISTS (SELECT 1 FROM ic_trans_shipment __ts WHERE __ts.doc_no = d.bill_no AND __ts.transport_code = '${scope.branch}')`
+    ? `AND EXISTS (SELECT 1 FROM ic_trans_shipment __ts WHERE __ts.doc_no = d.bill_no AND __ts.transport_code IN (${scope.branchListSql}))`
     : "";
 
   const inProgressRowsP = query(

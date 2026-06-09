@@ -205,19 +205,22 @@ async function createJob(session, data) {
     return { ...bill, count_item: itemsToSave.length, items: itemsToSave };
   };
 
-  // origin_transport_code = which delivery branch this trip belongs to. A branch
-  // admin is locked to their own branch (session.logistic_code); a manager
-  // (unscoped) picks it in the form and sends it as forward_transport_code —
-  // persist that choice (M6) instead of dropping it, so the trip shows up under
-  // the right branch in scoped reports/lists.
-  const sessionBranch = (session.logistic_code ?? "").trim();
-  const isScopedBranch = !!sessionBranch && sessionBranch !== "02-0004";
+  // origin_transport_code = which delivery branch this trip belongs to.
+  //  - One assigned branch  → locked to it.
+  //  - Many assigned branches (multi-branch dispatcher) → must pick one of THEIR
+  //    branches; sent in the form as forward_transport_code.
+  //  - No branch scope (manager / head office) → may pick any delivery branch.
+  // Persist that choice so the trip shows under the right branch in scoped views.
+  const scope = getBranchScope(session);
   const selectedBranch = String(data.forward_transport_code ?? "").trim();
-  const originBranch = isScopedBranch
-    ? sessionBranch
-    : DELIVERY_BRANCH_CODES.includes(selectedBranch)
-      ? selectedBranch
-      : null;
+  let originBranch;
+  if (scope.branches.length === 1) {
+    originBranch = scope.branches[0];
+  } else if (scope.branches.length > 1) {
+    originBranch = scope.branches.includes(selectedBranch) ? selectedBranch : null;
+  } else {
+    originBranch = DELIVERY_BRANCH_CODES.includes(selectedBranch) ? selectedBranch : null;
+  }
   if (!originBranch) {
     throw new Error("ກະລຸນາເລືອກສາຂາຂົນສົ່ງ");
   }
@@ -1213,7 +1216,15 @@ async function getJobAddPageData(session) {
   const employeeList = employees.status === "fulfilled" ? employees.value : [];
   const billList = bills.status === "fulfilled" ? bills.value : [];
 
-  return { doc_no, cars: carList, drivers: employeeList, workers: employeeList, bills: billList };
+  // The user's live assigned branch set, so the trip page's branch picker is
+  // always current (independent of the cached client session). This is the
+  // admin's assignment verbatim — NOT filtered to the hardcoded three internal
+  // branches, since a branch like 02-0007 (ໂພນສະອາດ) is a real delivery branch a
+  // worker can be assigned to. Empty = unscoped manager (picks a delivery branch).
+  const scope = getBranchScope(session);
+  const myBranches = scope.branches;
+
+  return { doc_no, cars: carList, drivers: employeeList, workers: employeeList, bills: billList, my_branches: myBranches };
 }
 
 async function getJobPrintData(docNo) {

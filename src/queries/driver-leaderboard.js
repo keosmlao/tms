@@ -14,7 +14,7 @@ async function getDriverLeaderboard(session, period = "month") {
 
   const scope = getBranchScope(session);
   const branchClause = scope.scoped
-    ? `AND EXISTS (SELECT 1 FROM ic_trans_shipment __ts WHERE __ts.doc_no = d.bill_no AND __ts.transport_code = '${scope.branch}')`
+    ? `AND EXISTS (SELECT 1 FROM ic_trans_shipment __ts WHERE __ts.doc_no = d.bill_no AND __ts.transport_code IN (${scope.branchListSql}))`
     : "";
 
   const params = [fixedToday, monthStart, nextMonthStart];

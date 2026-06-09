@@ -21,6 +21,7 @@ export interface Session {
   position_title: string;
   app_role: string;
   position_code: string;
+  branch_codes: string;
 }
 
 interface SessionContextValue {

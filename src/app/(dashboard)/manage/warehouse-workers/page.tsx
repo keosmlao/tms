@@ -16,6 +16,8 @@ interface Worker {
   branch_name: string | null;
   position_code: PositionCode | null;
   position_name: string | null;
+  // Branches this worker may see on the web dispatch screens (multi-select).
+  dispatch_branch_codes: string[];
 }
 
 interface Branch { code: string; name_1: string; }
@@ -131,6 +133,33 @@ export default function TransportWorkersPage() {
     startTransition(async () => {
       try {
         await Actions.setWorkerProfile(code, nextBranch, nextPosition);
+        setSavedCode(code);
+        setTimeout(() => setSavedCode((c) => (c === code ? null : c)), 1500);
+      } catch (e) {
+        console.error(e);
+        setError("ບັນທຶກບໍ່ສຳເລັດ");
+        fetchAll();
+      } finally {
+        setSavingCode((s) => (s === code ? null : s));
+      }
+    });
+  };
+
+  // Toggle one branch in/out of a worker's dispatch-visibility set and persist.
+  const handleDispatchToggle = (code: string, branchCode: string) => {
+    const worker = workers.find((w) => w.code === code);
+    if (!worker) return;
+    const current = worker.dispatch_branch_codes ?? [];
+    const next = current.includes(branchCode)
+      ? current.filter((c) => c !== branchCode)
+      : [...current, branchCode].sort();
+    setSavingCode(code);
+    setWorkers((prev) =>
+      prev.map((w) => (w.code === code ? { ...w, dispatch_branch_codes: next } : w))
+    );
+    startTransition(async () => {
+      try {
+        await Actions.setWorkerDispatchBranches(code, next);
         setSavedCode(code);
         setTimeout(() => setSavedCode((c) => (c === code ? null : c)), 1500);
       } catch (e) {
@@ -367,6 +396,7 @@ export default function TransportWorkersPage() {
                   <th className="px-5 py-3 text-left text-xs font-medium uppercase tracking-wider">ພະນັກງານ</th>
                   <th className="px-5 py-3 text-left text-xs font-medium uppercase tracking-wider">ລະຫັດ</th>
                   <th className="px-5 py-3 text-left text-xs font-medium uppercase tracking-wider">ສາຂາຮັບຜິດຊອບ</th>
+                  <th className="px-5 py-3 text-left text-xs font-medium uppercase tracking-wider">ສາຂາທີ່ເຫັນ (ຈັດຖ້ຽວ)</th>
                   <th className="px-5 py-3 text-left text-xs font-medium uppercase tracking-wider">ຕຳແໜ່ງ</th>
                 </tr>
               </thead>
@@ -405,6 +435,27 @@ export default function TransportWorkersPage() {
                         ) : savedCode === w.code ? (
                           <FaCheckCircle className="text-emerald-500" size={11} />
                         ) : null}
+                      </div>
+                    </td>
+                    <td className="px-5 py-3">
+                      <div className="flex flex-wrap items-center gap-1.5">
+                        {branches.map((b) => {
+                          const on = (w.dispatch_branch_codes ?? []).includes(b.code);
+                          return (
+                            <button
+                              key={b.code}
+                              type="button"
+                              onClick={() => handleDispatchToggle(w.code, b.code)}
+                              disabled={savingCode === w.code}
+                              title={b.name_1}
+                              className={`text-xs px-2 py-1 rounded-lg ring-1 cursor-pointer focus:outline-none focus:ring-2 focus:ring-teal-500/40 transition-all disabled:opacity-60 ${
+                                on ? chipClass(b.code) : "bg-slate-500/5 text-gray-400 ring-slate-300/40 dark:ring-white/10"
+                              }`}
+                            >
+                              {on ? "✓ " : ""}{b.name_1}
+                            </button>
+                          );
+                        })}
                       </div>
                     </td>
                     <td className="px-5 py-3">

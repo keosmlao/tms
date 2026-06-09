@@ -160,8 +160,8 @@ async function getFuelLogs({ fromDate, toDate, search, userCode, session } = {})
   // history isn't lost. Viewers with no branch see everything.
   const scope = getBranchScope(session);
   if (scope.scoped) {
-    params.push(scope.branch);
-    where.push(`(transport_code = $${params.length} OR transport_code IS NULL)`);
+    params.push(scope.branches);
+    where.push(`(transport_code = ANY($${params.length}) OR transport_code IS NULL)`);
   }
   if (search) {
     params.push(`%${search}%`);
@@ -218,8 +218,8 @@ async function getFuelSummary({ fromDate, toDate, userCode, session } = {}) {
   }
   const scope = getBranchScope(session);
   if (scope.scoped) {
-    params.push(scope.branch);
-    where.push(`(transport_code = $${params.length} OR transport_code IS NULL)`);
+    params.push(scope.branches);
+    where.push(`(transport_code = ANY($${params.length}) OR transport_code IS NULL)`);
   }
   const whereClause = where.length ? `WHERE ${where.join(" AND ")}` : "";
   const row = await queryOne(
