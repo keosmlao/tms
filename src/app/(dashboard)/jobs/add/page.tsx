@@ -344,7 +344,9 @@ export default function AddJobClient({
   };
 
   useEffect(() => {
-    void Actions.listDeliveryRoutes(true)
+    // Load ALL routes (incl. inactive) so a legacy/deactivated route that still
+    // has scheduled bills can be labelled by name in the route dropdown.
+    void Actions.listDeliveryRoutes(false)
       .then((data) =>
         setDeliveryRoutes(
           (data ?? []) as Array<{ code: string; name: string; origin?: string; destination?: string; waypoints?: Array<string | { name?: string }> }>
@@ -625,7 +627,9 @@ export default function AddJobClient({
   useEffect(() => {
     if (!deliveryRouteCode) return;
     const selected = deliveryRoutes.find((r) => r.code === deliveryRouteCode);
-    if (selected) setRouteSearch(routeLabel(selected));
+    // Fall back to the bare code so a legacy route (absent from the master)
+    // still labels the search box in edit mode instead of going blank.
+    setRouteSearch(selected ? routeLabel(selected) : deliveryRouteCode);
   }, [deliveryRouteCode, deliveryRoutes]);
 
   useEffect(() => {
@@ -926,21 +930,46 @@ export default function AddJobClient({
     return m;
   }, [branchBills, dateLog, deliveryRouteCode]);
 
-  // Only routes with bills to deliver that day (always keep the currently
-  // selected route so an edit/preset never disappears), label with the count.
-  const filteredRoutes: Option[] = deliveryRoutes
-    .filter((r) => (routeBillCounts[r.code] ?? 0) > 0 || r.code === deliveryRouteCode)
-    .map((r) => {
-      const n = routeBillCounts[r.code] ?? 0;
-      const base = routeLabel(r);
-      return { code: r.code, name_1: n > 0 ? `${base} · ${n} ບິນ` : base };
-    })
-    .filter(
-      (item) =>
-        !deferredRouteSearch ||
-        item.name_1.toLowerCase().includes(deferredRouteSearch.toLowerCase()) ||
-        item.code.toLowerCase().includes(deferredRouteSearch.toLowerCase())
-    );
+  // Routes shown by BRANCH, driven by the bills themselves so none is hidden:
+  // every distinct route that has scheduled (undelivered) bills for the selected
+  // branch is selectable — regardless of the chosen date, and even for legacy or
+  // deactivated route codes no longer in the route master (those fall back to
+  // showing their code). The currently-selected route is always kept. Routes
+  // with bills on the selected date float to the top with a count badge.
+  const routeLabelByCode = useMemo(() => {
+    const m = new Map<string, string>();
+    for (const r of deliveryRoutes) m.set(r.code, routeLabel(r));
+    return m;
+  }, [deliveryRoutes]);
+
+  const branchRouteCodes = useMemo(() => {
+    const codes = new Set<string>();
+    for (const b of branchBills) {
+      const rc = (b.delivery_route_code ?? "").trim();
+      if (rc) codes.add(rc);
+    }
+    return codes;
+  }, [branchBills]);
+
+  const filteredRoutes: Option[] = useMemo(() => {
+    const codes = new Set(branchRouteCodes);
+    if (deliveryRouteCode) codes.add(deliveryRouteCode);
+    return Array.from(codes)
+      .map((code, i) => {
+        const n = routeBillCounts[code] ?? 0;
+        const base = routeLabelByCode.get(code) ?? code;
+        return { code, name_1: n > 0 ? `${base} · ${n} ບິນ` : base, _n: n, _i: i };
+      })
+      .sort((a, b) => b._n - a._n || a._i - b._i)
+      .filter(
+        (item) =>
+          !deferredRouteSearch ||
+          item.name_1.toLowerCase().includes(deferredRouteSearch.toLowerCase()) ||
+          item.code.toLowerCase().includes(deferredRouteSearch.toLowerCase())
+      )
+      .map(({ code, name_1 }) => ({ code, name_1 }));
+  }, [branchRouteCodes, deliveryRouteCode, routeBillCounts, routeLabelByCode, deferredRouteSearch]);
+
   const filteredDrivers = drivers.filter(
     (item) =>
       !deferredDriverSearch ||

@@ -415,6 +415,10 @@ async function getManualReadyBills() {
             COALESCE(b.telephone, '') as telephone,
             (SELECT count(item_code) FROM ic_trans_detail WHERE doc_no=a.doc_no AND item_code NOT LIKE '97%') as count_item,
             ${SCHEDULED_BILL_FIELDS},
+            -- Manual bills (transfer flag 72 / returns / service) carry their
+            -- delivery branch on the pending row; surface it so the create-trip
+            -- page can scope them to the chosen branch like shipment bills do.
+            COALESCE(NULLIF(TRIM(pb.transport_code), ''), '') as delivery_transport_code,
             false as incoming_forwarded,
             '' as forward_from_transport_code,
             '' as forward_from_transport_name,
@@ -434,6 +438,7 @@ async function getManualReadyBills() {
             to_char(pb.scheduled_date,'YYYY-MM-DD') as scheduled_date,
             to_char(pb.scheduled_date,'DD-MM-YYYY') as scheduled_date_display,
             COALESCE(pb.delivery_route_code, '') as delivery_route_code,
+            COALESCE(NULLIF(TRIM(pb.transport_code), ''), '') as delivery_transport_code,
             pb.delivery_round_code,
             COALESCE(dr.name, '') as delivery_round_name,
             COALESCE(dr.time_label, '') as delivery_round_time_label
@@ -468,6 +473,7 @@ async function getManualReadyBills() {
       scheduled_date: sched?.scheduled_date ?? null,
       scheduled_date_display: sched?.scheduled_date_display ?? null,
       delivery_route_code: sched?.delivery_route_code ?? "",
+      delivery_transport_code: sched?.delivery_transport_code ?? "",
       delivery_round_code: sched?.delivery_round_code ?? "",
       delivery_round_name: sched?.delivery_round_name ?? "",
       delivery_round_time_label: sched?.delivery_round_time_label ?? "",
