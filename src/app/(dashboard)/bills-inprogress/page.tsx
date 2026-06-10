@@ -122,6 +122,39 @@ export interface InProgressBillDetail {
   delivery_images?: string[];
   forward_transport_code?: string;
   forward_transport_name?: string;
+  delivery_condition?: string;
+}
+
+// Mandatory per-bill delivery condition (ເງື່ອນໄຂການຈັດສົ່ງ), mirroring the
+// options offered on jobs/add. Kept in sync with DELIVERY_CONDITIONS there.
+const DELIVERY_CONDITION_LABELS: Record<string, string> = {
+  to_customer: "ສົ່ງລູກຄ້າ",
+  to_branch: "ສົ່ງສາຂາ",
+  to_carrier: "ສົ່ງຂົນສົ່ງ",
+  to_bus: "ຝາກລົດເມ",
+};
+
+function getDeliveryConditionStyle(code: string) {
+  switch (code) {
+    case "to_customer":
+      return "bg-emerald-500/10 text-emerald-600 dark:text-emerald-400";
+    case "to_branch":
+      return "bg-sky-500/10 text-sky-600 dark:text-sky-400";
+    case "to_carrier":
+      return "bg-violet-500/10 text-violet-600 dark:text-violet-400";
+    case "to_bus":
+      return "bg-amber-500/10 text-amber-600 dark:text-amber-400";
+    default:
+      return "bg-slate-500/10 text-slate-600 dark:text-slate-400";
+  }
+}
+
+// Resolve the condition to show: prefer the stored value, else infer from a
+// forward branch (older bills predate the column), else default to to_customer.
+function resolveDeliveryCondition(detail: InProgressBillDetail): string {
+  if (detail.delivery_condition) return detail.delivery_condition;
+  if (detail.forward_transport_code) return "to_branch";
+  return "to_customer";
 }
 
 interface Product {
@@ -816,6 +849,21 @@ export default function BillsInProgressClient({
                                                   </span>
                                                 </div>
                                               </div>
+                                              {(() => {
+                                                const condition = resolveDeliveryCondition(detail);
+                                                return (
+                                                  <div className="flex items-center gap-1.5 mt-1.5 ml-7">
+                                                    <span className="text-[10px] text-slate-400">ເງື່ອນໄຂ:</span>
+                                                    <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-semibold ${getDeliveryConditionStyle(condition)}`}>
+                                                      <FaTruckMoving size={9} />
+                                                      {DELIVERY_CONDITION_LABELS[condition] ?? condition}
+                                                      {condition === "to_branch" && detail.forward_transport_name
+                                                        ? ` → ${detail.forward_transport_name}`
+                                                        : ""}
+                                                    </span>
+                                                  </div>
+                                                );
+                                              })()}
                                               {detail.telephone && (
                                                 <p className="text-[10px] text-slate-400 mt-1 ml-7 flex items-center gap-1.5">
                                                   <span>ໂທ: {detail.telephone}</span>

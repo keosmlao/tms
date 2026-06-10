@@ -1047,6 +1047,10 @@ async function getBillsWaitingSentDetails(docNo) {
       COALESCE(img.delivery_images, ARRAY[]::text[]) as delivery_images,
       COALESCE(d.forward_transport_code, '') as forward_transport_code,
       COALESCE(ftt.name_1, '') as forward_transport_name,
+      -- Mandatory delivery condition chosen per bill when added to the trip
+      -- (to_customer · to_branch · to_carrier · to_bus). Empty for legacy bills
+      -- created before the column existed.
+      COALESCE(d.delivery_condition, '') as delivery_condition,
       CASE
         WHEN d.sent_start IS NOT NULL AND d.sent_end IS NOT NULL
           THEN EXTRACT(EPOCH FROM (d.sent_end - d.sent_start))::bigint
