@@ -638,7 +638,15 @@ async function getBillsPending(session, fromDate, toDate, transportCode) {
         COALESCE(NULLIF(TRIM(od.department_name_lo), ''), oe.department_code, '') as department,
         COALESCE(NULLIF(TRIM(dov.name_1), ''), d.name_1) as transport, to_char(a.create_date_time_now,'DD-MM-YYYY HH24:MI') as time_open,
         now() - a.create_date_time_now as time_use,
-        now() - b.send_date::timestamp as time_use_send
+        now() - b.send_date::timestamp as time_use_send,
+        -- Forwarded-in: a completed 'ສົ່ງສາຂາ' leg dropped this bill at the branch
+        -- it now sits in (a.transport_code). Surfaces it for onward delivery here
+        -- with a "ສົ່ງມາຈาກສາຂາ" badge + origin/time, and lets it bypass the date
+        -- window below (its arrival is fresh even if the sale is old).
+        CASE WHEN fwd.bill_no IS NULL THEN false ELSE true END as incoming_forwarded,
+        COALESCE(fwd.origin_transport_code, '') as forward_from_transport_code,
+        COALESCE(fwd.origin_transport_name, '') as forward_from_transport_name,
+        COALESCE(fwd.forwarded_at, '') as forwarded_at
       FROM ic_trans_shipment a
       LEFT JOIN ic_trans b ON b.doc_no=a.doc_no
       LEFT JOIN ar_customer cust ON cust.code = a.cust_code
@@ -648,13 +656,31 @@ async function getBillsPending(session, fromDate, toDate, transportCode) {
       LEFT JOIN transport_type d ON d.code=a.transport_code
       LEFT JOIN public.odg_tms_pending_bill pbov ON pbov.bill_no = a.doc_no
       LEFT JOIN transport_type dov ON dov.code = NULLIF(TRIM(pbov.transport_code), '')
+      LEFT JOIN LATERAL (
+        SELECT fd.bill_no,
+               COALESCE(fj.origin_transport_code, '') as origin_transport_code,
+               COALESCE(ott.name_1, '') as origin_transport_name,
+               to_char(COALESCE(fd.sent_end, fd.create_date_time_now), 'DD-MM-YYYY HH24:MI') as forwarded_at
+        FROM public.odg_tms_detail fd
+        LEFT JOIN public.odg_tms fj ON fj.doc_no = fd.doc_no
+        LEFT JOIN public.transport_type ott ON ott.code = fj.origin_transport_code
+        WHERE fd.bill_no = a.doc_no
+          AND COALESCE(fd.status, 0) = 1
+          AND NULLIF(TRIM(fd.forward_transport_code), '') = a.transport_code
+          AND ${getFixedYearSqlFilter("fd.doc_date")}
+        ORDER BY COALESCE(fd.sent_end, fd.create_date_time_now) DESC
+        LIMIT 1
+      ) fwd ON true
       -- A sale bill with no send_date yet (NULL) must still surface so admins
       -- can schedule it. NULL::date BETWEEN x AND y is FALSE in SQL, which used
       -- to silently drop these bills, so fall back to doc_date for the window
       -- check (matches the COALESCE in getManualPendingRowsForPending). The
       -- SELECT keeps send_date NULL on purpose so the row stays flagged as
-      -- "needs a delivery date" on the page.
-      WHERE a.trans_flag=44 AND check_status=0 AND COALESCE(b.send_date::date, b.doc_date::date) BETWEEN $1::date AND $2::date AND ${where}
+      -- "needs a delivery date" on the page. Forwarded-in bills bypass the window
+      -- so the receiving branch sees them regardless of the original sale date.
+      WHERE a.trans_flag=44 AND check_status=0
+        AND (COALESCE(b.send_date::date, b.doc_date::date) BETWEEN $1::date AND $2::date OR fwd.bill_no IS NOT NULL)
+        AND ${where}
       ORDER BY COALESCE(b.send_date, b.doc_date) ASC, b.doc_date ASC`,
       params
     ),
@@ -726,20 +752,24 @@ async function getBillsPending(session, fromDate, toDate, transportCode) {
          AND ${getFixedYearSqlFilter("doc_date")}`,
       [billNos]
     ),
-    // Bills already handed off to another branch via a COMPLETED "ສົ່ງສາຂາ"
-    // (forward-to-branch) stop have left this triage queue — their onward
-    // delivery to the customer is dispatched from the RECEIVING branch's
-    // available-bills / incoming-forwarded list (getAvailableBills*), not here.
-    // Commit 3998cf6 stopped counting forward legs as "delivered" in the shared
-    // remaining-qty CTE (correct for the available queue), which made these
-    // forwarded bills re-surface in the originating branch's pending list. We
-    // drop them here the same way activeDispatchSet drops in-flight bills.
+    // Bills handed off via a COMPLETED "ສົ່ງສາຂາ" (forward-to-branch) stop now
+    // sit at the RECEIVING branch (their shipment was moved there, check_status=0)
+    // awaiting onward delivery to the customer — they SHOULD appear in that
+    // branch's pending queue (with an incoming-forwarded badge). So we only drop a
+    // forwarded bill when its effective branch (pending override, else shipment)
+    // points AWAY from where the shipment currently sits — i.e. a stale override
+    // would otherwise mis-file it under the originating branch. A bill resting at
+    // its forward destination (effective == shipment) is kept here on purpose.
     query(
-      `SELECT DISTINCT bill_no FROM public.odg_tms_detail
-       WHERE bill_no = ANY($1::varchar[])
-         AND COALESCE(status, 0) = 1
-         AND NULLIF(TRIM(forward_transport_code), '') IS NOT NULL
-         AND ${getFixedYearSqlFilter("doc_date")}`,
+      `SELECT DISTINCT d.bill_no
+         FROM public.odg_tms_detail d
+         JOIN public.ic_trans_shipment s ON s.doc_no = d.bill_no
+         LEFT JOIN public.odg_tms_pending_bill pb ON pb.bill_no = d.bill_no
+        WHERE d.bill_no = ANY($1::varchar[])
+          AND COALESCE(d.status, 0) = 1
+          AND NULLIF(TRIM(d.forward_transport_code), '') IS NOT NULL
+          AND COALESCE(NULLIF(TRIM(pb.transport_code), ''), s.transport_code) <> s.transport_code
+          AND ${getFixedYearSqlFilter("d.doc_date")}`,
       [billNos]
     ),
     // Service bills whose CURRENT scheduled cycle has been delivered. A service

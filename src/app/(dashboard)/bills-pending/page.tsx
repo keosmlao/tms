@@ -97,6 +97,12 @@ export interface Bill {
   cust_lng?: string | null;
   source_format?: string;
   is_pos_settled?: boolean;
+  // Forwarded INTO this branch from another branch's "ສົ່ງສາຂາ" leg — awaiting
+  // onward delivery to the customer from here.
+  incoming_forwarded?: boolean;
+  forward_from_transport_code?: string;
+  forward_from_transport_name?: string;
+  forwarded_at?: string;
 }
 
 interface DeliveryRound {
@@ -1223,6 +1229,14 @@ export default function BillsPendingClient() {
                                     {bill.manual_pending_bill && (
                                       <span className="inline-flex items-center rounded bg-teal-100 dark:bg-teal-900/30 px-1 py-0.5 text-[9px] font-bold text-teal-600 dark:text-teal-400">
                                         ພິເສດ
+                                      </span>
+                                    )}
+                                    {bill.incoming_forwarded && (
+                                      <span
+                                        className="inline-flex items-center rounded bg-sky-100 dark:bg-sky-900/30 px-1 py-0.5 text-[9px] font-bold text-sky-600 dark:text-sky-400"
+                                        title={`ສົ່ງມາຈາກສາຂາ ${bill.forward_from_transport_name || bill.forward_from_transport_code || "ສາຂາອື່ນ"}${bill.forwarded_at ? ` · ${bill.forwarded_at}` : ""} — ໃຫ້ຈັດສົ່ງຕໍ່ຫາລູກຄ້າ`}
+                                      >
+                                        ⇄ ສົ່ງມາຈາກ {bill.forward_from_transport_name || bill.forward_from_transport_code || "ສາຂາອື່ນ"}
                                       </span>
                                     )}
                                     {transportCode === "all" && (

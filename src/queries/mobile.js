@@ -1071,10 +1071,38 @@ async function mobileJobAction(body) {
 
           await saveDeliveryImages(billNo, deliveryImages, client);
 
+          // Capture the bill's CURRENT shipment branch before we move it — used
+          // below to backfill the anchor on a legacy NULL-origin trip so it stays
+          // in the operating branch's scoped lists once the shipment leaves.
+          const shipBefore = await client.query(
+            `SELECT NULLIF(TRIM(transport_code), '') AS transport_code
+             FROM ic_trans_shipment WHERE doc_no = $1`,
+            [billNo]
+          );
+          const sourceBranch = shipBefore.rows[0]?.transport_code ?? "";
+
           await client.query(
             `UPDATE ic_trans_shipment
              SET transport_code = $2, check_status = 0
              WHERE doc_no = $1`,
+            [billNo, forwardToBranch]
+          );
+
+          // Re-home the bill onto the receiving branch's pending queue: pin its
+          // transport to that branch and clear the originating branch's stale
+          // schedule so it surfaces in "ລໍຖ້າຈັດຖ້ຽວ" as a fresh, to-be-scheduled
+          // stop (flagged incoming-forwarded). Mirrors reclassifyDeliveredBillToBranch.
+          const { ensurePendingBillSchema } = require("./pending-bill");
+          await ensurePendingBillSchema();
+          await client.query(
+            `INSERT INTO public.odg_tms_pending_bill (bill_no, transport_code, scheduled_date, delivery_round_code, delivery_route_code, updated_at)
+             VALUES ($1, $2, NULL, NULL, NULL, LOCALTIMESTAMP(0))
+             ON CONFLICT (bill_no) DO UPDATE
+               SET transport_code = EXCLUDED.transport_code,
+                   scheduled_date = NULL,
+                   delivery_round_code = NULL,
+                   delivery_route_code = NULL,
+                   updated_at = LOCALTIMESTAMP(0)`,
             [billNo, forwardToBranch]
           );
 
@@ -1085,6 +1113,20 @@ async function mobileJobAction(body) {
              WHERE doc_no = $1 AND ${getFixedYearSqlFilter("doc_date")}`,
             [currentDocNo]
           );
+
+          // Anchor a legacy NULL-origin trip to the branch that operated it so the
+          // forwarded 'ສົ່ງຕໍ່ → ສາຂາ' row stays visible in that branch's scoped
+          // lists after the shipment moves to the destination.
+          const tripOrigin = String(currentBill.origin_transport_code ?? "").trim();
+          if (!tripOrigin && sourceBranch && sourceBranch !== forwardToBranch) {
+            await client.query(
+              `UPDATE odg_tms SET origin_transport_code = $2
+                WHERE doc_no = $1
+                  AND NULLIF(TRIM(origin_transport_code), '') IS NULL
+                  AND ${getFixedYearSqlFilter("doc_date")}`,
+              [currentDocNo, sourceBranch]
+            );
+          }
 
           // Cascade sent_start for sibling bills picked up at the trip's
           // origin warehouse when dispatch was auto-started here.

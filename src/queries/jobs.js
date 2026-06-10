@@ -1809,6 +1809,8 @@ async function reclassifyDeliveredBillToBranch(session, docNo, billNo, forwardTr
   await ensureForwardBranchColumn();
   // delivery_condition lives on the delivery-workflow schema.
   await ensureDeliveryWorkflowSchema(pool);
+  // We re-home the bill onto the receiving branch's pending queue below.
+  await ensurePendingBillSchema();
 
   const doc = String(docNo ?? "").trim();
   const bill = String(billNo ?? "").trim();
@@ -1859,6 +1861,17 @@ async function reclassifyDeliveredBillToBranch(session, docNo, billNo, forwardTr
     if (origin && origin === branch) {
       throw new Error("ສາຂາປາຍທາງຊ້ຳກັບສາຂາທີ່ຈັດສົ່ງ");
     }
+    // Legacy trips can have no origin_transport_code anchor — they show in a
+    // branch's scoped lists only via the bill's CURRENT shipment branch
+    // (branchFilterJob). Capture that branch now, BEFORE we move the shipment to
+    // the destination below, so we can backfill the anchor and stop the trip
+    // (and this forwarded row) from vanishing out of the source branch's views.
+    const shipBefore = await client.query(
+      `SELECT NULLIF(TRIM(transport_code), '') AS transport_code
+       FROM ic_trans_shipment WHERE doc_no = $1`,
+      [bill]
+    );
+    const sourceBranch = shipBefore.rows[0]?.transport_code ?? "";
 
     await client.query(
       `UPDATE public.odg_tms_detail
@@ -1886,6 +1899,34 @@ async function reclassifyDeliveredBillToBranch(session, docNo, billNo, forwardTr
       `UPDATE ic_trans_shipment SET transport_code = $2, check_status = 0 WHERE doc_no = $1`,
       [bill, branch]
     );
+    // Re-home the bill onto the receiving branch's pending queue: pin its
+    // transport to that branch and clear the originating branch's stale schedule
+    // so it surfaces in "ລໍຖ້າຈັດຖ້ຽວ" as a fresh, to-be-scheduled stop (flagged
+    // incoming-forwarded) instead of carrying the old branch's date/round.
+    await client.query(
+      `INSERT INTO public.odg_tms_pending_bill (bill_no, transport_code, scheduled_date, delivery_round_code, delivery_route_code, updated_at)
+       VALUES ($1, $2, NULL, NULL, NULL, LOCALTIMESTAMP(0))
+       ON CONFLICT (bill_no) DO UPDATE
+         SET transport_code = EXCLUDED.transport_code,
+             scheduled_date = NULL,
+             delivery_round_code = NULL,
+             delivery_route_code = NULL,
+             updated_at = LOCALTIMESTAMP(0)`,
+      [bill, branch]
+    );
+    // Anchor a legacy NULL-origin trip to the branch that operated it, so it
+    // stays in that branch's scoped lists (ກຳລັງຈັດສົ່ງ / ຈັດສົ່ງສຳເລັດ) as a
+    // 'ສົ່ງຕໍ່ → ສາຂາ' record now that the shipment has moved away.
+    if (!origin && sourceBranch && sourceBranch !== branch) {
+      await client.query(
+        `UPDATE public.odg_tms
+            SET origin_transport_code = $2
+          WHERE doc_no = $1
+            AND NULLIF(TRIM(origin_transport_code), '') IS NULL
+            AND ${getFixedYearSqlFilter("doc_date")}`,
+        [doc, sourceBranch]
+      );
+    }
 
     // Forwarding an in-delivery / waiting stop finalises it mid-trip, so make
     // sure the trip itself is marked dispatched — the same job_status bump the
