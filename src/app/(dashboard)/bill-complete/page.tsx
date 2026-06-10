@@ -755,7 +755,7 @@ export default function BillCompleteClient({
                                                   {detail.remark && (
                                                     <p className="text-[10px] text-rose-500">{detail.remark}</p>
                                                   )}
-                                                  {(detail.phase === "done" || detail.phase === "partial") &&
+                                                  {detail.phase !== "cancel" && !detail.forward_transport_code &&
                                                     (() => {
                                                       const key = `${job.doc_no}::${detail.bill_no}`;
                                                       if (reclassifyKey !== key) {

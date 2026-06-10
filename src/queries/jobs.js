@@ -1793,16 +1793,18 @@ async function moveBillToJob(sourceDocNo, billNo, destDocNo) {
   }
 }
 
-// Re-classify an ALREADY-COMPLETED "ສົ່ງລູກຄ້າ" (to_customer) stop as
-// "ສົ່ງສາຂາ" (to_branch) without re-keying anything — the dispatcher picked the
-// wrong destination and the driver has already closed the stop. This reproduces
-// the exact end-state the native to_branch completion path leaves behind
-// (mobile complete_bill → forwardToBranch): the detail row is flagged forwarded
-// + relabelled, the per-item delivered_qty is zeroed (nothing actually reached
-// the customer on this mis-classified leg), and the shipment is moved to the
-// receiving branch and released (check_status=0) so that branch's
-// available-bills queue can dispatch it onward to the customer.
-// Allowed only on a completed (status=1) stop that isn't already a forward.
+// Re-classify a "ສົ່ງລູກຄ້າ" (to_customer) stop as "ສົ່ງສາຂາ" (to_branch)
+// without re-keying anything — the dispatcher picked the wrong destination.
+// Works for a stop that is still in delivery (ກຳລັງຈັດສົ່ງ) / waiting just as
+// it does for one the driver already closed: in both cases this reproduces the
+// exact end-state the native to_branch completion path leaves behind
+// (mobile complete_bill → forwardToBranch). The detail row is flagged forwarded
+// + relabelled and force-finalised (status=1, sent_start/sent_end stamped if the
+// stop hadn't started/finished yet), the per-item delivered_qty is zeroed
+// (nothing actually reached the customer on this mis-classified leg), and the
+// shipment is moved to the receiving branch and released (check_status=0) so that
+// branch's available-bills queue can dispatch it onward to the customer.
+// Allowed on any stop that isn't already a forward and wasn't cancelled.
 async function reclassifyDeliveredBillToBranch(session, docNo, billNo, forwardTransportCode) {
   await ensureForwardBranchColumn();
   // delivery_condition lives on the delivery-workflow schema.
@@ -1836,12 +1838,16 @@ async function reclassifyDeliveredBillToBranch(session, docNo, billNo, forwardTr
     );
     if (lock.rows.length === 0) throw new Error("ບໍ່ພົບບິນໃນຖ້ຽວນີ້");
     const detail = lock.rows[0];
-    if (Number(detail.status) !== 1) {
-      throw new Error("ແກ້ໄດ້ສະເພາະບິນທີ່ສົ່ງສຳເລັດແລ້ວ");
+    if (Number(detail.status) === 2) {
+      throw new Error("ບິນທີ່ຍົກເລີກແລ້ວ ບໍ່ສາມາດແກ້ເປັນສົ່ງສາຂາ");
     }
     if (detail.forward_transport_code) {
       throw new Error("ບິນນີ້ເປັນ 'ສົ່ງສາຂາ' ຢູ່ແລ້ວ");
     }
+    // An in-delivery (ກຳລັງຈັດສົ່ງ) / waiting stop hasn't been finalised yet, so
+    // we also stamp its completion below + dispatch the trip (matching the native
+    // forward path). A driver-closed stop (status=1) keeps its real timestamps.
+    const wasCompleted = Number(detail.status) === 1;
 
     // Can't forward to the very branch that just delivered it.
     const trip = await client.query(
@@ -1856,7 +1862,11 @@ async function reclassifyDeliveredBillToBranch(session, docNo, billNo, forwardTr
 
     await client.query(
       `UPDATE public.odg_tms_detail
-       SET forward_transport_code = $3, delivery_condition = 'to_branch'
+       SET forward_transport_code = $3,
+           delivery_condition = 'to_branch',
+           status = 1,
+           sent_start = COALESCE(sent_start, LOCALTIMESTAMP(0)),
+           sent_end = COALESCE(sent_end, LOCALTIMESTAMP(0))
        WHERE doc_no = $1 AND bill_no = $2 AND ${getFixedYearSqlFilter("doc_date")}`,
       [doc, bill, branch]
     );
@@ -1876,6 +1886,20 @@ async function reclassifyDeliveredBillToBranch(session, docNo, billNo, forwardTr
       `UPDATE ic_trans_shipment SET transport_code = $2, check_status = 0 WHERE doc_no = $1`,
       [bill, branch]
     );
+
+    // Forwarding an in-delivery / waiting stop finalises it mid-trip, so make
+    // sure the trip itself is marked dispatched — the same job_status bump the
+    // native forward-completion path runs. No-op for an already-dispatched or
+    // closed trip (job_status >= 2), so a completed-bill correction is untouched.
+    if (!wasCompleted) {
+      await client.query(
+        `UPDATE odg_tms
+         SET job_status = CASE WHEN COALESCE(job_status, 0) < 2 THEN 2 ELSE job_status END,
+             dispatch_started_at = COALESCE(dispatch_started_at, LOCALTIMESTAMP(0))
+         WHERE doc_no = $1 AND ${getFixedYearSqlFilter("doc_date")}`,
+        [doc]
+      );
+    }
 
     await client.query("COMMIT");
 

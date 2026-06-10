@@ -151,7 +151,8 @@ export async function moveBillToJob(
   return svcMoveBillToJob(sourceDocNo, billNo, destDocNo);
 }
 
-// Correct a completed "ສົ່ງລູກຄ້າ" stop that should have been "ສົ່ງສາຂາ":
+// Correct a "ສົ່ງລູກຄ້າ" stop that should have been "ສົ່ງສາຂາ" — whether it is
+// still in delivery (ກຳລັງຈັດສົ່ງ) / waiting or the driver already closed it:
 // forward it onward to the given branch, reusing the existing delivery data.
 export async function reclassifyDeliveredBillToBranch(
   docNo: string,

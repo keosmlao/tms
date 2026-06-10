@@ -283,9 +283,15 @@ export default function BillsInProgressClient({
   const [currentPage, setCurrentPage] = useState(1);
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState<string | null>(null);
+  // "ແກ້ເປັນສົ່ງສາຂາ" — re-classify a still-in-delivery to_customer stop as a
+  // branch forward, the same correction the completed page already allows.
+  const [branches, setBranches] = useState<{ code: string; name_1: string }[]>([]);
+  const [reclassifyKey, setReclassifyKey] = useState<string | null>(null);
+  const [reclassifyBranch, setReclassifyBranch] = useState("");
+  const [reclassifyBusy, setReclassifyBusy] = useState(false);
   const perPage = 20;
 
-  useEffect(() => {
+  const fetchJobs = () => {
     setLoading(true);
     setLoadError(null);
     void Actions.getBillsInProgress()
@@ -295,7 +301,59 @@ export default function BillsInProgressClient({
         setLoadError(e?.response?.data?.error ?? e?.message ?? "Unknown error");
       })
       .finally(() => setLoading(false));
+  };
+
+  useEffect(() => {
+    fetchJobs();
   }, []);
+
+  useEffect(() => {
+    void Actions.getTransportBranches()
+      .then((data) => setBranches((data ?? []) as { code: string; name_1: string }[]))
+      .catch(() => setBranches([]));
+  }, []);
+
+  const refreshDetails = async (docNo: string) => {
+    try {
+      const details = (await Actions.getBillsWaitingSentDetails(
+        docNo
+      )) as InProgressBillDetail[];
+      setDetailsByDoc((current) => ({ ...current, [docNo]: sortDetails(details) }));
+    } catch (error) {
+      console.error(error);
+    }
+  };
+
+  const handleReclassify = async (docNo: string, billNo: string) => {
+    if (!reclassifyBranch) {
+      void confirm({ title: "ກະລຸນາເລືອກສາຂາ", message: "ເລືອກສາຂາປາຍທາງກ່ອນ", tone: "warning", single: true });
+      return;
+    }
+    const branch = branches.find((b) => b.code === reclassifyBranch);
+    const ok = await confirm({
+      title: "ແກ້ເປັນສົ່ງສາຂາ",
+      message: `ປ່ຽນບິນ ${billNo} ຈາກ 'ສົ່ງລູກຄ້າ' ເປັນ 'ສົ່ງສາຂາ → ${branch?.name_1 ?? reclassifyBranch}' ໂດຍໃຊ້ຂໍ້ມູນເດີມ? ບິນຈະຖືກປິດການສົ່ງໃນຖ້ຽວນີ້ ແລະກັບເຂົ້າຄິວຂອງສາຂາປາຍທາງເພື່ອຈັດສົ່ງຕໍ່ຫາລູກຄ້າ.`,
+      tone: "warning",
+      confirmLabel: "ປ່ຽນ",
+    });
+    if (!ok) return;
+    setReclassifyBusy(true);
+    try {
+      await Actions.reclassifyDeliveredBillToBranch(docNo, billNo, reclassifyBranch);
+      setReclassifyKey(null);
+      setReclassifyBranch("");
+      // The bill left this trip's active queue, so refresh both the expanded
+      // detail rows and the job-list counts (the trip may even fall off here).
+      await refreshDetails(docNo);
+      fetchJobs();
+    } catch (error) {
+      console.error(error);
+      const message = error instanceof Error ? error.message : "ປ່ຽນບໍ່ສຳເລັດ";
+      void confirm({ title: "ຜິດພາດ", message, tone: "warning", single: true });
+    } finally {
+      setReclassifyBusy(false);
+    }
+  };
 
   const transportOptions = useMemo(() => {
     const transports = new Set<string>();
@@ -790,6 +848,64 @@ export default function BillsInProgressClient({
                                               {detail.remark && (
                                                 <p className="text-[10px] text-rose-500 mt-1 ml-7">{detail.remark}</p>
                                               )}
+                                              {detail.phase !== "cancel" && !detail.forward_transport_code &&
+                                                (() => {
+                                                  const key = `${job.doc_no}::${detail.bill_no}`;
+                                                  if (reclassifyKey !== key) {
+                                                    return (
+                                                      <div className="mt-2 ml-7">
+                                                        <button
+                                                          type="button"
+                                                          onClick={() => {
+                                                            setReclassifyKey(key);
+                                                            setReclassifyBranch("");
+                                                          }}
+                                                          className="inline-flex items-center gap-1 rounded-full border border-sky-300 bg-sky-50 px-2 py-0.5 text-[9px] font-semibold text-sky-700 hover:bg-sky-100 dark:border-sky-900 dark:bg-sky-950/30 dark:text-sky-300"
+                                                          title="ແກ້ເປັນສົ່ງສາຂາ ໂດຍໃຊ້ຂໍ້ມູນເດີມ"
+                                                        >
+                                                          ⇄ ແກ້ເປັນສົ່ງສາຂາ
+                                                        </button>
+                                                      </div>
+                                                    );
+                                                  }
+                                                  return (
+                                                    <div className="mt-2 ml-7 flex flex-wrap items-center gap-1">
+                                                      <select
+                                                        value={reclassifyBranch}
+                                                        onChange={(e) => setReclassifyBranch(e.target.value)}
+                                                        disabled={reclassifyBusy}
+                                                        className="h-6 rounded border border-slate-300 bg-white px-1 text-[10px] dark:border-slate-700 dark:bg-slate-800"
+                                                      >
+                                                        <option value="">- ສາຂາປາຍທາງ -</option>
+                                                        {branches.map((b) => (
+                                                          <option key={b.code} value={b.code}>
+                                                            {b.name_1} ({b.code})
+                                                          </option>
+                                                        ))}
+                                                      </select>
+                                                      <button
+                                                        type="button"
+                                                        disabled={reclassifyBusy || !reclassifyBranch}
+                                                        onClick={() => void handleReclassify(job.doc_no, detail.bill_no)}
+                                                        className="inline-flex items-center gap-1 rounded bg-sky-600 px-2 py-0.5 text-[10px] font-semibold text-white hover:bg-sky-700 disabled:opacity-50"
+                                                      >
+                                                        {reclassifyBusy && <FaSpinner className="animate-spin" size={9} />}
+                                                        ຢືນຢັນ
+                                                      </button>
+                                                      <button
+                                                        type="button"
+                                                        disabled={reclassifyBusy}
+                                                        onClick={() => {
+                                                          setReclassifyKey(null);
+                                                          setReclassifyBranch("");
+                                                        }}
+                                                        className="rounded px-1.5 py-0.5 text-[10px] text-slate-500 hover:text-slate-700"
+                                                      >
+                                                        ຍົກເລີກ
+                                                      </button>
+                                                    </div>
+                                                  );
+                                                })()}
                                             </div>
                                             {billProducts && billProducts.products.length > 0 && (
                                               <div className="p-2">
