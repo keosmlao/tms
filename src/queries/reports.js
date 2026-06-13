@@ -806,6 +806,175 @@ async function getAttemptDeliveryItems(docNo, billNo) {
   );
 }
 
+// Daily-activity movement summary over a date range — a flow ledger for the
+// delivery pipeline, expressed as: ຍອດຍົກມາ + ເປີດບິນ − ຈັດສົ່ງ = ຄົງເຫຼືອ.
+//   ຄົງເຫຼືອ (remaining) — pending RIGHT NOW. MUST equal the bills-pending page,
+//      so it is taken verbatim from getBillsPending (the canonical pending list),
+//      NOT recomputed here — earlier recomputation inflated it badly.
+//   ເປີດບິນ (opened)    — sale bills (trans_flag=44) opened in [from,to] by doc_date.
+//   ຈັດສົ່ງ (delivered) — bills with a completed customer delivery (odg_tms_detail
+//      status=1, bill level) whose final sent_end falls in [from,to]. Bill level,
+//      not item level, so bills delivered without item-detail rows still count.
+//   ຍອດຍົກມາ (carry_in) — DERIVED so the ledger balances: remaining + delivered −
+//      opened (= pending at the start of the window). Keeps ຄົງເຫຼືອ exact.
+// Quantities mirror the same buckets: remaining = canonical remaining_qty_total,
+// opened = bill net qty (goods minus trans_flag=48 returns), delivered = units
+// actually handed over. Returns are netted so a fully-returned bill drops out.
+async function getReportDailyActivity(session, fromDate, toDate) {
+  const scope = getBranchScope(session);
+  await ensureForwardBranchColumn();
+  const branchList = scope.scoped
+    ? scope.branchListSql
+    : MONTHLY_DELIVERY_BRANCH_CODES.map((c) => `'${c}'`).join(", ");
+
+  // ── ຄົງເຫຼືອ / ຄ້າງສົ່ງ : reuse the canonical pending list so the number is
+  // byte-for-byte the same as the bills-pending page (pending as of toDate). ──
+  const { getBillsPending } = require("./bills.js");
+  const { FIXED_YEAR_START, FIXED_YEAR_END } = require("../lib/fixed-year");
+  // Full-year window = exactly what the bills-pending page passes, so the count
+  // equals the page's current "ຄ້າງສົ່ງ" total (e.g. 86) regardless of the
+  // report's date filter — pending is a "right now" figure, not date-sliced.
+  const pending = await getBillsPending(session, FIXED_YEAR_START, FIXED_YEAR_END, "all");
+  const pendingRows = (pending && pending.trans) || [];
+  const pendingByBranch = new Map();
+  for (const row of pendingRows) {
+    const code = (row.transport_code || "").trim();
+    const cur = pendingByBranch.get(code) || { bills: 0, qty: 0 };
+    cur.bills += 1;
+    cur.qty += Number(row.remaining_qty_total ?? 0);
+    pendingByBranch.set(code, cur);
+  }
+
+  // ── ເປີດບິນ + ຈັດສົ່ງ per branch (sale bills with deliverable goods) ──
+  const flowRows = await query(
+    `WITH sale_bills AS (
+      SELECT a.doc_no,
+             b.doc_date::date AS doc_date,
+             COALESCE(NULLIF(TRIM(pb.transport_code), ''), a.transport_code) AS branch_code
+      FROM ic_trans_shipment a
+      JOIN ic_trans b ON b.doc_no = a.doc_no
+      LEFT JOIN public.odg_tms_pending_bill pb ON pb.bill_no = a.doc_no
+      WHERE a.trans_flag = 44
+        AND b.doc_date::date <= $2::date
+        AND ${getFixedYearSqlFilter("a.doc_date")}
+        AND COALESCE(NULLIF(TRIM(pb.transport_code), ''), a.transport_code) IN (${branchList})
+    ),
+    bill_items AS (
+      SELECT d.doc_no AS bill_no, SUM(COALESCE(d.qty, 0))::numeric AS total_qty
+      FROM ic_trans_detail d
+      WHERE d.item_code NOT LIKE '97%'
+        AND d.doc_no IN (SELECT doc_no FROM sale_bills)
+      GROUP BY d.doc_no
+    ),
+    returned AS (
+      SELECT rd.ref_doc_no AS bill_no, SUM(ABS(COALESCE(rd.qty, 0)))::numeric AS returned_qty
+      FROM ic_trans_detail rd
+      JOIN ic_trans r ON r.doc_no = rd.doc_no AND r.trans_flag = 48
+      WHERE rd.item_code NOT LIKE '97%'
+        AND rd.ref_doc_no IN (SELECT doc_no FROM sale_bills)
+      GROUP BY rd.ref_doc_no
+    ),
+    del_dates AS (
+      -- Bill-level completion: the last finished customer delivery for the bill.
+      SELECT d.bill_no, MAX(d.sent_end) AS last_sent_end
+      FROM public.odg_tms_detail d
+      WHERE COALESCE(d.status, 0) = 1
+        AND NULLIF(TRIM(d.forward_transport_code), '') IS NULL
+        AND d.bill_no IN (SELECT doc_no FROM sale_bills)
+      GROUP BY d.bill_no
+    ),
+    del_units AS (
+      SELECT item.bill_no,
+             SUM(CASE WHEN COALESCE(item.delivered_qty, 0) = 0
+                      THEN COALESCE(item.selected_qty, 0)
+                      ELSE COALESCE(item.delivered_qty, 0) END)::numeric AS units
+      FROM public.odg_tms_detail_item item
+      JOIN public.odg_tms_detail det
+        ON det.bill_no = item.bill_no AND det.doc_no = item.doc_no
+      WHERE COALESCE(det.status, 0) = 1
+        AND NULLIF(TRIM(det.forward_transport_code), '') IS NULL
+        AND item.bill_no IN (SELECT doc_no FROM sale_bills)
+      GROUP BY item.bill_no
+    ),
+    calc AS (
+      SELECT sb.branch_code, sb.doc_date,
+             GREATEST(COALESCE(bi.total_qty, 0) - COALESCE(rt.returned_qty, 0), 0)::numeric AS net_total,
+             dd.last_sent_end::date AS completion_date,
+             COALESCE(du.units, 0)::numeric AS delivered_units
+      FROM sale_bills sb
+      LEFT JOIN bill_items bi ON bi.bill_no = sb.doc_no
+      LEFT JOIN returned rt ON rt.bill_no = sb.doc_no
+      LEFT JOIN del_dates dd ON dd.bill_no = sb.doc_no
+      LEFT JOIN del_units du ON du.bill_no = sb.doc_no
+    )
+    SELECT branch_code,
+      COUNT(*) FILTER (WHERE doc_date BETWEEN $1::date AND $2::date)::int AS opened_bills,
+      COALESCE(SUM(net_total) FILTER (WHERE doc_date BETWEEN $1::date AND $2::date), 0)::numeric AS opened_qty,
+      COUNT(*) FILTER (WHERE completion_date BETWEEN $1::date AND $2::date)::int AS delivered_bills,
+      COALESCE(SUM(LEAST(delivered_units, net_total)) FILTER (WHERE completion_date BETWEEN $1::date AND $2::date), 0)::numeric AS delivered_qty
+    FROM calc
+    WHERE net_total > 0
+    GROUP BY branch_code`,
+    [fromDate, toDate]
+  );
+  const flowByBranch = new Map(flowRows.map((r) => [r.branch_code, r]));
+
+  const codes = scope.scoped ? scope.branches : MONTHLY_DELIVERY_BRANCH_CODES;
+  // Pull live branch names from transport_type — the hardcoded
+  // MONTHLY_DELIVERY_BRANCH_NAMES map is stale (02-0001 is "ຂົນສົ່ງໂອດ່ຽນ" now).
+  const nameRows = codes.length
+    ? await query(
+        `SELECT code, COALESCE(NULLIF(TRIM(name_1), ''), code) AS name_1
+         FROM transport_type WHERE code = ANY($1::varchar[])`,
+        [codes]
+      )
+    : [];
+  const nameMap = new Map(nameRows.map((r) => [r.code, r.name_1]));
+
+  const build = (code) => {
+    const f = flowByBranch.get(code);
+    const p = pendingByBranch.get(code) || { bills: 0, qty: 0 };
+    const openedBills = Number(f?.opened_bills ?? 0);
+    const deliveredBills = Number(f?.delivered_bills ?? 0);
+    const remainingBills = Number(p.bills);
+    const openedQty = Number(f?.opened_qty ?? 0);
+    const deliveredQty = Number(f?.delivered_qty ?? 0);
+    const remainingQty = Number(p.qty);
+    return {
+      branch_code: code,
+      branch_name: nameMap.get(code) ?? MONTHLY_DELIVERY_BRANCH_NAMES[code] ?? code,
+      // ຍອດຍົກມາ derived so the ledger balances with the canonical ຄົງເຫຼືອ.
+      carry_bills: remainingBills + deliveredBills - openedBills,
+      opened_bills: openedBills,
+      delivered_bills: deliveredBills,
+      remaining_bills: remainingBills,
+      carry_qty: remainingQty + deliveredQty - openedQty,
+      opened_qty: openedQty,
+      delivered_qty: deliveredQty,
+      remaining_qty: remainingQty,
+    };
+  };
+  const branches = codes.map((code) => build(code));
+  const total = branches.reduce(
+    (acc, b) => {
+      acc.carry_bills += b.carry_bills;
+      acc.opened_bills += b.opened_bills;
+      acc.delivered_bills += b.delivered_bills;
+      acc.remaining_bills += b.remaining_bills;
+      acc.carry_qty += b.carry_qty;
+      acc.opened_qty += b.opened_qty;
+      acc.delivered_qty += b.delivered_qty;
+      acc.remaining_qty += b.remaining_qty;
+      return acc;
+    },
+    {
+      carry_bills: 0, opened_bills: 0, delivered_bills: 0, remaining_bills: 0,
+      carry_qty: 0, opened_qty: 0, delivered_qty: 0, remaining_qty: 0,
+    }
+  );
+  return { fromDate, toDate, branches, total };
+}
+
 module.exports = {
   getReportDaily,
   getReportByDriver,
@@ -818,5 +987,6 @@ module.exports = {
   getReportPendingDaily,
   getReportDeliveredDaily,
   getReportCancelledDaily,
+  getReportDailyActivity,
   getAttemptDeliveryItems,
 };

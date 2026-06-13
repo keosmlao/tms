@@ -13,6 +13,7 @@ import {
   getReportPendingDaily as svcGetReportPendingDaily,
   getReportDeliveredDaily as svcGetReportDeliveredDaily,
   getReportCancelledDaily as svcGetReportCancelledDaily,
+  getReportDailyActivity as svcGetReportDailyActivity,
   getAttemptDeliveryItems as svcGetAttemptDeliveryItems,
 } from "@/queries/reports.js";
 
@@ -77,6 +78,11 @@ export async function getReportDeliveredDaily(fromDate: string, toDate: string) 
 export async function getReportCancelledDaily(fromDate: string, toDate: string) {
   const s = await requireSession();
   return svcGetReportCancelledDaily(s, fromDate, toDate);
+}
+
+export async function getReportDailyActivity(fromDate: string, toDate: string) {
+  const s = await requireSession();
+  return svcGetReportDailyActivity(s, fromDate, toDate);
 }
 
 export async function getAttemptDeliveryItems(docNo: string, billNo: string) {

@@ -107,6 +107,7 @@ export const Actions = {
   getReportPendingDaily: reports.getReportPendingDaily,
   getReportDeliveredDaily: reports.getReportDeliveredDaily,
   getReportCancelledDaily: reports.getReportCancelledDaily,
+  getReportDailyActivity: reports.getReportDailyActivity,
   getAttemptDeliveryItems: reports.getAttemptDeliveryItems,
 
   // Cars
