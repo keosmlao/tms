@@ -10,6 +10,7 @@ import {
   removeManualPendingBill as svcRemoveManualPendingBill,
   getBillsPending as svcGetBillsPending,
   updateBillTransport as svcUpdateBillTransport,
+  sendBillContactLine as svcSendBillContactLine,
   getBillProducts as svcGetBillProducts,
   getBillsWaitingSent as svcGetBillsWaitingSent,
   getBillsWaitingSentDetails as svcGetBillsWaitingSentDetails,
@@ -131,6 +132,25 @@ export async function updateBillTransport(docNo: string, transportCode: string) 
 export async function getBillProducts(docNo: string) {
   await requireSession();
   return svcGetBillProducts(docNo);
+}
+
+export async function sendBillContactLine(
+  docNo: string,
+  target: "customer" | "salesperson"
+) {
+  const s = await requireSession();
+  const result = await svcSendBillContactLine(docNo, target);
+  if (result?.success) {
+    const { recordAudit } = await import("@/queries/audit-log.js");
+    await recordAudit({
+      action: "bill.send_line",
+      entityType: "bill",
+      entityId: docNo,
+      userCode: s.usercode,
+      changes: { target },
+    });
+  }
+  return result;
 }
 
 export async function getBillsWaitingSent() {

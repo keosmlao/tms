@@ -10,6 +10,7 @@ import {
   FaChevronDown,
   FaClock,
   FaExchangeAlt,
+  FaExclamationTriangle,
   FaFileInvoice,
   FaMapMarkerAlt,
   FaPhone,
@@ -25,6 +26,8 @@ import {
   FaTrash,
   FaTruck,
   FaCopy,
+  FaWhatsapp,
+  FaLine,
 } from "react-icons/fa";
 import { FIXED_YEAR_END, FIXED_YEAR_START, getFixedTodayDate } from "@/lib/fixed-year";
 import { Actions } from "@/lib/api";
@@ -36,7 +39,6 @@ import {
   PendingBillLocationDialog,
   type PendingLocationDefaults,
 } from "@/components/pending-bill-location-dialog";
-import { BillTodoPopover } from "@/components/bill-todo-popover";
 import Chatter from "@/components/Chatter";
 import { printBillLocationQr } from "@/lib/print-bill-location-qr";
 // Ported from server actions: getBillProducts, getBillsPending, updateBillTransport
@@ -75,6 +77,7 @@ export interface Bill {
   delivery_round_code?: string;
   schedule_updated_at?: string | null;
   schedule_updated_by?: string;
+  reschedule_count?: number;
   cancelled_delivery?: boolean;
   cancelled_delivery_job?: string;
   cancelled_delivery_at?: string | null;
@@ -93,6 +96,10 @@ export interface Bill {
   planned_lng?: string | null;
   cust_code?: string | null;
   cust_name?: string | null;
+  cust_phone?: string | null;
+  salesperson_phone?: string | null;
+  cust_line?: string | null;
+  salesperson_line?: string | null;
   cust_lat?: string | null;
   cust_lng?: string | null;
   source_format?: string;
@@ -143,6 +150,11 @@ interface ManualPendingBill {
 // dashboard counts it as a pickup (not logistic) and getBillsPending excludes
 // it from the contact queue, so assigning it here drops the bill off this list.
 const SELF_PICKUP_TRANSPORT_CODE = "02-0004";
+
+// A bill whose delivery (receive) date has been changed MORE THAN this many
+// times is flagged red in the queue — repeated reschedules signal a problem
+// bill (customer keeps postponing / can't receive). "ເກີນ 2 ເທື່ອ".
+const RESCHEDULE_RED_THRESHOLD = 2;
 
 // Flat state model — action_status combines contact result + reason:
 //   ຍັງບໍ່ເຖິງເວລາ uses send_date more than 3 days from today.
@@ -397,11 +409,13 @@ export default function BillsPendingClient() {
   const [loadingDoc, setLoadingDoc] = useState<string | null>(null);
   const [scheduleBill, setScheduleBill] = useState<{ billNo: string; defaults: PendingScheduleDefaults } | null>(null);
   const [locationBill, setLocationBill] = useState<{ billNo: string; defaults: PendingLocationDefaults } | null>(null);
-  const [todoOpen, setTodoOpen] = useState<{ billNo: string; anchor: HTMLElement } | null>(null);
   const [queueFilter] = useState<QueueFilter>("all");
   const [statusMenu, setStatusMenu] = useState<{ billNo: string; anchor: HTMLElement } | null>(null);
   const [routeMenu, setRouteMenu] = useState<{ billNo: string; anchor: HTMLElement } | null>(null);
   const [roundMenu, setRoundMenu] = useState<{ billNo: string; anchor: HTMLElement } | null>(null);
+  // Keyed `${billNo}:${target}` while a LINE push is in flight, so each button
+  // shows its own spinner without blocking the others.
+  const [sendingLine, setSendingLine] = useState<string | null>(null);
   const [deliveryRoutes, setDeliveryRoutes] = useState<DeliveryRoute[]>([]);
   const [deliveryRounds, setDeliveryRounds] = useState<DeliveryRound[]>([]);
   const [notYetDays, setNotYetDays] = useState(3);
@@ -782,6 +796,47 @@ export default function BillsPendingClient() {
       console.error(e);
     } finally {
       setRemovingManualBillNo(null);
+    }
+  };
+
+  // wa.me click-to-chat link. Mirrors the server normalizePhone (src/lib/whatsapp.js):
+  // strip non-digits, keep an existing country code, else drop a leading 0 and
+  // prepend Laos's 856. No message is pre-filled — the dispatcher types it in.
+  const whatsappUrl = (raw?: string | null) => {
+    const digits = String(raw ?? "").replace(/\D/g, "");
+    if (!digits) return "";
+    const intl =
+      digits.length >= 11 || (digits.length >= 10 && digits[0] !== "0")
+        ? digits
+        : "856" + (digits.startsWith("0") ? digits.slice(1) : digits);
+    return `https://wa.me/${intl}`;
+  };
+
+  // Push a LINE message about this bill to the customer or salesperson via the
+  // bot (their stored line_id is a bot user-id — see sendBillContactLine).
+  const sendLine = async (billNo: string, target: "customer" | "salesperson") => {
+    const key = `${billNo}:${target}`;
+    setSendingLine(key);
+    try {
+      const res = (await Actions.sendBillContactLine(billNo, target)) as {
+        success?: boolean;
+        skipped?: boolean;
+        error?: string;
+        message?: string;
+      };
+      if (res?.success) {
+        alert("ສົ່ງ LINE ສຳເລັດແລ້ວ ✓");
+      } else if (res?.error === "no_line") {
+        alert(res.message ?? "ບໍ່ມີ LINE");
+      } else if (res?.skipped) {
+        alert("ລະບົບ LINE ຍັງບໍ່ໄດ້ຕັ້ງຄ່າ (ບໍ່ມີ token)");
+      } else {
+        alert("ສົ່ງ LINE ບໍ່ສຳເລັດ");
+      }
+    } catch (e) {
+      alert(e instanceof Error ? e.message : "ສົ່ງ LINE ບໍ່ສຳເລັດ");
+    } finally {
+      setSendingLine(null);
     }
   };
 
@@ -1328,7 +1383,9 @@ export default function BillsPendingClient() {
                                     type="button"
                                     onClick={(e) => { e.stopPropagation(); openScheduleDialog(bill); }}
                                     className={`text-xs tabular-nums cursor-pointer transition-colors ${
-                                      bill.scheduled_date_display
+                                      (bill.reschedule_count ?? 0) > RESCHEDULE_RED_THRESHOLD
+                                        ? "text-rose-600 dark:text-rose-400 font-bold hover:underline"
+                                        : bill.scheduled_date_display
                                         ? "text-emerald-600 dark:text-emerald-400 font-semibold hover:underline"
                                         : "text-slate-400 hover:text-teal-600 dark:hover:text-teal-400"
                                     }`}
@@ -1336,6 +1393,12 @@ export default function BillsPendingClient() {
                                     ຮັບ: {bill.scheduled_date_display || "—"}
                                     {bill.scheduled_date_overridden && <span className="text-amber-500 ml-0.5">*</span>}
                                   </button>
+                                  {(bill.reschedule_count ?? 0) > RESCHEDULE_RED_THRESHOLD && (
+                                    <div className="mt-0.5 inline-flex items-center gap-1 rounded-full bg-rose-100 px-1.5 py-0.5 text-[9px] font-bold text-rose-700 dark:bg-rose-900/40 dark:text-rose-400">
+                                      <FaExclamationTriangle size={8} className="shrink-0" />
+                                      ປ່ຽນວັນຮັບ {bill.reschedule_count}×
+                                    </div>
+                                  )}
                                 </div>
                                 {/* Route */}
                                 <div className="px-3 py-1.5" onClick={(e) => e.stopPropagation()}>
@@ -1380,24 +1443,6 @@ export default function BillsPendingClient() {
                                 </div>
                                 {/* Actions */}
                                 <div className="px-3 py-1.5 flex items-center justify-center gap-1" onClick={(e) => e.stopPropagation()}>
-                                  <button
-                                    onClick={(e) => { e.stopPropagation(); setTodoOpen({ billNo: bill.doc_no, anchor: e.currentTarget }); }}
-                                    className={`relative w-6 h-6 rounded flex items-center justify-center transition-colors cursor-pointer ${
-                                      bill.todo_pending_count && bill.todo_earliest_deadline && bill.todo_earliest_deadline < today
-                                        ? "text-rose-600 bg-rose-100/80 hover:bg-rose-200 dark:bg-rose-900/30"
-                                        : bill.todo_pending_count
-                                        ? "text-emerald-600 bg-emerald-100/80 hover:bg-emerald-200 dark:bg-emerald-900/30"
-                                        : "text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800"
-                                    }`}
-                                    title="ກິດຈະກຳ"
-                                  >
-                                    <FaStickyNote size={10} />
-                                    {(bill.todo_pending_count ?? 0) > 0 && (
-                                      <span className="absolute -top-1 -right-1 min-w-[12px] h-[12px] px-0.5 rounded-full bg-rose-500 text-white text-[8px] font-bold flex items-center justify-center">
-                                        {bill.todo_pending_count}
-                                      </span>
-                                    )}
-                                  </button>
                                   <button
                                     onClick={(e) => { e.stopPropagation(); openModal(bill); }}
                                     className="w-6 h-6 rounded flex items-center justify-center bg-teal-600 hover:bg-teal-700 text-white transition-colors cursor-pointer"
@@ -1480,8 +1525,18 @@ export default function BillsPendingClient() {
                                     ສົ່ງ {bill.send_date_display ?? bill.doc_date}
                                   </span>
                                   {bill.scheduled_date_display && (
-                                    <span className="text-[10px] text-emerald-600 dark:text-emerald-400 tabular-nums font-semibold">
+                                    <span className={`text-[10px] tabular-nums font-semibold ${
+                                      (bill.reschedule_count ?? 0) > RESCHEDULE_RED_THRESHOLD
+                                        ? "text-rose-600 dark:text-rose-400"
+                                        : "text-emerald-600 dark:text-emerald-400"
+                                    }`}>
                                       ✓ {bill.scheduled_date_display}
+                                    </span>
+                                  )}
+                                  {(bill.reschedule_count ?? 0) > RESCHEDULE_RED_THRESHOLD && (
+                                    <span className="inline-flex items-center gap-0.5 rounded-full bg-rose-100 px-1.5 py-0.5 text-[9px] font-bold text-rose-700 dark:bg-rose-900/40 dark:text-rose-400">
+                                      <FaExclamationTriangle size={7} />
+                                      ປ່ຽນວັນຮັບ {bill.reschedule_count}×
                                     </span>
                                   )}
                                 </div>
@@ -1497,12 +1552,6 @@ export default function BillsPendingClient() {
                                     className="px-2 py-1 rounded border border-slate-200 dark:border-white/10 bg-white dark:bg-slate-800 text-[9px] font-semibold text-slate-600 dark:text-slate-300 cursor-pointer"
                                   >
                                     <FaCalendar size={8} className="inline mr-0.5" /> ວັນຮັບ
-                                  </button>
-                                  <button
-                                    onClick={(e) => { e.stopPropagation(); setTodoOpen({ billNo: bill.doc_no, anchor: e.currentTarget }); }}
-                                    className="px-2 py-1 rounded border border-slate-200 dark:border-white/10 bg-white dark:bg-slate-800 text-[9px] font-semibold text-slate-600 dark:text-slate-300 cursor-pointer"
-                                  >
-                                    <FaStickyNote size={8} className="inline mr-0.5" /> ບັນທຶກ
                                   </button>
                                   <BillLocationActions bill={bill} variant="label" onEdit={openLocationDialog} />
                                 </div>
@@ -1772,14 +1821,6 @@ export default function BillsPendingClient() {
         onSaved={() => void fetchBills()}
       />
 
-      <BillTodoPopover
-        open={todoOpen !== null}
-        billNo={todoOpen?.billNo ?? null}
-        anchorEl={todoOpen?.anchor ?? null}
-        onClose={() => setTodoOpen(null)}
-        onChanged={() => void fetchBills()}
-      />
-
       <StatusMenu
         billNo={statusMenu?.billNo ?? null}
         currentStatus={
@@ -1927,6 +1968,84 @@ export default function BillsPendingClient() {
                           </span>
                         </div>
                       )}
+                      <div>
+                        <span className="text-slate-400 block mb-0.5">ເບີໂທຮ້ານຄ້າ</span>
+                        {drawerBill.cust_phone ? (
+                          <a
+                            href={`tel:${drawerBill.cust_phone}`}
+                            className="font-semibold text-teal-700 dark:text-teal-400 flex items-center gap-1 hover:underline break-all"
+                          >
+                            <FaPhone size={10} className="text-slate-400 shrink-0" />
+                            {drawerBill.cust_phone}
+                          </a>
+                        ) : (
+                          <span className="font-semibold text-slate-400">-</span>
+                        )}
+                        {(drawerBill.cust_phone || drawerBill.cust_line) && (
+                          <div className="mt-1.5 flex flex-wrap items-center gap-1.5">
+                            {drawerBill.cust_phone && (
+                              <a
+                                href={whatsappUrl(drawerBill.cust_phone)}
+                                target="_blank"
+                                rel="noopener noreferrer"
+                                className="inline-flex items-center gap-1 rounded-md bg-green-500/10 px-2 py-1 text-[10px] font-semibold text-green-700 hover:bg-green-500/20 dark:text-green-400 transition-colors"
+                              >
+                                <FaWhatsapp size={11} /> WhatsApp
+                              </a>
+                            )}
+                            {drawerBill.cust_line && (
+                              <button
+                                type="button"
+                                onClick={() => sendLine(drawerBill.doc_no, "customer")}
+                                disabled={sendingLine === `${drawerBill.doc_no}:customer`}
+                                className="inline-flex items-center gap-1 rounded-md bg-[#06C755]/10 px-2 py-1 text-[10px] font-semibold text-[#06C755] hover:bg-[#06C755]/20 transition-colors disabled:opacity-50 cursor-pointer"
+                              >
+                                {sendingLine === `${drawerBill.doc_no}:customer` ? <FaSpinner size={11} className="animate-spin" /> : <FaLine size={11} />}
+                                ສົ່ງ LINE
+                              </button>
+                            )}
+                          </div>
+                        )}
+                      </div>
+                      <div>
+                        <span className="text-slate-400 block mb-0.5">ເບີໂທພະນັກງານຂາຍ</span>
+                        {drawerBill.salesperson_phone ? (
+                          <a
+                            href={`tel:${drawerBill.salesperson_phone}`}
+                            className="font-semibold text-teal-700 dark:text-teal-400 flex items-center gap-1 hover:underline break-all"
+                          >
+                            <FaPhone size={10} className="text-slate-400 shrink-0" />
+                            {drawerBill.salesperson_phone}
+                          </a>
+                        ) : (
+                          <span className="font-semibold text-slate-400">-</span>
+                        )}
+                        {(drawerBill.salesperson_phone || drawerBill.salesperson_line) && (
+                          <div className="mt-1.5 flex flex-wrap items-center gap-1.5">
+                            {drawerBill.salesperson_phone && (
+                              <a
+                                href={whatsappUrl(drawerBill.salesperson_phone)}
+                                target="_blank"
+                                rel="noopener noreferrer"
+                                className="inline-flex items-center gap-1 rounded-md bg-green-500/10 px-2 py-1 text-[10px] font-semibold text-green-700 hover:bg-green-500/20 dark:text-green-400 transition-colors"
+                              >
+                                <FaWhatsapp size={11} /> WhatsApp
+                              </a>
+                            )}
+                            {drawerBill.salesperson_line && (
+                              <button
+                                type="button"
+                                onClick={() => sendLine(drawerBill.doc_no, "salesperson")}
+                                disabled={sendingLine === `${drawerBill.doc_no}:salesperson`}
+                                className="inline-flex items-center gap-1 rounded-md bg-[#06C755]/10 px-2 py-1 text-[10px] font-semibold text-[#06C755] hover:bg-[#06C755]/20 transition-colors disabled:opacity-50 cursor-pointer"
+                              >
+                                {sendingLine === `${drawerBill.doc_no}:salesperson` ? <FaSpinner size={11} className="animate-spin" /> : <FaLine size={11} />}
+                                ສົ່ງ LINE
+                              </button>
+                            )}
+                          </div>
+                        )}
+                      </div>
                       {drawerBill.sales_remark && (
                         <div className="col-span-2 border-t border-slate-200/50 pt-2 dark:border-white/5">
                           <span className="text-slate-400 block mb-1">ໝາຍເຫດບິນຂາຍ</span>
@@ -2010,7 +2129,11 @@ export default function BillsPendingClient() {
                         <button
                           type="button"
                           onClick={() => openScheduleDialog(drawerBill)}
-                          className="w-full flex items-center justify-between rounded-lg border border-slate-200/50 dark:border-white/5 bg-white/40 dark:bg-white/5 px-3 py-2 text-xs font-medium text-slate-700 dark:text-slate-200 hover:border-teal-500 dark:hover:border-teal-400 transition-colors cursor-pointer"
+                          className={`w-full flex items-center justify-between rounded-lg border bg-white/40 dark:bg-white/5 px-3 py-2 text-xs font-medium transition-colors cursor-pointer ${
+                            (drawerBill.reschedule_count ?? 0) > RESCHEDULE_RED_THRESHOLD
+                              ? "border-rose-400/60 dark:border-rose-500/50 text-rose-700 dark:text-rose-400 hover:border-rose-500"
+                              : "border-slate-200/50 dark:border-white/5 text-slate-700 dark:text-slate-200 hover:border-teal-500 dark:hover:border-teal-400"
+                          }`}
                         >
                           <span className="flex items-center gap-1.5 truncate">
                             <FaCalendar size={10} className="text-slate-400" />
@@ -2018,6 +2141,12 @@ export default function BillsPendingClient() {
                           </span>
                           <FaChevronDown size={8} className="opacity-60" />
                         </button>
+                        {(drawerBill.reschedule_count ?? 0) > RESCHEDULE_RED_THRESHOLD && (
+                          <div className="mt-1.5 flex items-center gap-1.5 rounded-lg border border-rose-500/20 bg-rose-500/10 px-2.5 py-1.5 text-[11px] font-semibold text-rose-700 dark:text-rose-300">
+                            <FaExclamationTriangle size={11} className="shrink-0" />
+                            ປ່ຽນວັນຮັບແລ້ວ {drawerBill.reschedule_count} ເທື່ອ — ກວດສອບກັບລູກຄ້າ
+                          </div>
+                        )}
                       </div>
 
                       {/* Delivery Round */}

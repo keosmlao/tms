@@ -490,6 +490,7 @@ async function getManualReadyBills() {
 
 const {
   getPendingBillScheduleMap,
+  getPendingBillRescheduleCountMap,
   ensurePendingBillSchema,
 } = require("./pending-bill");
 const { getBillTodoSummaryMap } = require("./bill-todo");
@@ -515,10 +516,14 @@ async function getManualPendingRowsForPending(fromDate, toDate, transportCode = 
       COALESCE(NULLIF(TRIM(cust.name_1), ''), a.cust_code, '') as transport_name,
       COALESCE(NULLIF(TRIM(acd.latitude::text), ''), '') as cust_lat,
       COALESCE(NULLIF(TRIM(acd.longitude::text), ''), '') as cust_lng,
+      COALESCE(NULLIF(TRIM(cust.telephone), ''), '') as cust_phone,
+      COALESCE(NULLIF(TRIM(cust.line_id), ''), '') as cust_line,
       COALESCE(NULLIF(TRIM(a.remark), ''), '') as sales_remark,
       to_char(COALESCE(a.send_date, pb.scheduled_date, a.doc_date),'YYYY-MM-DD') as send_date,
       to_char(COALESCE(a.send_date, pb.scheduled_date, a.doc_date),'DD-MM-YYYY') as send_date_display,
       COALESCE(NULLIF(TRIM(oe.fullname_lo), ''), NULLIF(TRIM(oe.nickname), ''), a.sale_code) as sale,
+      COALESCE(NULLIF(TRIM(oe.mobile), ''), '') as salesperson_phone,
+      COALESCE(NULLIF(TRIM(oe.line_id), ''), '') as salesperson_line,
       COALESCE(NULLIF(TRIM(od.department_name_lo), ''), oe.department_code, '') as department,
       COALESCE(pb.transport_code, '') as transport_code,
       COALESCE(NULLIF(TRIM(tt.name_1), ''), NULLIF(TRIM(pb.transport_code), ''), '') as transport,
@@ -630,11 +635,15 @@ async function getBillsPending(session, fromDate, toDate, transportCode) {
         COALESCE(NULLIF(TRIM(cust.name_1), ''), a.cust_code, '') as cust_name,
         COALESCE(NULLIF(TRIM(acd.latitude::text), ''), '') as cust_lat,
         COALESCE(NULLIF(TRIM(acd.longitude::text), ''), '') as cust_lng,
+        COALESCE(NULLIF(TRIM(cust.telephone), ''), '') as cust_phone,
+        COALESCE(NULLIF(TRIM(cust.line_id), ''), '') as cust_line,
         COALESCE(NULLIF(TRIM(b.remark), ''), '') as sales_remark,
         to_char(b.send_date,'YYYY-MM-DD') as send_date,
         to_char(b.send_date,'DD-MM-YYYY') as send_date_display,
         COALESCE(b.doc_format_code, '') as source_format,
         COALESCE(NULLIF(TRIM(oe.fullname_lo), ''), NULLIF(TRIM(oe.nickname), ''), b.sale_code) as sale,
+        COALESCE(NULLIF(TRIM(oe.mobile), ''), '') as salesperson_phone,
+        COALESCE(NULLIF(TRIM(oe.line_id), ''), '') as salesperson_line,
         COALESCE(NULLIF(TRIM(od.department_name_lo), ''), oe.department_code, '') as department,
         COALESCE(NULLIF(TRIM(dov.name_1), ''), d.name_1) as transport, to_char(a.create_date_time_now,'DD-MM-YYYY HH24:MI') as time_open,
         now() - a.create_date_time_now as time_use,
@@ -716,7 +725,7 @@ async function getBillsPending(session, fromDate, toDate, transportCode) {
   // schedule map and the todo map all depend only on transRaw/billNos and are
   // independent of each other — run them concurrently so the lighter lookups
   // overlap with applyRemainingCounts instead of stacking after it.
-  const [countedRows, cancelledRows, scheduleMap, todoMap, activeDispatchRows, forwardedAwayRows, deliveredServiceRows] = await Promise.all([
+  const [countedRows, cancelledRows, scheduleMap, rescheduleCountMap, todoMap, activeDispatchRows, forwardedAwayRows, deliveredServiceRows] = await Promise.all([
     applyRemainingCounts(transRaw),
     query(
       `SELECT DISTINCT ON (d.bill_no)
@@ -738,6 +747,8 @@ async function getBillsPending(session, fromDate, toDate, transportCode) {
     ),
     // Schedule + remark stamps for bills the admin has flagged as overdue.
     getPendingBillScheduleMap(billNos),
+    // How many times the delivery date was changed (for the over-reschedule flag).
+    getPendingBillRescheduleCountMap(billNos),
     // Aggregated todo counts/earliest deadline for the row indicator.
     getBillTodoSummaryMap(billNos),
     // Bills already sitting on an OPEN trip (status NULL/0/3 — not delivered=1,
@@ -820,6 +831,7 @@ async function getBillsPending(session, fromDate, toDate, transportCode) {
       const sched = scheduleMap.get(bill.doc_no) ?? null;
       const todo = todoMap.get(bill.doc_no) ?? null;
       const cancelled = cancelledMap.get(bill.doc_no) ?? null;
+      const rescheduleCount = rescheduleCountMap.get(bill.doc_no) ?? 0;
       // CAKAP = POS receipt from web_sale_order's cashier/settle. The customer
       // has already paid, so the "ຕ້ອງໂທຫາລູກຄ້າ" gate doesn't apply — auto-
       // promote to contacted_ready and treat send_date as the planned delivery
@@ -880,6 +892,7 @@ async function getBillsPending(session, fromDate, toDate, transportCode) {
         delivery_round_code: sched?.delivery_round_code ?? "",
         schedule_updated_at: sched?.updated_at ?? null,
         schedule_updated_by: sched?.updated_by ?? "",
+        reschedule_count: rescheduleCount,
         cancelled_delivery: Boolean(cancelled),
         cancelled_delivery_job: cancelled?.cancelled_delivery_job ?? "",
         cancelled_delivery_at: cancelled?.cancelled_delivery_at ?? "",
@@ -1183,6 +1196,11 @@ async function getBillsInProgress(session) {
     LEFT JOIN job_transport jt ON jt.doc_no = a.doc_no
     WHERE COALESCE(a.approve_status, 0) = 1
       AND COALESCE(a.job_status, 0) = 2
+      -- A job_status=2 trip whose every bill is already finalised (none waiting,
+      -- none mid-delivery) is treated as "driver forgot to close" and is surfaced
+      -- by getJobsClosedByDriver instead. Excluding it here keeps each job in a
+      -- single bucket so it never shows both "ກຳລັງຈັດສົ່ງ" and "ຄົນຂັບປິດງານ".
+      AND (COALESCE(bs.waiting_bill_count, 0) + COALESCE(bs.inprogress_bill_count, 0)) > 0
       AND ${getFixedYearSqlFilter("a.doc_date")}
       ${branchFilterJob(scope, "a")}
     ORDER BY bs.active_sent_start ASC NULLS LAST, a.create_date_time_now ASC, a.doc_no ASC`
@@ -1327,8 +1345,59 @@ async function getBillsPartialList(session, fromDate, toDate) {
   );
 }
 
+// Push a LINE message about one pending bill to either the customer or the
+// salesperson. Their LINE ids (ar_customer.line_id / odg_employee.line_id) are
+// bot user-ids captured when they added the channel as a friend, so this is the
+// only way to "send LINE" from the dashboard — a click-to-open chat link is not
+// possible with these ids. Returns { success, skipped?, error?, message? };
+// no_line means that party has no LINE on file (UI should disable the button).
+async function sendBillContactLine(billNo, target) {
+  const code = String(billNo ?? "").trim();
+  if (!code) return { success: false, error: "bill_no is required" };
+  if (target !== "customer" && target !== "salesperson") {
+    return { success: false, error: "invalid target" };
+  }
+  const row = await queryOne(
+    `SELECT b.doc_no,
+            COALESCE(NULLIF(TRIM(cust.name_1), ''), b.cust_code, '') as cust_name,
+            COALESCE(NULLIF(TRIM(cust.line_id), ''), '') as cust_line,
+            COALESCE(NULLIF(TRIM(oe.fullname_lo), ''), NULLIF(TRIM(oe.nickname), ''), b.sale_code, '') as sale_name,
+            COALESCE(NULLIF(TRIM(oe.line_id), ''), '') as sale_line,
+            to_char(COALESCE(pb.scheduled_date, b.send_date, b.doc_date),'DD-MM-YYYY') as receive_date,
+            COALESCE(NULLIF(TRIM(tt.name_1), ''), NULLIF(TRIM(pb.transport_code), ''), s.transport_name, '') as transport
+       FROM ic_trans b
+       LEFT JOIN ic_trans_shipment s ON s.doc_no = b.doc_no
+       LEFT JOIN ar_customer cust ON cust.code = b.cust_code
+       LEFT JOIN public.odg_employee oe ON oe.employee_code = b.sale_code
+       LEFT JOIN public.odg_tms_pending_bill pb ON pb.bill_no = b.doc_no
+       LEFT JOIN transport_type tt ON tt.code = NULLIF(TRIM(pb.transport_code), '')
+      WHERE b.doc_no = $1
+      LIMIT 1`,
+    [code]
+  );
+  if (!row) return { success: false, error: "bill not found" };
+  const to = target === "customer" ? row.cust_line : row.sale_line;
+  if (!to) {
+    return {
+      success: false,
+      error: "no_line",
+      message:
+        target === "customer" ? "ລູກຄ້າຍັງບໍ່ມີ LINE" : "ພະນັກງານຍັງບໍ່ມີ LINE",
+    };
+  }
+  const msg =
+    `🧾 ບິນ ${row.doc_no}\n` +
+    `ຮ້ານຄ້າ: ${row.cust_name || "-"}\n` +
+    `ວັນຮັບສິນຄ້າ: ${row.receive_date || "-"}\n` +
+    (row.transport ? `ສາຍສົ່ງ: ${row.transport}\n` : "") +
+    `ພະນັກງານຂາຍ: ${row.sale_name || "-"}`;
+  const { sendLineText } = require("../lib/line");
+  return sendLineText(to, msg);
+}
+
 module.exports = {
   applyRemainingCounts,
+  sendBillContactLine,
   getAvailableBillsWithProducts,
   getAvailableBills,
   getAvailableBillProducts,

@@ -162,6 +162,38 @@ async function getPendingBillScheduleMap(billNos) {
   return new Map(rows.map((r) => [r.bill_no, r]));
 }
 
+// How many times each bill's delivery date (scheduled_date) was actually
+// CHANGED, from odg_tms_pending_bill_history. Every save appends a history row
+// (even when only the remark/status/route changes), so we count transitions
+// where the date moves from one non-null value to a DIFFERENT non-null value.
+// The first time a date is set (NULL → date) is the initial assignment, not a
+// reschedule, so it is excluded. Drives the "rescheduled too many times" red
+// flag in the pending queue.
+async function getPendingBillRescheduleCountMap(billNos) {
+  if (!Array.isArray(billNos) || billNos.length === 0) {
+    return new Map();
+  }
+  await ensurePendingBillSchema();
+  const rows = await query(
+    `WITH h AS (
+       SELECT bill_no, scheduled_date,
+              LAG(scheduled_date) OVER (PARTITION BY bill_no ORDER BY changed_at, id) AS prev_date
+       FROM public.odg_tms_pending_bill_history
+       WHERE bill_no = ANY($1::varchar[])
+     )
+     SELECT bill_no,
+            COUNT(*) FILTER (
+              WHERE scheduled_date IS NOT NULL
+                AND prev_date IS NOT NULL
+                AND scheduled_date IS DISTINCT FROM prev_date
+            )::int AS reschedule_count
+     FROM h
+     GROUP BY bill_no`,
+    [billNos]
+  );
+  return new Map(rows.map((r) => [r.bill_no, Number(r.reschedule_count ?? 0)]));
+}
+
 // Newest-first change log for one bill's schedule (date / remark / status /
 // route / round). Drives the "ປະຫວັດການປ່ຽນວັນຈັດສົ່ງ" timeline in the drawer.
 async function getPendingBillScheduleHistory(billNo) {
@@ -440,6 +472,7 @@ async function upsertPendingBillLocation({ billNo, lat, lng, userCode }) {
 module.exports = {
   ensurePendingBillSchema,
   getPendingBillScheduleMap,
+  getPendingBillRescheduleCountMap,
   getPendingBillScheduleHistory,
   getPendingBillSchedule,
   upsertPendingBillSchedule,

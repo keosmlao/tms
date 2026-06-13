@@ -76,6 +76,7 @@ export const Actions = {
   removeManualPendingBill: bills.removeManualPendingBill,
   getBillsPending: bills.getBillsPending,
   updateBillTransport: bills.updateBillTransport,
+  sendBillContactLine: bills.sendBillContactLine,
   getBillProducts: bills.getBillProducts,
   getBillsWaitingSent: bills.getBillsWaitingSent,
   getBillsWaitingSentDetails: bills.getBillsWaitingSentDetails,
