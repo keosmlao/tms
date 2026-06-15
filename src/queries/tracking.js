@@ -469,7 +469,9 @@ async function getSalesBillTrackingList(session, opts = {}) {
   await ensureDeliveryRoundSchema();
   await ensureDeliveryWorkflowSchema();
   // Sales scope:
-  // - salesperson/admin: their own bills only (t.sale_code = session.usercode)
+  // - salesperson/admin: their own bills only (t.creator_code = session.usercode —
+  //   the salesperson who created the bill; ERP sale_code is a separate area/rep
+  //   code that is often blank or different, so it must NOT be used for scoping)
   // - head/manager: whole sales department, read-only, with owner shown in UI.
   const empDept = String(session?.emp_department_code ?? "").trim();
   const userCode = String(session?.usercode ?? "").trim();
@@ -481,16 +483,13 @@ async function getSalesBillTrackingList(session, opts = {}) {
   const fromDate = String(opts.fromDate ?? "").trim() || "1900-01-01";
   const toDate = String(opts.toDate ?? "").trim() || "2999-12-31";
   const search = String(opts.search ?? "").trim();
-  // Default view = undelivered bills (status <> 1). deliveredOnly flips it to
-  // the completed-delivery tracking list sales uses to send tracking links.
-  const deliveredOnly = !!opts.deliveredOnly;
-  const statusClause = deliveredOnly
-    ? "AND COALESCE(latest.status, 0) = 1"
-    : "AND COALESCE(latest.status, 0) <> 1";
+  // This list is the undelivered/in-progress tracking view (status <> 1).
+  // Completed-delivery bills have their own query: getSalesDeliveredBillTrackingList.
+  const statusClause = "AND COALESCE(latest.status, 0) <> 1";
   const params = [deptScope ? empDept : userCode, fromDate, toDate, deptScope, scopeRole, scopeLabel];
   const scopeClause = deptScope
     ? "COALESCE(NULLIF(TRIM(sale_e.department_code), ''), '') = $1"
-    : "COALESCE(NULLIF(TRIM(t.sale_code), ''), '') = $1";
+    : "COALESCE(NULLIF(TRIM(t.creator_code), ''), '') = $1";
   let searchClause = "";
   if (search) {
     params.push(`%${search.toUpperCase()}%`);
@@ -514,8 +513,8 @@ async function getSalesBillTrackingList(session, opts = {}) {
        COALESCE(NULLIF(TRIM(t.cust_code), ''), '') AS cust_code,
        COALESCE(NULLIF(TRIM(c.telephone), ''), '') AS telephone,
        COALESCE(NULLIF(TRIM(t.remark), ''), '') AS sales_remark,
-       COALESCE(NULLIF(TRIM(t.sale_code), ''), '') AS sale_code,
-       COALESCE(NULLIF(TRIM(sale_e.fullname_lo), ''), NULLIF(TRIM(sale_e.nickname), ''), NULLIF(TRIM(t.sale_code), ''), '') AS salesperson,
+       COALESCE(NULLIF(TRIM(t.creator_code), ''), '') AS sale_code,
+       COALESCE(NULLIF(TRIM(sale_e.fullname_lo), ''), NULLIF(TRIM(sale_e.nickname), ''), NULLIF(TRIM(t.creator_code), ''), '') AS salesperson,
        $4::boolean AS scope_readonly,
        $5::text AS scope_role,
        $6::text AS scope_label,
@@ -556,7 +555,7 @@ async function getSalesBillTrackingList(session, opts = {}) {
      FROM public.ic_trans t
      LEFT JOIN public.ic_trans_shipment s ON s.doc_no = t.doc_no
      LEFT JOIN public.ar_customer c ON c.code = t.cust_code
-     LEFT JOIN public.odg_employee sale_e ON sale_e.employee_code = t.sale_code
+     LEFT JOIN public.odg_employee sale_e ON sale_e.employee_code = t.creator_code
      LEFT JOIN public.transport_type tt ON tt.code = s.transport_code
      LEFT JOIN public.odg_tms_pending_bill pb ON pb.bill_no = t.doc_no
      LEFT JOIN public.odg_tms_delivery_route rt ON rt.code = pb.delivery_route_code
@@ -601,6 +600,93 @@ async function getSalesBillTrackingList(session, opts = {}) {
   );
 }
 
+// Completed-delivery tracking list for sales ("ບິນສົ່ງສຳເລັດ").
+//
+// Driven by the delivery ledger (odg_tms_detail.status = 1) — the same
+// definition of "delivered" used by the dashboard / driver-leaderboard /
+// delivery-calendar — NOT by the undelivered list's `latest.status` /
+// trans_flag=44 / ic_trans_shipment.transport_code filters. Those filters
+// silently dropped genuinely-delivered bills here:
+//   - manual/transfer bills (trans_flag 70/72/56) and flag-44 bills whose
+//     shipment row has no transport_code (their branch lives in pb.transport_code),
+//   - bills delivered once but later re-attempted/returned (latest row not status=1),
+//   - bills delivered this month but billed in an earlier month (list filtered
+//     by bill date, not delivery date).
+// One row per bill = its most recent completed attempt; ranged by DELIVERY date
+// (sent_end) so "delivered in this period" means what sales expects.
+async function getSalesDeliveredBillTrackingList(session, opts = {}) {
+  await ensurePendingBillSchema();
+  await ensureDeliveryWorkflowSchema();
+  const empDept = String(session?.emp_department_code ?? "").trim();
+  const userCode = String(session?.usercode ?? "").trim();
+  if (!empDept || !userCode) return [];
+  const deptScope = canSeeDepartmentSales(session);
+  const scopeRole = salesRoleFromSession(session) || "admin";
+  const scopeLabel = deptScope ? "ທັງໝົດໃນພະແນກ" : "ຂອງຕົນເອງ";
+
+  const fromDate = String(opts.fromDate ?? "").trim() || "1900-01-01";
+  const toDate = String(opts.toDate ?? "").trim() || "2999-12-31";
+  const search = String(opts.search ?? "").trim();
+  const params = [deptScope ? empDept : userCode, fromDate, toDate, deptScope, scopeRole, scopeLabel];
+  const scopeClause = deptScope
+    ? "COALESCE(NULLIF(TRIM(sale_e.department_code), ''), '') = $1"
+    : "COALESCE(NULLIF(TRIM(t.creator_code), ''), '') = $1";
+  let searchClause = "";
+  if (search) {
+    params.push(`%${search.toUpperCase()}%`);
+    searchClause = `AND (
+      UPPER(t.doc_no) LIKE $${params.length}
+      OR UPPER(COALESCE(c.name_1, '')) LIKE $${params.length}
+      OR UPPER(COALESCE(t.cust_code, '')) LIKE $${params.length}
+    )`;
+  }
+
+  return query(
+    `SELECT
+       t.doc_no AS bill_no,
+       to_char(t.doc_date,'DD-MM-YYYY') AS bill_date,
+       to_char(t.doc_date,'YYYY-MM-DD') AS bill_date_iso,
+       COALESCE(NULLIF(TRIM(c.name_1), ''), t.cust_code, '-') AS customer_name,
+       COALESCE(NULLIF(TRIM(t.cust_code), ''), '') AS cust_code,
+       COALESCE(NULLIF(TRIM(c.telephone), ''), '') AS telephone,
+       COALESCE(NULLIF(TRIM(t.creator_code), ''), '') AS sale_code,
+       COALESCE(NULLIF(TRIM(sale_e.fullname_lo), ''), NULLIF(TRIM(sale_e.nickname), ''), NULLIF(TRIM(t.creator_code), ''), '') AS salesperson,
+       $4::boolean AS scope_readonly,
+       $5::text AS scope_role,
+       $6::text AS scope_label,
+       COALESCE(NULLIF(TRIM(tt.name_1), ''), NULLIF(TRIM(s.transport_code), ''), NULLIF(TRIM(pb.transport_code), ''), '') AS transport_name,
+       to_char(deliv.sent_end,'DD-MM-YYYY HH24:MI') AS sent_end_at,
+       COALESCE(NULLIF(TRIM(car.name_1), ''), '') AS car,
+       COALESCE(NULLIF(TRIM(car.plate_no), ''), '') AS car_plate,
+       COALESCE(NULLIF(TRIM(driver.name_1), ''), job.driver, '') AS driver,
+       COALESCE(NULLIF(TRIM(driver.tel), ''), '') AS driver_phone
+     FROM (
+       SELECT DISTINCT ON (d.bill_no) d.bill_no, d.doc_no, d.sent_end, d.car
+       FROM public.odg_tms_detail d
+       WHERE d.status = 1
+         AND ${getFixedYearSqlFilter("d.doc_date")}
+         AND COALESCE(d.sent_end::date, d.doc_date) BETWEEN $2::date AND $3::date
+       ORDER BY d.bill_no, d.sent_end DESC NULLS LAST, d.doc_no DESC
+     ) deliv
+     JOIN public.ic_trans t ON t.doc_no = deliv.bill_no
+     LEFT JOIN public.ic_trans_shipment s ON s.doc_no = t.doc_no
+     LEFT JOIN public.ar_customer c ON c.code = t.cust_code
+     LEFT JOIN public.odg_employee sale_e ON sale_e.employee_code = t.creator_code
+     LEFT JOIN public.odg_tms_pending_bill pb ON pb.bill_no = t.doc_no
+     LEFT JOIN public.transport_type tt ON tt.code = COALESCE(NULLIF(TRIM(s.transport_code), ''), pb.transport_code)
+     LEFT JOIN public.odg_tms job ON job.doc_no = deliv.doc_no
+     LEFT JOIN public.odg_tms_car car ON car.code = COALESCE(job.car, deliv.car)
+     LEFT JOIN public.odg_tms_driver driver ON driver.code = job.driver
+     WHERE ${scopeClause}
+       AND ${getFixedYearSqlFilter("t.doc_date")}
+       AND t.trans_flag <> 48
+       ${searchClause}
+     ORDER BY deliv.sent_end DESC NULLS LAST, t.doc_no DESC
+     LIMIT 500`,
+    params
+  );
+}
+
 async function trackSalesBill(session, billNo) {
   const empDept = String(session?.emp_department_code ?? "").trim();
   const userCode = String(session?.usercode ?? "").trim();
@@ -609,11 +695,11 @@ async function trackSalesBill(session, billNo) {
   const deptScope = canSeeDepartmentSales(session);
   const scopeClause = deptScope
     ? "COALESCE(NULLIF(TRIM(u.department_code), ''), '') = $2"
-    : "COALESCE(NULLIF(TRIM(t.sale_code), ''), '') = $2";
+    : "COALESCE(NULLIF(TRIM(t.creator_code), ''), '') = $2";
   const ownBill = await queryOne(
     `SELECT t.doc_no
      FROM public.ic_trans t
-     LEFT JOIN public.odg_employee u ON u.employee_code = t.sale_code
+     LEFT JOIN public.odg_employee u ON u.employee_code = t.creator_code
      WHERE t.doc_no = $1
        AND t.trans_flag = 44
        AND ${scopeClause}
@@ -1744,7 +1830,7 @@ async function getDailyOpenedBillsForSales(session, opts = {}) {
   const params = [deptScope ? empDept : userCode, date, scopeRole, scopeLabel];
   const scopeClause = deptScope
     ? "COALESCE(NULLIF(TRIM(sale_e.department_code), ''), '') = $1"
-    : "COALESCE(NULLIF(TRIM(t.sale_code), ''), '') = $1";
+    : "COALESCE(NULLIF(TRIM(t.creator_code), ''), '') = $1";
   let searchClause = "";
   if (search) {
     params.push(`%${search.toUpperCase()}%`);
@@ -1764,8 +1850,8 @@ async function getDailyOpenedBillsForSales(session, opts = {}) {
        to_char(t.create_date_time_now,'DD-MM-YYYY HH24:MI') AS created_at,
        COALESCE(NULLIF(TRIM(c.name_1), ''), t.cust_code, '-') AS customer_name,
        COALESCE(NULLIF(TRIM(t.cust_code), ''), '') AS cust_code,
-       COALESCE(NULLIF(TRIM(t.sale_code), ''), '') AS sale_code,
-       COALESCE(NULLIF(TRIM(sale_e.fullname_lo), ''), NULLIF(TRIM(sale_e.nickname), ''), NULLIF(TRIM(t.sale_code), ''), '') AS salesperson,
+       COALESCE(NULLIF(TRIM(t.creator_code), ''), '') AS sale_code,
+       COALESCE(NULLIF(TRIM(sale_e.fullname_lo), ''), NULLIF(TRIM(sale_e.nickname), ''), NULLIF(TRIM(t.creator_code), ''), '') AS salesperson,
        COALESCE(NULLIF(TRIM(t.remark), ''), '') AS sales_remark,
        -- current schedule (from odg_tms_pending_bill) merged in for the editors
        to_char(pb.scheduled_date,'YYYY-MM-DD') AS scheduled_date,
@@ -1791,7 +1877,7 @@ async function getDailyOpenedBillsForSales(session, opts = {}) {
      FROM public.ic_trans t
      LEFT JOIN public.ic_trans_shipment s ON s.doc_no = t.doc_no
      LEFT JOIN public.ar_customer c ON c.code = t.cust_code
-     LEFT JOIN public.odg_employee sale_e ON sale_e.employee_code = t.sale_code
+     LEFT JOIN public.odg_employee sale_e ON sale_e.employee_code = t.creator_code
      LEFT JOIN public.odg_tms_pending_bill pb ON pb.bill_no = t.doc_no
      LEFT JOIN public.transport_type tt_pb ON tt_pb.code = NULLIF(TRIM(pb.transport_code), '')
      LEFT JOIN public.transport_type tt_ship ON tt_ship.code = s.transport_code
@@ -1852,10 +1938,10 @@ async function isSalesBillInScope(session, billNo) {
   const deptScope = canSeeDepartmentSales(session);
   const scopeClause = deptScope
     ? "COALESCE(NULLIF(TRIM(sale_e.department_code), ''), '') = $2"
-    : "COALESCE(NULLIF(TRIM(t.sale_code), ''), '') = $2";
+    : "COALESCE(NULLIF(TRIM(t.creator_code), ''), '') = $2";
   const row = await queryOne(
     `SELECT 1 FROM public.ic_trans t
-     LEFT JOIN public.odg_employee sale_e ON sale_e.employee_code = t.sale_code
+     LEFT JOIN public.odg_employee sale_e ON sale_e.employee_code = t.creator_code
      WHERE t.doc_no = $1 AND t.trans_flag = 44 AND ${scopeClause} LIMIT 1`,
     [code, deptScope ? empDept : userCode]
   );
@@ -1865,6 +1951,7 @@ async function isSalesBillInScope(session, billNo) {
 module.exports = {
   trackBill,
   getSalesBillTrackingList,
+  getSalesDeliveredBillTrackingList,
   trackSalesBill,
   trackBillPublic,
   searchActiveDeliveryBills,

@@ -4,6 +4,7 @@ import { requireSession } from "./_helpers";
 import {
   trackBill as svcTrackBill,
   getSalesBillTrackingList as svcGetSalesBillTrackingList,
+  getSalesDeliveredBillTrackingList as svcGetSalesDeliveredBillTrackingList,
   trackSalesBill as svcTrackSalesBill,
   searchActiveDeliveryBills as svcSearchActiveDeliveryBills,
   getGpsRealtime as svcGetGpsRealtime,
@@ -46,15 +47,17 @@ export async function getSalesBillTrackingList(input?: {
   return svcGetSalesBillTrackingList(s, input ?? {});
 }
 
-// Completed-delivery tracking list for sales — same scoping as the undelivered
-// view but only status=1 bills, used to send customers a tracking link.
+// Completed-delivery tracking list for sales ("ບິນສົ່ງສຳເລັດ"), used to send
+// customers a tracking link. Driven by the delivery ledger (status=1) so it
+// shows every genuinely-delivered bill — including manual/transfer bills and
+// bills delivered in a later month than they were billed.
 export async function getSalesDeliveredBillTrackingList(input?: {
   fromDate?: string;
   toDate?: string;
   search?: string;
 }) {
   const s = await requireSession();
-  return svcGetSalesBillTrackingList(s, { ...(input ?? {}), deliveredOnly: true });
+  return svcGetSalesDeliveredBillTrackingList(s, input ?? {});
 }
 
 export async function trackSalesBill(billNo: string) {
