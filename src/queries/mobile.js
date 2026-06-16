@@ -1644,6 +1644,37 @@ async function mobileJobAction(body) {
         return { success: true };
       }
 
+      case "tracking_status": {
+        if (!docNo) throw new Error("doc_no is required");
+        const status = asText(body.status);
+        if (!status) throw new Error("status is required");
+
+        // Append-only log so the office can see when/how often a driver's
+        // tracking dropped mid-trip (gps_off | no_permission | auth_expired).
+        // Self-creating table — no migration needed on first use.
+        await client.query(
+          `CREATE TABLE IF NOT EXISTS public.odg_tms_tracking_status (
+             id BIGSERIAL PRIMARY KEY,
+             doc_no character varying NOT NULL,
+             driver character varying,
+             status character varying NOT NULL,
+             recorded_at timestamp without time zone DEFAULT LOCALTIMESTAMP(0)
+           )`
+        );
+        await client.query(
+          `CREATE INDEX IF NOT EXISTS idx_odg_tms_tracking_status_doc_no
+           ON public.odg_tms_tracking_status (doc_no)`
+        );
+        await client.query(
+          `INSERT INTO public.odg_tms_tracking_status (doc_no, driver, status)
+           VALUES ($1, $2, $3)`,
+          [docNo, driverId || null, status]
+        );
+
+        await client.query("COMMIT");
+        return { success: true };
+      }
+
       case "fuel_refill": {
         const result = await saveFuelRefill(
           {

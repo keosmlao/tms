@@ -55,6 +55,26 @@ describe("JobActionSchema", () => {
     });
     expect(out).toMatchObject({ liters: 10.5, amount: 200000 });
   });
+
+  it("validates 'tracking_status' branch", () => {
+    expect(
+      JobActionSchema.parse({
+        action: "tracking_status",
+        doc_no: "D1",
+        status: "gps_off",
+      })
+    ).toEqual({ action: "tracking_status", doc_no: "D1", status: "gps_off" });
+  });
+
+  it("tracking_status rejects an unknown status", () => {
+    expect(() =>
+      JobActionSchema.parse({
+        action: "tracking_status",
+        doc_no: "D1",
+        status: "battery_low",
+      })
+    ).toThrow();
+  });
 });
 
 describe("PublicTrackSchema", () => {

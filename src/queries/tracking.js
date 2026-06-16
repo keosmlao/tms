@@ -799,32 +799,51 @@ async function trackBillPublic(billNo) {
     [row.bill_no, row.doc_no]
   );
 
-  // Current vehicle position (best-effort — never blocks tracking).
+  // Current vehicle position (best-effort — never blocks tracking). Mirror the
+  // dashboard trackBill: PREFER the driver's PHONE GPS (mobile app
+  // travel_history for this trip), then fall back to the car's GPS device.
   let car_position = null;
   try {
-    const params = [];
-    const conds = [];
-    if (row.car_code) {
-      params.push(String(row.car_code).trim());
-      conds.push(`car_code = $${params.length}`);
-    }
-    if (row.car_imei) {
-      params.push(String(row.car_imei).trim());
-      conds.push(`imei = $${params.length}`);
-    }
-    if (conds.length > 0) {
-      const pos = await queryOne(
+    if (row.doc_no) {
+      car_position = await queryOne(
         `SELECT lat::float as lat, lng::float as lng,
                 COALESCE(speed::float, 0) as speed,
+                COALESCE(heading::float, 0) as heading,
                 to_char(recorded_at::timestamp,'DD-MM-YYYY HH24:MI:SS') as recorded_at,
                 GREATEST(0, EXTRACT(EPOCH FROM ((NOW() AT TIME ZONE 'Asia/Bangkok') - recorded_at::timestamp)))::int as age_seconds
-         FROM public.odg_tms_gps_current
-         WHERE ${conds.join(" OR ")}
+         FROM public.odg_tms_travel_history
+         WHERE doc_no = $1 AND lat IS NOT NULL AND lng IS NOT NULL
          ORDER BY recorded_at DESC NULLS LAST
          LIMIT 1`,
-        params
+        [String(row.doc_no).trim()]
       );
-      if (pos) car_position = pos;
+    }
+    if (!car_position) {
+      const params = [];
+      const conds = [];
+      if (row.car_code) {
+        params.push(String(row.car_code).trim());
+        conds.push(`car_code = $${params.length}`);
+      }
+      if (row.car_imei) {
+        params.push(String(row.car_imei).trim());
+        conds.push(`imei = $${params.length}`);
+      }
+      if (conds.length > 0) {
+        const pos = await queryOne(
+          `SELECT lat::float as lat, lng::float as lng,
+                  COALESCE(speed::float, 0) as speed,
+                  COALESCE(heading::float, 0) as heading,
+                  to_char(recorded_at::timestamp,'DD-MM-YYYY HH24:MI:SS') as recorded_at,
+                  GREATEST(0, EXTRACT(EPOCH FROM ((NOW() AT TIME ZONE 'Asia/Bangkok') - recorded_at::timestamp)))::int as age_seconds
+           FROM public.odg_tms_gps_current
+           WHERE ${conds.join(" OR ")}
+           ORDER BY recorded_at DESC NULLS LAST
+           LIMIT 1`,
+          params
+        );
+        if (pos) car_position = pos;
+      }
     }
   } catch (err) {
     console.warn("[trackBillPublic] gps lookup failed:", err?.message ?? err);
@@ -1654,6 +1673,18 @@ async function getPhoneTrackingJobs(session) {
 // it for the online/offline staleness check.
 async function getPhoneFleet(session) {
   await ensureDeliveryWorkflowSchema();
+  // The driver app reports here when it CAN'T post GPS mid-trip (gps_off /
+  // no_permission / auth_expired). Self-creating so a fresh DB doesn't error on
+  // the LATERAL join below before any report has ever arrived.
+  await query(
+    `CREATE TABLE IF NOT EXISTS public.odg_tms_tracking_status (
+       id BIGSERIAL PRIMARY KEY,
+       doc_no character varying NOT NULL,
+       driver character varying,
+       status character varying NOT NULL,
+       recorded_at timestamp without time zone DEFAULT LOCALTIMESTAMP(0)
+     )`
+  );
   const scope = getBranchScope(session);
   return query(
     `SELECT
@@ -1676,7 +1707,9 @@ async function getPhoneFleet(session) {
        z.point_count,
        COALESCE(dev.model, '')     AS device_model,
        COALESCE(dev.sim_phone, '') AS sim_phone,
-       COALESCE(dw.stationary_secs, 0)::int AS stationary_secs
+       COALESCE(dw.stationary_secs, 0)::int AS stationary_secs,
+       -- Latest tracking problem reported in the last 15 min ('' when healthy).
+       COALESCE(ts.status, '') AS tracking_status
      FROM (
        SELECT DISTINCT ON (tl.unit_key)
          tl.unit_key, tl.imei, tl.doc_no, tl.doc_date, tl.car_code,
@@ -1730,6 +1763,16 @@ async function getPhoneFleet(session) {
          AND ${getFixedYearSqlFilter("h.doc_date")}
          AND h.recorded_at >= z.recorded_at - INTERVAL '12 hours'
      ) dw ON TRUE
+     -- Most recent tracking-health report for this trip, only if it's fresh
+     -- (≤15 min) — a stale report shouldn't keep flagging a now-healthy driver.
+     LEFT JOIN LATERAL (
+       SELECT s.status
+       FROM public.odg_tms_tracking_status s
+       WHERE s.doc_no = z.doc_no
+         AND s.recorded_at >= (NOW() AT TIME ZONE 'Asia/Bangkok') - INTERVAL '15 minutes'
+       ORDER BY s.recorded_at DESC
+       LIMIT 1
+     ) ts ON TRUE
      ORDER BY z.recorded_at DESC NULLS LAST
      LIMIT 500`
   );

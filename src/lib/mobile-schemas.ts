@@ -131,6 +131,14 @@ const SaveTravelHistory = z.object({
   lat: NonEmptyString,
   lng: NonEmptyString,
 });
+// Tracking health for an active trip when the driver app can't post GPS — the
+// driver turned off location, revoked permission, or the session expired. Lets
+// the control center tell tampering from a parked truck / dead zone.
+const TrackingStatus = z.object({
+  action: z.literal("tracking_status"),
+  doc_no: NonEmptyString,
+  status: z.enum(["gps_off", "no_permission", "auth_expired"]),
+});
 const AttachJobImage = z.object({
   action: z.literal("attach_job_image"),
   doc_no: NonEmptyString,
@@ -187,6 +195,7 @@ export const JobActionSchema = z.discriminatedUnion("action", [
   EditCompleteBill,
   CompleteJob,
   SaveTravelHistory,
+  TrackingStatus,
   AttachJobImage,
   AttachBillImage,
   FuelRefill,

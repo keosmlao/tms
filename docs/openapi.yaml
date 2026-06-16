@@ -47,6 +47,28 @@ paths:
         '401': { $ref: '#/components/responses/Unauthorized' }
         '429': { $ref: '#/components/responses/RateLimited' }
 
+  /api/mobile/refresh:
+    post:
+      tags: [auth]
+      summary: Re-mint a fresh 8h JWT for a still-valid token.
+      description: |
+        The driver app calls this proactively during long trips (and at launch)
+        so continuous GPS tracking survives past the 8h token lifetime without a
+        re-login. A fully-expired token returns 401 — the app then falls back to
+        a normal login.
+      responses:
+        '200':
+          description: A fresh token
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [token]
+                properties:
+                  token: { type: string }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '429': { $ref: '#/components/responses/RateLimited' }
+
   /api/mobile/jobs:
     get:
       tags: [jobs]
@@ -422,6 +444,7 @@ components:
         - $ref: '#/components/schemas/EditCompleteBillAction'
         - $ref: '#/components/schemas/CompleteJobAction'
         - $ref: '#/components/schemas/SaveTravelHistoryAction'
+        - $ref: '#/components/schemas/TrackingStatusAction'
         - $ref: '#/components/schemas/AttachJobImageAction'
         - $ref: '#/components/schemas/AttachBillImageAction'
         - $ref: '#/components/schemas/FuelRefillAction'
@@ -515,6 +538,16 @@ components:
         doc_no: { type: string }
         lat: { type: string }
         lng: { type: string }
+    TrackingStatusAction:
+      type: object
+      required: [action, doc_no, status]
+      properties:
+        action: { const: tracking_status }
+        doc_no: { type: string }
+        status:
+          type: string
+          enum: [gps_off, no_permission, auth_expired]
+          description: 'Why the driver app cannot post GPS for this active trip.'
     AttachJobImageAction:
       type: object
       required: [action, doc_no, kind]

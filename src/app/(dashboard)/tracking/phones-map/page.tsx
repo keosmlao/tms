@@ -8,6 +8,7 @@ import "leaflet/dist/leaflet.css";
 import {
   FaBatteryHalf,
   FaCompass,
+  FaExclamationTriangle,
   FaExpand,
   FaExternalLinkAlt,
   FaMapMarkerAlt,
@@ -58,6 +59,23 @@ interface PhoneUnit {
   sim_phone: string;
   /** Seconds the phone has stayed within ~65m of its current position. */
   stationary_secs: number;
+  /**
+   * Latest tracking problem the driver app reported in the last 15 min, or ''
+   * when healthy: 'gps_off' | 'no_permission' | 'auth_expired'. Distinguishes a
+   * driver disabling tracking from a parked truck / dead zone.
+   */
+  tracking_status?: string;
+}
+
+// Driver-app-reported tracking problems → office-facing Lao label.
+const TRACKING_ALERTS: Record<string, string> = {
+  gps_off: "driver ປິດ GPS",
+  no_permission: "driver ປິດສິດຕຳແໜ່ງ",
+  auth_expired: "ເຊສຊັນໝົດອາຍຸ",
+};
+function trackingAlert(u: PhoneUnit): string | null {
+  const key = String(u.tracking_status ?? "").trim();
+  return key ? TRACKING_ALERTS[key] ?? null : null;
 }
 
 const AUTO_REFRESH_MS = 3_000;
@@ -316,6 +334,13 @@ function SelectedUnitCard({ unit, onClose }: { unit: PhoneUnit; onClose: () => v
           </span>
         </div>
 
+        {trackingAlert(unit) && (
+          <div className="flex items-center gap-1.5 rounded-lg bg-red-500/10 ring-1 ring-red-500/30 px-2.5 py-1.5 text-[11px] font-bold text-red-600 dark:text-red-400">
+            <FaExclamationTriangle size={10} />
+            {trackingAlert(unit)}
+          </div>
+        )}
+
         {/* The two things that matter for a phone: where it is now, and how
             long it has stayed there. */}
         <div className="rounded-lg bg-sky-500/5 ring-1 ring-sky-500/20 px-2.5 py-2 space-y-1">
@@ -455,6 +480,12 @@ function UnitRow({
           <FaTruck size={9} /> <span className="truncate">{unit.car}</span>
           <FaRoute size={9} /> <span className="truncate font-mono">{unit.doc_no}</span>
         </div>
+        {trackingAlert(unit) && (
+          <div className="mt-1 inline-flex items-center gap-1 rounded-md bg-red-500/15 px-1.5 py-0.5 text-[10.5px] font-bold text-red-600 dark:text-red-400">
+            <FaExclamationTriangle size={9} />
+            {trackingAlert(unit)}
+          </div>
+        )}
         <div className="mt-1 flex flex-wrap items-center gap-x-2.5 gap-y-1 text-[11px]">
           <span className={`inline-flex items-center gap-1 font-semibold ${c.text}`}>
             <StatusDot status={status} />
