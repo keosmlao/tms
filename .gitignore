@@ -44,7 +44,8 @@ next-env.d.ts
 # secrets
 firebase-service-account.json
 
-# Release/debug APKs are too large for GitHub (>100MB). Keep them on disk for
-# local serving but never commit them — deploy them to the server out-of-band
-# (GitHub Release asset, object storage, or direct upload to public/).
+# Ignore ad-hoc/debug APKs, but DO commit the canonical driver-app build
+# (public/tms.apk, ~35MB — under GitHub's 100MB limit) so it deploys with the
+# app via git instead of an out-of-band upload.
 public/*.apk
+!public/tms.apk
