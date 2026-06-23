@@ -32,13 +32,18 @@ async function saveBillShipment(session, docNo, transportCode) {
       await client.query(`INSERT INTO ic_trans_shipment (doc_no, doc_date, trans_flag, cust_code, transport_code, check_status) SELECT doc_no, doc_date, trans_flag, cust_code, $1, 0 FROM ic_trans WHERE doc_no = $2`, [transportCode, docNo]);
     } else if (!result.tms_shipment && result.trans_shipment) {
       await client.query("INSERT INTO odg_tms_shipment (doc_no, transport_code, user_create) VALUES ($1,$2,$3)", [docNo, transportCode, session.usercode]);
-      await client.query("UPDATE ic_trans_shipment SET transport_code=$1 WHERE doc_no=$2", [transportCode, docNo]);
+      // Reset check_status=0 so the bill enters the bills-pending pool. The ERP
+      // pre-creates ic_trans_shipment with check_status=1, so a transport_code-only
+      // update would leave the bill invisible in pending. Mirrors the INSERT
+      // branches here and the transport-change resets in jobs.js / mobile.js.
+      await client.query("UPDATE ic_trans_shipment SET transport_code=$1, check_status=0 WHERE doc_no=$2", [transportCode, docNo]);
     } else if (result.tms_shipment && !result.trans_shipment) {
       await client.query("UPDATE odg_tms_shipment SET transport_code=$1, user_create=$2 WHERE doc_no=$3", [transportCode, session.usercode, docNo]);
       await client.query(`INSERT INTO ic_trans_shipment (doc_no, doc_date, trans_flag, cust_code, transport_code, check_status) SELECT doc_no, doc_date, trans_flag, cust_code, $1, 0 FROM ic_trans WHERE doc_no = $2`, [transportCode, docNo]);
     } else {
       await client.query("UPDATE odg_tms_shipment SET transport_code=$1, user_create=$2 WHERE doc_no=$3", [transportCode, session.usercode, docNo]);
-      await client.query("UPDATE ic_trans_shipment SET transport_code=$1 WHERE doc_no=$2", [transportCode, docNo]);
+      // check_status=0 for the same reason as the branch above.
+      await client.query("UPDATE ic_trans_shipment SET transport_code=$1, check_status=0 WHERE doc_no=$2", [transportCode, docNo]);
     }
     await client.query("COMMIT");
   } catch (e) {

@@ -1272,7 +1272,12 @@ function TrackingPageInner() {
             carName={result.car}
             initialCar={
               result.car_position
-                ? { lat: result.car_position.lat, lng: result.car_position.lng }
+                ? {
+                    lat: result.car_position.lat,
+                    lng: result.car_position.lng,
+                    recorded_at: result.car_position.recorded_at,
+                    age_seconds: result.car_position.age_seconds,
+                  }
                 : null
             }
             start={

@@ -297,7 +297,12 @@ function TrackPageInner() {
               carName={result.car || "ລົດຈັດສົ່ງ"}
               initialCar={
                 result.car_position
-                  ? { lat: result.car_position.lat, lng: result.car_position.lng }
+                  ? {
+                      lat: result.car_position.lat,
+                      lng: result.car_position.lng,
+                      recorded_at: result.car_position.recorded_at,
+                      age_seconds: result.car_position.age_seconds,
+                    }
                   : null
               }
               start={
@@ -317,11 +322,16 @@ function TrackPageInner() {
                 );
                 if (!r.ok) return null;
                 const data = (await r.json()) as
-                  | { car_position?: { lat: number; lng: number } | null }
+                  | { car_position?: CarPosition | null }
                   | null;
                 const p = data?.car_position;
                 if (!p || !Number.isFinite(p.lat) || !Number.isFinite(p.lng)) return null;
-                return { lat: p.lat, lng: p.lng };
+                return {
+                  lat: p.lat,
+                  lng: p.lng,
+                  recorded_at: p.recorded_at,
+                  age_seconds: p.age_seconds,
+                };
               }}
             />
 
