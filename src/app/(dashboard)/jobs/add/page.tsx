@@ -35,6 +35,15 @@ interface Product {
   unit_code: string;
 }
 
+interface WarehouseItem {
+  wh_code: string;
+  wh_name: string;
+  item_code: string;
+  item_name: string;
+  qty: number;
+  unit_code: string;
+}
+
 export interface AvailableBill {
   doc_no: string;
   doc_date: string;
@@ -518,6 +527,7 @@ export default function AddJobClient({
     }
     return {};
   });
+  const [warehouseItemsByNo, setWarehouseItemsByNo] = useState<Record<string, WarehouseItem[]>>({});
   const [loadingBillNo, setLoadingBillNo] = useState<string | null>(null);
   const [expandedInJob, setExpandedInJob] = useState<string | null>(null);
   const [qtyDrafts, setQtyDrafts] = useState<Record<string, string>>({});
@@ -648,8 +658,12 @@ export default function AddJobClient({
     if (billProductsByNo[billNo]) return billProductsByNo[billNo];
     setLoadingBillNo(billNo);
     try {
-      const products = (await Actions.getAvailableBillProducts(billNo)) as Product[];
+      const [products, whItems] = await Promise.all([
+        Actions.getAvailableBillProducts(billNo) as Promise<Product[]>,
+        Actions.getBillItemsByWarehouse(billNo) as Promise<WarehouseItem[]>,
+      ]);
       setBillProductsByNo((current) => ({ ...current, [billNo]: products }));
+      setWarehouseItemsByNo((current) => ({ ...current, [billNo]: whItems }));
       return products;
     } finally {
       setLoadingBillNo(null);
@@ -781,6 +795,32 @@ export default function AddJobClient({
           forward_transport_code: nextForward,
         },
       };
+    });
+  };
+
+  // Select only the items belonging to a specific warehouse for this bill.
+  // Used by the "split by warehouse" UI — the dispatcher picks warehouse X, and
+  // only that warehouse's items remain checked for this trip.
+  const selectItemsByWarehouse = (billNo: string, whCode: string) => {
+    const whItems = warehouseItemsByNo[billNo];
+    const products = billProductsByNo[billNo];
+    if (!whItems || !products) return;
+    const whItemCodes = new Set(
+      whItems.filter((w) => w.wh_code === whCode).map((w) => w.item_code)
+    );
+    setAddedByBill((prev) => {
+      const group = prev[billNo];
+      if (!group) return prev;
+      const filteredItems = group.items
+        .filter((i) => whItemCodes.has(i.item_code))
+        .concat(
+          // Add any not-yet-added wh items (full qty)
+          products
+            .filter((p) => whItemCodes.has(p.item_code) && !group.items.some((i) => i.item_code === p.item_code))
+            .map((p) => ({ ...p, selectedQty: p.qty }))
+        );
+      if (filteredItems.length === 0) return prev;
+      return { ...prev, [billNo]: { ...group, items: filteredItems } };
     });
   };
 
@@ -1298,6 +1338,7 @@ export default function AddJobClient({
                       setExpandedInJob(expandedInJob === billNo ? null : billNo)
                     }
                     products={billProductsByNo[billNo]}
+                    warehouseItems={warehouseItemsByNo[billNo]}
                     loading={loadingBillNo === billNo}
                     ensureProducts={() => void ensureBillProducts(billNo)}
                     dragging={draggedBillNo === billNo}
@@ -1317,6 +1358,7 @@ export default function AddJobClient({
                     onSetForwardCode={(code) => setBillForwardCode(billNo, code)}
                     onSetPickupCode={(code) => setBillPickupCode(billNo, code)}
                     onSetDeliveryCondition={(code) => setBillDeliveryCondition(billNo, code)}
+                    onSelectByWarehouse={(whCode) => selectItemsByWarehouse(billNo, whCode)}
                     qtyDrafts={qtyDrafts}
                     setQtyDrafts={setQtyDrafts}
                     commitItemQty={commitItemQty}
@@ -1488,6 +1530,7 @@ function InJobCard({
   expanded,
   setExpanded,
   products,
+  warehouseItems,
   loading,
   ensureProducts,
   dragging,
@@ -1500,6 +1543,7 @@ function InJobCard({
   onSetForwardCode,
   onSetPickupCode,
   onSetDeliveryCondition,
+  onSelectByWarehouse,
   qtyDrafts,
   setQtyDrafts,
   commitItemQty,
@@ -1509,6 +1553,7 @@ function InJobCard({
   expanded: boolean;
   setExpanded: () => void;
   products: Product[] | undefined;
+  warehouseItems: WarehouseItem[] | undefined;
   loading: boolean;
   ensureProducts: () => void;
   dragging: boolean;
@@ -1521,6 +1566,7 @@ function InJobCard({
   onSetForwardCode: (code: string | null) => void;
   onSetPickupCode: (code: string | null) => void;
   onSetDeliveryCondition: (code: string) => void;
+  onSelectByWarehouse: (whCode: string) => void;
   qtyDrafts: Record<string, string>;
   setQtyDrafts: React.Dispatch<React.SetStateAction<Record<string, string>>>;
   commitItemQty: (billNo: string, itemCode: string, maxQty: number) => void;
@@ -1682,67 +1728,115 @@ function InJobCard({
             </div>
           ) : products.length === 0 ? (
             <p className="py-3 text-center text-xs text-slate-500">ບໍ່ມີສິນຄ້າ</p>
-          ) : (
-            <div className="space-y-1">
-              {products.map((p) => {
-                const added = group.items.find((i) => i.item_code === p.item_code);
-                const isAdded = !!added;
-                const draftKey = `${billNo}::${p.item_code}`;
-                const qtyValue = qtyDrafts[draftKey] ?? String(added?.selectedQty ?? p.qty);
-                return (
-                  <div
-                    key={p.item_code}
-                    className={`flex items-center gap-2 rounded border px-2.5 py-1.5 ${
-                      isAdded
-                        ? "border-teal-200 bg-teal-50/60 dark:border-teal-900 dark:bg-teal-950/20"
-                        : "border-slate-200 bg-white dark:border-slate-800 dark:bg-slate-900"
-                    }`}
-                  >
-                    <button
-                      type="button"
-                      onClick={() => toggleAddedItem(group.bill, p)}
-                      className={`flex h-5 w-5 flex-shrink-0 cursor-pointer items-center justify-center rounded transition-colors active:scale-95 ${
+          ) : (() => {
+            // Build warehouse → item codes map for grouping UI
+            const whGroups = new Map<string, { wh_name: string; itemCodes: Set<string> }>();
+            if (warehouseItems) {
+              for (const w of warehouseItems) {
+                if (!whGroups.has(w.wh_code)) {
+                  whGroups.set(w.wh_code, { wh_name: w.wh_name, itemCodes: new Set() });
+                }
+                whGroups.get(w.wh_code)!.itemCodes.add(w.item_code);
+              }
+            }
+            // item_code → first warehouse name (for badge display)
+            const itemWhName = new Map<string, string>();
+            for (const [, g] of whGroups) {
+              for (const ic of g.itemCodes) {
+                if (!itemWhName.has(ic)) itemWhName.set(ic, g.wh_name);
+              }
+            }
+            const multiWarehouse = whGroups.size > 1;
+            return (
+              <div className="space-y-1.5">
+                {multiWarehouse && (
+                  <div className="mb-2 rounded border border-amber-200 bg-amber-50 px-2.5 py-2 dark:border-amber-900 dark:bg-amber-950/30">
+                    <p className="mb-1.5 text-[10px] font-bold text-amber-700 dark:text-amber-300">
+                      ⚠ ໃບນີ້ມີສິນຄ້າຈາກ {whGroups.size} ສາງ — ຄວນຈັດຄົນລະຖ້ຽວ
+                    </p>
+                    <div className="flex flex-wrap gap-1">
+                      {Array.from(whGroups.entries()).map(([whCode, g]) => (
+                        <button
+                          key={whCode}
+                          type="button"
+                          onClick={() => onSelectByWarehouse(whCode)}
+                          className="rounded border border-amber-300 bg-white px-2 py-0.5 text-[10px] font-bold text-amber-800 transition-colors hover:bg-amber-100 active:scale-95 dark:border-amber-800 dark:bg-slate-900 dark:text-amber-300 dark:hover:bg-amber-950/40"
+                          title={`ເລືອກສະເພາະ ສາງ ${g.wh_name} (${g.itemCodes.size} ລາຍການ)`}
+                        >
+                          🏭 {g.wh_name} ({g.itemCodes.size})
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                )}
+                {products.map((p) => {
+                  const added = group.items.find((i) => i.item_code === p.item_code);
+                  const isAdded = !!added;
+                  const draftKey = `${billNo}::${p.item_code}`;
+                  const qtyValue = qtyDrafts[draftKey] ?? String(added?.selectedQty ?? p.qty);
+                  const whName = itemWhName.get(p.item_code);
+                  return (
+                    <div
+                      key={p.item_code}
+                      className={`flex items-center gap-2 rounded border px-2.5 py-1.5 ${
                         isAdded
-                          ? "bg-teal-600 text-white"
-                          : "border border-slate-300 bg-white hover:bg-slate-100 dark:border-slate-700 dark:bg-slate-900 dark:hover:bg-slate-800"
+                          ? "border-teal-200 bg-teal-50/60 dark:border-teal-900 dark:bg-teal-950/20"
+                          : "border-slate-200 bg-white dark:border-slate-800 dark:bg-slate-900"
                       }`}
                     >
-                      {isAdded && <FaCheck size={9} />}
-                    </button>
-                    <div className="min-w-0 flex-1">
-                      <p className="truncate text-[11px] font-bold text-slate-800 dark:text-slate-100">
-                        {p.item_name}
-                      </p>
-                      <p className="truncate font-mono text-[10px] text-slate-400">
-                        {p.item_code}
-                      </p>
+                      <button
+                        type="button"
+                        onClick={() => toggleAddedItem(group.bill, p)}
+                        className={`flex h-5 w-5 flex-shrink-0 cursor-pointer items-center justify-center rounded transition-colors active:scale-95 ${
+                          isAdded
+                            ? "bg-teal-600 text-white"
+                            : "border border-slate-300 bg-white hover:bg-slate-100 dark:border-slate-700 dark:bg-slate-900 dark:hover:bg-slate-800"
+                        }`}
+                      >
+                        {isAdded && <FaCheck size={9} />}
+                      </button>
+                      <div className="min-w-0 flex-1">
+                        <p className="truncate text-[11px] font-bold text-slate-800 dark:text-slate-100">
+                          {p.item_name}
+                        </p>
+                        <div className="flex items-center gap-1.5">
+                          <p className="truncate font-mono text-[10px] text-slate-400">
+                            {p.item_code}
+                          </p>
+                          {whName && multiWarehouse && (
+                            <span className="rounded bg-slate-200 px-1 py-0 text-[9px] font-bold text-slate-600 dark:bg-slate-700 dark:text-slate-300">
+                              {whName}
+                            </span>
+                          )}
+                        </div>
+                      </div>
+                      {isAdded ? (
+                        <input
+                          type="number"
+                          min={1}
+                          max={p.qty}
+                          value={qtyValue}
+                          onChange={(e) =>
+                            setQtyDrafts((prev) => ({
+                              ...prev,
+                              [draftKey]: e.target.value,
+                            }))
+                          }
+                          onBlur={() => commitItemQty(billNo, p.item_code, p.qty)}
+                          className="h-7 w-14 rounded border border-teal-400 bg-white px-1.5 text-center text-[11px] font-bold text-teal-700 outline-none focus:ring-1 focus:ring-teal-500/40 dark:border-teal-700 dark:bg-slate-900 dark:text-teal-300"
+                        />
+                      ) : (
+                        <span className="text-[11px] font-bold text-slate-500 dark:text-slate-400">{p.qty}</span>
+                      )}
+                      <span className="w-12 truncate text-[10px] text-slate-400">
+                        / {p.qty} {p.unit_code}
+                      </span>
                     </div>
-                    {isAdded ? (
-                      <input
-                        type="number"
-                        min={1}
-                        max={p.qty}
-                        value={qtyValue}
-                        onChange={(e) =>
-                          setQtyDrafts((prev) => ({
-                            ...prev,
-                            [draftKey]: e.target.value,
-                          }))
-                        }
-                        onBlur={() => commitItemQty(billNo, p.item_code, p.qty)}
-                        className="h-7 w-14 rounded border border-teal-400 bg-white px-1.5 text-center text-[11px] font-bold text-teal-700 outline-none focus:ring-1 focus:ring-teal-500/40 dark:border-teal-700 dark:bg-slate-900 dark:text-teal-300"
-                      />
-                    ) : (
-                      <span className="text-[11px] font-bold text-slate-500 dark:text-slate-400">{p.qty}</span>
-                    )}
-                    <span className="w-12 truncate text-[10px] text-slate-400">
-                      / {p.qty} {p.unit_code}
-                    </span>
-                  </div>
-                );
-              })}
-            </div>
-          )}
+                  );
+                })}
+              </div>
+            );
+          })()}
         </div>
       )}
     </div>

@@ -480,6 +480,37 @@ async function getRemainingSummaryMap(billNos) {
   return result;
 }
 
+// Returns items for a bill grouped by warehouse (wh_code + item_code).
+// Used for the split-by-warehouse UI so dispatchers can see which items
+// belong to which warehouse and create separate trips per warehouse.
+// Unlike getRemainingBillProducts this does NOT subtract active-locked or
+// delivered quantities — it reflects the original ERP invoice structure.
+async function getBillItemsByWarehouse(billNo) {
+  const rows = await query(
+    `SELECT
+       COALESCE(NULLIF(TRIM(d.wh_code), ''), '') AS wh_code,
+       COALESCE(w.name_1, NULLIF(TRIM(d.wh_code), ''), 'ບໍ່ລະບຸສາງ') AS wh_name,
+       d.item_code,
+       MAX(d.item_name) AS item_name,
+       SUM(COALESCE(d.qty, 0))::numeric AS qty,
+       MAX(d.unit_code) AS unit_code
+     FROM ic_trans_detail d
+     LEFT JOIN public.ic_warehouse w ON w.code = NULLIF(TRIM(d.wh_code), '')
+     WHERE d.doc_no = $1 AND d.item_code NOT LIKE '97%'
+     GROUP BY COALESCE(NULLIF(TRIM(d.wh_code), ''), ''), COALESCE(w.name_1, NULLIF(TRIM(d.wh_code), ''), 'ບໍ່ລະບຸສາງ'), d.item_code
+     ORDER BY wh_code, d.item_code`,
+    [billNo]
+  );
+  return rows.map((row) => ({
+    wh_code: row.wh_code,
+    wh_name: row.wh_name,
+    item_code: row.item_code,
+    item_name: row.item_name,
+    qty: Number(row.qty ?? 0),
+    unit_code: row.unit_code,
+  }));
+}
+
 // Web dispatch scope. A user may be scoped to a SET of transport branches:
 // `branch_codes` (the multi-branch dispatch assignment) wins, else the legacy
 // single `logistic_code`. 02-0004 (customer self-pickup) is never a real scope.
@@ -540,6 +571,7 @@ module.exports = {
   getRemainingBillProducts,
   getRemainingBillProductsMap,
   getRemainingSummaryMap,
+  getBillItemsByWarehouse,
   getBranchScope,
   branchFilterShipment,
   branchFilterJob,

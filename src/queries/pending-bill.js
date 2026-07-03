@@ -113,12 +113,30 @@ async function ensurePendingBillSchemaInternal(db) {
     CREATE INDEX IF NOT EXISTS idx_odg_tms_pending_bill_history_bill
     ON public.odg_tms_pending_bill_history (bill_no, changed_at DESC)
   `);
+  // Free-form "ອື່ນໆ" bills created by the dispatcher for deliveries that have
+  // no ERP document (no ic_trans row, no service tb_product row). The row IS
+  // the bill: customer + item lines live here, and the generated bill_no joins
+  // odg_tms_pending_bill / odg_tms_detail like any other bill number.
+  await safeDdl(db, `
+    CREATE TABLE IF NOT EXISTS public.odg_tms_custom_bill (
+      bill_no character varying PRIMARY KEY,
+      cust_name character varying NOT NULL,
+      telephone character varying,
+      items jsonb NOT NULL DEFAULT '[]'::jsonb,
+      remark text,
+      created_by character varying,
+      created_at timestamp without time zone DEFAULT LOCALTIMESTAMP(0)
+    )
+  `);
+  await safeDdl(db, `
+    CREATE SEQUENCE IF NOT EXISTS public.odg_tms_custom_bill_seq
+  `);
 }
 
 // Bump the cache version whenever the DDL changes so existing dev/prod
 // processes re-run the ALTER TABLE migrations on next call (the global cache
 // otherwise persists across hot-reloads).
-const PENDING_BILL_SCHEMA_VERSION = "v7_full_edit_history";
+const PENDING_BILL_SCHEMA_VERSION = "v8_custom_bill";
 
 async function ensurePendingBillSchema() {
   const readyKey = `__tmsPendingBillSchemaReady_${PENDING_BILL_SCHEMA_VERSION}`;

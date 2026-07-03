@@ -420,9 +420,17 @@ export default function BillsPendingClient() {
   const [deliveryRounds, setDeliveryRounds] = useState<DeliveryRound[]>([]);
   const [notYetDays, setNotYetDays] = useState(3);
   const [manualModalOpen, setManualModalOpen] = useState(false);
+  // "search" = pick an existing bill (ໂອນ 72 / service); "custom" = type a
+  // free-form ອື່ນໆ bill that doesn't exist anywhere in the system.
+  const [manualMode, setManualMode] = useState<"search" | "custom">("search");
   const [manualSearch, setManualSearch] = useState("");
   const [manualResults, setManualResults] = useState<ManualPendingBill[]>([]);
   const [manualSelected, setManualSelected] = useState<ManualPendingBill | null>(null);
+  const [customName, setCustomName] = useState("");
+  const [customPhone, setCustomPhone] = useState("");
+  const [customItems, setCustomItems] = useState<
+    Array<{ item_name: string; qty: string; unit_code: string }>
+  >([{ item_name: "", qty: "1", unit_code: "ອັນ" }]);
   const [manualDate, setManualDate] = useState(getFixedTodayDate());
   const [manualRound, setManualRound] = useState("");
   const [manualRoute, setManualRoute] = useState("");
@@ -695,6 +703,7 @@ export default function BillsPendingClient() {
 
   const openManualModal = () => {
     setManualModalOpen(true);
+    setManualMode("search");
     setManualSearch("");
     setManualResults([]);
     setManualSelected(null);
@@ -703,6 +712,9 @@ export default function BillsPendingClient() {
     setManualRoute("");
     setManualTransport("");
     setManualRemark("");
+    setCustomName("");
+    setCustomPhone("");
+    setCustomItems([{ item_name: "", qty: "1", unit_code: "ອັນ" }]);
   };
 
   const closeManualModal = () => {
@@ -724,6 +736,47 @@ export default function BillsPendingClient() {
       setManualResults([]);
     } finally {
       setManualSearching(false);
+    }
+  };
+
+  const normalizedCustomItems = () =>
+    customItems
+      .map((item) => ({
+        item_name: item.item_name.trim(),
+        qty: Number(item.qty),
+        unit_code: item.unit_code.trim() || "ອັນ",
+      }))
+      .filter((item) => item.item_name && Number.isFinite(item.qty) && item.qty > 0);
+
+  // ຂົນສົ່ງ (delivery branch) is required for custom bills — the pending queue
+  // is branch-scoped, so a custom bill with no branch would never show up.
+  const canSaveCustom =
+    customName.trim().length > 0 &&
+    normalizedCustomItems().length > 0 &&
+    Boolean(manualDate) &&
+    Boolean(manualRound) &&
+    Boolean(manualTransport);
+
+  const saveCustomBill = async () => {
+    if (!canSaveCustom || manualSaving) return;
+    setManualSaving(true);
+    try {
+      await Actions.createCustomPendingBill({
+        cust_name: customName.trim(),
+        telephone: customPhone.trim() || null,
+        items: normalizedCustomItems(),
+        scheduled_date: manualDate,
+        delivery_round_code: manualRound,
+        delivery_route_code: manualRoute || null,
+        transport_code: manualTransport,
+        remark: manualRemark,
+      });
+      setManualModalOpen(false);
+      await fetchBills();
+    } catch (e) {
+      console.error(e);
+    } finally {
+      setManualSaving(false);
     }
   };
 
@@ -841,6 +894,9 @@ export default function BillsPendingClient() {
   };
 
   const inputCls = "w-full px-3 py-2 glass-input rounded-lg text-xs text-slate-700 dark:text-slate-200 transition-all";
+  // Same look as inputCls but WITHOUT w-full — for flex rows where each input
+  // sets its own width (w-full otherwise wins over w-14/w-16 in the CSS).
+  const itemRowInputCls = "px-3 py-2 glass-input rounded-lg text-xs text-slate-700 dark:text-slate-200 transition-all";
 
   // ── Workflow steps ──
   // Step labels and tone for the workflow stepper. The numeric prefixes ("1",
@@ -1637,7 +1693,7 @@ export default function BillsPendingClient() {
                 </div>
                 <div>
                   <h3 className="text-sm font-bold text-slate-800 dark:text-slate-100">ເພີ່ມບິນເຂົ້າລໍຖ້າຈັດຖ້ຽວ</h3>
-                  <p className="text-[11px] text-slate-500">ຄົ້ນຫາບິນໂອນ (72) ແລະ ບິນສູນບໍລິການ</p>
+                  <p className="text-[11px] text-slate-500">ຄົ້ນຫາບິນໂອນ (72), ບິນສູນບໍລິການ ຫຼື ເພີ່ມບິນອື່ນໆທີ່ບໍ່ມີໃນລະບົບ</p>
                 </div>
               </div>
               <button onClick={closeManualModal} className="p-1.5 text-slate-400 hover:text-slate-600 hover:bg-white rounded-lg transition-colors">
@@ -1646,34 +1702,150 @@ export default function BillsPendingClient() {
             </div>
 
             <div className="p-5 space-y-4">
-              <form
-                onSubmit={(e) => {
-                  e.preventDefault();
-                  void searchManualBills();
-                }}
-                className="flex gap-2"
-              >
-                <div className="relative flex-1">
-                  <FaSearch className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" size={10} />
-                  <input
-                    type="text"
-                    value={manualSearch}
-                    onChange={(e) => setManualSearch(e.target.value)}
-                    placeholder="ຄົ້ນຫາເລກບິນ, ລະຫັດ ຫຼື ຊື່ລູກຄ້າ..."
-                    className={`${inputCls} pl-8`}
-                  />
-                </div>
-                <button
-                  type="submit"
-                  disabled={manualSearching || manualSearch.trim().length < 2}
-                  className="inline-flex items-center gap-1.5 rounded-lg bg-teal-600 px-4 py-2 text-xs font-semibold text-white transition-colors hover:bg-teal-700 disabled:cursor-not-allowed disabled:opacity-50 dark:bg-teal-500"
+              {/* Mode switch: pick an existing bill vs type a free-form ອື່ນໆ bill */}
+              <div className="flex rounded-lg border border-slate-200/60 dark:border-white/10 bg-white/40 dark:bg-white/5 p-1 gap-1">
+                {([
+                  { key: "search" as const, label: "ຄົ້ນຫາບິນໃນລະບົບ" },
+                  { key: "custom" as const, label: "ເພີ່ມບິນອື່ນໆ (ບໍ່ມີໃນລະບົບ)" },
+                ]).map((mode) => (
+                  <button
+                    key={mode.key}
+                    type="button"
+                    onClick={() => setManualMode(mode.key)}
+                    className={`flex-1 rounded-md px-3 py-1.5 text-[11px] font-bold transition-colors cursor-pointer ${
+                      manualMode === mode.key
+                        ? "bg-teal-600 text-white dark:bg-teal-500"
+                        : "text-slate-500 hover:bg-slate-500/10 dark:text-slate-400"
+                    }`}
+                  >
+                    {mode.label}
+                  </button>
+                ))}
+              </div>
+
+              {manualMode === "search" && (
+                <form
+                  onSubmit={(e) => {
+                    e.preventDefault();
+                    void searchManualBills();
+                  }}
+                  className="flex gap-2"
                 >
-                  {manualSearching ? <FaSpinner className="animate-spin" size={10} /> : <FaSearch size={10} />}
-                  ຄົ້ນຫາ
-                </button>
-              </form>
+                  <div className="relative flex-1">
+                    <FaSearch className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" size={10} />
+                    <input
+                      type="text"
+                      value={manualSearch}
+                      onChange={(e) => setManualSearch(e.target.value)}
+                      placeholder="ຄົ້ນຫາເລກບິນ, ລະຫັດ ຫຼື ຊື່ລູກຄ້າ..."
+                      className={`${inputCls} pl-8`}
+                    />
+                  </div>
+                  <button
+                    type="submit"
+                    disabled={manualSearching || manualSearch.trim().length < 2}
+                    className="inline-flex items-center gap-1.5 rounded-lg bg-teal-600 px-4 py-2 text-xs font-semibold text-white transition-colors hover:bg-teal-700 disabled:cursor-not-allowed disabled:opacity-50 dark:bg-teal-500"
+                  >
+                    {manualSearching ? <FaSpinner className="animate-spin" size={10} /> : <FaSearch size={10} />}
+                    ຄົ້ນຫາ
+                  </button>
+                </form>
+              )}
 
               <div className="grid gap-4 md:grid-cols-[1.2fr_0.8fr]">
+                {manualMode === "custom" ? (
+                  <div className="space-y-3 rounded-lg border border-slate-200/50 bg-white/40 p-3 dark:border-white/10 dark:bg-white/5">
+                    <div>
+                      <label className="block text-[10px] font-semibold text-slate-500 uppercase tracking-wider mb-1.5">
+                        ຊື່ລູກຄ້າ / ຜູ້ຮັບ <span className="text-rose-500">*</span>
+                      </label>
+                      <input
+                        type="text"
+                        value={customName}
+                        onChange={(e) => setCustomName(e.target.value)}
+                        placeholder="ຊື່ລູກຄ້າ ຫຼື ຜູ້ຮັບເຄື່ອງ..."
+                        className={inputCls}
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-[10px] font-semibold text-slate-500 uppercase tracking-wider mb-1.5">ເບີໂທ</label>
+                      <input
+                        type="tel"
+                        value={customPhone}
+                        onChange={(e) => setCustomPhone(e.target.value)}
+                        placeholder="020..."
+                        className={inputCls}
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-[10px] font-semibold text-slate-500 uppercase tracking-wider mb-1.5">
+                        ລາຍການເຄື່ອງ <span className="text-rose-500">*</span>
+                      </label>
+                      <div className="space-y-2">
+                        {customItems.map((item, index) => (
+                          <div key={index} className="flex items-center gap-1.5">
+                            <input
+                              type="text"
+                              value={item.item_name}
+                              onChange={(e) =>
+                                setCustomItems((current) =>
+                                  current.map((it, i) => (i === index ? { ...it, item_name: e.target.value } : it))
+                                )
+                              }
+                              placeholder={`ລາຍການ ${index + 1}...`}
+                              className={`${itemRowInputCls} flex-1 min-w-0`}
+                            />
+                            <input
+                              type="number"
+                              min={1}
+                              value={item.qty}
+                              onChange={(e) =>
+                                setCustomItems((current) =>
+                                  current.map((it, i) => (i === index ? { ...it, qty: e.target.value } : it))
+                                )
+                              }
+                              className={`${itemRowInputCls} w-14 shrink-0 text-center`}
+                              title="ຈຳນວນ"
+                            />
+                            <input
+                              type="text"
+                              value={item.unit_code}
+                              onChange={(e) =>
+                                setCustomItems((current) =>
+                                  current.map((it, i) => (i === index ? { ...it, unit_code: e.target.value } : it))
+                                )
+                              }
+                              className={`${itemRowInputCls} w-16 shrink-0 text-center`}
+                              title="ຫົວໜ່ວຍ"
+                            />
+                            <button
+                              type="button"
+                              onClick={() => setCustomItems((current) => current.filter((_, i) => i !== index))}
+                              disabled={customItems.length <= 1}
+                              className="p-1.5 text-slate-400 hover:text-rose-500 disabled:opacity-30 disabled:cursor-not-allowed rounded transition-colors cursor-pointer"
+                              title="ລົບລາຍການ"
+                            >
+                              <FaTrash size={10} />
+                            </button>
+                          </div>
+                        ))}
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() =>
+                          setCustomItems((current) => [...current, { item_name: "", qty: "1", unit_code: "ອັນ" }])
+                        }
+                        className="mt-2 inline-flex items-center gap-1.5 rounded-lg border border-dashed border-teal-400/60 px-3 py-1.5 text-[11px] font-semibold text-teal-600 hover:bg-teal-500/10 dark:text-teal-400 transition-colors cursor-pointer"
+                      >
+                        <FaPlus size={9} />
+                        ເພີ່ມລາຍການ
+                      </button>
+                    </div>
+                    <div className="rounded-lg bg-sky-500/10 px-3 py-2 text-[11px] text-sky-700 dark:text-sky-400">
+                      ລະບົບຈະອອກເລກບິນ OTH-XXXX ໃຫ້ອັດຕະໂນມັດ. ຕ້ອງເລືອກ “ຂົນສົ່ງ” (ສາຂາຈັດສົ່ງ) ຈຶ່ງບັນທຶກໄດ້.
+                    </div>
+                  </div>
+                ) : (
                 <div className="min-h-[220px] rounded-lg border border-slate-200/50 bg-white/40 p-2 dark:border-white/10 dark:bg-white/5">
                   {manualResults.length === 0 ? (
                     <div className="flex h-full min-h-[200px] flex-col items-center justify-center text-center text-slate-400">
@@ -1704,7 +1876,11 @@ export default function BillsPendingClient() {
                             <div className="flex items-center gap-2">
                               <span className="font-mono text-xs font-bold text-slate-800 dark:text-slate-100">{bill.doc_no}</span>
                               <span className="rounded-full bg-slate-500/10 px-1.5 py-0.5 text-[9px] font-bold text-slate-500">
-                                {bill.source_type === "odservice.tb_product" ? "ບໍລິການ" : `ປະເພດ ${bill.source_trans_flag}`}
+                                {bill.source_type === "odservice.tb_product"
+                                  ? "ບໍລິການ"
+                                  : bill.source_type === "custom"
+                                  ? "ອື່ນໆ"
+                                  : `ປະເພດ ${bill.source_trans_flag}`}
                               </span>
                               <span className="ml-auto text-[10px] text-slate-500">{bill.count_item} ລາຍການ</span>
                             </div>
@@ -1722,6 +1898,7 @@ export default function BillsPendingClient() {
                     </div>
                   )}
                 </div>
+                )}
 
                 <div className="space-y-3 rounded-lg border border-slate-200/50 bg-white/40 p-3 dark:border-white/10 dark:bg-white/5">
                   <div>
@@ -1758,7 +1935,9 @@ export default function BillsPendingClient() {
                     </select>
                   </div>
                   <div>
-                    <label className="block text-[10px] font-semibold text-slate-500 uppercase tracking-wider mb-1.5">ຂົນສົ່ງ</label>
+                    <label className="block text-[10px] font-semibold text-slate-500 uppercase tracking-wider mb-1.5">
+                      ຂົນສົ່ງ {manualMode === "custom" && <span className="text-rose-500">*</span>}
+                    </label>
                     <select value={manualTransport} onChange={(e) => setManualTransport(e.target.value)} className={inputCls}>
                       <option value="">-- ບໍ່ກຳນົດ --</option>
                       {transports.map((t) => (
@@ -1787,13 +1966,22 @@ export default function BillsPendingClient() {
 
             <div className="flex items-center justify-between gap-2 px-5 py-3 border-t border-white/20 dark:border-white/5 bg-white/30 dark:bg-white/5">
               <p className="truncate text-[11px] text-slate-500">
-                {manualSelected ? `ເລືອກ: ${manualSelected.doc_no}` : "ເລືອກບິນກ່ອນບັນທຶກ"}
+                {manualMode === "custom"
+                  ? "ບິນອື່ນໆ: ໃສ່ຊື່ລູກຄ້າ, ລາຍການ, ຂົນສົ່ງ ແລະ ຮອບກ່ອນບັນທຶກ"
+                  : manualSelected
+                  ? `ເລືອກ: ${manualSelected.doc_no}`
+                  : "ເລືອກບິນກ່ອນບັນທຶກ"}
               </p>
               <div className="flex items-center gap-2">
                 <button onClick={closeManualModal} className="px-4 py-2 text-xs font-medium text-slate-600 hover:bg-slate-100 rounded-lg transition-colors">ຍົກເລີກ</button>
                 <button
-                  onClick={() => void saveManualBill()}
-                  disabled={!manualSelected || !manualDate || !manualRound || manualSaving}
+                  onClick={() => void (manualMode === "custom" ? saveCustomBill() : saveManualBill())}
+                  disabled={
+                    manualSaving ||
+                    (manualMode === "custom"
+                      ? !canSaveCustom
+                      : !manualSelected || !manualDate || !manualRound)
+                  }
                   className="px-4 py-2 text-white text-xs font-semibold rounded-lg disabled:opacity-50 disabled:cursor-not-allowed transition-colors flex items-center gap-1.5 bg-teal-600 hover:bg-teal-700 dark:bg-teal-500 dark:hover:bg-teal-600"
                 >
                   {manualSaving ? <FaSpinner className="animate-spin" size={10} /> : <FaCheck size={10} />}

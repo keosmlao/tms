@@ -1230,6 +1230,9 @@ async function getJobAddPageData(session) {
 async function getJobPrintData(docNo) {
   const { ensureDeliveryRouteSchema } = require("./delivery-route");
   await ensureDeliveryRouteSchema();
+  // The bill list below joins odg_tms_custom_bill (hand-typed "ອື່ນໆ" bills).
+  const { ensurePendingBillSchema } = require("./pending-bill");
+  await ensurePendingBillSchema();
   const header = await queryOne(
     `SELECT
        a.doc_no,
@@ -1263,11 +1266,12 @@ async function getJobPrintData(docNo) {
        d.bill_no,
        to_char(d.bill_date,'DD-MM-YYYY') as bill_date,
        d.cust_code,
-       COALESCE(NULLIF(TRIM(c.name_1), ''), d.cust_code, '-') as cust_name,
-       COALESCE(NULLIF(TRIM(d.telephone), ''), NULLIF(TRIM(c.telephone), ''), '') as telephone,
+       COALESCE(NULLIF(TRIM(c.name_1), ''), NULLIF(TRIM(cb.cust_name), ''), d.cust_code, '-') as cust_name,
+       COALESCE(NULLIF(TRIM(d.telephone), ''), NULLIF(TRIM(c.telephone), ''), NULLIF(TRIM(cb.telephone), ''), '') as telephone,
        d.roworder
      FROM public.odg_tms_detail d
      LEFT JOIN ar_customer c ON c.code = d.cust_code
+     LEFT JOIN public.odg_tms_custom_bill cb ON cb.bill_no = d.bill_no
      WHERE d.doc_no = $1 AND ${getFixedYearSqlFilter("d.doc_date")}
      ORDER BY d.roworder`,
     [docNo]

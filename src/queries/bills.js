@@ -13,6 +13,7 @@ const {
   ensureForwardBranchColumn,
   getRemainingBillProducts,
   getRemainingSummaryMap,
+  getBillItemsByWarehouse,
 } = require("./helpers");
 
 // Only surface bills that the department head has scheduled — i.e. both
@@ -37,6 +38,9 @@ const MANUAL_IC_TRANS_FLAGS = [56, 72, 44, 48];
 // ບິນໂອນ (transfer bills) — when scheduling a trip we only surface this flag.
 const TRANSFER_BILL_FLAG = 72;
 const SERVICE_SOURCE_TYPE = "odservice.tb_product";
+// Free-form bills the dispatcher typed in by hand (odg_tms_custom_bill) —
+// deliveries with no ERP document at all ("ອື່ນໆ").
+const CUSTOM_SOURCE_TYPE = "custom";
 
 // The "ລໍຖ້າຈັດຖ້ຽວ" (bills-pending) queue only dispatches the three internal
 // delivery branches: 02-0001 ໂອດ້ຽນ/ຂົວຫຼວງ · 02-0002 ດອນຕິ້ວ · 02-0003 ປາກເຊ.
@@ -54,16 +58,22 @@ function manualFlagListSql() {
 
 async function applyRemainingCounts(rows) {
   const serviceRows = rows.filter((row) => row.source_type === SERVICE_SOURCE_TYPE);
-  const normalRows = rows.filter((row) => row.source_type !== SERVICE_SOURCE_TYPE);
-  const [normalSummaries, serviceSummaries] = await Promise.all([
+  const customRows = rows.filter((row) => row.source_type === CUSTOM_SOURCE_TYPE);
+  const normalRows = rows.filter(
+    (row) => row.source_type !== SERVICE_SOURCE_TYPE && row.source_type !== CUSTOM_SOURCE_TYPE
+  );
+  const [normalSummaries, serviceSummaries, customSummaries] = await Promise.all([
     getRemainingSummaryMap(normalRows.map((row) => row.doc_no)),
     getServiceSummaryMap(serviceRows.map((row) => row.doc_no)),
+    getCustomSummaryMap(customRows.map((row) => row.doc_no)),
   ]);
   return rows.map((row) => {
     const summary =
       row.source_type === SERVICE_SOURCE_TYPE
         ? serviceSummaries.get(row.doc_no)
-        : normalSummaries.get(row.doc_no);
+        : row.source_type === CUSTOM_SOURCE_TYPE
+          ? customSummaries.get(row.doc_no)
+          : normalSummaries.get(row.doc_no);
     return {
       ...row,
       count_item: summary?.remaining_count ?? 0,
@@ -130,6 +140,116 @@ async function getServiceSummaryMap(billNos) {
     });
   }
   return result;
+}
+
+async function getCustomBillProducts(billNo) {
+  await ensurePendingBillSchema();
+  await ensureTmsDetailItemTable();
+  const row = await queryOne(
+    `SELECT items FROM public.odg_tms_custom_bill WHERE bill_no = $1`,
+    [billNo]
+  );
+  const items = Array.isArray(row?.items) ? row.items : [];
+  if (items.length === 0) return [];
+  // Unlike service bills, a custom bill is NOT re-deliverable: qty on any
+  // non-cancelled job (active OR delivered) consumes the line, so a fully
+  // dispatched custom bill drops out of pending/available lists for good.
+  const usageRows = await query(
+    `SELECT item.item_code,
+            COALESCE(SUM(item.selected_qty), 0)::numeric AS used_qty
+     FROM public.odg_tms_detail_item item
+     INNER JOIN public.odg_tms_detail det
+       ON det.bill_no = item.bill_no AND det.doc_no = item.doc_no
+     WHERE item.bill_no = $1
+       AND COALESCE(det.status, 0) <> 2
+     GROUP BY item.item_code`,
+    [billNo]
+  );
+  const usage = new Map(usageRows.map((row) => [row.item_code, Number(row.used_qty ?? 0)]));
+  return items
+    .map((item, index) => {
+      const itemCode = String(item?.item_code ?? "").trim() || `C${index + 1}`;
+      const qty = Math.max(Number(item?.qty ?? 0) - (usage.get(itemCode) ?? 0), 0);
+      return {
+        item_code: itemCode,
+        item_name: String(item?.item_name ?? "").trim() || itemCode,
+        qty,
+        unit_code: String(item?.unit_code ?? "").trim() || "ອັນ",
+      };
+    })
+    .filter((row) => row.qty > 0);
+}
+
+async function getCustomSummaryMap(billNos) {
+  if (!Array.isArray(billNos) || billNos.length === 0) return new Map();
+  const result = new Map(billNos.map((billNo) => [billNo, { remaining_count: 0, remaining_qty_total: 0 }]));
+  for (const billNo of billNos) {
+    const products = await getCustomBillProducts(billNo);
+    result.set(billNo, {
+      remaining_count: products.length,
+      remaining_qty_total: products.reduce((sum, product) => sum + Number(product.qty || 0), 0),
+    });
+  }
+  return result;
+}
+
+// Create a free-form "ອື່ນໆ" bill that exists only in TMS (no ERP document).
+// Generates the bill number, stores customer + item lines, and immediately
+// schedules it as contacted_ready so it lands in "ພ້ອມຈັດຖ້ຽວ".
+async function createCustomPendingBill({
+  custName,
+  telephone,
+  items,
+  scheduledDate,
+  deliveryRoundCode,
+  deliveryRouteCode,
+  transportCode,
+  remark,
+  userCode,
+}) {
+  const name = String(custName ?? "").trim();
+  const date = String(scheduledDate ?? "").trim();
+  const round = String(deliveryRoundCode ?? "").trim();
+  if (!name) throw new Error("cust_name is required");
+  if (!date) throw new Error("scheduled_date is required");
+  if (!round) throw new Error("delivery_round_code is required");
+  const normalizedItems = (Array.isArray(items) ? items : [])
+    .map((item) => ({
+      item_name: String(item?.item_name ?? "").trim(),
+      qty: Number(item?.qty ?? 0),
+      unit_code: String(item?.unit_code ?? "").trim() || "ອັນ",
+    }))
+    .filter((item) => item.item_name && Number.isFinite(item.qty) && item.qty > 0)
+    .map((item, index) => ({ item_code: `C${index + 1}`, ...item }));
+  if (normalizedItems.length === 0) throw new Error("items are required");
+  await ensurePendingBillSchema();
+  const inserted = await queryOne(
+    `INSERT INTO public.odg_tms_custom_bill (bill_no, cust_name, telephone, items, remark, created_by)
+     VALUES (
+       'OTH-' || to_char(LOCALTIMESTAMP, 'YYMM') || '-' || lpad(nextval('public.odg_tms_custom_bill_seq')::text, 4, '0'),
+       $1, $2, $3::jsonb, $4, $5
+     )
+     RETURNING bill_no`,
+    [
+      name,
+      String(telephone ?? "").trim() || null,
+      JSON.stringify(normalizedItems),
+      String(remark ?? "").trim() || null,
+      userCode ?? null,
+    ]
+  );
+  const { upsertPendingBillSchedule } = require("./pending-bill");
+  await upsertPendingBillSchedule({
+    billNo: inserted.bill_no,
+    scheduledDate: date,
+    remark: String(remark ?? "").trim() || null,
+    actionStatus: "contacted_ready",
+    deliveryRoundCode: round,
+    deliveryRouteCode: String(deliveryRouteCode ?? "").trim() || null,
+    transportCode: String(transportCode ?? "").trim() || null,
+    userCode,
+  });
+  return { success: true, bill_no: inserted.bill_no };
 }
 
 async function getAvailableBillsWithProducts(session) {
@@ -244,14 +364,16 @@ async function getAvailableBills(session) {
 async function getAvailableBillProducts(docNo) {
   const products = await getRemainingBillProducts(docNo);
   if (products.length > 0) return products;
-  return getServiceBillProducts(docNo);
+  const serviceProducts = await getServiceBillProducts(docNo);
+  if (serviceProducts.length > 0) return serviceProducts;
+  return getCustomBillProducts(docNo);
 }
 
 async function searchManualPendingBills(q) {
   await ensurePendingBillSchema();
   const text = String(q ?? "").trim();
   if (text.length < 2) return [];
-  const [icRows, serviceRows] = await Promise.all([
+  const [icRows, serviceRows, customRows] = await Promise.all([
     query(
     `SELECT a.doc_no,
             to_char(a.doc_date,'DD-MM-YYYY') as doc_date,
@@ -303,6 +425,33 @@ async function searchManualPendingBills(q) {
        LIMIT 30`,
       [`%${text}%`]
     ),
+    query(
+      `SELECT cb.bill_no as doc_no,
+              to_char(cb.created_at,'DD-MM-YYYY') as doc_date,
+              '' as cust_code,
+              cb.cust_name,
+              COALESCE(cb.telephone, '') as telephone,
+              NULL::int as source_trans_flag,
+              to_char(pb.scheduled_date,'YYYY-MM-DD') as scheduled_date,
+              to_char(pb.scheduled_date,'DD-MM-YYYY') as scheduled_date_display,
+              COALESCE(pb.delivery_route_code, '') as delivery_route_code,
+              COALESCE(pb.delivery_round_code, '') as delivery_round_code,
+              COALESCE(dr.name, '') as delivery_round_name,
+              COALESCE(dr.time_label, '') as delivery_round_time_label,
+              COALESCE(pb.transport_code, '') as transport_code,
+              '${CUSTOM_SOURCE_TYPE}' as source_type
+       FROM public.odg_tms_custom_bill cb
+       LEFT JOIN public.odg_tms_pending_bill pb ON pb.bill_no = cb.bill_no
+       LEFT JOIN public.odg_tms_delivery_round dr ON dr.code = pb.delivery_round_code
+       WHERE (
+         cb.bill_no ILIKE $1
+         OR cb.cust_name ILIKE $1
+         OR COALESCE(cb.telephone, '') ILIKE $1
+       )
+       ORDER BY cb.created_at DESC
+       LIMIT 30`,
+      [`%${text}%`]
+    ),
   ]);
   const serviceDocNos = serviceRows.map((row) => row.doc_no);
   const serviceScheduleMap = await getPendingBillScheduleMap(serviceDocNos);
@@ -321,6 +470,7 @@ async function searchManualPendingBills(q) {
   });
   const icSummaries = await getRemainingSummaryMap(icRows.map((row) => row.doc_no));
   const serviceSummaries = await getServiceSummaryMap(serviceRows.map((row) => row.doc_no));
+  const customSummaries = await getCustomSummaryMap(customRows.map((row) => row.doc_no));
   const icResult = icRows
     .map((row) => ({
       ...row,
@@ -334,8 +484,16 @@ async function searchManualPendingBills(q) {
     ...row,
     count_item: serviceSummaries.get(row.doc_no)?.remaining_count ?? 0,
   }));
+  // Custom "ອື່ນໆ" bills are single-shot: once dispatched their remaining
+  // count hits 0 and they leave the search results.
+  const customResult = customRows
+    .map((row) => ({
+      ...row,
+      count_item: customSummaries.get(row.doc_no)?.remaining_count ?? 0,
+    }))
+    .filter((row) => row.count_item > 0);
   const seen = new Set();
-  return [...icResult, ...serviceResult].filter((row) => {
+  return [...icResult, ...serviceResult, ...customResult].filter((row) => {
     const key = `${row.source_type}:${row.doc_no}`;
     if (seen.has(key)) return false;
     seen.add(key);
@@ -354,18 +512,26 @@ async function addManualPendingBill({ billNo, scheduledDate, deliveryRoundCode, 
   if (!round) throw new Error("delivery_round_code is required");
   await ensurePendingBillSchema();
   const requestedSource = String(sourceType ?? "").trim();
-  const icBill = requestedSource === SERVICE_SOURCE_TYPE ? null : await queryOne(
-    `SELECT doc_no FROM ic_trans
-     WHERE doc_no = $1
-       AND trans_flag IN (${manualFlagListSql()})`,
-    [code]
-  );
-  const serviceBill = icBill ? null : await queryB(
+  const icBill = requestedSource === SERVICE_SOURCE_TYPE || requestedSource === CUSTOM_SOURCE_TYPE
+    ? null
+    : await queryOne(
+        `SELECT doc_no FROM ic_trans
+         WHERE doc_no = $1
+           AND trans_flag IN (${manualFlagListSql()})`,
+        [code]
+      );
+  const customBill = icBill || requestedSource === SERVICE_SOURCE_TYPE
+    ? null
+    : await queryOne(
+        `SELECT bill_no FROM public.odg_tms_custom_bill WHERE bill_no = $1`,
+        [code]
+      );
+  const serviceBill = icBill || customBill ? [] : await queryB(
     `SELECT code FROM public.tb_product WHERE code = $1 LIMIT 1`,
     [code]
   );
-  if (!icBill && serviceBill.length === 0) {
-    throw new Error("Bill not found in ic_trans trans_flag 56/72/44/48 or odservice.tb_product");
+  if (!icBill && !customBill && serviceBill.length === 0) {
+    throw new Error("Bill not found in ic_trans trans_flag 56/72/44/48, odservice.tb_product or odg_tms_custom_bill");
   }
   const { upsertPendingBillSchedule } = require("./pending-bill");
   await upsertPendingBillSchedule({
@@ -391,17 +557,34 @@ async function removeManualPendingBill(billNo) {
        AND trans_flag IN (${manualFlagListSql()})`,
     [code]
   );
-  const serviceBill = icBill ? [] : await queryB(
+  const customBill = icBill ? null : await queryOne(
+    `SELECT bill_no FROM public.odg_tms_custom_bill WHERE bill_no = $1`,
+    [code]
+  );
+  const serviceBill = icBill || customBill ? [] : await queryB(
     `SELECT code FROM public.tb_product WHERE code = $1 LIMIT 1`,
     [code]
   );
-  if (!icBill && serviceBill.length === 0) {
-    throw new Error("Bill not found in ic_trans trans_flag 56/72/44/48 or odservice.tb_product");
+  if (!icBill && !customBill && serviceBill.length === 0) {
+    throw new Error("Bill not found in ic_trans trans_flag 56/72/44/48, odservice.tb_product or odg_tms_custom_bill");
   }
   await query(
     `DELETE FROM public.odg_tms_pending_bill WHERE bill_no = $1`,
     [code]
   );
+  // A hand-typed custom bill exists nowhere else, so removing it from the
+  // queue also deletes the bill itself — unless a job already references it
+  // (keep the record so that job's history stays resolvable).
+  if (customBill) {
+    await query(
+      `DELETE FROM public.odg_tms_custom_bill cb
+       WHERE cb.bill_no = $1
+         AND NOT EXISTS (
+           SELECT 1 FROM public.odg_tms_detail d WHERE d.bill_no = cb.bill_no
+         )`,
+      [code]
+    );
+  }
   return { success: true };
 }
 
@@ -450,20 +633,34 @@ async function getManualReadyBills() {
   );
   const scheduledDocNos = readySchedules.map((row) => row.bill_no);
   const existingIc = new Set(icRows.map((row) => row.doc_no));
-  const serviceBaseRows = scheduledDocNos.length === 0
-    ? []
-    : await queryB(
-        `SELECT s.code as doc_no,
-                to_char(MAX(COALESCE(s.time_register, s.create_date_time_now)),'DD-MM-YYYY') as doc_date,
-                COALESCE(MAX(NULLIF(TRIM(s.cust_code), '')), '') as cust_code,
-                COALESCE(MAX(NULLIF(TRIM(s.name_1), '')), MAX(NULLIF(TRIM(s.p_model), '')), s.code) as cust_name,
-                '' as telephone,
-                NULL::int as source_trans_flag
-         FROM public.tb_product s
-         WHERE s.code = ANY($1::varchar[])
-         GROUP BY s.code`,
-        [scheduledDocNos.filter((docNo) => !existingIc.has(docNo))]
-      );
+  const nonIcDocNos = scheduledDocNos.filter((docNo) => !existingIc.has(docNo));
+  const [serviceBaseRows, customBaseRows] = nonIcDocNos.length === 0
+    ? [[], []]
+    : await Promise.all([
+        queryB(
+          `SELECT s.code as doc_no,
+                  to_char(MAX(COALESCE(s.time_register, s.create_date_time_now)),'DD-MM-YYYY') as doc_date,
+                  COALESCE(MAX(NULLIF(TRIM(s.cust_code), '')), '') as cust_code,
+                  COALESCE(MAX(NULLIF(TRIM(s.name_1), '')), MAX(NULLIF(TRIM(s.p_model), '')), s.code) as cust_name,
+                  '' as telephone,
+                  NULL::int as source_trans_flag
+           FROM public.tb_product s
+           WHERE s.code = ANY($1::varchar[])
+           GROUP BY s.code`,
+          [nonIcDocNos]
+        ),
+        query(
+          `SELECT cb.bill_no as doc_no,
+                  to_char(cb.created_at,'DD-MM-YYYY') as doc_date,
+                  '' as cust_code,
+                  cb.cust_name,
+                  COALESCE(cb.telephone, '') as telephone,
+                  NULL::int as source_trans_flag
+           FROM public.odg_tms_custom_bill cb
+           WHERE cb.bill_no = ANY($1::varchar[])`,
+          [nonIcDocNos]
+        ),
+      ]);
   const scheduleMap = new Map(readySchedules.map((row) => [row.bill_no, row]));
   const serviceRows = serviceBaseRows.map((row) => {
     const sched = scheduleMap.get(row.doc_no);
@@ -485,7 +682,27 @@ async function getManualReadyBills() {
       source_type: SERVICE_SOURCE_TYPE,
     };
   });
-  return [...icRows, ...serviceRows];
+  const customReadyRows = customBaseRows.map((row) => {
+    const sched = scheduleMap.get(row.doc_no);
+    return {
+      ...row,
+      count_item: 0,
+      scheduled_date: sched?.scheduled_date ?? null,
+      scheduled_date_display: sched?.scheduled_date_display ?? null,
+      delivery_route_code: sched?.delivery_route_code ?? "",
+      delivery_transport_code: sched?.delivery_transport_code ?? "",
+      delivery_round_code: sched?.delivery_round_code ?? "",
+      delivery_round_name: sched?.delivery_round_name ?? "",
+      delivery_round_time_label: sched?.delivery_round_time_label ?? "",
+      incoming_forwarded: false,
+      forward_from_transport_code: "",
+      forward_from_transport_name: "",
+      forwarded_at: "",
+      manual_pending_bill: true,
+      source_type: CUSTOM_SOURCE_TYPE,
+    };
+  });
+  return [...icRows, ...serviceRows, ...customReadyRows];
 }
 
 const {
@@ -567,22 +784,37 @@ async function getManualPendingRowsForPending(fromDate, toDate, transportCode = 
     params
   );
   const existingIc = new Set(icRows.map((row) => row.doc_no));
-  const serviceDocNos = readySchedules
+  const nonIcDocNos = readySchedules
     .map((row) => row.bill_no)
     .filter((docNo) => !existingIc.has(docNo));
-  const serviceBaseRows = serviceDocNos.length === 0
-    ? []
-    : await queryB(
-        `SELECT s.code as doc_no,
-                to_char(MAX(COALESCE(s.time_register, s.create_date_time_now)),'DD-MM-YYYY') as doc_date,
-                COALESCE(MAX(NULLIF(TRIM(s.cust_code), '')), '') as cust_code,
-                COALESCE(MAX(NULLIF(TRIM(s.name_1), '')), MAX(NULLIF(TRIM(s.p_model), '')), s.code) as transport_name,
-                NULL::int as source_trans_flag
-         FROM public.tb_product s
-         WHERE s.code = ANY($1::varchar[])
-         GROUP BY s.code`,
-        [serviceDocNos]
-      );
+  const [serviceBaseRows, customBaseRows] = nonIcDocNos.length === 0
+    ? [[], []]
+    : await Promise.all([
+        queryB(
+          `SELECT s.code as doc_no,
+                  to_char(MAX(COALESCE(s.time_register, s.create_date_time_now)),'DD-MM-YYYY') as doc_date,
+                  COALESCE(MAX(NULLIF(TRIM(s.cust_code), '')), '') as cust_code,
+                  COALESCE(MAX(NULLIF(TRIM(s.name_1), '')), MAX(NULLIF(TRIM(s.p_model), '')), s.code) as transport_name,
+                  NULL::int as source_trans_flag
+           FROM public.tb_product s
+           WHERE s.code = ANY($1::varchar[])
+           GROUP BY s.code`,
+          [nonIcDocNos]
+        ),
+        query(
+          `SELECT cb.bill_no as doc_no,
+                  to_char(cb.created_at,'DD-MM-YYYY') as doc_date,
+                  '' as cust_code,
+                  cb.cust_name,
+                  cb.cust_name as transport_name,
+                  COALESCE(cb.telephone, '') as cust_phone,
+                  COALESCE(cb.remark, '') as sales_remark,
+                  NULL::int as source_trans_flag
+           FROM public.odg_tms_custom_bill cb
+           WHERE cb.bill_no = ANY($1::varchar[])`,
+          [nonIcDocNos]
+        ),
+      ]);
   const scheduleMap = new Map(readySchedules.map((row) => [row.bill_no, row]));
   const serviceRows = serviceBaseRows.map((row) => {
     const sched = scheduleMap.get(row.doc_no);
@@ -604,7 +836,30 @@ async function getManualPendingRowsForPending(fromDate, toDate, transportCode = 
       source_type: SERVICE_SOURCE_TYPE,
     };
   });
-  return [...icRows, ...serviceRows];
+  const customPendingRows = customBaseRows.map((row) => {
+    const sched = scheduleMap.get(row.doc_no);
+    return {
+      doc_no: row.doc_no,
+      doc_date: row.doc_date,
+      cust_code: row.cust_code,
+      cust_name: row.cust_name,
+      transport_name: row.transport_name,
+      cust_phone: row.cust_phone,
+      sales_remark: row.sales_remark,
+      send_date: sched?.send_date ?? null,
+      send_date_display: sched?.send_date_display ?? null,
+      sale: "",
+      department: "ອື່ນໆ",
+      transport_code: sched?.transport_code ?? "",
+      transport: sched?.transport ?? "",
+      time_open: sched?.time_open ?? "",
+      time_use: sched?.time_use ?? null,
+      manual_pending_bill: true,
+      source_trans_flag: row.source_trans_flag,
+      source_type: CUSTOM_SOURCE_TYPE,
+    };
+  });
+  return [...icRows, ...serviceRows, ...customPendingRows];
 }
 
 async function getBillsPending(session, fromDate, toDate, transportCode) {
@@ -954,7 +1209,13 @@ async function updateBillTransport(docNo, transportCode) {
 }
 
 async function getBillProducts(docNo) {
-  return getRemainingBillProducts(docNo);
+  const products = await getRemainingBillProducts(docNo);
+  if (products.length > 0) return products;
+  // Manual/custom bills have no ic_trans_detail rows — fall back so the
+  // pending-page drawer can still show what's on the bill.
+  const serviceProducts = await getServiceBillProducts(docNo);
+  if (serviceProducts.length > 0) return serviceProducts;
+  return getCustomBillProducts(docNo);
 }
 
 async function getBillsWaitingSent(session) {
@@ -1401,8 +1662,10 @@ module.exports = {
   getAvailableBillsWithProducts,
   getAvailableBills,
   getAvailableBillProducts,
+  getBillItemsByWarehouse,
   searchManualPendingBills,
   addManualPendingBill,
+  createCustomPendingBill,
   removeManualPendingBill,
   getBillsPending,
   getManualPendingRowsForPending,

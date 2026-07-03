@@ -5,8 +5,10 @@ import {
   getAvailableBills as svcGetAvailableBills,
   getAvailableBillsWithProducts as svcGetAvailableBillsWithProducts,
   getAvailableBillProducts as svcGetAvailableBillProducts,
+  getBillItemsByWarehouse as svcGetBillItemsByWarehouse,
   searchManualPendingBills as svcSearchManualPendingBills,
   addManualPendingBill as svcAddManualPendingBill,
+  createCustomPendingBill as svcCreateCustomPendingBill,
   removeManualPendingBill as svcRemoveManualPendingBill,
   getBillsPending as svcGetBillsPending,
   updateBillTransport as svcUpdateBillTransport,
@@ -49,6 +51,11 @@ export async function getAvailableBillProducts(docNo: string) {
   return svcGetAvailableBillProducts(docNo);
 }
 
+export async function getBillItemsByWarehouse(docNo: string) {
+  await requireSession();
+  return svcGetBillItemsByWarehouse(docNo);
+}
+
 export async function searchManualPendingBills(q: string) {
   await requireSession();
   return svcSearchManualPendingBills(q);
@@ -88,6 +95,51 @@ export async function addManualPendingBill(input: {
       delivery_route_code: input.delivery_route_code ?? null,
       transport_code: input.transport_code ?? null,
       source_type: input.source_type ?? null,
+    },
+  });
+  return result;
+}
+
+// Create a free-form "ອື່ນໆ" bill that has no ERP document — the dispatcher
+// types the customer + items by hand and it goes straight to "ພ້ອມຈັດຖ້ຽວ".
+export async function createCustomPendingBill(input: {
+  cust_name: string;
+  telephone?: string | null;
+  items: Array<{ item_name: string; qty: number; unit_code?: string | null }>;
+  scheduled_date: string;
+  delivery_round_code: string;
+  delivery_route_code?: string | null;
+  transport_code?: string | null;
+  remark?: string | null;
+}) {
+  const s = await requireSession();
+  const userCode =
+    (s as { code?: string; usercode?: string })?.code ?? (s as { usercode?: string })?.usercode;
+  const result = await svcCreateCustomPendingBill({
+    custName: input.cust_name,
+    telephone: input.telephone ?? null,
+    items: input.items,
+    scheduledDate: input.scheduled_date,
+    deliveryRoundCode: input.delivery_round_code,
+    deliveryRouteCode: input.delivery_route_code ?? null,
+    transportCode: input.transport_code ?? null,
+    remark: input.remark ?? null,
+    userCode,
+  });
+  const { recordAudit } = await import("@/queries/audit-log.js");
+  await recordAudit({
+    action: "pending_bill.add_custom",
+    entityType: "bill",
+    entityId: (result as { bill_no: string }).bill_no,
+    userCode,
+    changes: {
+      cust_name: input.cust_name,
+      telephone: input.telephone ?? null,
+      items: input.items,
+      scheduled_date: input.scheduled_date,
+      delivery_round_code: input.delivery_round_code,
+      delivery_route_code: input.delivery_route_code ?? null,
+      transport_code: input.transport_code ?? null,
     },
   });
   return result;

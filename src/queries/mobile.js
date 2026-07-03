@@ -1715,6 +1715,9 @@ async function mobileBills({ docNo, billNo, type, driverId, isSupervisor }) {
   // Run the schema check first so a fresh DB doesn't blow up on missing column.
   // Cached after first call so this is effectively a no-op afterwards.
   await ensureDeliveryWorkflowSchema(pool);
+  // Same reason for odg_tms_custom_bill (joined below for hand-typed bills).
+  const { ensurePendingBillSchema } = require("./pending-bill");
+  await ensurePendingBillSchema();
   const cleanDriver = asText(driverId);
   if (!cleanDriver && !isSupervisor) {
     const err = new Error("Unauthorized");
@@ -1810,7 +1813,9 @@ async function mobileBills({ docNo, billNo, type, driverId, isSupervisor }) {
       `SELECT * FROM (
         SELECT DISTINCT ON (a.bill_no)
         a.bill_no, to_char(a.bill_date,'DD-MM-YYYY') as bill_date,
-        a.cust_code, b.name_1 as cust_name, b.telephone,
+        a.cust_code,
+        COALESCE(NULLIF(TRIM(b.name_1), ''), NULLIF(TRIM(cb.cust_name), '')) as cust_name,
+        COALESCE(NULLIF(TRIM(b.telephone), ''), NULLIF(TRIM(a.telephone), ''), NULLIF(TRIM(cb.telephone), '')) as telephone,
         to_char(a.date_logistic,'DD-MM-YYYY') as date_logistic,
         COALESCE(NULLIF(TRIM(a.lat::text), ''), NULLIF(TRIM(acd.latitude::text), '')) as lat,
         COALESCE(NULLIF(TRIM(a.lng::text), ''), NULLIF(TRIM(acd.longitude::text), '')) as lng,
@@ -1862,6 +1867,9 @@ async function mobileBills({ docNo, billNo, type, driverId, isSupervisor }) {
       FROM public.odg_tms_detail a
       LEFT JOIN ar_customer b ON b.code = a.cust_code
       LEFT JOIN ar_customer_detail acd ON acd.ar_code = a.cust_code
+      -- Custom "ອື່ນໆ" bills have no ar_customer row; their name/phone live on
+      -- the hand-typed bill itself.
+      LEFT JOIN public.odg_tms_custom_bill cb ON cb.bill_no = a.bill_no
       LEFT JOIN ic_trans_shipment s ON s.doc_no = a.bill_no
       LEFT JOIN public.transport_type pt ON pt.code = COALESCE(NULLIF(a.pickup_transport_code, '__CUSTOMER__'), s.transport_code)
       LEFT JOIN public.transport_type fwd ON fwd.code = a.forward_transport_code
