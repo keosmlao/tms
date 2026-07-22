@@ -10,11 +10,13 @@ import {
   type ReactNode,
 } from "react";
 import Link from "next/link";
+import * as XLSX from "xlsx";
 import {
   FaBackward,
   FaCalendarAlt,
   FaChartLine,
   FaClock,
+  FaFileExcel,
   FaForward,
   FaMap,
   FaParking,
@@ -456,6 +458,84 @@ export default function GpsUsagePage() {
     );
   }, [summary]);
 
+  const exportExcel = useCallback(() => {
+    if (filteredSummary.length === 0) return;
+    const header = [
+      "ລ/ດ",
+      "ລົດ",
+      "ລະຫັດ",
+      "IMEI",
+      "ວັນ active (>5km)",
+      "ໄລຍະທາງ (km)",
+      "ສູງສຸດ/ວັນ (km)",
+      "ຕ່ຳສຸດ/ວັນ (km)",
+      "ສະເລ່ຍ/ວັນ (km)",
+      "max (km/h)",
+      "ເວລາແລ່ນ",
+      "ເວລາຈອດ",
+      "Synced",
+    ];
+    const rows = filteredSummary.map((row, i) => [
+      i + 1,
+      row.car_name || "-",
+      row.car_code || "",
+      row.imei || "",
+      `${row.active_days}/${row.days_count}`,
+      Number((Number(row.distance_km) || 0).toFixed(1)),
+      row.max_daily_km ? Number(Number(row.max_daily_km).toFixed(1)) : "",
+      row.min_daily_km ? Number(Number(row.min_daily_km).toFixed(1)) : "",
+      row.avg_daily_km ? Number(Number(row.avg_daily_km).toFixed(1)) : "",
+      Number(row.max_speed) || 0,
+      fmtSec(Number(row.moving_seconds) || 0),
+      fmtSec(Number(row.stopped_seconds) || 0),
+      row.last_synced ? formatGpsRelative(row.last_synced) : "-",
+    ]);
+    const totalRow = [
+      "",
+      "ລວມທັງໝົດ",
+      "",
+      "",
+      totals.active_days,
+      Number(totals.distance_km.toFixed(1)),
+      "",
+      "",
+      "",
+      "",
+      fmtSec(totals.moving_seconds),
+      fmtSec(totals.stopped_seconds),
+      "",
+    ];
+    const sheet = XLSX.utils.aoa_to_sheet([
+      ["ສະຫຼຸບການນຳໃຊ້ລົດຈາກ GPS"],
+      [`ຊ່ວງວັນທີ: ${fromDate} ຫາ ${toDate}`],
+      header,
+      ...rows,
+      totalRow,
+    ]);
+    sheet["!merges"] = [
+      { s: { r: 0, c: 0 }, e: { r: 0, c: header.length - 1 } },
+      { s: { r: 1, c: 0 }, e: { r: 1, c: header.length - 1 } },
+    ];
+    sheet["!cols"] = [
+      { wch: 6 },
+      { wch: 20 },
+      { wch: 12 },
+      { wch: 18 },
+      { wch: 14 },
+      { wch: 13 },
+      { wch: 13 },
+      { wch: 13 },
+      { wch: 13 },
+      { wch: 11 },
+      { wch: 11 },
+      { wch: 11 },
+      { wch: 14 },
+    ];
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, sheet, "GPS Usage");
+    XLSX.writeFile(wb, `gps-usage_${fromDate}_${toDate}.xlsx`);
+  }, [filteredSummary, totals, fromDate, toDate]);
+
   return (
     <div className="space-y-5">
       {/* Header */}
@@ -646,9 +726,21 @@ export default function GpsUsagePage() {
               ສະຫຼຸບຕາມລົດ
             </h2>
           </div>
-          <span className="rounded-full bg-teal-500/10 px-2.5 py-1 text-[11px] font-bold text-teal-600 tabular-nums">
-            {filteredSummary.length} / {summary.length}
-          </span>
+          <div className="flex items-center gap-2">
+            <button
+              type="button"
+              onClick={exportExcel}
+              disabled={filteredSummary.length === 0}
+              title="Export to Excel"
+              className="inline-flex items-center gap-1.5 rounded-lg border border-emerald-600/30 bg-emerald-500/10 px-3 py-1.5 text-[11px] font-semibold text-emerald-700 dark:text-emerald-300 hover:bg-emerald-500/20 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+            >
+              <FaFileExcel size={11} />
+              Excel
+            </button>
+            <span className="rounded-full bg-teal-500/10 px-2.5 py-1 text-[11px] font-bold text-teal-600 tabular-nums">
+              {filteredSummary.length} / {summary.length}
+            </span>
+          </div>
         </div>
 
         <div className="overflow-x-auto">

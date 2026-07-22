@@ -67,6 +67,7 @@ const navSections: NavSection[] = [
       { label: "ແຜນທີ່ມືຖື", href: "/tracking/phones-map", icon: <FaMobileAlt size={13} /> },
       { label: "ເສັ້ນທາງມືຖືຄົນຂັບ", href: "/tracking/phone", icon: <FaMobileAlt size={13} /> },
       { label: "ສະຫຼຸບ GPS ປະຈຳວັນ", href: "/tracking/gps-usage", icon: <FaChartArea size={13} /> },
+      { label: "GPS Monthly Summary", href: "/tracking/gps-monthly-summary", icon: <FaChartLine size={13} /> },
       // { label: "ດຶງຂໍ້ມູນ GPS ຍ້ອນຫຼັງ", href: "/tracking/gps-backfill", icon: <FaCloudDownloadAlt size={13} /> },
     ],
   },

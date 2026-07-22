@@ -52,6 +52,7 @@ const pageTitles: Record<string, string> = {
   "/tracking/sales": "ບິນສົ່ງບໍ່ສຳເລັດ",
   "/tracking/sales/delivered": "ບິນສົ່ງສຳເລັດ",
   "/tracking/cars-map": "ແຜນທີ່ລົດ",
+  "/tracking/gps-monthly-summary": "GPS Monthly Summary",
   "/location": "ຕໍາແໜ່ງລົດ",
 };
 
