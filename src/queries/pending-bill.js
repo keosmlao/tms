@@ -131,12 +131,21 @@ async function ensurePendingBillSchemaInternal(db) {
   await safeDdl(db, `
     CREATE SEQUENCE IF NOT EXISTS public.odg_tms_custom_bill_seq
   `);
+  // Parent sale-bill key for sub-bills created by the "ຈັດຖ້ຽວທີ່ເຫຼືອຕາມສາຂາ"
+  // split tool: one multi-warehouse ERP bill becomes one custom sub-bill per
+  // delivery branch, all sharing the original bill_no here so the split can be
+  // traced back (and guarded against re-splitting the same branch). NULL for a
+  // hand-typed "ອື່ນໆ" bill that has no parent.
+  await safeDdl(db, `
+    ALTER TABLE public.odg_tms_custom_bill
+    ADD COLUMN IF NOT EXISTS parent_bill_no character varying
+  `);
 }
 
 // Bump the cache version whenever the DDL changes so existing dev/prod
 // processes re-run the ALTER TABLE migrations on next call (the global cache
 // otherwise persists across hot-reloads).
-const PENDING_BILL_SCHEMA_VERSION = "v8_custom_bill";
+const PENDING_BILL_SCHEMA_VERSION = "v9_custom_bill_parent";
 
 async function ensurePendingBillSchema() {
   const readyKey = `__tmsPendingBillSchemaReady_${PENDING_BILL_SCHEMA_VERSION}`;

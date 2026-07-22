@@ -72,6 +72,8 @@ export const Actions = {
   getAvailableBillsWithProducts: bills.getAvailableBillsWithProducts,
   getAvailableBillProducts: bills.getAvailableBillProducts,
   getBillItemsByWarehouse: bills.getBillItemsByWarehouse,
+  getBillRemainingItemsByWarehouse: bills.getBillRemainingItemsByWarehouse,
+  dispatchBillRemainingByBranch: bills.dispatchBillRemainingByBranch,
   searchManualPendingBills: bills.searchManualPendingBills,
   addManualPendingBill: bills.addManualPendingBill,
   createCustomPendingBill: bills.createCustomPendingBill,

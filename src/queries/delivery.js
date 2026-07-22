@@ -49,6 +49,13 @@ async function ensureDeliveryWorkflowSchemaInternal(db) {
     ALTER TABLE public.odg_tms_detail_item
     ADD COLUMN IF NOT EXISTS delivered_qty numeric DEFAULT 0
   `);
+  // returned_qty (ຄືນສາງ) = quantity the driver could NOT deliver and sent back
+  // to the warehouse. Settled = delivered_qty + returned_qty; a line is only
+  // "remaining" (still owed to the customer) while settled < selected_qty.
+  await safeDdl(db, `
+    ALTER TABLE public.odg_tms_detail_item
+    ADD COLUMN IF NOT EXISTS returned_qty numeric DEFAULT 0
+  `);
   await safeDdl(db, `
     CREATE INDEX IF NOT EXISTS idx_odg_tms_detail_item_bill_item
     ON public.odg_tms_detail_item (bill_no, item_code)
@@ -384,9 +391,22 @@ async function ensureBillDeliveryItems(billNo, client) {
   await ensureJobDeliveryItems(bill.doc_no, db);
 }
 
-async function getBillDeliveryItemSummary(billNo, client) {
+// docNo pins the summary to one trip. Callers that decide whether to CLOSE a
+// bill must pass it: the fallback below guesses the "most active" trip, and a
+// bill split across two open trips would otherwise be judged on the wrong one.
+async function getBillDeliveryItemSummary(billNo, client, docNo) {
   const db = client ?? pool;
   await ensureBillDeliveryItems(billNo, db);
+
+  const docScope = docNo
+    ? "$2"
+    : `(
+        SELECT d.doc_no FROM public.odg_tms_detail d
+        WHERE d.bill_no = $1 AND ${getFixedYearSqlFilter("d.doc_date")}
+        ORDER BY (CASE WHEN COALESCE(d.status, 0) NOT IN (1, 2) THEN 0 ELSE 1 END),
+                 d.create_date_time_now DESC NULLS LAST
+        LIMIT 1
+      )`;
 
   return runQueryOne(
     db,
@@ -396,24 +416,19 @@ async function getBillDeliveryItemSummary(billNo, client) {
         WHERE COALESCE(delivered_qty, 0)::numeric > 0
       )::int AS delivered_item_count,
       COUNT(*) FILTER (
-        WHERE GREATEST(COALESCE(selected_qty, 0)::numeric - COALESCE(delivered_qty, 0)::numeric, 0) > 0
+        WHERE GREATEST(COALESCE(selected_qty, 0)::numeric - COALESCE(delivered_qty, 0)::numeric - COALESCE(returned_qty, 0)::numeric, 0) > 0
       )::int AS remaining_item_count,
       COALESCE(SUM(COALESCE(selected_qty, 0)::numeric), 0)::numeric AS selected_qty_total,
       COALESCE(SUM(COALESCE(delivered_qty, 0)::numeric), 0)::numeric AS delivered_qty_total,
+      COALESCE(SUM(COALESCE(returned_qty, 0)::numeric), 0)::numeric AS returned_qty_total,
       COALESCE(
-        SUM(GREATEST(COALESCE(selected_qty, 0)::numeric - COALESCE(delivered_qty, 0)::numeric, 0)),
+        SUM(GREATEST(COALESCE(selected_qty, 0)::numeric - COALESCE(delivered_qty, 0)::numeric - COALESCE(returned_qty, 0)::numeric, 0)),
         0
       )::numeric AS remaining_qty_total
     FROM public.odg_tms_detail_item
     WHERE bill_no = $1
-      AND doc_no = (
-        SELECT d.doc_no FROM public.odg_tms_detail d
-        WHERE d.bill_no = $1 AND ${getFixedYearSqlFilter("d.doc_date")}
-        ORDER BY (CASE WHEN COALESCE(d.status, 0) NOT IN (1, 2) THEN 0 ELSE 1 END),
-                 d.create_date_time_now DESC NULLS LAST
-        LIMIT 1
-      )`,
-    [billNo]
+      AND doc_no = ${docScope}`,
+    docNo ? [billNo, docNo] : [billNo]
   );
 }
 
@@ -461,10 +476,11 @@ async function getBillDeliveryItems(params, client) {
       i.bill_no,
       i.item_code,
       MAX(i.item_name) AS item_name,
-      GREATEST(SUM(COALESCE(i.selected_qty, 0))::numeric - SUM(COALESCE(i.delivered_qty, 0))::numeric, 0)::numeric AS qty,
+      GREATEST(SUM(COALESCE(i.selected_qty, 0))::numeric - SUM(COALESCE(i.delivered_qty, 0))::numeric - SUM(COALESCE(i.returned_qty, 0))::numeric, 0)::numeric AS qty,
       SUM(COALESCE(i.selected_qty, 0))::numeric AS selected_qty,
       SUM(COALESCE(i.delivered_qty, 0))::numeric AS delivered_qty,
-      GREATEST(SUM(COALESCE(i.selected_qty, 0))::numeric - SUM(COALESCE(i.delivered_qty, 0))::numeric, 0)::numeric AS remaining_qty,
+      SUM(COALESCE(i.returned_qty, 0))::numeric AS returned_qty,
+      GREATEST(SUM(COALESCE(i.selected_qty, 0))::numeric - SUM(COALESCE(i.delivered_qty, 0))::numeric - SUM(COALESCE(i.returned_qty, 0))::numeric, 0)::numeric AS remaining_qty,
       MAX(i.unit_code) AS unit_code,
       COALESCE(MAX(w.name_1), '') AS wh_code
     FROM public.odg_tms_detail_item i
@@ -497,11 +513,12 @@ async function getBillPhaseSummary(docNo, client) {
         WHERE COALESCE(delivered_qty, 0)::numeric > 0
       )::int AS delivered_item_count,
       COUNT(*) FILTER (
-        WHERE GREATEST(COALESCE(selected_qty, 0)::numeric - COALESCE(delivered_qty, 0)::numeric, 0) > 0
+        WHERE GREATEST(COALESCE(selected_qty, 0)::numeric - COALESCE(delivered_qty, 0)::numeric - COALESCE(returned_qty, 0)::numeric, 0) > 0
       )::int AS remaining_item_count,
       COALESCE(SUM(COALESCE(delivered_qty, 0)::numeric), 0)::numeric AS delivered_qty_total,
+      COALESCE(SUM(COALESCE(returned_qty, 0)::numeric), 0)::numeric AS returned_qty_total,
       COALESCE(
-        SUM(GREATEST(COALESCE(selected_qty, 0)::numeric - COALESCE(delivered_qty, 0)::numeric, 0)),
+        SUM(GREATEST(COALESCE(selected_qty, 0)::numeric - COALESCE(delivered_qty, 0)::numeric - COALESCE(returned_qty, 0)::numeric, 0)),
         0
       )::numeric AS remaining_qty_total
     FROM public.odg_tms_detail_item

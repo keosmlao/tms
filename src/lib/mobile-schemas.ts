@@ -96,6 +96,20 @@ const CompleteBill = z.object({
   collected_amount: z.coerce.number().nonnegative().max(10000000000).nullish(),
   payment_method: OptionalString, // cash | transfer | none
 });
+const ReturnBill = z.object({
+  action: z.literal("return_bill"),
+  bill_no: NonEmptyString,
+  // Per-item qty to send back to the warehouse. Empty → return everything
+  // still owed on the bill (selected − delivered − already-returned).
+  items: z.array(z.record(z.string(), z.unknown())).default([]),
+  comment: OptionalString,
+  lat: LatLng,
+  lng: LatLng,
+  lat_end: LatLng,
+  lng_end: LatLng,
+  // Optional standardized reason for why the goods came back.
+  reason_code: OptionalString,
+});
 const CancelBill = z.object({
   action: z.literal("cancel_bill"),
   bill_no: NonEmptyString,
@@ -190,6 +204,7 @@ export const JobActionSchema = z.discriminatedUnion("action", [
   StartDispatch,
   CheckinBill,
   CompleteBill,
+  ReturnBill,
   CancelBill,
   RevertCompleteBill,
   EditCompleteBill,

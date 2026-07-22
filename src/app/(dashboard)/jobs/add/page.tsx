@@ -27,6 +27,7 @@ import {
 import { FIXED_YEAR_END, FIXED_YEAR_START, getFixedTodayDate } from "@/lib/fixed-year";
 import { Actions } from "@/lib/api";
 import { useSession } from "@/providers/session-provider";
+import SplitBillByBranch from "@/components/split-bill-by-branch";
 
 interface Product {
   item_code: string;
@@ -528,6 +529,8 @@ export default function AddJobClient({
     return {};
   });
   const [warehouseItemsByNo, setWarehouseItemsByNo] = useState<Record<string, WarehouseItem[]>>({});
+  // Bill currently open in the "ຈັດຖ້ຽວທີ່ເຫຼືອຕາມສາຂາ" split dialog.
+  const [splitBillNo, setSplitBillNo] = useState<string | null>(null);
   const [loadingBillNo, setLoadingBillNo] = useState<string | null>(null);
   const [expandedInJob, setExpandedInJob] = useState<string | null>(null);
   const [qtyDrafts, setQtyDrafts] = useState<Record<string, string>>({});
@@ -1359,6 +1362,7 @@ export default function AddJobClient({
                     onSetPickupCode={(code) => setBillPickupCode(billNo, code)}
                     onSetDeliveryCondition={(code) => setBillDeliveryCondition(billNo, code)}
                     onSelectByWarehouse={(whCode) => selectItemsByWarehouse(billNo, whCode)}
+                    onSplitByBranch={() => setSplitBillNo(billNo)}
                     qtyDrafts={qtyDrafts}
                     setQtyDrafts={setQtyDrafts}
                     commitItemQty={commitItemQty}
@@ -1369,6 +1373,13 @@ export default function AddJobClient({
           </KanbanColumn>
         </div>
       </div>
+
+      {splitBillNo && (
+        <SplitBillByBranch
+          billNo={splitBillNo}
+          onClose={() => setSplitBillNo(null)}
+        />
+      )}
     </div>
   );
 }
@@ -1544,6 +1555,7 @@ function InJobCard({
   onSetPickupCode,
   onSetDeliveryCondition,
   onSelectByWarehouse,
+  onSplitByBranch,
   qtyDrafts,
   setQtyDrafts,
   commitItemQty,
@@ -1567,6 +1579,7 @@ function InJobCard({
   onSetPickupCode: (code: string | null) => void;
   onSetDeliveryCondition: (code: string) => void;
   onSelectByWarehouse: (whCode: string) => void;
+  onSplitByBranch: () => void;
   qtyDrafts: Record<string, string>;
   setQtyDrafts: React.Dispatch<React.SetStateAction<Record<string, string>>>;
   commitItemQty: (billNo: string, itemCode: string, maxQty: number) => void;
@@ -1767,6 +1780,16 @@ function InJobCard({
                         </button>
                       ))}
                     </div>
+                    {/* Fan the whole bill out to a queue per branch in one step
+                        (each warehouse's items → its delivery branch). */}
+                    <button
+                      type="button"
+                      onClick={onSplitByBranch}
+                      className="mt-2 inline-flex items-center gap-1 rounded border border-emerald-300 bg-emerald-50 px-2 py-1 text-[10px] font-bold text-emerald-800 transition-colors hover:bg-emerald-100 active:scale-95 dark:border-emerald-800 dark:bg-emerald-950/30 dark:text-emerald-300 dark:hover:bg-emerald-950/50"
+                      title="ແຍກບິນນີ້ໄປແຕ່ລະສາຂາ ແລ້ວຈັດຄິວຈັດຖ້ຽວອັດຕະໂນມັດ"
+                    >
+                      ⇄ ຈັດຖ້ຽວທີ່ເຫຼືອຕາມສາຂາ
+                    </button>
                   </div>
                 )}
                 {products.map((p) => {

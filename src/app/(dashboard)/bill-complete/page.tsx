@@ -107,6 +107,7 @@ export interface CompletedBillDetail {
   partial_delivery?: boolean;
   selected_qty_total?: number | string;
   delivered_qty_total?: number | string;
+  returned_qty_total?: number | string;
   remaining_qty_total?: number | string;
   remaining_item_count?: number | string;
   url_img?: string;
@@ -752,6 +753,17 @@ export default function BillCompleteClient({
                                                   <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-semibold ${getBillPhaseStyle(detail.phase)}`}>
                                                     {detail.bill_status}
                                                   </span>
+                                                  {(toNumber(detail.returned_qty_total) > 0 ||
+                                                    toNumber(detail.remaining_qty_total) > 0) && (
+                                                    <p className="text-[10px] text-slate-500">
+                                                      ສົ່ງ {toNumber(detail.delivered_qty_total)}
+                                                      {toNumber(detail.returned_qty_total) > 0 &&
+                                                        ` · ຄືນສາງ ${toNumber(detail.returned_qty_total)}`}
+                                                      {toNumber(detail.remaining_qty_total) > 0 &&
+                                                        ` · ຄ້າງ ${toNumber(detail.remaining_qty_total)}`}
+                                                      {` / ${toNumber(detail.selected_qty_total)}`}
+                                                    </p>
+                                                  )}
                                                   {detail.remark && (
                                                     <p className="text-[10px] text-rose-500">{detail.remark}</p>
                                                   )}

@@ -14,6 +14,7 @@ const {
   getRemainingBillProducts,
   getRemainingSummaryMap,
   getBillItemsByWarehouse,
+  getBillRemainingItemsByWarehouse,
 } = require("./helpers");
 
 // Only surface bills that the department head has scheduled — i.e. both
@@ -129,14 +130,42 @@ async function getServiceBillProducts(billNo) {
     .filter((row) => row.qty > 0);
 }
 
+// Batched summary for service bills — same math as getServiceBillProducts
+// (a service bill has exactly ONE item line whose item_code IS the bill code;
+// only qty locked by an in-flight job is unavailable), but 2 queries for the
+// whole set instead of 2 per bill (the per-bill loop was an N+1 measured at
+// ~0.9s for 20 service bills on bills-pending).
 async function getServiceSummaryMap(billNos) {
   if (!Array.isArray(billNos) || billNos.length === 0) return new Map();
+  await ensureTmsDetailItemTable();
   const result = new Map(billNos.map((billNo) => [billNo, { remaining_count: 0, remaining_qty_total: 0 }]));
-  for (const billNo of billNos) {
-    const products = await getServiceBillProducts(billNo);
-    result.set(billNo, {
-      remaining_count: products.length,
-      remaining_qty_total: products.reduce((sum, product) => sum + Number(product.qty || 0), 0),
+  const [totalRows, usageRows] = await Promise.all([
+    queryB(
+      `SELECT d.code AS bill_no, COUNT(*)::numeric AS total_qty
+       FROM public.tb_product d
+       WHERE d.code = ANY($1::varchar[])
+       GROUP BY d.code`,
+      [billNos]
+    ),
+    query(
+      `SELECT item.bill_no,
+              COALESCE(SUM(item.selected_qty), 0)::numeric AS locked_qty
+       FROM public.odg_tms_detail_item item
+       INNER JOIN public.odg_tms_detail det
+         ON det.bill_no = item.bill_no AND det.doc_no = item.doc_no
+       WHERE item.bill_no = ANY($1::varchar[])
+         AND item.item_code = item.bill_no
+         AND COALESCE(det.status, 0) NOT IN (1, 2)
+       GROUP BY item.bill_no`,
+      [billNos]
+    ),
+  ]);
+  const locked = new Map(usageRows.map((row) => [row.bill_no, Number(row.locked_qty ?? 0)]));
+  for (const row of totalRows) {
+    const qty = Math.max(Number(row.total_qty ?? 0) - (locked.get(row.bill_no) ?? 0), 0);
+    result.set(row.bill_no, {
+      remaining_count: qty > 0 ? 1 : 0,
+      remaining_qty_total: qty,
     });
   }
   return result;
@@ -180,15 +209,47 @@ async function getCustomBillProducts(billNo) {
     .filter((row) => row.qty > 0);
 }
 
+// Batched summary for custom bills — same math as getCustomBillProducts
+// but one items query + one usage query for the whole set (no N+1).
 async function getCustomSummaryMap(billNos) {
   if (!Array.isArray(billNos) || billNos.length === 0) return new Map();
+  await ensurePendingBillSchema();
+  await ensureTmsDetailItemTable();
   const result = new Map(billNos.map((billNo) => [billNo, { remaining_count: 0, remaining_qty_total: 0 }]));
-  for (const billNo of billNos) {
-    const products = await getCustomBillProducts(billNo);
-    result.set(billNo, {
-      remaining_count: products.length,
-      remaining_qty_total: products.reduce((sum, product) => sum + Number(product.qty || 0), 0),
+  const [billRows, usageRows] = await Promise.all([
+    query(
+      `SELECT bill_no, items FROM public.odg_tms_custom_bill WHERE bill_no = ANY($1::varchar[])`,
+      [billNos]
+    ),
+    query(
+      `SELECT item.bill_no, item.item_code,
+              COALESCE(SUM(item.selected_qty), 0)::numeric AS used_qty
+       FROM public.odg_tms_detail_item item
+       INNER JOIN public.odg_tms_detail det
+         ON det.bill_no = item.bill_no AND det.doc_no = item.doc_no
+       WHERE item.bill_no = ANY($1::varchar[])
+         AND COALESCE(det.status, 0) <> 2
+       GROUP BY item.bill_no, item.item_code`,
+      [billNos]
+    ),
+  ]);
+  const usage = new Map(usageRows.map((row) => [`${row.bill_no}:${row.item_code}`, Number(row.used_qty ?? 0)]));
+  for (const row of billRows) {
+    const items = Array.isArray(row.items) ? row.items : [];
+    let count = 0;
+    let qtyTotal = 0;
+    items.forEach((item, index) => {
+      const itemCode = String(item?.item_code ?? "").trim() || `C${index + 1}`;
+      const qty = Math.max(
+        Number(item?.qty ?? 0) - (usage.get(`${row.bill_no}:${itemCode}`) ?? 0),
+        0
+      );
+      if (qty > 0) {
+        count += 1;
+        qtyTotal += qty;
+      }
     });
+    result.set(row.bill_no, { remaining_count: count, remaining_qty_total: qtyTotal });
   }
   return result;
 }
@@ -250,6 +311,137 @@ async function createCustomPendingBill({
     userCode,
   });
   return { success: true, bill_no: inserted.bill_no };
+}
+
+// "ຈັດຖ້ຽວທີ່ເຫຼືອຕາມສາຂາ" — split ONE multi-warehouse ERP sale bill into a
+// separate delivery task per branch. Each branch entry becomes a custom sub-bill
+// (odg_tms_custom_bill, parent_bill_no = the original) carrying that branch's
+// warehouse items, scheduled onto that branch's pending queue. The original ERP
+// bill is left untouched (decision 2B) — the sub-bills are additive delivery
+// legs. Custom bills only surface once scheduled, so a scheduled_date +
+// delivery_round_code is required per branch (decision 3B).
+//
+//   branches: [{
+//     transport_code,          // delivery branch (transport_type 02-xxxx, not 02-0004)
+//     scheduled_date,          // YYYY-MM-DD
+//     delivery_round_code,     // required
+//     delivery_route_code?,    // optional
+//     wh_label?,               // "ສາງຂົວຫຼວງ 3" — display only, folded into the remark
+//     items: [{ item_code, item_name, unit_code, qty }]
+//   }]
+async function dispatchBillRemainingByBranch(session, billNo, branches) {
+  await ensurePendingBillSchema();
+  const bill = String(billNo ?? "").trim();
+  if (!bill) throw new Error("ຕ້ອງລະບຸ bill_no");
+  if (!Array.isArray(branches) || branches.length === 0) {
+    throw new Error("ຕ້ອງເລືອກຢ່າງໜ້ອຍ 1 ສາຂາ");
+  }
+
+  // Fold the incoming entries by branch so two warehouses handed to the same
+  // branch become one sub-bill (items summed per item_code).
+  const byBranch = new Map();
+  for (const entry of branches) {
+    const branch = String(entry?.transport_code ?? "").trim();
+    if (!branch) throw new Error("ກະລຸນາເລືອກສາຂາໃຫ້ທຸກກຸ່ມສາງ");
+    const date = String(entry?.scheduled_date ?? "").trim();
+    const round = String(entry?.delivery_round_code ?? "").trim();
+    if (!date) throw new Error(`ກະລຸນາເລືອກວັນຈັດສົ່ງໃຫ້ສາຂາ ${branch}`);
+    if (!round) throw new Error(`ກະລຸນາເລືອກຮອບຈັດສົ່ງໃຫ້ສາຂາ ${branch}`);
+    const items = (Array.isArray(entry?.items) ? entry.items : [])
+      .map((item) => ({
+        item_code: String(item?.item_code ?? "").trim(),
+        item_name: String(item?.item_name ?? "").trim(),
+        unit_code: String(item?.unit_code ?? "").trim() || "ອັນ",
+        qty: Number(item?.qty ?? 0),
+      }))
+      .filter((item) => item.item_code && Number.isFinite(item.qty) && item.qty > 0);
+    if (items.length === 0) continue;
+    if (!byBranch.has(branch)) {
+      byBranch.set(branch, {
+        transport_code: branch,
+        scheduled_date: coerceDateToFixedYear(date),
+        delivery_round_code: round,
+        delivery_route_code: String(entry?.delivery_route_code ?? "").trim() || null,
+        whLabels: new Set(),
+        items: [],
+      });
+    }
+    const group = byBranch.get(branch);
+    if (entry?.wh_label) group.whLabels.add(String(entry.wh_label).trim());
+    for (const item of items) {
+      const existing = group.items.find((row) => row.item_code === item.item_code);
+      if (existing) existing.qty += item.qty;
+      else group.items.push({ ...item });
+    }
+  }
+  if (byBranch.size === 0) throw new Error("ບໍ່ມີລາຍການທີ່ຈະຈັດ");
+
+  // Every chosen branch must be a real internal delivery branch.
+  const branchCodes = [...byBranch.keys()];
+  const validRows = await query(
+    `SELECT code, name_1 FROM public.transport_type
+     WHERE code = ANY($1::varchar[]) AND code LIKE '02-%' AND code <> '02-0004'`,
+    [branchCodes]
+  );
+  const branchNameByCode = new Map(validRows.map((row) => [row.code, row.name_1]));
+  for (const code of branchCodes) {
+    if (!branchNameByCode.has(code)) throw new Error(`ສາຂາປາຍທາງ ${code} ບໍ່ຖືກຕ້ອງ`);
+  }
+
+  // Customer name / phone come from the ERP bill; custom sub-bills carry no
+  // cust_code link (decision 1A), so we snapshot the display fields here.
+  const parent = await queryOne(
+    `SELECT COALESCE(NULLIF(TRIM(c.name_1), ''), s.cust_code, '') AS cust_name,
+            COALESCE(NULLIF(TRIM(c.telephone), ''), '') AS telephone
+     FROM public.ic_trans_shipment s
+     LEFT JOIN ar_customer c ON c.code = s.cust_code
+     WHERE s.doc_no = $1
+     LIMIT 1`,
+    [bill]
+  );
+  const custName = (parent?.cust_name || bill).trim() || bill;
+  const telephone = (parent?.telephone || "").trim() || null;
+  const userCode = session?.usercode ?? null;
+  const { upsertPendingBillSchedule } = require("./pending-bill");
+
+  const created = [];
+  for (const [branch, group] of byBranch) {
+    const subBillNo = `${bill}#${branch}`;
+    // Idempotency (decision C): never re-split the same branch — the sub-bill_no
+    // is deterministic, so a prior split would collide on the PK anyway.
+    const existing = await queryOne(
+      `SELECT bill_no FROM public.odg_tms_custom_bill WHERE bill_no = $1`,
+      [subBillNo]
+    );
+    if (existing) {
+      throw new Error(`ບິນ ${bill} ຖືກແຍກໄປສາຂາ ${branchNameByCode.get(branch)} ແລ້ວ`);
+    }
+    const whLabel = [...group.whLabels].filter(Boolean).join(", ");
+    const remark = `ແຍກຈາກບິນ ${bill}${whLabel ? ` · ${whLabel}` : ""}`;
+    await queryOne(
+      `INSERT INTO public.odg_tms_custom_bill (bill_no, cust_name, telephone, items, remark, created_by, parent_bill_no)
+       VALUES ($1, $2, $3, $4::jsonb, $5, $6, $7)
+       RETURNING bill_no`,
+      [subBillNo, custName, telephone, JSON.stringify(group.items), remark, userCode, bill]
+    );
+    await upsertPendingBillSchedule({
+      billNo: subBillNo,
+      scheduledDate: group.scheduled_date,
+      remark,
+      actionStatus: "contacted_ready",
+      deliveryRoundCode: group.delivery_round_code,
+      deliveryRouteCode: group.delivery_route_code,
+      transportCode: branch,
+      userCode,
+    });
+    created.push({
+      bill_no: subBillNo,
+      transport_code: branch,
+      transport_name: branchNameByCode.get(branch),
+      item_count: group.items.length,
+    });
+  }
+  return { success: true, parent_bill_no: bill, created };
 }
 
 async function getAvailableBillsWithProducts(session) {
@@ -1294,9 +1486,12 @@ async function getBillsWaitingSentDetails(docNo) {
         bill_no,
         COALESCE(SUM(COALESCE(selected_qty, 0)::numeric), 0)::numeric AS selected_qty_total,
         COALESCE(SUM(COALESCE(delivered_qty, 0)::numeric), 0)::numeric AS delivered_qty_total,
-        COALESCE(SUM(GREATEST(COALESCE(selected_qty, 0)::numeric - COALESCE(delivered_qty, 0)::numeric, 0)), 0)::numeric AS remaining_qty_total,
+        COALESCE(SUM(COALESCE(returned_qty, 0)::numeric), 0)::numeric AS returned_qty_total,
+        -- "remaining" nets out both delivered AND returned-to-warehouse qty:
+        -- goods sent back to the warehouse are no longer owed to the customer.
+        COALESCE(SUM(GREATEST(COALESCE(selected_qty, 0)::numeric - COALESCE(delivered_qty, 0)::numeric - COALESCE(returned_qty, 0)::numeric, 0)), 0)::numeric AS remaining_qty_total,
         COUNT(*) FILTER (
-          WHERE GREATEST(COALESCE(selected_qty, 0)::numeric - COALESCE(delivered_qty, 0)::numeric, 0) > 0
+          WHERE GREATEST(COALESCE(selected_qty, 0)::numeric - COALESCE(delivered_qty, 0)::numeric - COALESCE(returned_qty, 0)::numeric, 0) > 0
         )::int AS remaining_item_count
       FROM public.odg_tms_detail_item
       WHERE doc_no = $1
@@ -1346,6 +1541,7 @@ async function getBillsWaitingSentDetails(docNo) {
       END as distance_km,
       COALESCE(it.selected_qty_total, 0)::numeric as selected_qty_total,
       COALESCE(it.delivered_qty_total, 0)::numeric as delivered_qty_total,
+      COALESCE(it.returned_qty_total, 0)::numeric as returned_qty_total,
       COALESCE(it.remaining_qty_total, 0)::numeric as remaining_qty_total,
       COALESCE(it.remaining_item_count, 0)::int as remaining_item_count,
       CASE
@@ -1357,6 +1553,10 @@ async function getBillsWaitingSentDetails(docNo) {
         WHEN d.sent_start IS NOT NULL AND d.sent_end IS NULL THEN 'ກຳລັງຈັດສົ່ງ'
         WHEN COALESCE(d.status, 0) = 1 AND d.forward_transport_code IS NOT NULL THEN 'ສົ່ງຕໍ່ສາຂາແລ້ວ'
         WHEN COALESCE(d.status, 0) = 1 AND COALESCE(it.remaining_qty_total, 0) > 0 THEN 'ທະຍອຍສົ່ງ'
+        -- Returned to warehouse (ຄືນສາງ): closed with nothing delivered vs some
+        -- delivered + the rest sent back.
+        WHEN COALESCE(d.status, 0) = 1 AND COALESCE(it.returned_qty_total, 0) > 0 AND COALESCE(it.delivered_qty_total, 0) <= 0 THEN 'ຄືນສາງ'
+        WHEN COALESCE(d.status, 0) = 1 AND COALESCE(it.returned_qty_total, 0) > 0 THEN 'ສຳເລັດ (ຄືນສາງບາງສ່ວນ)'
         WHEN COALESCE(d.status, 0) = 1 THEN 'ຄົບຈຳນວນ'
         WHEN COALESCE(d.status, 0) = 2 THEN 'ຍົກເລີກຈັດສົ່ງ'
         ELSE 'ລໍຖ້າຈັດສົ່ງ'
@@ -1568,7 +1768,8 @@ async function getBillsPartialList(session, fromDate, toDate) {
     `WITH partial_bills AS (
       SELECT i.bill_no, i.doc_no,
         SUM(COALESCE(i.selected_qty, 0))::numeric AS selected_total,
-        SUM(COALESCE(i.delivered_qty, 0))::numeric AS delivered_total
+        SUM(COALESCE(i.delivered_qty, 0))::numeric AS delivered_total,
+        SUM(COALESCE(i.returned_qty, 0))::numeric AS returned_total
       FROM public.odg_tms_detail_item i
       INNER JOIN public.odg_tms_detail d
         ON d.bill_no = i.bill_no AND d.doc_no = i.doc_no
@@ -1576,7 +1777,10 @@ async function getBillsPartialList(session, fromDate, toDate) {
         AND d.doc_date BETWEEN $1 AND $2
         AND ${getFixedYearSqlFilter("d.doc_date")}
       GROUP BY i.bill_no, i.doc_no
-      HAVING SUM(COALESCE(i.delivered_qty, 0)) < SUM(COALESCE(i.selected_qty, 0))
+      -- Genuinely still short: delivered + returned-to-warehouse < ordered.
+      -- A bill whose shortfall was fully sent back (ຄືນສາງ) is settled, not
+      -- an outstanding partial, so it drops out of this list.
+      HAVING SUM(COALESCE(i.delivered_qty, 0)) + SUM(COALESCE(i.returned_qty, 0)) < SUM(COALESCE(i.selected_qty, 0))
     )
     SELECT
       to_char(d.doc_date,'DD-MM-YYYY') as doc_date,
@@ -1592,7 +1796,8 @@ async function getBillsPartialList(session, fromDate, toDate) {
       COALESCE(d.remark, '') as remark,
       pb.selected_total::float as selected_total,
       pb.delivered_total::float as delivered_total,
-      (pb.selected_total - pb.delivered_total)::float as remaining_total
+      pb.returned_total::float as returned_total,
+      (pb.selected_total - pb.delivered_total - pb.returned_total)::float as remaining_total
     FROM partial_bills pb
     INNER JOIN public.odg_tms_detail d
       ON d.bill_no = pb.bill_no AND d.doc_no = pb.doc_no
@@ -1663,9 +1868,11 @@ module.exports = {
   getAvailableBills,
   getAvailableBillProducts,
   getBillItemsByWarehouse,
+  getBillRemainingItemsByWarehouse,
   searchManualPendingBills,
   addManualPendingBill,
   createCustomPendingBill,
+  dispatchBillRemainingByBranch,
   removeManualPendingBill,
   getBillsPending,
   getManualPendingRowsForPending,

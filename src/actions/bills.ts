@@ -1,14 +1,16 @@
 "use server";
 
-import { requireSession } from "./_helpers";
+import { requireSession, requireDispatchAccess } from "./_helpers";
 import {
   getAvailableBills as svcGetAvailableBills,
   getAvailableBillsWithProducts as svcGetAvailableBillsWithProducts,
   getAvailableBillProducts as svcGetAvailableBillProducts,
   getBillItemsByWarehouse as svcGetBillItemsByWarehouse,
+  getBillRemainingItemsByWarehouse as svcGetBillRemainingItemsByWarehouse,
   searchManualPendingBills as svcSearchManualPendingBills,
   addManualPendingBill as svcAddManualPendingBill,
   createCustomPendingBill as svcCreateCustomPendingBill,
+  dispatchBillRemainingByBranch as svcDispatchBillRemainingByBranch,
   removeManualPendingBill as svcRemoveManualPendingBill,
   getBillsPending as svcGetBillsPending,
   updateBillTransport as svcUpdateBillTransport,
@@ -54,6 +56,14 @@ export async function getAvailableBillProducts(docNo: string) {
 export async function getBillItemsByWarehouse(docNo: string) {
   await requireSession();
   return svcGetBillItemsByWarehouse(docNo);
+}
+
+// Remaining-to-dispatch items for one bill grouped by source warehouse, each
+// with its suggested delivery branch. Feeds the "ຈັດຖ້ຽວທີ່ເຫຼືອຕາມສາຂາ" tool that
+// splits a multi-warehouse bill into one trip per branch.
+export async function getBillRemainingItemsByWarehouse(billNo: string) {
+  await requireSession();
+  return svcGetBillRemainingItemsByWarehouse(billNo);
 }
 
 export async function searchManualPendingBills(q: string) {
@@ -140,6 +150,36 @@ export async function createCustomPendingBill(input: {
       delivery_round_code: input.delivery_round_code,
       delivery_route_code: input.delivery_route_code ?? null,
       transport_code: input.transport_code ?? null,
+    },
+  });
+  return result;
+}
+
+// Split a multi-warehouse ERP bill into one custom sub-bill per delivery branch,
+// each scheduled onto that branch's pending queue. Dispatch-staff only.
+export async function dispatchBillRemainingByBranch(input: {
+  bill_no: string;
+  branches: Array<{
+    transport_code: string;
+    scheduled_date: string;
+    delivery_round_code: string;
+    delivery_route_code?: string | null;
+    wh_label?: string | null;
+    items: Array<{ item_code: string; item_name: string; unit_code?: string | null; qty: number }>;
+  }>;
+}) {
+  const s = await requireDispatchAccess();
+  const userCode =
+    (s as { code?: string; usercode?: string })?.code ?? (s as { usercode?: string })?.usercode;
+  const result = await svcDispatchBillRemainingByBranch(s, input.bill_no, input.branches);
+  const { recordAudit } = await import("@/queries/audit-log.js");
+  await recordAudit({
+    action: "pending_bill.split_by_branch",
+    entityType: "bill",
+    entityId: input.bill_no,
+    userCode,
+    changes: {
+      created: (result as { created: unknown }).created,
     },
   });
   return result;

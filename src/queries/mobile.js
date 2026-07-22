@@ -1221,17 +1221,25 @@ async function mobileJobAction(body) {
           );
         }
 
+        // Partial delivery (ຈັດສົ່ງຫຼາຍຄັ້ງ/ບິນດຽວ): only close the bill (status=1)
+        // once nothing is left owed to the customer. While qty remains, we set
+        // sent_start so the bill sits in the "inprogress" phase — the driver can
+        // tap "ສຳເລັດ" again for the next batch, or "ຄືນສາງ" for the rest.
+        const summaryAfterDeliver = await getBillDeliveryItemSummary(billNo, client, currentDocNo);
+        const fullyDelivered = Number(summaryAfterDeliver?.remaining_qty_total ?? 0) <= 0;
+
         await client.query(
           `UPDATE public.odg_tms_detail
            SET sent_start = COALESCE(sent_start, LOCALTIMESTAMP(0)),
-               status = 1, sent_end = LOCALTIMESTAMP(0),
+               status = CASE WHEN $10 THEN 1 ELSE COALESCE(status, 0) END,
+               sent_end = CASE WHEN $10 THEN LOCALTIMESTAMP(0) ELSE sent_end END,
                lat = COALESCE($2, lat), lng = COALESCE($3, lng),
                lat_end = COALESCE($4, lat_end), lng_end = COALESCE($5, lng_end),
                url_img = COALESCE($6, url_img),
                sight_img = COALESCE($7, sight_img),
                remark = COALESCE($8, remark)
            WHERE bill_no = $1 AND doc_no = $9 AND ${getFixedYearSqlFilter("doc_date")}`,
-          [billNo, lat, lng, latEnd, lngEnd, deliveryImage, signatureImage, comment, currentDocNo]
+          [billNo, lat, lng, latEnd, lngEnd, deliveryImage, signatureImage, comment, currentDocNo, fullyDelivered]
         );
 
         await saveDeliveryImages(billNo, deliveryImages, client);
@@ -1279,21 +1287,160 @@ async function mobileJobAction(body) {
           );
         }
 
-        const summary = await getBillDeliveryItemSummary(billNo, client);
-        const remainingItems = Number(summary?.remaining_item_count ?? 0);
-        const remainingQty = Number(summary?.remaining_qty_total ?? 0);
+        const remainingItems = Number(summaryAfterDeliver?.remaining_item_count ?? 0);
+        const remainingQty = Number(summaryAfterDeliver?.remaining_qty_total ?? 0);
         const openBillCount = await getOpenBillCount(currentDocNo, client);
 
         await client.query("COMMIT");
         if (dispatchAutoStarted) void notifyJobDispatchStarted(currentDocNo);
-        void notifyBillStatus(billNo, "✅ ຈັດສົ່ງສຳເລັດ");
+        void notifyBillStatus(
+          billNo,
+          fullyDelivered ? "✅ ຈັດສົ່ງສຳເລັດ" : "📦 ຈັດສົ່ງບາງສ່ວນ"
+        );
+        return {
+          success: true,
+          doc_no: currentDocNo,
+          bill_no: billNo,
+          // finished = the bill is now fully settled (nothing left to deliver).
+          // On a partial drop it stays open so the driver can deliver the rest
+          // or send it back to the warehouse (ຄືນສາງ).
+          finished: fullyDelivered,
+          remaining_item_count: remainingItems,
+          remaining_qty_total: remainingQty,
+          open_bill_count: openBillCount,
+        };
+      }
+
+      case "return_bill": {
+        // ຄືນສາງ — the driver could not deliver (part of) the bill and is
+        // sending the undelivered goods back to the warehouse. Records
+        // returned_qty per item for the leftover qty, then CLOSES the bill
+        // (status=1). Any qty already delivered on earlier partial drops stays
+        // recorded; only the remainder is marked returned.
+        if (!billNo) throw new Error("bill_no is required");
+        await ensureBillDeliveryItems(billNo, client);
+
+        const billRow = await client.query(
+          `SELECT d.doc_no, t.approve_status, t.job_status,
+                  COALESCE(d.status, 0) AS status
+           FROM public.odg_tms_detail d
+           INNER JOIN odg_tms t ON t.doc_no = d.doc_no
+           WHERE d.bill_no = $1
+             AND t.driver = $2
+             AND ${getFixedYearSqlFilter("d.doc_date")}
+           ORDER BY (CASE WHEN COALESCE(d.status, 0) NOT IN (1, 2) THEN 0 ELSE 1 END),
+                    d.create_date_time_now DESC NULLS LAST
+           LIMIT 1`,
+          [billNo, driverId]
+        );
+        const currentBill = billRow.rows[0];
+        const currentDocNo = currentBill?.doc_no;
+        if (!currentDocNo) throw new Error("Bill was not found");
+        if (Number(currentBill.status ?? 0) === 1) {
+          const openBillCount = await getOpenBillCount(currentDocNo, client);
+          await client.query("COMMIT");
+          return {
+            success: true,
+            doc_no: currentDocNo,
+            bill_no: billNo,
+            finished: true,
+            already_completed: true,
+            open_bill_count: openBillCount,
+          };
+        }
+        if (Number(currentBill.approve_status ?? 0) !== 1) throw new Error("ຖ້ຽວນີ້ຍັງບໍ່ຖືກອະນຸມັດ");
+        if (Number(currentBill.job_status ?? 0) >= 3) throw new Error("ຖ້ຽວນີ້ປິດແລ້ວ ບໍ່ສາມາດຄືນສາງ");
+
+        const returnItemRows = await client.query(
+          `SELECT item_code, selected_qty, delivered_qty, returned_qty
+           FROM public.odg_tms_detail_item
+           WHERE bill_no = $1 AND doc_no = $2
+           ORDER BY item_code`,
+          [billNo, currentDocNo]
+        );
+        if (returnItemRows.rows.length === 0) {
+          throw new Error("No delivery items found for this bill");
+        }
+
+        // Empty items → return everything still owed on each line.
+        const requestedReturns = normalizeItems(body.items);
+        const currentReturnItems = new Map(
+          returnItemRows.rows.map((row) => [
+            row.item_code,
+            {
+              selectedQty: Number(row.selected_qty ?? 0),
+              deliveredQty: Number(row.delivered_qty ?? 0),
+              returnedQty: Number(row.returned_qty ?? 0),
+            },
+          ])
+        );
+        const itemsToReturn =
+          requestedReturns.length > 0
+            ? requestedReturns
+            : returnItemRows.rows
+                .map((row) => ({
+                  item_code: row.item_code,
+                  qty:
+                    Number(row.selected_qty ?? 0) -
+                    Number(row.delivered_qty ?? 0) -
+                    Number(row.returned_qty ?? 0),
+                }))
+                .filter((row) => row.qty > 0);
+
+        for (const item of itemsToReturn) {
+          const currentItem = currentReturnItems.get(item.item_code);
+          if (!currentItem) throw new Error(`Item ${item.item_code} was not found`);
+          const remainingQty =
+            currentItem.selectedQty - currentItem.deliveredQty - currentItem.returnedQty;
+          const returnQty = Math.min(item.qty, Math.max(remainingQty, 0));
+          if (returnQty <= 0) continue;
+          await client.query(
+            `UPDATE public.odg_tms_detail_item
+             SET returned_qty = COALESCE(returned_qty, 0)::numeric + $2::numeric
+             WHERE bill_no = $1 AND item_code = $3 AND doc_no = $4`,
+            [billNo, returnQty, item.item_code, currentDocNo]
+          );
+        }
+
+        const returnReasonCode = asNullableText(body.reason_code ?? body.cancel_reason_code);
+        await client.query(
+          `UPDATE public.odg_tms_detail
+           SET sent_start = COALESCE(sent_start, LOCALTIMESTAMP(0)),
+               status = 1, sent_end = LOCALTIMESTAMP(0),
+               lat = COALESCE($2, lat), lng = COALESCE($3, lng),
+               lat_end = COALESCE($4, lat_end), lng_end = COALESCE($5, lng_end),
+               url_img = COALESCE($6, url_img),
+               remark = COALESCE($7, remark),
+               cancel_reason_code = COALESCE($8, cancel_reason_code)
+           WHERE bill_no = $1 AND doc_no = $9 AND ${getFixedYearSqlFilter("doc_date")}`,
+          [billNo, lat, lng, latEnd, lngEnd, deliveryImage, comment, returnReasonCode, currentDocNo]
+        );
+
+        await saveDeliveryImages(billNo, deliveryImages, client);
+
+        // Move the trip into "dispatching" if the driver jumped straight to a
+        // return without pressing ເລີ່ມຈັດສົ່ງ — same rule as complete_bill.
+        await client.query(
+          `UPDATE odg_tms
+           SET job_status = CASE WHEN COALESCE(job_status, 0) < 2 THEN 2 ELSE job_status END,
+               dispatch_started_at = COALESCE(dispatch_started_at, LOCALTIMESTAMP(0))
+           WHERE doc_no = $1 AND ${getFixedYearSqlFilter("doc_date")}`,
+          [currentDocNo]
+        );
+
+        const returnSummary = await getBillDeliveryItemSummary(billNo, client, currentDocNo);
+        const openBillCount = await getOpenBillCount(currentDocNo, client);
+
+        await client.query("COMMIT");
+        void notifyBillStatus(billNo, "🔙 ຄືນສາງ", { note: comment ?? undefined });
         return {
           success: true,
           doc_no: currentDocNo,
           bill_no: billNo,
           finished: true,
-          remaining_item_count: remainingItems,
-          remaining_qty_total: remainingQty,
+          returned: true,
+          delivered_qty_total: Number(returnSummary?.delivered_qty_total ?? 0),
+          returned_qty_total: Number(returnSummary?.returned_qty_total ?? 0),
           open_bill_count: openBillCount,
         };
       }
@@ -1474,6 +1621,7 @@ async function mobileJobAction(body) {
                url_img = NULL,
                sight_img = NULL,
                remark = NULL,
+               cancel_reason_code = NULL,
                collected_amount = NULL,
                payment_method = NULL,
                collected_at = NULL
@@ -1483,7 +1631,7 @@ async function mobileJobAction(body) {
 
         await client.query(
           `UPDATE public.odg_tms_detail_item
-           SET delivered_qty = 0
+           SET delivered_qty = 0, returned_qty = 0
            WHERE bill_no = $1 AND doc_no = $2`,
           [billNo, currentDocNo]
         );
@@ -1565,21 +1713,33 @@ async function mobileJobAction(body) {
           );
         }
 
-        if (comment !== null) {
-          await client.query(
-            `UPDATE public.odg_tms_detail
-             SET remark = $2
-             WHERE bill_no = $1 AND doc_no = $3 AND ${getFixedYearSqlFilter("doc_date")}`,
-            [billNo, comment, currentDocNo]
-          );
-        }
+        // Lowering delivered_qty leaves goods owed to the customer again. A bill
+        // must never sit at status=1 with qty outstanding — that is what silently
+        // re-queued it for a fresh trip. Reopen it so the driver settles the rest
+        // (deliver again, or ຄືນສາງ), and only re-close once nothing is owed.
+        const summaryAfterEdit = await getBillDeliveryItemSummary(billNo, client, currentDocNo);
+        const stillOwed = Number(summaryAfterEdit?.remaining_qty_total ?? 0) > 0;
+
+        await client.query(
+          `UPDATE public.odg_tms_detail
+           SET remark = COALESCE($2, remark),
+               status = CASE WHEN $4 THEN 0 ELSE 1 END,
+               sent_end = CASE WHEN $4 THEN NULL ELSE COALESCE(sent_end, LOCALTIMESTAMP(0)) END
+           WHERE bill_no = $1 AND doc_no = $3 AND ${getFixedYearSqlFilter("doc_date")}`,
+          [billNo, comment, currentDocNo, stillOwed]
+        );
 
         await client.query("COMMIT");
-        void notifyBillStatus(billNo, "✏️ ແກ້ໄຂການຈັດສົ່ງ");
+        void notifyBillStatus(
+          billNo,
+          stillOwed ? "✏️ ແກ້ໄຂການຈັດສົ່ງ · ຍັງມີເຄື່ອງຄ້າງ" : "✏️ ແກ້ໄຂການຈັດສົ່ງ"
+        );
         return {
           success: true,
           doc_no: currentDocNo,
           bill_no: billNo,
+          reopened: stillOwed,
+          remaining_qty_total: Number(summaryAfterEdit?.remaining_qty_total ?? 0),
         };
       }
 
@@ -1799,6 +1959,7 @@ async function mobileBills({ docNo, billNo, type, driverId, isSupervisor }) {
           delivered_item_count: Number(row.delivered_item_count ?? 0),
           remaining_item_count: Number(row.remaining_item_count ?? 0),
           delivered_qty_total: Number(row.delivered_qty_total ?? 0),
+          returned_qty_total: Number(row.returned_qty_total ?? 0),
           remaining_qty_total: Number(row.remaining_qty_total ?? 0),
         },
       ])
@@ -1893,11 +2054,15 @@ async function mobileBills({ docNo, billNo, type, driverId, isSupervisor }) {
     );
 
     return data.map((row) => {
+      // Fallback for bills with no odg_tms_detail_item rows (custom/service
+      // bills have no ic_trans_detail to seed from). count_item is a LINE
+      // count, not a quantity — never use it as a qty total.
       const summary = itemSummaryByBill.get(String(row.bill_no)) ?? {
         total_item_count: Number(row.count_item ?? 0),
         delivered_item_count: 0,
         remaining_item_count: Number(row.count_item ?? 0),
         delivered_qty_total: 0,
+        returned_qty_total: 0,
         remaining_qty_total: 0,
       };
       const status = Number(row.status ?? 0);
@@ -1909,9 +2074,19 @@ async function mobileBills({ docNo, billNo, type, driverId, isSupervisor }) {
         : row.recipt_job !== "-" ? "pickup"
         : "waiting";
 
+      // A "done" bill where some qty went back to the warehouse (ຄືນສາງ) reads
+      // differently: fully returned = "ຄືນສາງ"; part delivered + part returned =
+      // "ສຳເລັດ (ຄືນສາງບາງສ່ວນ)".
+      const doneText =
+        summary.returned_qty_total > 0 && summary.delivered_qty_total <= 0
+          ? "ຄືນສາງ"
+          : summary.returned_qty_total > 0
+          ? "ສຳເລັດ (ຄືນສາງບາງສ່ວນ)"
+          : "ຈັດສົ່ງສຳເລັດ";
+
       const status_text =
         phase === "cancel" ? "ຍົກເລີກຈັດສົ່ງ"
-        : phase === "done" ? "ຈັດສົ່ງສຳເລັດ"
+        : phase === "done" ? doneText
         : phase === "inprogress" ? "ກຳລັງຈັດສົ່ງ"
         : phase === "pickup" ? "ເບີກເຄື່ອງແລ້ວ"
         : "ລໍເບີກເຄື່ອງ";
@@ -1922,6 +2097,7 @@ async function mobileBills({ docNo, billNo, type, driverId, isSupervisor }) {
         delivered_item_count: summary.delivered_item_count,
         remaining_item_count: summary.remaining_item_count,
         delivered_qty_total: summary.delivered_qty_total,
+        returned_qty_total: summary.returned_qty_total,
         remaining_qty_total: summary.remaining_qty_total,
         phase,
         status_text,
