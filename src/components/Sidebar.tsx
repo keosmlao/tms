@@ -39,6 +39,7 @@ import {
   FaHistory,
   FaPlug,
   FaTruckLoading,
+  FaBook,
 } from "react-icons/fa";
 
 interface NavItem {
@@ -147,6 +148,14 @@ const navSections: NavSection[] = [
       { label: "ຜູ້ໃຊ້ Online", href: "/manage/presence", icon: <FaBroadcastTower size={13} /> },
       { label: "ຕັ້ງຄ່າ", href: "/manage/settings", icon: <FaCog size={13} /> },
       { label: "Audit Log", href: "/manage/audit-log", icon: <FaHistory size={13} /> },
+    ],
+  },
+  {
+    title: "ຊ່ວຍເຫຼືອ",
+    icon: <FaBook size={16} />,
+    key: "help",
+    items: [
+      { label: "ຄູ່ມືການໃຊ້ງານ", href: "/help", icon: <FaBook size={13} /> },
     ],
   },
 ];
