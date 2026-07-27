@@ -7,6 +7,17 @@ const { getFixedTodayDate, getFixedYearSqlFilter } = require("../lib/fixed-year"
 const TV_CACHE_TTL_MS = 10_000;
 const tvCache = new Map();
 
+// The same status wording the web daily report uses. Two screens in one office
+// must not name the same trip differently.
+const TRIP_STATUS_SQL = `CASE
+    WHEN COALESCE(t.approve_status,0) = 0 THEN 'ລໍຖ້າອະນຸມັດ'
+    WHEN COALESCE(t.job_status,0) = 0 THEN 'ລໍຖ້າຈັດສົ່ງ'
+    WHEN COALESCE(t.job_status,0) = 1 THEN 'ຮັບຖ້ຽວ / ເບີກເຄື່ອງ'
+    WHEN COALESCE(t.job_status,0) = 2 THEN 'ກຳລັງຈັດສົ່ງ'
+    WHEN COALESCE(t.job_status,0) = 3 THEN 'ຄົນຂັບປິດງານ'
+    ELSE 'admin ປິດຖ້ຽວ'
+  END`;
+
 // A trip that has not closed a bill in this long is drifting; the screen turns
 // it amber so the dispatcher notices without being told.
 const STALL_MINUTES = 90;
@@ -30,7 +41,7 @@ async function getTvDashboard({ date = "", branch = "" } = {}) {
   const yearFilter = getFixedYearSqlFilter("t.doc_date");
   const scope = `t.date_logistic::date = $1::date AND ${yearFilter}${branchClause}`;
 
-  const [totals, trips, notStarted, alerts, cancelled, feed, vehicles] =
+  const [totals, doneToday, trips, notStarted, alerts, cancelled, feed, vehicles, tripPoints] =
     await Promise.all([
       // ── ໜ້າ 1: ໂຕເລກໃຫຍ່ຂອງມື້ ──
       queryOne(
@@ -45,6 +56,18 @@ async function getTvDashboard({ date = "", branch = "" } = {}) {
          FROM odg_tms t
          LEFT JOIN public.odg_tms_detail d ON d.doc_no = t.doc_no
          WHERE ${scope}`,
+        params
+      ),
+
+      // ── ບິນທີ່ປິດພາຍໃນວັນນີ້ຈິງ ບໍ່ວ່າຈະເປັນຖ້ຽວຂອງວັນໃດ.
+      //    ຖ້ຽວມື້ວານທີ່ຄົນຂັບປິດບິນມື້ນີ້ ຕ້ອງນັບເປັນວຽກຂອງມື້ນີ້ ──
+      queryOne(
+        `SELECT
+           COUNT(*) FILTER (WHERE COALESCE(d.status,0) = 1)::int AS delivered,
+           COUNT(*) FILTER (WHERE COALESCE(d.status,0) = 2)::int AS cancelled
+         FROM public.odg_tms_detail d
+         JOIN odg_tms t ON t.doc_no = d.doc_no
+         WHERE d.sent_end::date = $1::date AND ${yearFilter}${branchClause}`,
         params
       ),
 
@@ -84,7 +107,8 @@ async function getTvDashboard({ date = "", branch = "" } = {}) {
                 COALESCE(NULLIF(TRIM(rt.name), ''), t.delivery_route_code::text, '') AS route,
                 COUNT(d.bill_no)::int AS bills,
                 COALESCE(t.job_status, 0)::int AS job_status,
-                COALESCE(t.approve_status, 0)::int AS approve_status
+                COALESCE(t.approve_status, 0)::int AS approve_status,
+                ${TRIP_STATUS_SQL} AS status_label
          FROM odg_tms t
          LEFT JOIN public.odg_tms_detail d ON d.doc_no = t.doc_no
          LEFT JOIN public.odg_tms_car car ON car.code::text = t.car::text
@@ -170,6 +194,34 @@ async function getTvDashboard({ date = "", branch = "" } = {}) {
          LIMIT 60`,
         []
       ),
+
+      // ── ໜ້າ 4: ຈຸດຂອງແຕ່ລະຖ້ຽວ ຈາກບິນລ່າສຸດທີ່ປິດພ້ອມພິກັດ.
+      //    ເຄື່ອງ tracker ຕິດບໍ່ຄົບທຸກຄັນ ຈຶ່ງໃຊ້ບ່ອນທີ່ຄົນຂັບກົດສົ່ງສຳເລັດ
+      //    ເປັນຫຼັກຖານວ່າລົດຢູ່ໃສ ແລະ ຄືບໜ້າໄປທາງໃດ ──
+      query(
+        `SELECT DISTINCT ON (t.doc_no)
+                t.doc_no,
+                COALESCE(NULLIF(TRIM(car.name_1), ''), t.car::text, '-') AS car,
+                COALESCE(NULLIF(TRIM(dv.name_1), ''), t.driver::text, '-') AS driver,
+                NULLIF(TRIM(d.lat), '')::numeric AS lat,
+                NULLIF(TRIM(d.lng), '')::numeric AS lng,
+                to_char(d.sent_end, 'HH24:MI') AS at,
+                EXTRACT(EPOCH FROM (NOW() - d.sent_end))/60 AS age_minutes,
+                COALESCE(NULLIF(TRIM(cu.name_1), ''), d.cust_code, '') AS cust_name,
+                COALESCE(t.job_status, 0)::int AS job_status
+         FROM public.odg_tms_detail d
+         JOIN odg_tms t ON t.doc_no = d.doc_no
+         LEFT JOIN public.odg_tms_car car ON car.code::text = t.car::text
+         LEFT JOIN public.odg_tms_driver dv ON dv.code::text = t.driver::text
+         LEFT JOIN public.ar_customer cu ON cu.code = d.cust_code
+         WHERE ${scope}
+           AND COALESCE(d.status,0) = 1
+           AND NULLIF(TRIM(d.lat), '') IS NOT NULL
+           AND NULLIF(TRIM(d.lng), '') IS NOT NULL
+           AND d.sent_end IS NOT NULL
+         ORDER BY t.doc_no, d.sent_end DESC`,
+        params
+      ),
     ]);
 
   const int = (row, key) => Number(row?.[key] ?? 0);
@@ -217,6 +269,9 @@ async function getTvDashboard({ date = "", branch = "" } = {}) {
     generated_at: new Date().toISOString(),
     totals: {
       trips: int(totals, "trips"),
+      // ນັບຈາກເວລາປິດບິນຈິງ — ວຽກທີ່ສຳເລັດ "ພາຍໃນວັນນີ້"
+      delivered_today: int(doneToday, "delivered"),
+      cancelled_today: int(doneToday, "cancelled"),
       trips_out: int(totals, "trips_out"),
       trips_closed: int(totals, "trips_closed"),
       bills: int(totals, "bills"),
@@ -233,6 +288,7 @@ async function getTvDashboard({ date = "", branch = "" } = {}) {
       bills: Number(row.bills ?? 0),
       job_status: Number(row.job_status ?? 0),
       approved: Number(row.approve_status ?? 0) > 0,
+      status_label: row.status_label,
     })),
     open_trips: alerts.map((row) => ({
       doc_no: row.doc_no,
@@ -255,6 +311,20 @@ async function getTvDashboard({ date = "", branch = "" } = {}) {
       driver: row.driver,
       at: row.at,
     })),
+    trip_points: tripPoints.map((row) => {
+      const age = mins(row.age_minutes);
+      return {
+        doc_no: row.doc_no,
+        car: row.car,
+        driver: row.driver,
+        lat: Number(row.lat),
+        lng: Number(row.lng),
+        at: row.at,
+        age_minutes: age,
+        cust_name: row.cust_name,
+        running: Number(row.job_status ?? 0) === 2,
+      };
+    }),
     vehicles: vehicles.map((row) => {
       const age = mins(row.age_minutes);
       return {

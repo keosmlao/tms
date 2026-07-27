@@ -514,3 +514,15 @@ html,
 .tv-page-off {
   display: none;
 }
+
+/* ໝຸດຈາກບິນທີ່ປິດລ່າສຸດ — ບອກວ່າຖ້ຽວໄປຮອດໃສແລ້ວ ເມື່ອລົດບໍ່ມີ tracker */
+.tv-pin-bill {
+  border-color: #38bdf8;
+  border-style: dashed;
+}
+.tv-pin-bill .tv-pin-dot {
+  background: #38bdf8;
+}
+.tv-dot-bill {
+  background: #38bdf8;
+}

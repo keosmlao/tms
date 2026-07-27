@@ -50,16 +50,37 @@ function escapeHtml(value: string): string {
     .replace(/"/g, "&quot;");
 }
 
+export type MapTripPoint = {
+  doc_no: string;
+  car: string;
+  driver: string;
+  lat: number;
+  lng: number;
+  at: string | null;
+  age_minutes: number | null;
+  cust_name: string;
+  running: boolean;
+};
+
+function billPinHtml(point: MapTripPoint): string {
+  const name = escapeHtml(point.car);
+  const at = escapeHtml(point.at ?? "");
+  return `<div class="tv-pin tv-pin-bill"><span class="tv-pin-dot"></span><span class="tv-pin-name">${name}</span><span class="tv-pin-speed">${at}</span></div>`;
+}
+
 export default function TvMap({
   vehicles,
+  tripPoints,
   active,
 }: {
   vehicles: MapVehicle[];
+  tripPoints: MapTripPoint[];
   active: boolean;
 }) {
   const containerRef = useRef<HTMLDivElement | null>(null);
   const mapRef = useRef<L.Map | null>(null);
   const markersRef = useRef<Map<string, L.Marker>>(new Map());
+  const billMarkersRef = useRef<Map<string, L.Marker>>(new Map());
   // Only auto-fit while the screen has not settled on a view yet, so the map
   // does not lurch every poll once all the trucks are on screen.
   const fittedRef = useRef(false);
@@ -85,10 +106,12 @@ export default function TvMap({
     }).addTo(map);
     mapRef.current = map;
     const markers = markersRef.current;
+    const billMarkers = billMarkersRef.current;
     return () => {
       map.remove();
       mapRef.current = null;
       markers.clear();
+      billMarkers.clear();
       fittedRef.current = false;
     };
   }, []);
@@ -129,10 +152,43 @@ export default function TvMap({
       }
     }
 
-    if (!fittedRef.current && markersRef.current.size > 0) {
-      const points = vehicles
-        .filter((v) => Number.isFinite(v.lat) && Number.isFinite(v.lng))
-        .map((v) => [v.lat, v.lng] as [number, number]);
+    const seenBills = new Set<string>();
+    for (const point of tripPoints) {
+      if (!Number.isFinite(point.lat) || !Number.isFinite(point.lng)) continue;
+      seenBills.add(point.doc_no);
+      const position: [number, number] = [point.lat, point.lng];
+      const icon = L.divIcon({
+        html: billPinHtml(point),
+        className: "tv-pin-wrap",
+        iconSize: [0, 0],
+        iconAnchor: [0, 0],
+      });
+      const existing = billMarkersRef.current.get(point.doc_no);
+      if (existing) {
+        existing.setLatLng(position);
+        existing.setIcon(icon);
+      } else {
+        billMarkersRef.current.set(
+          point.doc_no,
+          L.marker(position, { icon, interactive: false }).addTo(map)
+        );
+      }
+    }
+    for (const [docNo, marker] of billMarkersRef.current) {
+      if (!seenBills.has(docNo)) {
+        marker.remove();
+        billMarkersRef.current.delete(docNo);
+      }
+    }
+
+    if (
+      !fittedRef.current &&
+      markersRef.current.size + billMarkersRef.current.size > 0
+    ) {
+      const points = [
+        ...vehicles.map((v) => [v.lat, v.lng] as [number, number]),
+        ...tripPoints.map((p) => [p.lat, p.lng] as [number, number]),
+      ].filter(([lat, lng]) => Number.isFinite(lat) && Number.isFinite(lng));
       if (points.length === 1) {
         map.setView(points[0], 14);
       } else if (points.length > 1) {
@@ -140,7 +196,7 @@ export default function TvMap({
       }
       fittedRef.current = true;
     }
-  }, [vehicles]);
+  }, [vehicles, tripPoints]);
 
   // The page is hidden with `display: none` between rotations, so Leaflet reads
   // a zero-sized container while away. Re-measure each time it comes back.

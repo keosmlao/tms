@@ -26,6 +26,8 @@ const PAGE_MS = 20_000;
 
 type Totals = {
   trips: number;
+  delivered_today: number;
+  cancelled_today: number;
   trips_out: number;
   trips_closed: number;
   bills: number;
@@ -56,6 +58,7 @@ type NotStarted = {
   route: string;
   bills: number;
   approved: boolean;
+  status_label: string;
 };
 
 type OpenTrip = {
@@ -80,6 +83,18 @@ type FeedRow = {
   cust_name: string;
   driver: string;
   at: string | null;
+};
+
+type TripPoint = {
+  doc_no: string;
+  car: string;
+  driver: string;
+  lat: number;
+  lng: number;
+  at: string | null;
+  age_minutes: number | null;
+  cust_name: string;
+  running: boolean;
 };
 
 type Vehicle = {
@@ -107,6 +122,7 @@ type TvData = {
   cancelled: Cancelled[];
   feed: FeedRow[];
   vehicles: Vehicle[];
+  trip_points: TripPoint[];
 };
 
 const PAGES = ["ພາບລວມມື້ນີ້", "ຖ້ຽວກຳລັງແລ່ນ", "ຕ້ອງແກ້ດຽວນີ້", "ຕຳແໜ່ງລົດ"];
@@ -235,7 +251,11 @@ export default function TvPage() {
           <Alerts data={data} />
         </Page>
         <Page active={page === 3}>
-          <Vehicles vehicles={data.vehicles} active={page === 3} />
+          <Vehicles
+            vehicles={data.vehicles}
+            tripPoints={data.trip_points}
+            active={page === 3}
+          />
         </Page>
       </section>
 
@@ -293,6 +313,9 @@ function Overview({
         <Sub label="ປິດຖ້ຽວແລ້ວ" value={totals.trips_closed} />
         <Sub label="ຍັງບໍ່ອອກ" value={data.not_started.length} tone={data.not_started.length > 0 ? "warn" : "plain"} />
         <Sub label="ຖ້ຽວຊັກຊ້າ" value={stalled} tone={stalled > 0 ? "bad" : "plain"} />
+        {totals.delivered_today !== totals.delivered && (
+          <Sub label="ປິດບິນພາຍໃນວັນ" value={totals.delivered_today} />
+        )}
       </div>
     </div>
   );
@@ -392,7 +415,7 @@ function Alerts({ data }: { data: TvData }) {
         rows={notStarted.slice(0, 6).map((trip) => ({
           key: trip.doc_no,
           main: `${trip.car} · ${trip.driver}`,
-          side: trip.approved ? "ອະນຸມັດແລ້ວ" : "ຍັງບໍ່ອະນຸມັດ",
+          side: trip.status_label,
           tone: trip.approved ? "warn" : "bad",
           meta: `${trip.route || "-"} · ${trip.bills} ບິນ`,
         }))}
@@ -462,13 +485,15 @@ function AlertPanel({
 
 function Vehicles({
   vehicles,
+  tripPoints,
   active,
 }: {
   vehicles: Vehicle[];
+  tripPoints: TripPoint[];
   active: boolean;
 }) {
-  if (vehicles.length === 0) {
-    return <Empty text="ຍັງບໍ່ມີສັນຍານ GPS ຈາກລົດ" />;
+  if (vehicles.length === 0 && tripPoints.length === 0) {
+    return <Empty text="ຍັງບໍ່ມີພິກັດຈາກລົດ ຫຼື ຈາກການສົ່ງ" />;
   }
   const moving = vehicles.filter((vehicle) => vehicle.moving && !vehicle.stale).length;
   const stopped = vehicles.filter((vehicle) => !vehicle.moving && !vehicle.stale).length;
@@ -476,16 +501,18 @@ function Vehicles({
   return (
     <div className="tv-vehicles">
       <div className="tv-subrow">
+        <Sub label="ລົດມີ GPS" value={vehicles.length} />
         <Sub label="ກຳລັງແລ່ນ" value={moving} />
         <Sub label="ຈອດຢູ່" value={stopped} tone="warn" />
         <Sub label="ຂາດສັນຍານ" value={stale} tone={stale > 0 ? "bad" : "plain"} />
+        <Sub label="ຈຸດສົ່ງລ່າສຸດ" value={tripPoints.length} />
         <span className="tv-legend">
-          <i className="tv-dot tv-dot-move" /> ແລ່ນ
-          <i className="tv-dot tv-dot-stop" /> ຈອດ
-          <i className="tv-dot tv-dot-stale" /> ຂາດສັນຍານ
+          <i className="tv-dot tv-dot-move" /> GPS ແລ່ນ
+          <i className="tv-dot tv-dot-stop" /> GPS ຈອດ
+          <i className="tv-dot tv-dot-bill" /> ຈຸດສົ່ງລ່າສຸດ
         </span>
       </div>
-      <TvMap vehicles={vehicles} active={active} />
+      <TvMap vehicles={vehicles} tripPoints={tripPoints} active={active} />
     </div>
   );
 }
