@@ -630,7 +630,61 @@ function branchFilterJob(scope, jobAlias) {
   )`;
 }
 
+// ຈຸດຮັບເຄື່ອງທີ່ໃຊ້ຈິງ — SQL for "where does the driver collect this bill".
+//
+// Priority:
+//   1. odg_tms_detail.pickup_transport_code — the per-bill override the
+//      dispatcher set on the trip (includes the '__CUSTOMER__' sentinel).
+//   2. odg_tms_pending_bill.transport_code — the branch the dispatcher assigned
+//      when scheduling. This is what the bills-pending screen shows.
+//   3. ic_trans_shipment.transport_code — the raw ERP value, LAST because it is
+//      frequently a pseudo-branch that describes a handover MODE rather than a
+//      warehouse (02-0004 ລູກຄ້າຮັບເອງ, 02-0006 ຊ່າງໂອດ່ຽນມາເອົາເອງ,
+//      02-0008 ສົ່ງແລ້ວແຕ່ບໍ່ໄດ້ຈັດຖ້ຽວ). Treating those as a pickup point made
+//      the trip page and the pending page disagree, and made the driver app
+//      refuse the pickup as "ບິນສາຂາອື່ນ".
+//
+// alias = the odg_tms_detail alias in the surrounding query (needs .bill_no).
+function effectivePickupCodeSql(alias = "d") {
+  return `COALESCE(
+    NULLIF(TRIM(${alias}.pickup_transport_code), ''),
+    (SELECT NULLIF(TRIM(pbx.transport_code), '')
+     FROM public.odg_tms_pending_bill pbx WHERE pbx.bill_no = ${alias}.bill_no),
+    (SELECT NULLIF(TRIM(sx.transport_code), '')
+     FROM public.ic_trans_shipment sx WHERE sx.doc_no = ${alias}.bill_no LIMIT 1),
+    ''
+  )`;
+}
+
+// ບ້ານ · ເມືອງ · ແຂວງ of a customer, as one display string.
+//
+// ar_customer stores these as CODES (tambon '0101001', amper '0101', province
+// '01'), so the names have to come from the ERP master tables. Written as a
+// self-contained scalar subquery: any bill query can select it by passing its
+// customer-code column, with no extra joins to thread through.
+//
+// custCodeExpr = SQL expression for the customer code (e.g. "d.cust_code").
+// Empty string when the customer has no area codes filled in — ~97% of
+// customers used on trips this year resolve to at least one level.
+function customerAreaSql(custCodeExpr) {
+  return `COALESCE((
+    SELECT NULLIF(CONCAT_WS(' · ',
+      NULLIF(TRIM(tbx.name_1), ''),
+      NULLIF(TRIM(amx.name_1), ''),
+      NULLIF(TRIM(pvx.name_1), '')
+    ), '')
+    FROM ar_customer cx
+    LEFT JOIN erp_tambon tbx ON tbx.code = NULLIF(TRIM(cx.tambon), '')
+    LEFT JOIN erp_amper amx ON amx.code = NULLIF(TRIM(cx.amper), '')
+    LEFT JOIN erp_province pvx ON pvx.code = NULLIF(TRIM(cx.province), '')
+    WHERE cx.code = ${custCodeExpr}
+    LIMIT 1
+  ), '')`;
+}
+
 module.exports = {
+  customerAreaSql,
+  effectivePickupCodeSql,
   safeDdl,
   once,
   formatInterval,

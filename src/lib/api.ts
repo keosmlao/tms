@@ -15,6 +15,7 @@ import * as gps from "@/actions/gps";
 import * as jobs from "@/actions/jobs";
 import * as masterData from "@/actions/master-data";
 import * as notifications from "@/actions/notifications";
+import * as pickupVariance from "@/actions/pickup-variance";
 import * as presence from "@/actions/presence";
 import * as reports from "@/actions/reports";
 import * as settings from "@/actions/settings";
@@ -32,6 +33,11 @@ export const Actions = {
 
   // Audit log
   getAuditLog: auditLog.getAuditLog,
+
+  // Pickup variance (ບິນເບີກບໍ່ຄົບ)
+  getPickupVarianceList: pickupVariance.getPickupVarianceList,
+  acknowledgePickupVariance: pickupVariance.acknowledgePickupVariance,
+  getOpenPickupVarianceCount: pickupVariance.getOpenPickupVarianceCount,
 
   // Presence
   heartbeat: presence.heartbeat,
@@ -112,6 +118,7 @@ export const Actions = {
   getReportDeliveredDaily: reports.getReportDeliveredDaily,
   getReportCancelledDaily: reports.getReportCancelledDaily,
   getReportDailyActivity: reports.getReportDailyActivity,
+  getReportDailyDepartment: reports.getReportDailyDepartment,
   getAttemptDeliveryItems: reports.getAttemptDeliveryItems,
 
   // Cars

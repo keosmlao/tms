@@ -38,9 +38,12 @@ import {
   deleteBillTodo as svcDeleteBillTodo,
 } from "@/queries/bill-todo.js";
 
-export async function getAvailableBills() {
+// scheduledDate (YYYY-MM-DD) limits the pool to bills due that day — the
+// create-trip page shows one day at a time, and the unfiltered pool is the
+// whole year (~2,000 bills / ~860 KB over the wire).
+export async function getAvailableBills(scheduledDate?: string) {
   const s = await requireSession();
-  return svcGetAvailableBills(s);
+  return svcGetAvailableBills(s, scheduledDate);
 }
 
 export async function getAvailableBillsWithProducts() {

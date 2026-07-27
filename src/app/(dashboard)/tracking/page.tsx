@@ -813,6 +813,7 @@ interface ActiveBill {
   bill_date: string;
   cust_code: string;
   cust_name: string;
+  cust_area?: string;
   car: string;
   driver: string;
   phase: string;
@@ -936,6 +937,9 @@ function ActiveBillsCombobox({
                       <p className="text-[11px] text-slate-500 dark:text-slate-400 truncate">
                         {b.cust_name}
                       </p>
+                      {b.cust_area && (
+                        <p className="text-[10px] text-slate-400 truncate">📍 {b.cust_area}</p>
+                      )}
                       <p className="text-[10px] text-slate-400 truncate">
                         🚚 {b.car} · {b.driver}
                       </p>

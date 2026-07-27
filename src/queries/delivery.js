@@ -304,6 +304,44 @@ async function ensureDeliveryWorkflowSchemaInternal(db) {
     CREATE INDEX IF NOT EXISTS idx_odg_tms_notification_reads_user
     ON public.odg_tms_notification_reads (user_code)
   `);
+
+  // ບິນເບີກບໍ່ຄົບ — append-only log of every pickup where the quantity the
+  // driver actually received at the warehouse differed from what the
+  // dispatcher put on the trip. The trip itself is corrected in place
+  // (odg_tms_detail_item.selected_qty), so this table is the ONLY record that
+  // the correction happened; it also drives the dispatcher's activity feed.
+  await safeDdl(db, `
+    CREATE TABLE IF NOT EXISTS public.odg_tms_pickup_variance (
+      roworder BIGSERIAL PRIMARY KEY,
+      doc_no character varying NOT NULL,
+      bill_no character varying NOT NULL,
+      item_code character varying NOT NULL,
+      item_name character varying,
+      unit_code character varying,
+      planned_qty numeric DEFAULT 0,
+      reported_qty numeric DEFAULT 0,
+      actual_qty numeric DEFAULT 0,
+      diff_qty numeric DEFAULT 0,
+      over_reported boolean DEFAULT false,
+      driver character varying,
+      remark text,
+      created_at timestamp without time zone DEFAULT LOCALTIMESTAMP(0),
+      acknowledged_at timestamp without time zone,
+      acknowledged_by character varying
+    )
+  `);
+  await safeDdl(db, `
+    CREATE INDEX IF NOT EXISTS idx_odg_tms_pickup_variance_bill
+    ON public.odg_tms_pickup_variance (bill_no, created_at DESC)
+  `);
+  await safeDdl(db, `
+    CREATE INDEX IF NOT EXISTS idx_odg_tms_pickup_variance_doc
+    ON public.odg_tms_pickup_variance (doc_no)
+  `);
+  await safeDdl(db, `
+    CREATE INDEX IF NOT EXISTS idx_odg_tms_pickup_variance_open
+    ON public.odg_tms_pickup_variance (created_at DESC) WHERE acknowledged_at IS NULL
+  `);
 }
 
 async function ensureDeliveryWorkflowSchema(client) {
@@ -312,26 +350,26 @@ async function ensureDeliveryWorkflowSchema(client) {
   // this short-circuit each mobile API request was re-running ~10 DDL
   // statements, which can stall under concurrent load while ALTER TABLE waits
   // for an ACCESS EXCLUSIVE lock.
-  if (deliveryCache.__tmsDeliverySchemaReady_v8) return;
+  if (deliveryCache.__tmsDeliverySchemaReady_v9) return;
 
   const isSharedPool = !client || client === pool;
   if (!isSharedPool) {
     await ensureDeliveryWorkflowSchemaInternal(client);
-    deliveryCache.__tmsDeliverySchemaReady_v8 = true;
+    deliveryCache.__tmsDeliverySchemaReady_v9 = true;
     return;
   }
 
-  if (!deliveryCache.__tmsDeliverySchemaPromise_v8) {
-    deliveryCache.__tmsDeliverySchemaPromise_v8 = ensureDeliveryWorkflowSchemaInternal(pool)
+  if (!deliveryCache.__tmsDeliverySchemaPromise_v9) {
+    deliveryCache.__tmsDeliverySchemaPromise_v9 = ensureDeliveryWorkflowSchemaInternal(pool)
       .then(() => {
-        deliveryCache.__tmsDeliverySchemaReady_v8 = true;
+        deliveryCache.__tmsDeliverySchemaReady_v9 = true;
       })
       .catch((err) => {
-        deliveryCache.__tmsDeliverySchemaPromise_v8 = null;
+        deliveryCache.__tmsDeliverySchemaPromise_v9 = null;
         throw err;
       });
   }
-  await deliveryCache.__tmsDeliverySchemaPromise_v8;
+  await deliveryCache.__tmsDeliverySchemaPromise_v9;
 }
 
 async function ensureJobDeliveryItems(docNo, client) {

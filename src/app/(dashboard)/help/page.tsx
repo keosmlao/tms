@@ -255,6 +255,27 @@ function ManualTab() {
         ))}
       </div>
 
+      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+        <Card className="border-indigo-200/70 bg-indigo-50/40 dark:border-indigo-900/50 dark:bg-indigo-950/20">
+          <SectionTitle>📞 ການຕິດຕໍ່ຫາລູກຄ້າ (When to Contact Customer)</SectionTitle>
+          <ul className="mt-2 space-y-1.5 text-xs text-slate-600 dark:text-slate-300">
+            <li><b>1. ກ່ອນອອກຈັດສົ່ງ (Dispatch):</b> ໂທ/WhatsApp ຢືນຢັນໝຸດ Lat/Lng, ບ້ານ/ເມືອງ, ເວລາສະດວກຮັບ.</li>
+            <li><b>2. ກ່ອນລົດຮອດ 15-30m (Driver):</b> ຄົນຂັບໂທແຈ້ງລູກຄ້າກຽມຮັບສິນຄ້າ.</li>
+            <li><b>3. ເມື່ອມີບັນຫາຢູ່ຈຸດສົ່ງ:</b> ໂທບໍ່ຕິດ / ລູກຄ້າຂໍຄືນ → ກົດ <i>ສົ່ງຄືນ (Return)</i> + ໃສ່ເຫດຜົນ.</li>
+            <li><b>4. ຫຼັງຈັດສົ່ງ (Sales):</b> ຕິດຕາມຄວາມພໍໃຈ & ສົ່ງລິ້ງ ໃຫ້ຄະແນນ <code className="rounded bg-slate-500/10 px-1">/rate</code>.</li>
+          </ul>
+        </Card>
+
+        <Card className="border-teal-200/70 bg-teal-50/40 dark:border-teal-900/50 dark:bg-teal-950/20">
+          <SectionTitle>💬 Chatter & Activities (Odoo-style Thread)</SectionTitle>
+          <ul className="mt-2 space-y-1.5 text-xs text-slate-600 dark:text-slate-300">
+            <li><b>Chatter:</b> ສົນທະນາ/ໝາຍເຫດພາຍໃນປະຈຳບິນ, ແນບຮູບເອກະສານ, ໃຊ້ <code className="rounded bg-slate-500/10 px-1">@mention</code> ເພື່ອ tag ເອີ້ນພະນັກງານ (ສົ່ງ Bell Alert).</li>
+            <li><b>Followers:</b> ກົດ Follow ໃບງານ ເພື່ອຮັບແຈ້ງເຕືອນທຸກຄັ້ງທີ່ມີຄົນ comment/ປ່ຽນສະຖານະ.</li>
+            <li><b>Activities (To-do):</b> ມອບໝາຍວຽກຕັ້ງ Due Date (ໂທຫາລູກຄ້າ/ກວດເອກະສານ). ລະບົບເຕືອນເມື່ອ Overdue ແລະ ກົດ Done ເມື່ອສຳເລັດ.</li>
+          </ul>
+        </Card>
+      </div>
+
       <Card className="border-sky-200/70 bg-sky-50/60 dark:border-sky-900/50 dark:bg-sky-950/30">
         <p className="text-xs text-slate-600 dark:text-slate-300">
           <b className="text-slate-800 dark:text-white">ຕິດຕາມສາທາລະນະ:</b>{" "}
@@ -291,6 +312,16 @@ function WorkflowTab() {
       body: "ຄົບ → complete + ຮູບ · ບໍ່ຄົບ → return + ເຫດຜົນ · ຍົກເລີກ → ຕ້ອງໄດ້ອະນຸຍາດ.",
     },
     {
+      tone: "border-l-indigo-500",
+      title: "ກໍລະນີ · ທະຍອຍສົ່ງ (Partial)",
+      body: "ສົ່ງໄດ້ບາງສ່ວນ (ມີຍອດເຫຼືອ > 0) → ລະບົບປ່ຽນສະຖານະເປັນ 'ທະຍອຍສົ່ງ' ອັດຕະໂນມັດ ແລະ ດຶງບິນກັບເຂົ້າ 'ລໍຖ້າຈັດຖ້ຽວ' ເພື່ອໃຫ້ Office ຈັດຖ້ຽວຮອບຕໍ່ໄປ.",
+    },
+    {
+      tone: "border-l-purple-500",
+      title: "ກໍລະນີ · ສົ່ງຕໍ່ສາຂາ (Forwarding)",
+      body: "ຂົນສົ່ງໄປມອບໃຫ້ສາຂາປາຍທາງ → ເມື່ອມອບແລ້ວ ສະຖານະເປັນ 'ສົ່ງຕໍ່ສາຂາແລ້ວ' → ບິນເຂົ້າຄິວ 'ລໍຖ້າຈັດຖ້ຽວ' ຂອງສາຂານັ້ນອັດຕະໂນມັດ (ພ້ອມ Push Alert) ເພື່ອໃຫ້ຈັດສົ່ງຕໍ່ຫາລູກຄ້າ.",
+    },
+    {
       tone: "border-l-emerald-500",
       title: "ຈຸດຕັດສິນ · ກວດຮັບ (ຂັ້ນ 11)",
       body: "office ກວດຮູບ + ຈຳນວນ. ຂາດ/ຜິດ → ຕີກັບໃຫ້ຄົນຂັບ (revert/edit) ກ່ອນປິດ.",
@@ -303,6 +334,76 @@ function WorkflowTab() {
   ];
   return (
     <div className="space-y-5">
+      {/* Visual Process Flowchart */}
+      <Card className="p-4">
+        <SectionTitle>🗺️ ແຜນຜັງຂະບວນການຈັດສົ່ງ, ການກວດສອບ ແລະ ຕິດຕາມ (Flowchart Pipeline)</SectionTitle>
+        <p className="mt-1 mb-4 text-xs text-slate-500 dark:text-slate-400">
+          ແຜນຜັງຂະບວນການເຮັດວຽກທີ່ເຊື່ອມໂຍງລະຫວ່າງ Workflow, SOP (1-5) ແລະ WI (A-E) ຢ່າງຄົບວົງຈອນ.
+        </p>
+
+        <div className="space-y-4 text-xs">
+          {/* Phase 1 */}
+          <div className="rounded-lg border border-slate-200 bg-slate-50/50 p-3 dark:border-slate-800 dark:bg-slate-900/40">
+            <span className="font-bold text-indigo-600 dark:text-indigo-400">1. ຂັ້ນຕອນກຽມ & ຈັດຖ້ຽວ (Prep & Dispatch Phase)</span>
+            <div className="mt-2 flex flex-wrap items-center gap-2 font-mono">
+              <span className="rounded bg-slate-200 px-2 py-1 text-slate-800 dark:bg-slate-800 dark:text-slate-200">ຮັບບິນ (POS/Manual)</span>
+              <span>➡️</span>
+              <span className="rounded bg-indigo-100 px-2 py-1 text-indigo-800 dark:bg-indigo-950 dark:text-indigo-300">ຈັດຖ້ຽວ / ປັກໝຸດ / ແຍກສາຂາ (SOP-1 · WI-A1,A4,A5,A8)</span>
+              <span>➡️</span>
+              <span className="rounded bg-indigo-100 px-2 py-1 text-indigo-800 dark:bg-indigo-950 dark:text-indigo-300">ສ້າງໃບງານ (SOP-1 · WI-A2)</span>
+            </div>
+          </div>
+
+          {/* Phase 2 */}
+          <div className="rounded-lg border border-amber-200 bg-amber-50/40 p-3 dark:border-amber-900/40 dark:bg-amber-950/20">
+            <span className="font-bold text-amber-600 dark:text-amber-400">2. ຂັ້ນຕອນກວດສອບ & ອະນຸມັດ (Approval Phase)</span>
+            <div className="mt-2 flex flex-wrap items-center gap-2 font-mono">
+              <span className="rounded bg-amber-100 px-2 py-1 text-amber-900 dark:bg-amber-950 dark:text-amber-300">ສົ່ງໃຫ້ຫົວໜ້າ (SOP-1)</span>
+              <span>➡️</span>
+              <span className="rounded bg-amber-200 px-2 py-1 text-amber-900 font-bold dark:bg-amber-900 dark:text-amber-100">ຫົວໜ້າກວດສອບ & ອະນຸມັດພາຍໃນ SLA &lt; 2h (SOP-2 · WI-B1)</span>
+              <span>➡️</span>
+              <span className="rounded bg-emerald-100 px-2 py-1 text-emerald-800 dark:bg-emerald-950 dark:text-emerald-300">ຜ່ານ → ສົ່ງເຂົ້າແອັບຄົນຂັບ (SOP-2)</span>
+            </div>
+          </div>
+
+          {/* Phase 3 */}
+          <div className="rounded-lg border border-sky-200 bg-sky-50/40 p-3 dark:border-sky-900/40 dark:bg-sky-950/20">
+            <span className="font-bold text-sky-600 dark:text-sky-400">3. ຂັ້ນຕອນຈັດສົ່ງ & ຕິດຕາມ Realtime (Execution & GPS Tracking Phase)</span>
+            <div className="mt-2 flex flex-wrap items-center gap-2 font-mono">
+              <span className="rounded bg-sky-100 px-2 py-1 text-sky-800 dark:bg-sky-950 dark:text-sky-300">ຄົນຂັບຮັບຖ້ຽວ & ເບີກເຄື່ອງ (SOP-3 · WI-C1)</span>
+              <span>➡️</span>
+              <span className="rounded bg-sky-200 px-2 py-1 text-sky-900 font-bold dark:bg-sky-900 dark:text-sky-100">ເລີ່ມຈັດສົ່ງ & ເປີດ GPS (SOP-3 · WI-C2 · ຕິດຕາມຢູ່ໜ້າແຜນທີ່)</span>
+              <span>➡️</span>
+              <span className="rounded bg-sky-100 px-2 py-1 text-sky-800 dark:bg-sky-950 dark:text-sky-300">ເຊັກອິນຈຸດສົ່ງ (WI-C3)</span>
+            </div>
+          </div>
+
+          {/* Phase 4 */}
+          <div className="rounded-lg border border-emerald-200 bg-emerald-50/40 p-3 dark:border-emerald-900/40 dark:bg-emerald-950/20">
+            <span className="font-bold text-emerald-600 dark:text-emerald-400">4. ຜົນການຈັດສົ່ງ & ການກວດຮັບປິດງານ (Delivery Outcome & Close Phase)</span>
+            <div className="mt-2 grid grid-cols-1 gap-2 sm:grid-cols-2 lg:grid-cols-4 font-mono">
+              <div className="rounded bg-emerald-100 p-2 text-emerald-900 dark:bg-emerald-950 dark:text-emerald-300">
+                <b>1. ສົ່ງຄົບ (100%):</b> ຖ່າຍຮູບ + ລາຍເຊັນ → ສົ່ງສຳເລັດ
+              </div>
+              <div className="rounded bg-indigo-100 p-2 text-indigo-900 dark:bg-indigo-950 dark:text-indigo-300">
+                <b>2. ທະຍອຍສົ່ງ:</b> ຍອດເຫຼືອເດັ້ງກັບ 'ລໍຖ້າຈັດຖ້ຽວ' ຈັດຮອບຕໍ່ໄປ
+              </div>
+              <div className="rounded bg-purple-100 p-2 text-purple-900 dark:bg-purple-950 dark:text-purple-300">
+                <b>3. ສົ່ງຕໍ່ສາຂາ:</b> ມອບສາຂາປາຍທາງ → ເຂົ້າຄິວສາຂານັ້ນ + Push Alert
+              </div>
+              <div className="rounded bg-rose-100 p-2 text-rose-900 dark:bg-rose-950 dark:text-rose-300">
+                <b>4. ສົ່ງຄືນ / ຍົກເລີກ:</b> ໃສ່ເຫດຜົນ → ຄືນສາງ ຫຼື ຈັດຮອບໃໝ່
+              </div>
+            </div>
+            <div className="mt-3 flex flex-wrap items-center gap-2 font-mono">
+              <span className="rounded bg-emerald-200 px-2 py-1 text-emerald-900 font-bold dark:bg-emerald-900 dark:text-emerald-100">ຄົນຂັບປິດງານ (WI-C8)</span>
+              <span>➡️</span>
+              <span className="rounded bg-emerald-300 px-2 py-1 text-emerald-950 font-bold dark:bg-emerald-800 dark:text-white">Office ກວດຮັບຫຼັກຖານ & ປິດສຳເລັດ (SOP-1 · WI-A3)</span>
+            </div>
+          </div>
+        </div>
+      </Card>
+
       <Card className="!p-0 overflow-hidden">
         <div className="border-b border-slate-100 px-4 py-3 dark:border-slate-800">
           <SectionTitle>ຂັ້ນຕອນການເຮັດວຽກ (Swimlane)</SectionTitle>
@@ -406,9 +507,20 @@ function SopTab() {
       ],
       rule: "ໝາຍເຫດ: ບັນຊີຝ່າຍຂາຍຖືກຈຳກັດຂອບເຂດການເຫັນຂໍ້ມູນ",
     },
+    {
+      color: "border-t-purple-500",
+      title: "ຜູ້ດູແລລະບົບ (Admin)",
+      tag: "SOP-5 · ຂໍ້ມູນພື້ນຖານ & Admin",
+      steps: [
+        "ຮັກສາຂໍ້ມູນ: ລົດ · ປະເພດລົດ · ພະນັກງານ · ເສັ້ນທາງ · ຮອບຈັດສົ່ງ",
+        "ຄຸ້ມຄອງສິດຜູ້ໃຊ້ ແລະ ກວດ Audit Log ເປັນປະຈຳ",
+        "ຮັບປະກັນ backup ຖານຂໍ້ມູນ ແລະ ຄວາມປອດໄພຂອງລະບົບ",
+      ],
+      rule: "ຕ້ອງ: ກວດ Audit Log ເປັນປະຈຳ ແລະ ປົກປ້ອງຄວາມປອດໄພ",
+    },
   ];
   return (
-    <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+    <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
       {roles.map((r) => (
         <div
           key={r.title}
@@ -455,9 +567,34 @@ function WiTab() {
       steps: ["ເມນູ ຄົນຂັບປິດງານ", "ກວດຮູບ + ຈຳນວນ ຕໍ່ບິນ", "ຄົບ → ປິດສຳເລັດ", "ຂາດ → ຕີກັບພ້ອມໝາຍເຫດ"],
     },
     {
+      code: "WI-A4",
+      title: "ແຍກບິນຕາມສາຂາ",
+      steps: ["ເລືອກບິນທີ່ມີຫຼາຍສາຂາ", "ກົດ 'ແຍກບິນຕາມສາຂາ'", "ເລືອກລາຍການ + ສາຂາປາຍທາງ", "ບັນທຶກ → ລະບົບແຍກເປັນບິນຍ່ອຍ"],
+    },
+    {
+      code: "WI-A5",
+      title: "ປັກໝຸດ/ແກ້ໄຂຕຳແໜ່ງ",
+      steps: ["ໜ້າ ລໍຖ້າຈັດຖ້ຽວ → ກົດ 'ແກ້ໄຂຕຳແໜ່ງ'", "ເລືອກຕຳແໜ່ງເທິງແຜນທີ່ Lat/Lng", "ບັນທຶກ → GPS ຄົນຂັບນຳທາງແນ່ນອນ"],
+    },
+    {
+      code: "WI-A6",
+      title: "ເພີ່ມບິນເຂົ້າໃບງານເດີມ",
+      steps: ["ເປີດໃບງານເດີມ", "ກົດ 'ເພີ່ມບິນເຂົ້າໃບງານ'", "ເລືອກບິນດ່ວນ (ກວດນ້ຳໜັກບັນຈຸ)", "ບັນທຶກເຂົ້າໃບງານ"],
+    },
+    {
+      code: "WI-A7",
+      title: "ຈັດຖ້ຽວສົ່ງຕໍ່ສາຂາ",
+      steps: ["ເລືອກບິນ/ໃບງານ → ເລືອກ 'ສາຂາປາຍທາງ'", "ກົດ ບັນທຶກ", "ຈັດສົ່ງຮອດສາຂາ → ສະຖານະ 'ສົ່ງຕໍ່ສາຂາແລ້ວ'", "ບິນເຂົ້າຄິວ ລໍຖ້າຈັດຖ້ຽວ ຂອງສາຂານັ້ນ + Push Alert"],
+    },
+    {
       code: "WI-B1",
       title: "ອະນຸມັດ / ຕີກັບ",
       steps: ["ເມນູ ອະນຸມັດ › ລໍອະນຸມັດ", "ກວດ ລົດ/ຄົນຂັບ/ນ້ຳໜັກ/ເສັ້ນທາງ", "ຖືກ → ອະນຸມັດ", "ບໍ່ຖືກ → ຕີກັບ+ເຫດຜົນ"],
+    },
+    {
+      code: "WI-B2",
+      title: "ຕິດຕາມ GPS Realtime",
+      steps: ["ເມນູ ຕິດຕາມ › ແຜນທີ່ລົດ / ແຜນທີ່ມືຖື", "ຄລິກໝຸດລົດ ເບິ່ງຄວາມໄວ/ຕຳແໜ່ງ", "ເບິ່ງປະຫວັດເສັ້ນທາງ & ສະຫຼຸບ GPS/ວັນ"],
     },
     {
       code: "WI-C1–3",
@@ -465,19 +602,24 @@ function WiTab() {
       steps: ["ຮັບຖ້ຽວ → ເບີກເຄື່ອງ (ກວດຈຳນວນ)", "ເລີ່ມຈັດສົ່ງ (GPS ຫ້າມປິດ)", "ຮອດຈຸດ → ເຊັກອິນ", "ມອບ → ຖ່າຍຮູບ → ສົ່ງບິນສຳເລັດ"],
     },
     {
-      code: "WI-C4–6",
-      title: "ຄົນຂັບ: ບໍ່ຄົບ & ນ້ຳມັນ",
-      steps: ["ບໍ່ຄົບ → ສົ່ງຄືນ + ເຫດຜົນ (+ຮູບ)", "ຍົກເລີກ → ເຫດຜົນ (ຕ້ອງອະນຸຍາດ)", "ນ້ຳມັນ → ໃສ່ຈຳນວນ + ຮູບໃບບິນ", "ຈົບ → ປິດງານ"],
+      code: "WI-C4",
+      title: "ທະຍອຍສົ່ງ / ຍ້ອນກັບ",
+      steps: ["ສົ່ງໄດ້ບາງສ່ວນ → ປ້ອນຍອດສົ່ງໄດ້, ຍອດເຫຼືອເດັ້ງກັບລໍຖ້າຈັດຖ້ຽວ", "ກົດສົ່ງຜິດ → ກົດ 'ຍ້ອນກັບ (Revert)' ຫຼື 'ແກ້ໄຂ'", "ສົ່ງບໍ່ໄດ້ → ກົດສົ່ງຄືນ + ເຫດຜົນ (+ຮູບ)"],
+    },
+    {
+      code: "WI-C5",
+      title: "ບັນທຶກເຕີມນ້ຳມັນ",
+      steps: ["ເປີດແອັບມືຖື → ເມນູ ນ້ຳມັນ › ເພີ່ມ", "ປ້ອນ ຈຳນວນເງິນ, ລິດ, ເລກກິໂລແມັດ", "ຖ່າຍຮູບໃບບິນ → ບັນທຶກ"],
     },
     {
       code: "WI-D1",
       title: "ຝ່າຍຂາຍ: ຕິດຕາມບິນ",
-      steps: ["ເມນູ ຝ່າຍຂາຍ › ບິນສົ່ງບໍ່ສຳເລັດ", "ຄົ້ນຫາຕາມລູກຄ້າ/ເລກບິນ", "ກຳນົດວັນຈັດສົ່ງ (ປະສານ office)"],
+      steps: ["ເມນູ ຝ່າຍຂາຍ › ບິນສົ່ງບໍ່ສຳເລັດ", "ຄົ້ນຫາຕາມລູກຄ້າ/ເລກບິນ", "ກຳນົດວັນ/ຮອບຈັດສົ່ງໃໝ່ (ປະສານ office)"],
     },
     {
       code: "WI-E1",
-      title: "ລູກຄ້າ: ຕິດຕາມ",
-      steps: ["ເປີດ /track", "ໃສ່ເລກບິນ → ເບິ່ງສະຖານະ", "ໃຫ້ຄະແນນທີ່ /rate"],
+      title: "ລູກຄ້າ: WhatsApp & Track",
+      steps: ["ກົດປຸ່ມ WhatsApp Link ສົ່ງລິ້ງ /track ຫາລູກຄ້າ", "ລູກຄ້າໃສ່ເລກບິນເບິ່ງສະຖານະ", "ໃຫ້ຄະແນນການຈັດສົ່ງທີ່ /rate"],
     },
   ];
   return (

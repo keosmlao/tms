@@ -1,6 +1,7 @@
 const { pool, query, queryOne } = require("../lib/db");
 const { getFixedYearSqlFilter } = require("../lib/fixed-year");
 const {
+  customerAreaSql,
   getBranchScope,
   branchFilterShipment,
   branchFilterJob,
@@ -924,6 +925,7 @@ async function searchActiveDeliveryBills(session, q) {
        to_char(d.bill_date,'DD-MM-YYYY') as bill_date,
        d.cust_code,
        COALESCE(NULLIF(TRIM(cu.name_1),''), d.cust_code, '-') as cust_name,
+       ${customerAreaSql('d.cust_code')} as cust_area,
        COALESCE(NULLIF(TRIM(car.name_1),''), j.car, '-') as car,
        COALESCE(NULLIF(TRIM(drv.name_1),''), j.driver, '-') as driver,
        CASE
@@ -1005,6 +1007,7 @@ async function searchActiveDeliveryBills(session, q) {
          to_char(t.doc_date,'DD-MM-YYYY') AS bill_date,
          COALESCE(NULLIF(TRIM(t.cust_code), ''), '') AS cust_code,
          COALESCE(NULLIF(TRIM(cu.name_1), ''), t.cust_code, '-') AS cust_name,
+         ${customerAreaSql('t.cust_code')} as cust_area,
          COALESCE(NULLIF(TRIM(car.name_1), ''), latest.car, '-') AS car,
          COALESCE(NULLIF(TRIM(drv.name_1), ''), j.driver, '-') AS driver,
          CASE

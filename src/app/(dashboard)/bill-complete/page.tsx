@@ -96,6 +96,7 @@ export interface CompletedBillDetail {
   bill_no: string;
   bill_date: string;
   customer: string;
+  cust_area?: string;
   telephone: string;
   count_item: number;
   recipt_job: string;
@@ -706,6 +707,9 @@ export default function BillCompleteClient({
                                               <td className="py-2 pr-3">
                                                 <div className="space-y-0.5">
                                                   <p className="text-slate-700">{detail.customer}</p>
+                                                  {detail.cust_area && (
+                                                    <p className="text-[10px] text-slate-400">📍 {detail.cust_area}</p>
+                                                  )}
                                                   {detail.telephone && (
                                                     <p className="text-[10px] text-slate-400 flex items-center gap-1.5">
                                                       <span>{detail.telephone}</span>

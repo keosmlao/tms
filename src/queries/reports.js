@@ -975,6 +975,205 @@ async function getReportDailyActivity(session, fromDate, toDate) {
   return { fromDate, toDate, branches, total };
 }
 
+// Same movement ledger as getReportDailyActivity — ຍອດຍົກມາ + ເປີດບິນ − ຈັດສົ່ງ
+// = ຄົງເຫຼືອ — but bucketed by the SALE department that opened the bill instead
+// of the transport branch that carries it, and returning bill counts AND
+// product quantities side by side in one row (the branch report splits those
+// across two pages).
+//   ຄົງເຫຼືອ (remaining) — pending RIGHT NOW, taken verbatim from the canonical
+//      getBillsPending list so the total matches the bills-pending page.
+//   ເປີດບິນ (opened)     — sale bills (trans_flag=44) with doc_date in [from,to].
+//   ຈັດສົ່ງ (delivered)  — bills whose final customer delivery (odg_tms_detail
+//      status=1) completed in [from,to]; qty = units actually handed over.
+//   ຍອດຍົກມາ (carry_in)  — DERIVED (remaining + delivered − opened) so the ledger
+//      balances against the canonical ຄົງເຫຼືອ.
+// The department label is derived exactly the way the pending list derives it
+// (odg_employee → odg_department), so both sources fall into identical buckets.
+// salesOnly (default) keeps just the sale departments — odg_department rows in
+// division 200, i.e. ພະແນກຂາຍ* 201-208 — dropping production / service / office
+// departments and bills whose salesperson has no department at all.
+const UNASSIGNED_DEPARTMENT = "(ບໍ່ກຳນົດພະແນກ)";
+const SALES_DIVISION_CODE = "200";
+
+async function getReportDailyDepartment(session, fromDate, toDate, salesOnly = true) {
+  const scope = getBranchScope(session);
+  await ensureForwardBranchColumn();
+  const branchList = scope.scoped
+    ? scope.branchListSql
+    : MONTHLY_DELIVERY_BRANCH_CODES.map((c) => `'${c}'`).join(", ");
+
+  // Department master: gives the sales-division whitelist (matched by NAME,
+  // because the pending list only carries the display name) and the code used
+  // to order the rows the way the org chart does (201, 202, ...).
+  const deptRows = await query(
+    `SELECT department_code,
+            COALESCE(NULLIF(TRIM(department_name_lo), ''), department_code) AS name,
+            COALESCE(NULLIF(TRIM(division_code), ''), '') AS division_code
+     FROM public.odg_department`
+  );
+  const codeByName = new Map(deptRows.map((r) => [r.name, r.department_code]));
+  const salesNames = new Set(
+    deptRows
+      .filter((r) => r.division_code === SALES_DIVISION_CODE)
+      .map((r) => r.name)
+  );
+  const isIncluded = (name) => !salesOnly || salesNames.has(name);
+
+  // ── ຄົງເຫຼືອ / ຄ້າງສົ່ງ : canonical pending list, grouped by department ──
+  const { getBillsPending } = require("./bills.js");
+  const { FIXED_YEAR_START, FIXED_YEAR_END } = require("../lib/fixed-year");
+  const pending = await getBillsPending(session, FIXED_YEAR_START, FIXED_YEAR_END, "all");
+  const pendingRows = (pending && pending.trans) || [];
+  const pendingByDept = new Map();
+  for (const row of pendingRows) {
+    const dept = (row.department && String(row.department).trim()) || UNASSIGNED_DEPARTMENT;
+    if (!isIncluded(dept)) continue;
+    const cur = pendingByDept.get(dept) || { bills: 0, qty: 0 };
+    cur.bills += 1;
+    cur.qty += Number(row.remaining_qty_total ?? 0);
+    pendingByDept.set(dept, cur);
+  }
+
+  // ── ເປີດບິນ + ຈັດສົ່ງ per department ──
+  const flowRows = await query(
+    `WITH sale_bills AS (
+      SELECT a.doc_no,
+             b.doc_date::date AS doc_date,
+             COALESCE(
+               NULLIF(TRIM(od.department_name_lo), ''),
+               NULLIF(TRIM(oe.department_code::text), ''),
+               '${UNASSIGNED_DEPARTMENT}'
+             ) AS department
+      FROM ic_trans_shipment a
+      JOIN ic_trans b ON b.doc_no = a.doc_no
+      LEFT JOIN public.odg_tms_pending_bill pb ON pb.bill_no = a.doc_no
+      LEFT JOIN public.odg_employee oe ON oe.employee_code = b.sale_code
+      LEFT JOIN public.odg_department od ON od.department_code = oe.department_code
+      WHERE a.trans_flag = 44
+        AND b.doc_date::date <= $2::date
+        AND ${getFixedYearSqlFilter("a.doc_date")}
+        AND COALESCE(NULLIF(TRIM(pb.transport_code), ''), a.transport_code) IN (${branchList})
+        ${salesOnly ? `AND TRIM(od.division_code) = '${SALES_DIVISION_CODE}'` : ""}
+    ),
+    bill_items AS (
+      SELECT d.doc_no AS bill_no, SUM(COALESCE(d.qty, 0))::numeric AS total_qty
+      FROM ic_trans_detail d
+      WHERE d.item_code NOT LIKE '97%'
+        AND d.doc_no IN (SELECT doc_no FROM sale_bills)
+      GROUP BY d.doc_no
+    ),
+    returned AS (
+      SELECT rd.ref_doc_no AS bill_no, SUM(ABS(COALESCE(rd.qty, 0)))::numeric AS returned_qty
+      FROM ic_trans_detail rd
+      JOIN ic_trans r ON r.doc_no = rd.doc_no AND r.trans_flag = 48
+      WHERE rd.item_code NOT LIKE '97%'
+        AND rd.ref_doc_no IN (SELECT doc_no FROM sale_bills)
+      GROUP BY rd.ref_doc_no
+    ),
+    del_dates AS (
+      -- Bill-level completion: the last finished customer delivery for the bill.
+      SELECT d.bill_no, MAX(d.sent_end) AS last_sent_end
+      FROM public.odg_tms_detail d
+      WHERE COALESCE(d.status, 0) = 1
+        AND NULLIF(TRIM(d.forward_transport_code), '') IS NULL
+        AND d.bill_no IN (SELECT doc_no FROM sale_bills)
+      GROUP BY d.bill_no
+    ),
+    del_units AS (
+      SELECT item.bill_no,
+             SUM(CASE WHEN COALESCE(item.delivered_qty, 0) = 0
+                      THEN COALESCE(item.selected_qty, 0)
+                      ELSE COALESCE(item.delivered_qty, 0) END)::numeric AS units
+      FROM public.odg_tms_detail_item item
+      JOIN public.odg_tms_detail det
+        ON det.bill_no = item.bill_no AND det.doc_no = item.doc_no
+      WHERE COALESCE(det.status, 0) = 1
+        AND NULLIF(TRIM(det.forward_transport_code), '') IS NULL
+        AND item.bill_no IN (SELECT doc_no FROM sale_bills)
+      GROUP BY item.bill_no
+    ),
+    calc AS (
+      SELECT sb.department, sb.doc_date,
+             GREATEST(COALESCE(bi.total_qty, 0) - COALESCE(rt.returned_qty, 0), 0)::numeric AS net_total,
+             dd.last_sent_end::date AS completion_date,
+             COALESCE(du.units, 0)::numeric AS delivered_units
+      FROM sale_bills sb
+      LEFT JOIN bill_items bi ON bi.bill_no = sb.doc_no
+      LEFT JOIN returned rt ON rt.bill_no = sb.doc_no
+      LEFT JOIN del_dates dd ON dd.bill_no = sb.doc_no
+      LEFT JOIN del_units du ON du.bill_no = sb.doc_no
+    )
+    SELECT department,
+      COUNT(*) FILTER (WHERE doc_date BETWEEN $1::date AND $2::date)::int AS opened_bills,
+      COALESCE(SUM(net_total) FILTER (WHERE doc_date BETWEEN $1::date AND $2::date), 0)::numeric AS opened_qty,
+      COUNT(*) FILTER (WHERE completion_date BETWEEN $1::date AND $2::date)::int AS delivered_bills,
+      COALESCE(SUM(LEAST(delivered_units, net_total)) FILTER (WHERE completion_date BETWEEN $1::date AND $2::date), 0)::numeric AS delivered_qty
+    FROM calc
+    WHERE net_total > 0
+    GROUP BY department`,
+    [fromDate, toDate]
+  );
+  const flowByDept = new Map(flowRows.map((r) => [r.department, r]));
+
+  // A department shows up if it has movement in the window OR still has bills
+  // pending — either way it belongs on the report. In sales-only mode every
+  // sale department is listed even when it had no movement at all, so the
+  // reader can see the zero rather than wonder whether it was dropped.
+  const names = Array.from(
+    new Set([
+      ...(salesOnly ? salesNames : []),
+      ...flowByDept.keys(),
+      ...pendingByDept.keys(),
+    ])
+  ).sort((a, b) => {
+    const ca = codeByName.get(a) ?? "zzz";
+    const cb = codeByName.get(b) ?? "zzz";
+    return ca.localeCompare(cb) || a.localeCompare(b, "lo");
+  });
+
+  const departments = names.map((name) => {
+    const f = flowByDept.get(name);
+    const p = pendingByDept.get(name) || { bills: 0, qty: 0 };
+    const openedBills = Number(f?.opened_bills ?? 0);
+    const deliveredBills = Number(f?.delivered_bills ?? 0);
+    const remainingBills = Number(p.bills);
+    const openedQty = Number(f?.opened_qty ?? 0);
+    const deliveredQty = Number(f?.delivered_qty ?? 0);
+    const remainingQty = Number(p.qty);
+    return {
+      department: name,
+      department_code: codeByName.get(name) ?? "",
+      carry_bills: remainingBills + deliveredBills - openedBills,
+      opened_bills: openedBills,
+      delivered_bills: deliveredBills,
+      remaining_bills: remainingBills,
+      carry_qty: remainingQty + deliveredQty - openedQty,
+      opened_qty: openedQty,
+      delivered_qty: deliveredQty,
+      remaining_qty: remainingQty,
+    };
+  });
+
+  const total = departments.reduce(
+    (acc, d) => {
+      acc.carry_bills += d.carry_bills;
+      acc.opened_bills += d.opened_bills;
+      acc.delivered_bills += d.delivered_bills;
+      acc.remaining_bills += d.remaining_bills;
+      acc.carry_qty += d.carry_qty;
+      acc.opened_qty += d.opened_qty;
+      acc.delivered_qty += d.delivered_qty;
+      acc.remaining_qty += d.remaining_qty;
+      return acc;
+    },
+    {
+      carry_bills: 0, opened_bills: 0, delivered_bills: 0, remaining_bills: 0,
+      carry_qty: 0, opened_qty: 0, delivered_qty: 0, remaining_qty: 0,
+    }
+  );
+  return { fromDate, toDate, salesOnly, departments, total };
+}
+
 module.exports = {
   getReportDaily,
   getReportByDriver,
@@ -988,5 +1187,6 @@ module.exports = {
   getReportDeliveredDaily,
   getReportCancelledDaily,
   getReportDailyActivity,
+  getReportDailyDepartment,
   getAttemptDeliveryItems,
 };

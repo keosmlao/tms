@@ -29,6 +29,7 @@ interface PartialBill {
   completed_at: string | null;
   cust_code: string;
   cust_name: string;
+  cust_area?: string;
   telephone: string;
   car: string;
   driver: string;
@@ -213,6 +214,9 @@ export default function BillsPartialPage() {
                       <td className="px-4 py-3">
                         <div className="space-y-1">
                           <p className="text-slate-700 dark:text-slate-200 font-medium">{b.cust_name}</p>
+                          {b.cust_area && (
+                            <p className="text-[11px] text-slate-400">📍 {b.cust_area}</p>
+                          )}
                           {b.telephone && (
                             <p className="text-[11px] text-slate-500 inline-flex items-center gap-1.5">
                               <FaPhone size={9} /> {b.telephone}

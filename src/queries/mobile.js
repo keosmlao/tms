@@ -13,9 +13,11 @@ const {
   coerceDateToFixedYear,
   getFixedYearSqlFilter,
 } = require("../lib/fixed-year");
+const { effectivePickupCodeSql, customerAreaSql } = require("./helpers");
 const { saveToken: saveFcmToken, deleteToken: deleteFcmToken } = require("./push");
 const { saveFuelRefill, getFuelLogs, getFuelSummary } = require("./fuel");
-const { notifyBillStatus } = require("./notifications");
+const { notifyBillStatus, notifyPickupVariance } = require("./notifications");
+const { computePickupVariance } = require("../lib/pickup-variance");
 const { assertJobGeofence } = require("./geofence");
 
 function asText(value) {
@@ -292,6 +294,21 @@ async function mobileJobsListAll({ date = "", driverId = "", status = "" } = {})
   return await query(sql, params);
 }
 
+// Pickup quantities keep their zeros — "ຮັບ 0 ອັນ" is a meaningful report from
+// the warehouse floor, whereas normalizeItems() drops zero lines because for a
+// delivery they mean "nothing to record".
+function parsePickupItems(value) {
+  if (!Array.isArray(value)) return [];
+  const out = [];
+  for (const raw of value) {
+    const itemCode = asText(raw?.item_code);
+    if (!itemCode) continue;
+    const qty = Number(raw?.qty ?? 0);
+    out.push({ item_code: itemCode, qty: Number.isFinite(qty) ? qty : 0 });
+  }
+  return out;
+}
+
 function normalizeItems(value) {
   if (!Array.isArray(value)) return [];
   const grouped = new Map();
@@ -473,10 +490,7 @@ async function mobileJobAction(body) {
         if (!billNo) throw new Error("bill_no is required");
         const billRow = await client.query(
           `SELECT d.doc_no, t.approve_status, t.job_status,
-                  (COALESCE(NULLIF(TRIM(d.pickup_transport_code), ''),
-                            (SELECT s.transport_code FROM public.ic_trans_shipment s
-                             WHERE s.doc_no = d.bill_no LIMIT 1),
-                            '') <> COALESCE(t.origin_transport_code, '')) AS is_other_branch
+                  (${effectivePickupCodeSql('d')} <> COALESCE(t.origin_transport_code, '')) AS is_other_branch
            FROM public.odg_tms_detail d
            INNER JOIN odg_tms t ON t.doc_no = d.doc_no
            WHERE d.bill_no = $1
@@ -497,20 +511,86 @@ async function mobileJobAction(body) {
         if (currentJob.is_other_branch && Number(currentJob.job_status ?? 0) < 2) {
           throw new Error("ບິນສາຂາອື່ນ: ຕ້ອງເລີ່ມຈັດສົ່ງກ່ອນຈຶ່ງເບີກໄດ້");
         }
-        // Auto-receive if the driver hasn't tapped "ຮັບຖ້ຽວ" yet — saves a step
-        // since picking up implies the trip is in hand.
+        // ຮັບຖ້ຽວ is a required first step: the driver must take the trip before
+        // any goods leave the warehouse against it. This used to auto-receive
+        // (job_status 0 → 1) to save a tap, which let the pickup silently skip
+        // the step; the app now hides every pickup control until the trip is
+        // received, and this guard makes the rule hold for any other client.
         if (Number(currentJob.job_status ?? 0) === 0) {
-          await client.query(
-            `UPDATE odg_tms
-             SET job_status = 1
-             WHERE doc_no = $1 AND COALESCE(approve_status, 0) = 1 AND ${getFixedYearSqlFilter("doc_date")}`,
-            [currentDocNo]
-          );
-        } else if (Number(currentJob.job_status ?? 0) > 2) {
+          throw new Error("ຕ້ອງກົດ 'ຮັບຖ້ຽວ' ກ່ອນ ຈຶ່ງເບີກເຄື່ອງໄດ້");
+        }
+        if (Number(currentJob.job_status ?? 0) > 2) {
           throw new Error("ຖ້ຽວນີ້ປິດແລ້ວ ບໍ່ສາມາດເບີກເຄື່ອງ");
         }
 
         await ensureBillDeliveryItems(billNo, client);
+
+        // ── ຈຳນວນທີ່ຮັບຕົວຈິງ (optional) ──
+        // The app may report what the warehouse actually handed over. Anything
+        // short of the trip plan corrects selected_qty right here — which puts
+        // the shortfall straight back into the bill's pending pool, since
+        // "available" is ERP qty − selected_qty on active trips — and files a
+        // variance for the dispatcher. Sending no items keeps the old
+        // behaviour (a plain tap picks up the full planned quantity).
+        const reportedItems = parsePickupItems(body.items);
+        let variance = null;
+        if (reportedItems.length > 0) {
+          const plannedRows = await client.query(
+            `SELECT item_code, item_name, unit_code,
+                    COALESCE(selected_qty, 0)::numeric AS selected_qty
+             FROM public.odg_tms_detail_item
+             WHERE doc_no = $1 AND bill_no = $2
+             ORDER BY roworder`,
+            [currentDocNo, billNo]
+          );
+          const result = computePickupVariance(
+            plannedRows.rows.map((row) => ({
+              item_code: row.item_code,
+              item_name: row.item_name,
+              unit_code: row.unit_code,
+              selected_qty: Number(row.selected_qty ?? 0),
+            })),
+            reportedItems
+          );
+          if (result.emptyPickup) {
+            throw new Error(
+              "ບໍ່ໄດ້ຮັບສິນຄ້າແມ່ນແຕ່ລາຍການດຽວ — ໃຫ້ໃຊ້ 'ຍົກເລີກບິນ' ແທນການເບີກເຄື່ອງ"
+            );
+          }
+          for (const line of result.lines) {
+            // over_reported lines keep their planned qty (actual === planned),
+            // so this only ever writes a correction downwards.
+            if (line.actual_qty !== line.planned_qty) {
+              await client.query(
+                `UPDATE public.odg_tms_detail_item
+                 SET selected_qty = $4
+                 WHERE doc_no = $1 AND bill_no = $2 AND item_code = $3`,
+                [currentDocNo, billNo, line.item_code, line.actual_qty]
+              );
+            }
+            await client.query(
+              `INSERT INTO public.odg_tms_pickup_variance
+                 (doc_no, bill_no, item_code, item_name, unit_code,
+                  planned_qty, reported_qty, actual_qty, diff_qty, over_reported, driver, remark)
+               VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)`,
+              [
+                currentDocNo,
+                billNo,
+                line.item_code,
+                line.item_name,
+                line.unit_code,
+                line.planned_qty,
+                line.reported_qty,
+                line.actual_qty,
+                line.diff_qty,
+                line.over_reported,
+                driverId,
+                comment,
+              ]
+            );
+          }
+          if (result.hasVariance) variance = result;
+        }
 
         await client.query(
           `UPDATE public.odg_tms_detail
@@ -530,16 +610,35 @@ async function mobileJobAction(body) {
              AND d.doc_no = $2
              AND j.doc_no = d.doc_no
              AND d.sent_start IS NULL
-             AND COALESCE(d.pickup_transport_code,
-                          (SELECT s.transport_code FROM public.ic_trans_shipment s WHERE s.doc_no = d.bill_no LIMIT 1),
-                          '') <> COALESCE(j.origin_transport_code, '')
+             AND ${effectivePickupCodeSql('d')} <> COALESCE(j.origin_transport_code, '')
              AND ${getFixedYearSqlFilter("d.doc_date")}`,
           [billNo, currentDocNo]
         );
 
         await client.query("COMMIT");
         void notifyBillStatus(billNo, "📦 ເບີກເຄື່ອງແລ້ວ");
-        return { success: true, doc_no: currentDocNo };
+        if (variance) {
+          // Fire-and-forget: the pickup itself must not fail because a push
+          // token is stale or the dispatcher lookup is slow.
+          void notifyPickupVariance({
+            billNo,
+            docNo: currentDocNo,
+            driverCode: driverId,
+            variance,
+          });
+        }
+        return {
+          success: true,
+          doc_no: currentDocNo,
+          // Lets the app show "ປັບຈຳນວນໃນຖ້ຽວແລ້ວ" and refresh its item list.
+          variance: variance
+            ? {
+                lines: variance.lines,
+                planned_total: variance.plannedTotal,
+                actual_total: variance.actualTotal,
+              }
+            : null,
+        };
       }
 
       // Receive goods AT the customer's home/shop ("ຮັບສິນຄ້າຈາກລານລູກຄ້າ").
@@ -573,15 +672,10 @@ async function mobileJobAction(body) {
         if (currentBill.pickup_transport_code !== "__CUSTOMER__") {
           throw new Error("ບິນນີ້ບໍ່ແມ່ນການຮັບຈາກລານລູກຄ້າ");
         }
-        // Auto-receive the trip if the driver hasn't tapped "ຮັບຖ້ຽວ" — arriving
-        // to collect goods implies the trip is in hand.
+        // Same first-step rule as pickup_bill: the trip must be received before
+        // any goods are collected against it (was an auto-receive).
         if (Number(currentBill.job_status ?? 0) === 0) {
-          await client.query(
-            `UPDATE odg_tms
-             SET job_status = 1
-             WHERE doc_no = $1 AND COALESCE(approve_status, 0) = 1 AND ${getFixedYearSqlFilter("doc_date")}`,
-            [currentDocNo]
-          );
+          throw new Error("ຕ້ອງກົດ 'ຮັບຖ້ຽວ' ກ່ອນ ຈຶ່ງຮັບສິນຄ້າໄດ້");
         }
 
         await ensureBillDeliveryItems(billNo, client);
@@ -696,9 +790,7 @@ async function mobileJobAction(body) {
            WHERE d.doc_no = $1
              AND j.doc_no = d.doc_no
              AND d.sent_start IS NULL
-             AND COALESCE(d.pickup_transport_code,
-                          (SELECT s.transport_code FROM public.ic_trans_shipment s WHERE s.doc_no = d.bill_no LIMIT 1),
-                          '') = COALESCE(j.origin_transport_code, '')
+             AND ${effectivePickupCodeSql('d')} = COALESCE(j.origin_transport_code, '')
              AND ${getFixedYearSqlFilter("d.doc_date")}`,
           [docNo]
         );
@@ -714,9 +806,7 @@ async function mobileJobAction(body) {
            WHERE d.doc_no = $1
              AND j.doc_no = d.doc_no
              AND d.recipt_job IS NULL
-             AND COALESCE(d.pickup_transport_code,
-                          (SELECT s.transport_code FROM public.ic_trans_shipment s WHERE s.doc_no = d.bill_no LIMIT 1),
-                          '') = COALESCE(j.origin_transport_code, '')
+             AND ${effectivePickupCodeSql('d')} = COALESCE(j.origin_transport_code, '')
              AND ${getFixedYearSqlFilter("d.doc_date")}`,
           [docNo]
         );
@@ -734,9 +824,7 @@ async function mobileJobAction(body) {
           `SELECT d.doc_no, d.cust_code, t.approve_status, t.job_status, d.recipt_job,
                   d.pickup_transport_code, t.dispatch_started_at,
                   COALESCE(t.origin_transport_code, '') AS origin_transport_code,
-                  COALESCE(d.pickup_transport_code,
-                           (SELECT s.transport_code FROM public.ic_trans_shipment s WHERE s.doc_no = d.bill_no LIMIT 1),
-                           '') AS effective_pickup_code
+                  ${effectivePickupCodeSql('d')} AS effective_pickup_code
            FROM public.odg_tms_detail d
            INNER JOIN odg_tms t ON t.doc_no = d.doc_no
            WHERE d.bill_no = $1
@@ -839,9 +927,7 @@ async function mobileJobAction(body) {
              WHERE d.doc_no = $1
                AND j.doc_no = d.doc_no
                AND d.sent_start IS NULL
-               AND COALESCE(d.pickup_transport_code,
-                            (SELECT s.transport_code FROM public.ic_trans_shipment s WHERE s.doc_no = d.bill_no LIMIT 1),
-                            '') = COALESCE(j.origin_transport_code, '')
+               AND ${effectivePickupCodeSql('d')} = COALESCE(j.origin_transport_code, '')
                AND ${getFixedYearSqlFilter("d.doc_date")}`,
             [currentDocNo]
           );
@@ -997,9 +1083,7 @@ async function mobileJobAction(body) {
           `SELECT d.doc_no, t.approve_status, t.job_status, d.recipt_job, d.forward_transport_code,
                   d.pickup_transport_code,
                   COALESCE(t.origin_transport_code, '') AS origin_transport_code,
-                  COALESCE(d.pickup_transport_code,
-                           (SELECT s.transport_code FROM public.ic_trans_shipment s WHERE s.doc_no = d.bill_no LIMIT 1),
-                           '') AS effective_pickup_code,
+                  ${effectivePickupCodeSql('d')} AS effective_pickup_code,
                   COALESCE(d.status, 0) AS status
            FROM public.odg_tms_detail d
            INNER JOIN odg_tms t ON t.doc_no = d.doc_no
@@ -1138,9 +1222,7 @@ async function mobileJobAction(body) {
                WHERE d.doc_no = $1
                  AND j.doc_no = d.doc_no
                  AND d.sent_start IS NULL
-                 AND COALESCE(d.pickup_transport_code,
-                              (SELECT s.transport_code FROM public.ic_trans_shipment s WHERE s.doc_no = d.bill_no LIMIT 1),
-                              '') = COALESCE(j.origin_transport_code, '')
+                 AND ${effectivePickupCodeSql('d')} = COALESCE(j.origin_transport_code, '')
                  AND ${getFixedYearSqlFilter("d.doc_date")}`,
               [currentDocNo]
             );
@@ -1263,9 +1345,7 @@ async function mobileJobAction(body) {
              WHERE d.doc_no = $1
                AND j.doc_no = d.doc_no
                AND d.sent_start IS NULL
-               AND COALESCE(d.pickup_transport_code,
-                            (SELECT s.transport_code FROM public.ic_trans_shipment s WHERE s.doc_no = d.bill_no LIMIT 1),
-                            '') = COALESCE(j.origin_transport_code, '')
+               AND ${effectivePickupCodeSql('d')} = COALESCE(j.origin_transport_code, '')
                AND ${getFixedYearSqlFilter("d.doc_date")}`,
             [currentDocNo]
           );
@@ -1976,6 +2056,7 @@ async function mobileBills({ docNo, billNo, type, driverId, isSupervisor }) {
         a.bill_no, to_char(a.bill_date,'DD-MM-YYYY') as bill_date,
         a.cust_code,
         COALESCE(NULLIF(TRIM(b.name_1), ''), NULLIF(TRIM(cb.cust_name), '')) as cust_name,
+        ${customerAreaSql('a.cust_code')} as cust_area,
         COALESCE(NULLIF(TRIM(b.telephone), ''), NULLIF(TRIM(a.telephone), ''), NULLIF(TRIM(cb.telephone), '')) as telephone,
         to_char(a.date_logistic,'DD-MM-YYYY') as date_logistic,
         COALESCE(NULLIF(TRIM(a.lat::text), ''), NULLIF(TRIM(acd.latitude::text), '')) as lat,
@@ -1987,10 +2068,11 @@ async function mobileBills({ docNo, billNo, type, driverId, isSupervisor }) {
         COALESCE(to_char(a.sent_start,'DD-MM-YYYY HH24:MI'), '-') as sent_start,
         COALESCE(to_char(a.sent_end,'DD-MM-YYYY HH24:MI'), '-') as sent_end,
         COALESCE(NULLIF(TRIM(s.destination), ''), '') as destination,
-        -- Pickup point: per-bill override > bill's transport_code (default).
-        -- '__CUSTOMER__' means pickup at the customer's home/shop; otherwise
-        -- it's a transport_type code joined to its name below.
-        COALESCE(NULLIF(TRIM(a.pickup_transport_code), ''), NULLIF(TRIM(s.transport_code), ''), '') as pickup_transport_code,
+        -- Pickup point: per-bill override > dispatcher's assigned branch > ERP
+        -- branch (see effectivePickupCodeSql). '__CUSTOMER__' means pickup at
+        -- the customer's home/shop; otherwise it's a transport_type code whose
+        -- name is resolved below.
+        ${effectivePickupCodeSql("a")} as pickup_transport_code,
         CASE
           WHEN a.pickup_transport_code = '__CUSTOMER__' THEN 'ບ້ານ/ຮ້ານລູກຄ້າ'
           ELSE COALESCE(NULLIF(TRIM(pt.name_1), ''), '')
@@ -2024,15 +2106,24 @@ async function mobileBills({ docNo, billNo, type, driverId, isSupervisor }) {
         COALESCE(to_char(a.reschedule_date,'DD-MM-YYYY'), '') as reschedule_date,
         COALESCE(a.remark, '') as remark,
         COALESCE(NULLIF(TRIM(pb.planned_lat), ''), '') as planned_lat,
-        COALESCE(NULLIF(TRIM(pb.planned_lng), ''), '') as planned_lng
+        COALESCE(NULLIF(TRIM(pb.planned_lng), ''), '') as planned_lng,
+        -- The goods sit at a DIFFERENT branch's warehouse than the one this
+        -- trip departs from. Such bills may only be picked up once the trip has
+        -- started dispatching (job_status >= 2). MUST stay identical to the
+        -- pickup_bill guard — both now share effectivePickupCodeSql, so the
+        -- app never offers a pickup the server then rejects.
+        (${effectivePickupCodeSql("a")} <> COALESCE(j.origin_transport_code, '')) as is_other_branch
       FROM public.odg_tms_detail a
+      LEFT JOIN public.odg_tms j ON j.doc_no = a.doc_no
       LEFT JOIN ar_customer b ON b.code = a.cust_code
       LEFT JOIN ar_customer_detail acd ON acd.ar_code = a.cust_code
       -- Custom "ອື່ນໆ" bills have no ar_customer row; their name/phone live on
       -- the hand-typed bill itself.
       LEFT JOIN public.odg_tms_custom_bill cb ON cb.bill_no = a.bill_no
       LEFT JOIN ic_trans_shipment s ON s.doc_no = a.bill_no
-      LEFT JOIN public.transport_type pt ON pt.code = COALESCE(NULLIF(a.pickup_transport_code, '__CUSTOMER__'), s.transport_code)
+      -- Name of the effective pickup point (same priority as the code above).
+      LEFT JOIN public.transport_type pt
+        ON pt.code = NULLIF(${effectivePickupCodeSql("a")}, '__CUSTOMER__')
       LEFT JOIN public.transport_type fwd ON fwd.code = a.forward_transport_code
       LEFT JOIN public.odg_tms_pending_bill pb ON pb.bill_no = a.bill_no
       WHERE a.doc_no = $1 AND ${getFixedYearSqlFilter("a.doc_date")}

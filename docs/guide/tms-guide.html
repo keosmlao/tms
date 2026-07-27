@@ -1,483 +1,903 @@
-<title>ຄູ່ມືລະບົບ ODG TMS</title>
-<style>
-  :root {
-    --bg: #f5f7fa;
-    --surface: #ffffff;
-    --surface-2: #eef1f6;
-    --ink: #16202e;
-    --text: #45536a;
-    --muted: #7b8798;
-    --line: #dfe4ec;
-    --accent: #c26a10;
-    --accent-soft: #fbeed9;
-    --s-pending: #64748b;
-    --s-plan: #4f46e5;
-    --s-approve: #c2790a;
-    --s-transit: #0369a1;
-    --s-done: #05784f;
-    --s-alert: #c81e4a;
-    --shadow: 0 1px 2px rgba(22,32,46,.04), 0 8px 24px -12px rgba(22,32,46,.14);
-    --lao: "Noto Sans Lao", "Noto Sans Lao UI", "Phetsarath OT", "Saysettha OT", "Lao UI", system-ui, -apple-system, "Segoe UI", sans-serif;
-    --mono: "SF Mono", ui-monospace, "Cascadia Code", Menlo, monospace;
-  }
-  @media (prefers-color-scheme: dark) {
+<!DOCTYPE html>
+<html lang="lo">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>ຄູ່ມືລະບົບ ODG TMS · Transport Management System Guide</title>
+  <meta name="description" content="ຄູ່ມືການໃຊ້ງານ, Workflow, SOP ແລະ WI ລະບົບບໍລິຫານການຂົນສົ່ງ ODG TMS">
+  <style>
     :root {
-      --bg: #0d131e;
-      --surface: #151d2a;
-      --surface-2: #1c2635;
-      --ink: #eef2f8;
-      --text: #b3becd;
-      --muted: #7e8b9d;
-      --line: #26313f;
-      --accent: #eaa143;
-      --accent-soft: #2a2114;
-      --s-pending: #94a3b8;
-      --s-plan: #8b86f5;
-      --s-approve: #e6a33a;
-      --s-transit: #4aa6dd;
-      --s-done: #3fbd8b;
-      --s-alert: #f2668a;
-      --shadow: 0 1px 2px rgba(0,0,0,.3), 0 12px 30px -14px rgba(0,0,0,.6);
+      --bg: #0f172a;
+      --surface: #1e293b;
+      --surface-2: #334155;
+      --surface-card: #1e293b;
+      --ink: #f8fafc;
+      --text: #cbd5e1;
+      --muted: #94a3b8;
+      --line: #334155;
+      --accent: #f59e0b;
+      --accent-soft: rgba(245, 158, 11, 0.15);
+      --accent-hover: #d97706;
+      --primary: #3b82f6;
+      --primary-soft: rgba(59, 130, 246, 0.15);
+      
+      --s-pending: #64748b;
+      --s-plan: #8b5cf6;
+      --s-approve: #f59e0b;
+      --s-transit: #0ea5e9;
+      --s-done: #10b981;
+      --s-alert: #ef4444;
+      
+      --shadow: 0 4px 20px -2px rgba(0, 0, 0, 0.5);
+      --glass-bg: rgba(30, 41, 59, 0.85);
+      --glass-border: rgba(255, 255, 255, 0.1);
+      
+      --lao: "Noto Sans Lao", "Noto Sans Lao UI", "Phetsarath OT", "Saysettha OT", system-ui, -apple-system, sans-serif;
+      --mono: "JetBrains Mono", "SF Mono", ui-monospace, monospace;
     }
-  }
-  :root[data-theme="light"] {
-    --bg: #f5f7fa; --surface: #ffffff; --surface-2: #eef1f6; --ink: #16202e;
-    --text: #45536a; --muted: #7b8798; --line: #dfe4ec; --accent: #c26a10;
-    --accent-soft: #fbeed9; --s-pending:#64748b; --s-plan:#4f46e5; --s-approve:#c2790a;
-    --s-transit:#0369a1; --s-done:#05784f; --s-alert:#c81e4a;
-    --shadow: 0 1px 2px rgba(22,32,46,.04), 0 8px 24px -12px rgba(22,32,46,.14);
-  }
-  :root[data-theme="dark"] {
-    --bg: #0d131e; --surface: #151d2a; --surface-2: #1c2635; --ink: #eef2f8;
-    --text: #b3becd; --muted: #7e8b9d; --line: #26313f; --accent: #eaa143;
-    --accent-soft: #2a2114; --s-pending:#94a3b8; --s-plan:#8b86f5; --s-approve:#e6a33a;
-    --s-transit:#4aa6dd; --s-done:#3fbd8b; --s-alert:#f2668a;
-    --shadow: 0 1px 2px rgba(0,0,0,.3), 0 12px 30px -14px rgba(0,0,0,.6);
-  }
 
-  * { box-sizing: border-box; }
-  body {
-    margin: 0; background: var(--bg); color: var(--text);
-    font-family: var(--lao); line-height: 1.7; font-size: 16px;
-    -webkit-font-smoothing: antialiased;
-  }
-  .wrap { max-width: 1080px; margin: 0 auto; padding: 0 24px; }
+    :root[data-theme="light"] {
+      --bg: #f8fafc;
+      --surface: #ffffff;
+      --surface-2: #f1f5f9;
+      --surface-card: #ffffff;
+      --ink: #0f172a;
+      --text: #334155;
+      --muted: #64748b;
+      --line: #e2e8f0;
+      --accent: #d97706;
+      --accent-soft: #fef3c7;
+      --accent-hover: #b45309;
+      --primary: #2563eb;
+      --primary-soft: #dbeafe;
+      
+      --s-pending: #64748b;
+      --s-plan: #6d28d9;
+      --s-approve: #d97706;
+      --s-transit: #0284c7;
+      --s-done: #059669;
+      --s-alert: #dc2626;
+      
+      --shadow: 0 4px 16px -2px rgba(15, 23, 42, 0.08);
+      --glass-bg: rgba(255, 255, 255, 0.85);
+      --glass-border: rgba(0, 0, 0, 0.08);
+    }
 
-  /* ---------- header ---------- */
-  header.top {
-    position: sticky; top: 0; z-index: 40;
-    background: color-mix(in srgb, var(--bg) 86%, transparent);
-    backdrop-filter: blur(12px);
-    border-bottom: 1px solid var(--line);
-  }
-  .top-inner { display: flex; align-items: center; gap: 16px; height: 60px; }
-  .brand { display: flex; align-items: center; gap: 11px; font-weight: 700; color: var(--ink); }
-  .brand .mark {
-    width: 30px; height: 30px; border-radius: 8px; flex: none;
-    background: linear-gradient(135deg, var(--accent), #8a4a08);
-    display: grid; place-items: center; color: #fff; font-size: 15px;
-    box-shadow: 0 2px 8px -2px color-mix(in srgb, var(--accent) 60%, transparent);
-  }
-  .brand small { display:block; font-weight: 500; font-size: 11px; color: var(--muted); letter-spacing: .04em; }
-  nav.docnav { margin-left: auto; display: flex; gap: 4px; }
-  nav.docnav a {
-    font-size: 13.5px; color: var(--text); text-decoration: none;
-    padding: 7px 12px; border-radius: 8px; white-space: nowrap;
-  }
-  nav.docnav a:hover { background: var(--surface-2); color: var(--ink); }
-  .theme-btn {
-    background: var(--surface); border: 1px solid var(--line); color: var(--text);
-    width: 36px; height: 36px; border-radius: 9px; cursor: pointer; font-size: 15px;
-    display: grid; place-items: center;
-  }
-  .theme-btn:hover { border-color: var(--accent); }
-  @media (max-width: 820px) { nav.docnav { display: none; } }
+    * { box-sizing: border-box; }
+    html { scroll-behavior: smooth; }
+    body {
+      margin: 0; background: var(--bg); color: var(--text);
+      font-family: var(--lao); line-height: 1.7; font-size: 15px;
+      -webkit-font-smoothing: antialiased;
+      transition: background-color 0.3s, color 0.3s;
+    }
+    
+    .wrap { max-width: 1200px; margin: 0 auto; padding: 0 24px; }
 
-  /* ---------- hero ---------- */
-  .hero { padding: 56px 0 30px; }
-  .eyebrow {
-    display: inline-flex; align-items: center; gap: 8px; font-size: 12px; font-weight: 600;
-    letter-spacing: .13em; text-transform: uppercase; color: var(--accent);
-    background: var(--accent-soft); padding: 5px 12px; border-radius: 999px;
-  }
-  .hero h1 {
-    font-size: clamp(30px, 5vw, 46px); line-height: 1.18; color: var(--ink);
-    margin: 18px 0 12px; font-weight: 800; text-wrap: balance; letter-spacing: -.01em;
-  }
-  .hero p.lead { font-size: 18px; max-width: 64ch; margin: 0; }
-  .meta-row { display: flex; flex-wrap: wrap; gap: 10px 22px; margin-top: 22px; font-size: 13.5px; color: var(--muted); }
-  .meta-row b { color: var(--text); font-weight: 600; }
+    /* ---------- Header Navigation Bar ---------- */
+    header.top {
+      position: sticky; top: 0; z-index: 100;
+      background: var(--glass-bg);
+      backdrop-filter: blur(16px); -webkit-backdrop-filter: blur(16px);
+      border-bottom: 1px solid var(--line);
+      box-shadow: 0 2px 10px rgba(0,0,0,0.05);
+    }
+    .top-inner { display: flex; align-items: center; justify-content: space-between; gap: 16px; height: 68px; }
+    .brand { display: flex; align-items: center; gap: 12px; font-weight: 800; color: var(--ink); text-decoration: none; font-size: 18px; }
+    .brand .mark {
+      width: 36px; height: 36px; border-radius: 10px; flex: none;
+      background: linear-gradient(135deg, var(--accent), #b45309);
+      display: grid; place-items: center; color: #fff; font-size: 18px;
+      box-shadow: 0 4px 12px rgba(217, 119, 6, 0.35);
+    }
+    .brand small { display: block; font-weight: 500; font-size: 11.5px; color: var(--muted); letter-spacing: .02em; }
 
-  /* ---------- pipeline stepper ---------- */
-  .pipeline-card {
-    margin: 30px 0 8px; background: var(--surface); border: 1px solid var(--line);
-    border-radius: 16px; padding: 26px 24px 22px; box-shadow: var(--shadow);
-  }
-  .pipeline-card h3 { margin: 0 0 4px; color: var(--ink); font-size: 15px; font-weight: 700; }
-  .pipeline-card .sub { font-size: 13px; color: var(--muted); margin: 0 0 20px; }
-  .steps { display: flex; gap: 0; overflow-x: auto; padding-bottom: 8px; }
-  .step { flex: 1 0 auto; min-width: 96px; position: relative; padding: 0 6px; text-align: center; }
-  .step:not(:last-child)::after {
-    content: ""; position: absolute; top: 15px; left: 50%; width: 100%; height: 2px;
-    background: var(--line);
-  }
-  .dot {
-    position: relative; z-index: 1; width: 32px; height: 32px; margin: 0 auto 10px;
-    border-radius: 50%; display: grid; place-items: center; color: #fff; font-size: 13px;
-    font-weight: 700; font-variant-numeric: tabular-nums;
-    box-shadow: 0 0 0 4px var(--surface);
-  }
-  .step .lbl { font-size: 12px; line-height: 1.35; color: var(--text); display: block; }
-  .step .stage { font-size: 10px; color: var(--muted); text-transform: uppercase; letter-spacing: .05em; }
+    /* Header Controls */
+    .top-controls { display: flex; align-items: center; gap: 12px; }
+    .search-box { position: relative; width: 260px; }
+    .search-box input {
+      width: 100%; height: 38px; padding: 0 12px 0 36px; border-radius: 10px;
+      background: var(--surface-2); border: 1px solid var(--line); color: var(--ink);
+      font-size: 13.5px; font-family: var(--lao); transition: all 0.2s;
+    }
+    .search-box input:focus { outline: none; border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-soft); }
+    .search-box svg { position: absolute; left: 11px; top: 11px; width: 16px; height: 16px; fill: var(--muted); }
 
-  /* ---------- sections ---------- */
-  section.doc { padding: 46px 0; border-top: 1px solid var(--line); scroll-margin-top: 72px; }
-  .sec-head { display: flex; align-items: baseline; gap: 14px; margin-bottom: 6px; }
-  .sec-num {
-    font-family: var(--mono); font-size: 13px; font-weight: 600; color: var(--accent);
-    border: 1px solid var(--line); border-radius: 7px; padding: 3px 9px; flex: none;
-  }
-  section.doc h2 { font-size: 26px; color: var(--ink); margin: 0; font-weight: 800; letter-spacing: -.01em; }
-  section.doc > .wrap > p.intro { margin: 6px 0 26px; max-width: 68ch; }
+    .role-select select {
+      height: 38px; padding: 0 10px; border-radius: 10px; background: var(--surface-2);
+      border: 1px solid var(--line); color: var(--ink); font-size: 13px; font-family: var(--lao); cursor: pointer;
+    }
+    .role-select select:focus { outline: none; border-color: var(--accent); }
 
-  /* ---------- tables ---------- */
-  .tbl-scroll { overflow-x: auto; border: 1px solid var(--line); border-radius: 12px; box-shadow: var(--shadow); }
-  table { width: 100%; border-collapse: collapse; font-size: 14px; min-width: 520px; background: var(--surface); }
-  thead th {
-    text-align: left; background: var(--surface-2); color: var(--ink); font-weight: 700;
-    padding: 11px 15px; font-size: 12.5px; letter-spacing: .02em; border-bottom: 1px solid var(--line);
-  }
-  tbody td { padding: 11px 15px; border-bottom: 1px solid var(--line); vertical-align: top; }
-  tbody tr:last-child td { border-bottom: none; }
-  tbody tr:hover td { background: color-mix(in srgb, var(--surface-2) 50%, transparent); }
-  td .pill {
-    display: inline-block; font-size: 11.5px; font-weight: 600; padding: 2px 9px;
-    border-radius: 999px; white-space: nowrap;
-  }
+    nav.docnav { display: flex; gap: 4px; }
+    nav.docnav a {
+      font-size: 13.5px; font-weight: 600; color: var(--text); text-decoration: none;
+      padding: 8px 14px; border-radius: 8px; white-space: nowrap; transition: all 0.2s;
+    }
+    nav.docnav a:hover, nav.docnav a.active { background: var(--accent-soft); color: var(--accent); }
+    
+    .icon-btn {
+      background: var(--surface-2); border: 1px solid var(--line); color: var(--ink);
+      width: 38px; height: 38px; border-radius: 10px; cursor: pointer; font-size: 16px;
+      display: grid; place-items: center; transition: all 0.2s;
+    }
+    .icon-btn:hover { border-color: var(--accent); color: var(--accent); transform: translateY(-1px); }
 
-  /* ---------- role / task cards ---------- */
-  .grid { display: grid; gap: 16px; grid-template-columns: repeat(auto-fill, minmax(272px, 1fr)); }
-  .card {
-    background: var(--surface); border: 1px solid var(--line); border-radius: 14px;
-    padding: 20px; box-shadow: var(--shadow); border-top: 3px solid var(--role, var(--accent));
-  }
-  .card h4 { margin: 0 0 3px; color: var(--ink); font-size: 16px; font-weight: 700; }
-  .card .role-tag { font-size: 12px; color: var(--role, var(--accent)); font-weight: 600; margin-bottom: 12px; display: block; }
-  .card ol, .card ul { margin: 0; padding-left: 20px; font-size: 13.5px; }
-  .card li { margin-bottom: 5px; }
-  .card li::marker { color: var(--role, var(--accent)); font-weight: 700; }
-  .card .rule { margin-top: 13px; padding-top: 12px; border-top: 1px dashed var(--line); font-size: 12.5px; color: var(--muted); }
-  .card .rule b { color: var(--s-alert); }
+    @media (max-width: 900px) {
+      nav.docnav { display: none; }
+      .search-box { width: 160px; }
+    }
+    @media (max-width: 600px) {
+      .search-box { display: none; }
+    }
 
-  /* ---------- decisions / callouts ---------- */
-  .callouts { display: grid; gap: 14px; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); margin-top: 20px; }
-  .callout {
-    background: var(--surface); border: 1px solid var(--line); border-left: 3px solid var(--c, var(--accent));
-    border-radius: 10px; padding: 15px 17px;
-  }
-  .callout h5 { margin: 0 0 6px; color: var(--ink); font-size: 14px; }
-  .callout p { margin: 0; font-size: 13px; }
-  .callout .yes { color: var(--s-done); font-weight: 600; }
-  .callout .no { color: var(--s-alert); font-weight: 600; }
+    /* ---------- Hero Banner & Meta ---------- */
+    .hero { padding: 48px 0 32px; }
+    .eyebrow {
+      display: inline-flex; align-items: center; gap: 8px; font-size: 12px; font-weight: 700;
+      letter-spacing: .08em; text-transform: uppercase; color: var(--accent);
+      background: var(--accent-soft); padding: 6px 14px; border-radius: 999px;
+      border: 1px solid color-mix(in srgb, var(--accent) 30%, transparent);
+    }
+    .hero h1 {
+      font-size: clamp(28px, 4vw, 44px); line-height: 1.2; color: var(--ink);
+      margin: 18px 0 14px; font-weight: 800; letter-spacing: -.02em;
+    }
+    .hero p.lead { font-size: 17px; max-width: 72ch; margin: 0; color: var(--text); }
+    
+    .meta-row { display: flex; flex-wrap: wrap; gap: 12px 24px; margin-top: 24px; font-size: 13.5px; color: var(--muted); }
+    .meta-item { display: flex; align-items: center; gap: 6px; background: var(--surface); padding: 6px 14px; border-radius: 8px; border: 1px solid var(--line); }
+    .meta-item b { color: var(--ink); font-weight: 600; }
 
-  /* ---------- wi step cards ---------- */
-  .wi { background: var(--surface); border: 1px solid var(--line); border-radius: 12px; padding: 16px 18px; box-shadow: var(--shadow); }
-  .wi-code { font-family: var(--mono); font-size: 11px; font-weight: 600; color: var(--accent); background: var(--accent-soft); padding: 2px 7px; border-radius: 5px; }
-  .wi h4 { margin: 8px 0 8px; color: var(--ink); font-size: 15px; }
-  .wi ol { margin: 0; padding-left: 20px; font-size: 13.5px; }
-  .wi ol li { margin-bottom: 4px; }
-  .path { font-family: var(--mono); font-size: 12px; background: var(--surface-2); padding: 1px 6px; border-radius: 4px; color: var(--ink); }
+    /* ---------- Pipeline Stepper ---------- */
+    .pipeline-card {
+      margin: 32px 0 12px; background: var(--surface-card); border: 1px solid var(--line);
+      border-radius: 20px; padding: 28px; box-shadow: var(--shadow);
+    }
+    .pipeline-card .head { display: flex; justify-content: space-between; align-items: flex-end; margin-bottom: 20px; }
+    .pipeline-card h3 { margin: 0; color: var(--ink); font-size: 18px; font-weight: 800; }
+    .pipeline-card .sub { font-size: 13px; color: var(--muted); margin-top: 4px; }
+    
+    .steps { display: flex; gap: 6px; overflow-x: auto; padding: 8px 4px 16px; scrollbar-width: thin; }
+    .step {
+      flex: 1 0 auto; min-width: 100px; position: relative; padding: 12px 8px;
+      text-align: center; background: var(--surface-2); border-radius: 12px;
+      border: 1px solid var(--line); cursor: pointer; transition: all 0.25s;
+    }
+    .step:hover { transform: translateY(-3px); border-color: var(--accent); box-shadow: var(--shadow); }
+    .step.active { border-color: var(--accent); background: var(--accent-soft); }
+    .dot {
+      width: 32px; height: 32px; margin: 0 auto 8px; border-radius: 50%;
+      display: grid; place-items: center; color: #fff; font-size: 13px; font-weight: 800;
+      box-shadow: 0 2px 8px rgba(0,0,0,0.2);
+    }
+    .step .lbl { font-size: 12px; font-weight: 700; color: var(--ink); display: block; line-height: 1.3; }
+    .step .stage { font-size: 10.5px; color: var(--muted); text-transform: uppercase; font-weight: 600; margin-top: 4px; display: block; }
 
-  footer { border-top: 1px solid var(--line); padding: 30px 0 50px; font-size: 13px; color: var(--muted); }
-  a.tref { color: var(--accent); text-decoration: none; border-bottom: 1px solid transparent; }
-  a.tref:hover { border-bottom-color: var(--accent); }
-  @media (prefers-reduced-motion: no-preference) {
-    .dot { transition: transform .2s; }
-    .step:hover .dot { transform: scale(1.12); }
-  }
-</style>
+    /* ---------- Section Headers & Containers ---------- */
+    section.doc { padding: 48px 0; border-top: 1px solid var(--line); scroll-margin-top: 76px; }
+    .sec-head { display: flex; align-items: center; gap: 14px; margin-bottom: 8px; }
+    .sec-num {
+      font-family: var(--mono); font-size: 13px; font-weight: 700; color: var(--accent);
+      background: var(--accent-soft); border: 1px solid color-mix(in srgb, var(--accent) 30%, transparent);
+      border-radius: 8px; padding: 4px 10px; flex: none;
+    }
+    section.doc h2 { font-size: 28px; color: var(--ink); margin: 0; font-weight: 800; letter-spacing: -.01em; }
+    p.intro { margin: 8px 0 28px; max-width: 72ch; font-size: 15.5px; color: var(--muted); }
 
-<header class="top">
-  <div class="wrap top-inner">
-    <div class="brand">
-      <span class="mark">◈</span>
-      <span>ODG&nbsp;TMS<small>ຄູ່ມືລະບົບບໍລິຫານການຂົນສົ່ງ</small></span>
+    /* ---------- Styled Tables ---------- */
+    .tbl-scroll { overflow-x: auto; border: 1px solid var(--line); border-radius: 14px; box-shadow: var(--shadow); margin-bottom: 24px; }
+    table { width: 100%; border-collapse: collapse; font-size: 14px; min-width: 600px; background: var(--surface); }
+    thead th {
+      text-align: left; background: var(--surface-2); color: var(--ink); font-weight: 700;
+      padding: 13px 18px; font-size: 13px; border-bottom: 1px solid var(--line); letter-spacing: .02em;
+    }
+    tbody td { padding: 13px 18px; border-bottom: 1px solid var(--line); vertical-align: top; color: var(--text); }
+    tbody tr:last-child td { border-bottom: none; }
+    tbody tr:hover td { background: color-mix(in srgb, var(--surface-2) 60%, transparent); }
+    
+    .pill {
+      display: inline-flex; align-items: center; gap: 5px; font-size: 12px; font-weight: 700; padding: 3px 10px;
+      border-radius: 999px; white-space: nowrap; border: 1px solid transparent;
+    }
+    .pill-pending { background: rgba(100, 116, 139, 0.15); color: var(--s-pending); border-color: rgba(100, 116, 139, 0.3); }
+    .pill-plan { background: rgba(139, 92, 246, 0.15); color: var(--s-plan); border-color: rgba(139, 92, 246, 0.3); }
+    .pill-approve { background: rgba(245, 158, 11, 0.15); color: var(--s-approve); border-color: rgba(245, 158, 11, 0.3); }
+    .pill-transit { background: rgba(14, 165, 233, 0.15); color: var(--s-transit); border-color: rgba(14, 165, 233, 0.3); }
+    .pill-done { background: rgba(16, 185, 129, 0.15); color: var(--s-done); border-color: rgba(16, 185, 129, 0.3); }
+    .pill-alert { background: rgba(239, 68, 68, 0.15); color: var(--s-alert); border-color: rgba(239, 68, 68, 0.3); }
+
+    /* ---------- Grid Cards (SOP & WI) ---------- */
+    .grid-2 { display: grid; gap: 20px; grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); }
+    .grid-3 { display: grid; gap: 20px; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); }
+
+    .card {
+      background: var(--surface-card); border: 1px solid var(--line); border-radius: 16px;
+      padding: 24px; box-shadow: var(--shadow); border-top: 4px solid var(--role-color, var(--accent));
+      transition: transform 0.2s, box-shadow 0.2s;
+    }
+    .card:hover { transform: translateY(-2px); box-shadow: 0 8px 24px rgba(0,0,0,0.12); }
+    .card h4 { margin: 0 0 4px; color: var(--ink); font-size: 17px; font-weight: 800; }
+    .card .role-tag { font-size: 12px; color: var(--role-color, var(--accent)); font-weight: 700; margin-bottom: 14px; display: inline-block; }
+    .card ol, .card ul { margin: 0; padding-left: 20px; font-size: 14px; }
+    .card li { margin-bottom: 8px; line-height: 1.6; }
+    .card li::marker { color: var(--role-color, var(--accent)); font-weight: 800; }
+    
+    .card .rule-box {
+      margin-top: 16px; padding: 12px 14px; background: var(--surface-2); border-radius: 10px;
+      border-left: 3px solid var(--s-alert); font-size: 13px; color: var(--text);
+    }
+    .card .rule-box b { color: var(--s-alert); }
+
+    /* ---------- Callouts & Special Case Badges ---------- */
+    .callouts { display: grid; gap: 16px; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); margin: 20px 0; }
+    .callout {
+      background: var(--surface-card); border: 1px solid var(--line);
+      border-left: 4px solid var(--c, var(--accent)); border-radius: 12px; padding: 18px 20px;
+    }
+    .callout h5 { margin: 0 0 6px; color: var(--ink); font-size: 15px; font-weight: 700; }
+    .callout p { margin: 0; font-size: 13.5px; color: var(--text); }
+    .callout .yes { color: var(--s-done); font-weight: 700; }
+    .callout .no { color: var(--s-alert); font-weight: 700; }
+
+    /* ---------- Work Instructions WI Cards ---------- */
+    .wi-card {
+      background: var(--surface-card); border: 1px solid var(--line); border-radius: 14px;
+      padding: 20px; box-shadow: var(--shadow); transition: all 0.2s;
+    }
+    .wi-card:hover { border-color: var(--accent); }
+    .wi-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 12px; }
+    .wi-code {
+      font-family: var(--mono); font-size: 11.5px; font-weight: 800; color: var(--accent);
+      background: var(--accent-soft); padding: 3px 8px; border-radius: 6px; border: 1px solid var(--accent-soft);
+    }
+    .wi-card h4 { margin: 0; color: var(--ink); font-size: 16px; font-weight: 700; }
+    .wi-card ol { margin: 10px 0 0; padding-left: 20px; font-size: 13.5px; }
+    .wi-card ol li { margin-bottom: 6px; }
+    
+    .path {
+      font-family: var(--mono); font-size: 12px; background: var(--surface-2);
+      padding: 2px 7px; border-radius: 5px; color: var(--primary); font-weight: 600;
+    }
+
+    /* ---------- Accordion for FAQ ---------- */
+    .accordion-item {
+      background: var(--surface-card); border: 1px solid var(--line); border-radius: 12px;
+      margin-bottom: 12px; overflow: hidden;
+    }
+    .accordion-header {
+      padding: 16px 20px; font-size: 15px; font-weight: 700; color: var(--ink);
+      cursor: pointer; display: flex; justify-content: space-between; align-items: center;
+      user-select: none; transition: background 0.2s;
+    }
+    .accordion-header:hover { background: var(--surface-2); }
+    .accordion-content {
+      padding: 0 20px 18px; font-size: 14px; color: var(--text); display: none;
+      border-top: 1px solid var(--line); margin-top: 4px; padding-top: 14px;
+    }
+    .accordion-item.open .accordion-content { display: block; }
+    .accordion-item.open .accordion-header svg { transform: rotate(180deg); }
+    .accordion-header svg { width: 18px; height: 18px; fill: var(--muted); transition: transform 0.2s; }
+
+    /* ---------- Footer & Print ---------- */
+    footer { border-top: 1px solid var(--line); padding: 40px 0 60px; font-size: 13.5px; color: var(--muted); text-align: center; }
+
+    @media print {
+      header.top, .top-controls, .theme-btn, .icon-btn { display: none !important; }
+      body { background: #fff !important; color: #000 !important; font-size: 12pt; }
+      .card, .pipeline-card, .wi-card, .callout { border: 1px solid #ccc !important; box-shadow: none !important; break-inside: avoid; }
+      section.doc { page-break-before: always; }
+    }
+  </style>
+</head>
+<body>
+
+  <!-- Top Header -->
+  <header class="top">
+    <div class="wrap top-inner">
+      <a href="#" class="brand">
+        <span class="mark">◈</span>
+        <span>ODG&nbsp;TMS<small>ຄູ່ມືລະບົບບໍລິຫານການຂົນສົ່ງ</small></span>
+      </a>
+
+      <!-- Live Search & Controls -->
+      <div class="top-controls">
+        <div class="search-box">
+          <svg viewBox="0 0 24 24"><path d="M15.5 14h-.79l-.28-.27A6.471 6.471 0 0 0 16 9.5 6.5 6.5 0 1 0 9.5 16c1.61 0 3.09-.59 4.23-1.57l.27.28v.79l5 4.99L20.49 19l-4.99-5zm-6 0C7.01 14 5 11.99 5 9.5S7.01 5 9.5 5 14 7.01 14 9.5 11.99 14 9.5 14z"/></svg>
+          <input type="text" id="searchInput" placeholder="ຄົ້ນຫາຄູ່ມື (ເຊັ່ນ GPS, WI-A1)..." aria-label="ຄົ້ນຫາຄູ່ມື">
+        </div>
+
+        <div class="role-select">
+          <select id="roleSelect" aria-label="ເລືອກບົດບາດ">
+            <option value="all">ທຸກບົດບາດ (All Roles)</option>
+            <option value="office">Office / Dispatch</option>
+            <option value="head">ຫົວໜ້າ / ຜູ້ຄຸມ</option>
+            <option value="driver">ຄົນຂັບລົດ</option>
+            <option value="sales">ຝ່າຍຂາຍ</option>
+            <option value="admin">Admin / ຜູ້ດູແລ</option>
+          </select>
+        </div>
+
+        <nav class="docnav">
+          <a href="#manual">ຄູ່ມືໃຊ້ງານ</a>
+          <a href="#workflow">Workflow</a>
+          <a href="#sop">SOP</a>
+          <a href="#wi">WI</a>
+          <a href="#faq">FAQ</a>
+        </nav>
+
+        <button class="icon-btn" id="themeBtn" title="ສະຫຼັບໂໝດສີ Dark/Light" aria-label="ສະຫຼັບໂໝດສີ">◐</button>
+        <button class="icon-btn" onclick="window.print()" title="ພິມ/Save PDF" aria-label="ພິມເອກະສານ">🖨️</button>
+      </div>
     </div>
-    <nav class="docnav">
-      <a href="#manual">ຄູ່ມືການໃຊ້ງານ</a>
-      <a href="#workflow">Workflow</a>
-      <a href="#sop">SOP</a>
-      <a href="#wi">WI</a>
-    </nav>
-    <button class="theme-btn" id="themeBtn" aria-label="ສະຫຼັບໂໝດສີ">◐</button>
-  </div>
-</header>
+  </header>
 
-<main class="wrap">
-  <section class="hero">
-    <span class="eyebrow">◈ ຄູ່ມືຄົບທັງລະບົບ · ຮຸ່ນ 1.0</span>
-    <h1>ຄູ່ມືລະບົບ ODG TMS<br>ບໍລິຫານການຂົນສົ່ງແບບຄົບວົງຈອນ</h1>
-    <p class="lead">ຄູ່ມືການໃຊ້ງານ · Workflow · SOP · WI ໃນບ່ອນດຽວ — ສຳລັບ ພະນັກງານ office/dispatch, ຄົນຂັບລົດ, ຫົວໜ້າ/ຜູ້ຄຸມ ແລະ ຝ່າຍຂາຍ.</p>
-    <div class="meta-row">
-      <span>ລະຫັດ <b>DOC-TMS-GUIDE</b></span>
-      <span>ວັນທີ <b>2026-07-22</b></span>
-      <span>ຂອບເຂດ <b>Web Dashboard · ແອັບຄົນຂັບ · Tracking · ລາຍງານ</b></span>
-    </div>
+  <main class="wrap">
+    <!-- Hero Banner -->
+    <section class="hero">
+      <span class="eyebrow">◈ ຄູ່ມືຄົບທັງລະບົບ · Version 1.0</span>
+      <h1>ຄູ່ມືລະບົບ ODG TMS<br>ບໍລິຫານການຂົນສົ່ງແບບຄົບວົງຈອນ</h1>
+      <p class="lead">ຄູ່ມືການໃຊ້ງານ · Workflow 11 ສະຖານະ · SOP 5 ບົດບາດ · WI ຄຳແນະນຳ 1-2-3 — ຮອງຮັບ Web Dashboard, ແອັບຄົນຂັບມືຖື, GPS Realtime, Tracking ແລະ ລາຍງານ.</p>
 
-    <div class="pipeline-card">
-      <h3>ວົງຈອນຊີວິດຂອງບິນ (Bill Lifecycle)</h3>
-      <p class="sub">ບິນໄຫຼຈາກຊ້າຍ → ຂວາ ຜ່ານ 11 ສະຖານະ. ສີບອກຜູ້ຮັບຜິດຊອບໃນແຕ່ລະຊ່ວງ.</p>
-      <div class="steps" id="steps"></div>
-    </div>
-  </section>
+      <div class="meta-row">
+        <div class="meta-item">ລະຫັດເອກະສານ: <b>DOC-TMS-GUIDE</b></div>
+        <div class="meta-item">ວັນທີອັບເດດ: <b>2026-07-22</b></div>
+        <div class="meta-item">ຂອບເຂດ: <b>Web Dashboard · ແອັບມືຖື · GPS · Tracking</b></div>
+      </div>
 
-  <!-- ============ MANUAL ============ -->
-  <section class="doc" id="manual">
-    <div class="wrap" style="padding:0">
-      <div class="sec-head"><span class="sec-num">01</span><h2>ຄູ່ມືການໃຊ້ງານ</h2></div>
-      <p class="intro">ອະທິບາຍທຸກເມນູ ວ່າໃຊ້ເຮັດຫຍັງ. ໝວດ “ຂົນສົ່ງ” ຄືສາຍວຽກຫຼັກ — ແຕ່ລະເມນູຄື 1 ສະຖານະໃນວົງຈອນຂ້າງເທິງ.</p>
+      <!-- Pipeline Stepper -->
+      <div class="pipeline-card">
+        <div class="head">
+          <div>
+            <h3>ວົງຈອນຊີວິດຂອງບິນ (11 Bill Lifecycle Stages)</h3>
+            <div class="sub">ກົດທີ່ສະຖານະເພື່ອເບິ່ງລາຍລະອຽດຜູ້ຮັບຜິດຊອບ ແລະ ວຽກທີ່ຕ້ອງເຮັດ</div>
+          </div>
+        </div>
+        <div class="steps" id="steps"></div>
+      </div>
+    </section>
 
-      <h3 style="color:var(--ink);font-size:15px;margin:0 0 12px">ໝວດ “ຂົນສົ່ງ” — ຫົວໃຈຂອງລະບົບ</h3>
+    <!-- ============ SECTION 1: USER MANUAL ============ -->
+    <section class="doc" id="manual">
+      <div class="sec-head">
+        <span class="sec-num">01</span>
+        <h2>ຄູ່ມືການໃຊ້ງານ (User Manual)</h2>
+      </div>
+      <p class="intro">ອະທິບາຍທຸກໜ້າ ແລະ ທຸກເມນູໃນລະບົບ ODG TMS ແຍກຕາມໝວດການໃຊ້ງານ.</p>
+
+      <!-- Login Info Card -->
+      <div class="callouts">
+        <div class="callout" style="--c:var(--primary)">
+          <h5>💻 1.1 Web Dashboard (ຄອມພິວເຕີ)</h5>
+          <p>ເປີດ Browser ໄປທີ່ URL ລະບົບ (ເຊັ່ນ <code>tms.odien.net</code>) ➔ Login ດ້ວຍບັນຊີ ERP ➔ ຖ້າປ້ອນຜິດເກີນ 10 ຄັ້ງ/ນາທີ ລະບົບຈະລັອກ IP 1 ນາທີ.</p>
+        </div>
+        <div class="callout" style="--c:var(--s-transit)">
+          <h5>📱 1.2 ແອັບຄົນຂັບ (ມືຖື)</h5>
+          <p>Login ດ້ວຍ User/Pass ດຽວກັນ, Session ໃຊ້ໄດ້ 8 ຊົ່ວໂມງ ➔ <b>ຕ້ອງອະນຸຍາດ Location Always</b> ແລະ Notification ໃຫ້ຄົບ ເພື່ອໃຫ້ GPS ແລະ ແຈ້ງເຕືອນເຮັດວຽກ.</p>
+        </div>
+      </div>
+
+      <!-- Menu Category Tables -->
+      <h3 style="color:var(--ink);font-size:17px;margin:28px 0 14px;font-weight:700">🚚 ໝວດ “ຂົນສົ່ງ” — ສາຍວຽກຫຼັກຂອງລະບົບ</h3>
       <div class="tbl-scroll">
-        <table>
-          <thead><tr><th>ເມນູ</th><th>ໝາຍເຖິງ</th><th>ເຮັດຫຍັງ</th></tr></thead>
+        <table id="tbl-transport">
+          <thead>
+            <tr><th>ເມນູ</th><th>ໝາຍເຖິງ</th><th>ໜ້າທີ່ / ຂັ້ນຕອນ</th><th>ຜູ້ຮັບຜິດຊອບ</th></tr>
+          </thead>
           <tbody>
-            <tr><td><span class="pill" style="background:var(--accent-soft);color:var(--accent)">ລໍຖ້າຈັດຖ້ຽວ</span></td><td>ບິນຮັບເຂົ້າ ຍັງບໍ່ຈັດ</td><td>ກຳນົດວັນ/ຮອບ/ເສັ້ນທາງ → ຈັດເຂົ້າໃບງານ</td></tr>
-            <tr><td>ບິນລໍຕາມເສັ້ນທາງ</td><td>ຈັດເສັ້ນທາງແລ້ວ</td><td>ຈັດກຸ່ມຕາມເສັ້ນທາງ</td></tr>
-            <tr><td>ໃບງານ/ລໍຖ້າອະນຸມັດ</td><td>ໃບງານລໍອະນຸມັດ</td><td>ກວດຄວາມຖືກຕ້ອງ</td></tr>
-            <tr><td>ລໍຖ້າຮັບຖ້ຽວ</td><td>ອະນຸມັດແລ້ວ ລໍຄົນຂັບ</td><td>ຕິດຕາມການຮັບຖ້ຽວ</td></tr>
-            <tr><td>ລໍຖ້າເບີກເຄື່ອງ</td><td>ລໍເບີກຈາກສາງ</td><td>ປະສານສາງເບີກເຄື່ອງ</td></tr>
-            <tr><td>ກຳລັງຈັດສົ່ງ</td><td>ລົດອອກແລ່ນ</td><td>ຕິດຕາມ realtime ຜ່ານ GPS</td></tr>
-            <tr><td><span class="pill" style="background:color-mix(in srgb,var(--s-done) 15%,transparent);color:var(--s-done)">ຈັດສົ່ງສຳເລັດ</span></td><td>ສົ່ງຄົບແລ້ວ</td><td>ກວດຮູບຫຼັກຖານການສົ່ງ</td></tr>
-            <tr><td><span class="pill" style="background:color-mix(in srgb,var(--s-alert) 14%,transparent);color:var(--s-alert)">ບິນສົ່ງບໍ່ຄົບ</span></td><td>ສົ່ງບາງສ່ວນ/ຄືນ</td><td>ຕິດຕາມສາເຫດ, ຈັດຮອບຕໍ່ໄປ</td></tr>
-            <tr><td>ຄົນຂັບປິດງານ → ປິດສຳເລັດແລ້ວ</td><td>ຈົບຂະບວນການ</td><td>office ກວດຮັບ → ປິດ → ເຂົ້າລາຍງານ</td></tr>
+            <tr data-role="office"><td><span class="pill pill-pending">ລໍຖ້າຈັດຖ້ຽວ</span></td><td>ບິນຮັບເຂົ້າ ຍັງບໍ່ຈັດ</td><td>ກຳນົດວັນ/ຮອບ/ເສັ້ນທາງ ➔ ຈັດເຂົ້າໃບງານ</td><td>Office / Dispatch</td></tr>
+            <tr data-role="office"><td><span class="pill pill-plan">ບິນລໍຕາມເສັ້ນທາງ</span></td><td>ຈັດເສັ້ນທາງແລ້ວ</td><td>ຈັດກຸ່ມຕາມເສັ້ນທາງ ➔ ສ້າງໃບງານ</td><td>Office / Dispatch</td></tr>
+            <tr data-role="office"><td><span class="pill pill-plan">ໃບງານ/ລໍຖ້າອະນຸມັດ</span></td><td>ໃບງານລໍອະນຸມັດ</td><td>ກວດຄວາມຖືກຕ້ອງ ➔ ສົ່ງອະນຸມັດ</td><td>Office / Dispatch</td></tr>
+            <tr data-role="head"><td><span class="pill pill-approve">ລໍຖ້າຮັບຖ້ຽວ</span></td><td>ອະນຸມັດແລ້ວ ລໍຄົນຂັບ</td><td>ຕິດຕາມການຮັບຖ້ຽວຂອງຄົນຂັບ</td><td>ຄົນຂັບ / Office</td></tr>
+            <tr data-role="driver"><td><span class="pill pill-transit">ລໍຖ້າເບີກເຄື່ອງ</span></td><td>ລໍເບີກຈາກສາງ</td><td>ປະສານສາງເບີກເຄື່ອງ ➔ ກວດຈຳນວນ</td><td>ຄົນຂັບ + ສາງ</td></tr>
+            <tr data-role="driver"><td><span class="pill pill-transit">ລໍຖ້າຈັດສົ່ງ</span></td><td>ເບີກເຄື່ອງແລ້ວ ພ້ອມອອກ</td><td>ກວດຄວາມຮຽບຮ້ອຍເທິງລົດ ➔ ເລີ່ມຈັດສົ່ງ</td><td>ຄົນຂັບລົດ</td></tr>
+            <tr data-role="driver"><td><span class="pill pill-transit">ກຳລັງຈັດສົ່ງ</span></td><td>ລົດອອກແລ່ນຢູ່</td><td>ຕິດຕາມ realtime ຜ່ານ GPS ມືຖື/ຮາດແວ</td><td>ຄົນຂັບ / Office</td></tr>
+            <tr data-role="driver"><td><span class="pill pill-done">ຈັດສົ່ງສຳເລັດ</span></td><td>ສົ່ງຄົບ 100%</td><td>ກວດຮູບຫຼັກຖານການສົ່ງ + ລາຍເຊັນ</td><td>ຄົນຂັບ / Office</td></tr>
+            <tr data-role="driver"><td><span class="pill pill-alert">ບິນສົ່ງບໍ່ຄົບ</span></td><td>ສົ່ງບາງສ່ວນ/ຄືນ/ຍົກເລີກ</td><td>ຕິດຕາມສາເຫດ ➔ ຈັດຮອບຈັດສົ່ງຕໍ່ໄປ</td><td>ຄົນຂັບ / Office / ຝ່າຍຂາຍ</td></tr>
+            <tr data-role="office"><td><span class="pill pill-done">ຄົນຂັບປິດງານ</span></td><td>ຄົນຂັບປິດງານແລ້ວ</td><td>Office ກວດຮັບຫຼັກຖານ ➔ ປິດສຳເລັດ</td><td>Office / Dispatch</td></tr>
+            <tr data-role="office"><td><span class="pill pill-done">ປິດສຳເລັດແລ້ວ</span></td><td>ຈົບຂະບວນການ 100%</td><td>ເຂົ້າປະຫວັດ, ລາຍງານ KPI ແລະ Leaderboard</td><td>Office / Admin</td></tr>
           </tbody>
         </table>
       </div>
 
-      <h3 style="color:var(--ink);font-size:15px;margin:26px 0 12px">ໝວດອື່ນ</h3>
+      <h3 style="color:var(--ink);font-size:17px;margin:28px 0 14px;font-weight:700">📊 ໝວດອື່ນໆ ພາຍໃນລະບົບ</h3>
       <div class="tbl-scroll">
         <table>
-          <thead><tr><th>ໝວດ</th><th>ໃຊ້ຫຍັງ</th></tr></thead>
+          <thead>
+            <tr><th>ໝວດເມນູ</th><th>ລາຍການເມນູຍ່ອຍ</th><th>ການນຳໃຊ້</th></tr>
+          </thead>
           <tbody>
-            <tr><td><b>ຕິດຕາມ</b></td><td>ຄົ້ນຫາບິນ, ແຜນທີ່ລົດ (GPS ຮາດແວ/ມືຖື), ເສັ້ນທາງຄົນຂັບ, ສະຫຼຸບ GPS/ວັນ</td></tr>
-            <tr><td><b>ອະນຸມັດ</b></td><td>ລໍອະນຸມັດ / ອະນຸມັດແລ້ວ + ລາຍງານ</td></tr>
-            <tr><td><b>ລາຍງານ</b></td><td>ປະຈຳວັນ, ຕາມຄົນຂັບ/ລົດ/ບິນ, ປະຈຳເດືອນ, Leaderboard — export Excel ໄດ້</td></tr>
-            <tr><td><b>ນ້ຳມັນ</b></td><td>ບັນທຶກ/ກວດ ການເຕີມນ້ຳມັນ (ຄົນຂັບບັນທຶກຈາກແອັບ)</td></tr>
-            <tr><td><b>ທັນໃຈ Express</b></td><td>ຂົນສົ່ງດ່ວນ ThunJai: ຈັດການ, ສ້າງ Order, ພາບລວມ</td></tr>
-            <tr><td><b>ການຈັດການ</b></td><td>ຂໍ້ມູນລົດ, ປະເພດລົດ, ພະນັກງານ, ເສັ້ນທາງ, ຮອບຈັດສົ່ງ, ຜູ້ໃຊ້ online, ຕັ້ງຄ່າ, Audit Log</td></tr>
-            <tr><td><b>ຕິດຕາມສາທາລະນະ</b></td><td>ລູກຄ້າເປີດ <span class="path">/track</span> ໃສ່ເລກບິນ (ບໍ່ຕ້ອງ login) · ໃຫ້ຄະແນນທີ່ <span class="path">/rate</span></td></tr>
+            <tr data-role="head"><td><b>ອະນຸມັດ</b></td><td>ລໍອະນຸມັດ · ອະນຸມັດແລ້ວ + ລາຍງານ</td><td>ຫົວໜ້າກວດສອບໃບງານ, SLA &lt; 2h, ອະນຸມັດ ຫຼື ຕີກັບ.</td></tr>
+            <tr data-role="all"><td><b>ຕິດຕາມ</b></td><td>ຕິດຕາມສິນຄ້າ, ບິນສົ່ງບໍ່ສຳເລັດ, ແຜນທີ່ລົດ (GPS), ແຜນທີ່ມືຖື, ເສັ້ນທາງຄົນຂັບ, ສະຫຼຸບ GPS ປະຈຳວັນ</td><td>ຕິດຕາມຕຳແໜ່ງລົດ Realtime, ຄົ້ນຫາບິນ, ເບິ່ງປະຫວັດເສັ້ນທາງ.</td></tr>
+            <tr data-role="head"><td><b>ລາຍງານ</b></td><td>ປະຈຳວັນ, ເຄື່ອນໄຫວບິນ/ສິນຄ້າ, ບິນຄ້າງສົ່ງ/ສົ່ງສຳເລັດ/ຍົກເລີກ, ຕາມຄົນຂັບ/ລົດ, Leaderboard</td><td>ວິເຄາະຜົນງານ, ສະຫຼຸບ KPI, Export Excel ເອົາຂໍ້ມູນໄປວິເຄາະຕໍ່.</td></tr>
+            <tr data-role="driver"><td><b>ນ້ຳມັນ</b></td><td>ບັນທຶກ/ກວດ ການເຕີມນ້ຳມັນ</td><td>ຄົນຂັບບັນທຶກເງິນ/ລິດ/ກິໂລແມັດ + ຮູບໃບບິນ, Office ກວດກາ.</td></tr>
+            <tr data-role="office"><td><b>ທັນໃຈ Express</b></td><td>ຈັດການ, ສ້າງ Order, ພາບລວມ ThunJai</td><td>ບໍລິການຂົນສົ່ງດ່ວນ ThunJai.</td></tr>
+            <tr data-role="admin"><td><b>ການຈັດການ</b></td><td>ຂໍ້ມູນລົດ, ປະເພດລົດ, ພະນັກງານ, ເສັ້ນທາງ, ຮອບຈັດສົ່ງ, ຜູ້ໃຊ້ Online, Audit Log</td><td>ບໍລິຫານ Master Data, ສິດຜູ້ໃຊ້, ກວດ Audit Log ຄວາມປອດໄພ.</td></tr>
+            <tr data-role="all"><td><b>ຕິດຕາມສາທາລະນະ</b></td><td>ໜ້າ <code>/track</code> ແລະ <code>/rate</code></td><td>ລູກຄ້າເປີດເບິ່ງສະຖານະບິນໄດ້ໂດຍບໍ່ຕ້ອງ Login, ພ້ອມໃຫ້ຄະແນນ 1-5 ດາວ.</td></tr>
           </tbody>
         </table>
       </div>
-    </div>
-  </section>
+    </section>
 
-  <!-- ============ WORKFLOW ============ -->
-  <section class="doc" id="workflow">
-    <div class="wrap" style="padding:0">
-      <div class="sec-head"><span class="sec-num">02</span><h2>Workflow — ຂັ້ນຕອນການເຮັດວຽກ</h2></div>
-      <p class="intro">ໃຜຮັບຊ່ວງໃສ ແລະ ເຮັດຢູ່ບ່ອນໃດ ໃນແຕ່ລະຂັ້ນ (swimlane).</p>
-      <div class="tbl-scroll">
-        <table>
-          <thead><tr><th>ຂັ້ນ</th><th>ສະຖານະ</th><th>ຜູ້ຮັບຜິດຊອບ</th><th>ເຄື່ອງມື</th><th>ຜົນທີ່ໄດ້</th></tr></thead>
-          <tbody>
-            <tr><td>1–3</td><td>ຈັດຖ້ຽວ → ເສັ້ນທາງ → ໃບງານ</td><td>office / dispatch</td><td>Web</td><td>ໃບງານພ້ອມສົ່ງອະນຸມັດ</td></tr>
-            <tr><td>4</td><td>ອະນຸມັດ</td><td>ຫົວໜ້າ / ຜູ້ຄຸມ</td><td>Web</td><td>ໃບງານຖືກອະນຸມັດ</td></tr>
-            <tr><td>5–7</td><td>ຮັບຖ້ຽວ → ເບີກເຄື່ອງ → ພ້ອມສົ່ງ</td><td>ຄົນຂັບ + ສາງ</td><td>ແອັບ</td><td>ເບີກສິນຄ້າຄົບ</td></tr>
-            <tr><td>8</td><td>ກຳລັງຈັດສົ່ງ</td><td>ຄົນຂັບ</td><td>ແອັບ + GPS</td><td>ຕິດຕາມ realtime</td></tr>
-            <tr><td>9</td><td>ສຳເລັດ / ບໍ່ຄົບ</td><td>ຄົນຂັບ</td><td>ແອັບ</td><td>ຮູບຫຼັກຖານການສົ່ງ</td></tr>
-            <tr><td>10–11</td><td>ປິດງານ → ປິດສຳເລັດ</td><td>ຄົນຂັບ → office</td><td>ແອັບ → Web</td><td>ເຂົ້າລາຍງານ</td></tr>
-          </tbody>
-        </table>
+    <!-- ============ SECTION 2: WORKFLOW & BILL LIFECYCLE ============ -->
+    <section class="doc" id="workflow">
+      <div class="sec-head">
+        <span class="sec-num">02</span>
+        <h2>Workflow — ຂັ້ນຕອນການເຮັດວຽກ & 10 ກໍລະນີພິເສດ</h2>
       </div>
+      <p class="intro">ວົງຈອນການເຮັດວຽກ 11 ຂັ້ນຕອນ ແລະ ວິທີຮັບມືກັບ 10 ກໍລະນີພິເສດໃນການຈັດສົ່ງ.</p>
 
+      <!-- Decision Points Cards -->
       <div class="callouts">
         <div class="callout" style="--c:var(--s-approve)">
-          <h5>ຈຸດຕັດສິນ · ອະນຸມັດ (ຂັ້ນ 4)</h5>
-          <p>ກວດ ລົດ/ຄົນຂັບ/ນ້ຳໜັກ/ເສັ້ນທາງ. <span class="yes">ຜ່ານ</span> → ລໍຮັບຖ້ຽວ · <span class="no">ບໍ່ຜ່ານ</span> → ຕີກັບພ້ອມເຫດຜົນ.</p>
+          <h5>⚖️ ຈຸດຕັດສິນ 1: ການອະນຸມັດໃບງານ (ຂັ້ນ 4)</h5>
+          <p>ຫົວໜ້າກວດ ລົດ/ຄົນຂັບ/ນ້ຳໜັກ. <span class="yes">ຜ່ານ</span> ➔ ລໍຮັບຖ້ຽວ · <span class="no">ບໍ່ຜ່ານ</span> ➔ ຕີກັບພ້ອມລະບຸເຫດຜົນ (SLA &lt; 2 ຊົ່ວໂມງ).</p>
         </div>
         <div class="callout" style="--c:var(--s-alert)">
-          <h5>ຈຸດຕັດສິນ · ສົ່ງ (ຂັ້ນ 9)</h5>
-          <p><span class="yes">ຄົບ</span> → complete + ຮູບ · <span class="no">ບໍ່ຄົບ</span> → return + ເຫດຜົນ → ຈັດຮອບຕໍ່ໄປ · ຍົກເລີກ → ຕ້ອງໄດ້ອະນຸຍາດ.</p>
+          <h5>📦 ຈຸດຕັດສິນ 2: ຜົນການຈັດສົ່ງ (ຂັ້ນ 9)</h5>
+          <p><span class="yes">ສົ່ງຄົບ 100%</span> ➔ ຖ່າຍຮູບ + ລາຍເຊັນ · <span class="no">ສົ່ງບໍ່ຄົບ/ຄືນ</span> ➔ ໃສ່ເຫດຜົນ ➔ ຈັດຮອບຕໍ່ໄປ.</p>
         </div>
-        <div class="callout" style="--c:var(--s-done)">
-          <h5>ຈຸດຕັດສິນ · ກວດຮັບ (ຂັ້ນ 11)</h5>
-          <p>office ກວດຮູບ + ຈຳນວນ. ຂາດ/ຜິດ → ຕີກັບໃຫ້ຄົນຂັບ (revert/edit) ກ່ອນປິດ.</p>
+        <div class="callout" style="--c:var(--s-plan)">
+          <h5>🔄 ກໍລະນີພິເສດ: ທະຍອຍສົ່ງ (Partial Delivery)</h5>
+          <p>ຖ້າສົ່ງໄດ້ບາງສ່ວນ (ຍອດເຫຼືອ &gt; 0) ➔ ລະບົບປ່ຽນເປັນ <b>"ທະຍອຍສົ່ງ"</b> ອັດຕະໂນມັດ ແລະ ດຶງບິນກັບ <i>ລໍຖ້າຈັດຖ້ຽວ</i> ເພື່ອໃຫ້ Office ຈັດຖ້ຽວຮອບຕໍ່ໄປ.</p>
+        </div>
+        <div class="callout" style="--c:var(--s-transit)">
+          <h5>🏢 ກໍລະນີພິເສດ: ສົ່ງຕໍ່ສາຂາ (Branch Forwarding)</h5>
+          <p>ຂົນສົ່ງມອບໃຫ້ສາຂາປາຍທາງ ➔ ສະຖານະເປັນ <b>"ສົ່ງຕໍ່ສາຂາແລ້ວ"</b> ➔ Push Alert ຫາພະນັກງານສາຂານັ້ນ ➔ ບິນເຂົ້າຄິວ <i>ລໍຖ້າຈັດຖ້ຽວ</i> ຂອງສາຂາປາຍທາງ.</p>
         </div>
       </div>
 
-      <div class="callouts">
-        <div class="callout" style="--c:var(--s-transit)"><h5>ຂະບວນການເສີມ · GPS</h5><p>ຂະນະສົ່ງ ແອັບສົ່ງພິກັດອັດຕະໂນມັດ. ສົ່ງບໍ່ໄດ້ → ລາຍງານເຫດຜົນ (GPS ປິດ / ບໍ່ອະນຸຍາດ / token ໝົດ).</p></div>
-        <div class="callout" style="--c:var(--s-plan)"><h5>ຂະບວນການເສີມ · ແຈ້ງເຕືອນ</h5><p>Push ຫາຄົນຂັບເມື່ອມີໃບງານໃໝ່/ອະນຸມັດ; cron ເຕືອນ dispatch/KPI; ຝ່າຍຂາຍໄດ້ຮັບເມື່ອບິນປ່ຽນສະຖານະ.</p></div>
+      <!-- 10 Special Cases Expandable Accordions -->
+      <h3 style="color:var(--ink);font-size:17px;margin:28px 0 14px;font-weight:700">⭐ 10 ກໍລະນີການເຮັດວຽກພິເສດ (Special Cases)</h3>
+      
+      <div class="accordion-item">
+        <div class="accordion-header">
+          <span>1. ທະຍອຍສົ່ງ (Partial Delivery)</span>
+          <svg viewBox="0 0 24 24"><path d="M7.41 8.59L12 13.17l4.59-4.58L18 10l-6 6-6-6 1.41-1.41z"/></svg>
+        </div>
+        <div class="accordion-content">
+          ສົ່ງໄດ້ບາງສ່ວນ, ມີຍອດເຫຼືອສິນຄ້າ &gt; 0 ➔ ຄົນຂັບປ້ອນຈຳນວນສົ່ງໄດ້ຈິງ ➔ ລະບົບປ່ຽນສະຖານະເປັນ "ທະຍອຍສົ່ງ" ອັດຕະໂນມັດ ແລະ ດຶງບິນກັບເຂົ້າ <i>ລໍຖ້າຈັດຖ້ຽວ</i> ເພື່ອໃຫ້ Office ຈັດຖ້ຽວຮອບຕໍ່ໄປ.
+        </div>
       </div>
+
+      <div class="accordion-item">
+        <div class="accordion-header">
+          <span>2. ສົ່ງຕໍ່ສາຂາ (Branch Forwarding)</span>
+          <svg viewBox="0 0 24 24"><path d="M7.41 8.59L12 13.17l4.59-4.58L18 10l-6 6-6-6 1.41-1.41z"/></svg>
+        </div>
+        <div class="accordion-content">
+          ຂົນສົ່ງສິນຄ້າໄປມອບໃຫ້ສາຂາປາຍທາງ ➔ ຄົນຂັບກົດ "ສົ່ງຕໍ່ສາຂາ" ➔ ສະຖານະເປັນ <b>forward_transport_code</b> ➔ ລະບົບສົ່ງ Push Alert ຫາສາຂາປາຍທາງ ແລະ ດຶງບິນເຂົ້າຄິວ <i>ລໍຖ້າຈັດຖ້ຽວ</i> ຂອງສາຂານັ້ນອັດຕະໂນມັດ.
+        </div>
+      </div>
+
+      <div class="accordion-item">
+        <div class="accordion-header">
+          <span>3. ແຍກບິນຕາມສາຂາ (Split Bill by Branch)</span>
+          <svg viewBox="0 0 24 24"><path d="M7.41 8.59L12 13.17l4.59-4.58L18 10l-6 6-6-6 1.41-1.41z"/></svg>
+        </div>
+        <div class="accordion-content">
+          ບິນ 1 ໃບທີ່ມີສິນຄ້າສົ່ງຫຼາຍສາຂາ ➔ Office ໃຊ້ Dialog <b>"ແຍກບິນຕາມສາຂາ"</b> (WI-A4) ເພື່ອແບ່ງລາຍການສິນຄ້າອອກເປັນບິນຍ່ອຍແຍກຕາມສາຂາປາຍທາງ.
+        </div>
+      </div>
+
+      <div class="accordion-item">
+        <div class="accordion-header">
+          <span>4. ຍ້ອນກັບ / ແກ້ໄຂການສົ່ງຜິດ (Revert / Edit Delivery)</span>
+          <svg viewBox="0 0 24 24"><path d="M7.41 8.59L12 13.17l4.59-4.58L18 10l-6 6-6-6 1.41-1.41z"/></svg>
+        </div>
+        <div class="accordion-content">
+          ຖ້າຄົນຂັບກົດສົ່ງຜິດ ຫຼື Office ກວດເຫັນຮູບ/ຈຳນວນບໍ່ຖືກ ➔ Office ໃຊ້ປຸ່ມ <b>"ຍ້ອນກັບ (Revert)"</b> ຫຼື <b>"ແກ້ໄຂ (Edit)"</b> (WI-A3/WI-C7) ເພື່ອປັບຂໍ້ມູນ ຫຼື ຍ້ອນສະຖານະໃຫ້ຄົນຂັບສົ່ງໃໝ່.
+        </div>
+      </div>
+
+      <div class="accordion-item">
+        <div class="accordion-header">
+          <span>5. ເພີ່ມບິນເຂົ້າໃບງານເດີມ (Add Bills to Job)</span>
+          <svg viewBox="0 0 24 24"><path d="M7.41 8.59L12 13.17l4.59-4.58L18 10l-6 6-6-6 1.41-1.41z"/></svg>
+        </div>
+        <div class="accordion-content">
+          ມີບິນດ່ວນດຶງເຂົ້າມາຕື່ມ ➔ Office ເປີດໜ້າໃບງານ ➔ ກົດ Dialog <b>"ເພີ່ມບິນເຂົ້າໃບງານ"</b> ດຶງບິນໃໝ່ເຂົ້າໃບງານເດີມໄດ້ໂດຍບໍ່ຕ້ອງສ້າງໃບງານໃໝ່.
+        </div>
+      </div>
+
+      <div class="accordion-item">
+        <div class="accordion-header">
+          <span>6. ປັກໝຸດ/ແກ້ໄຂຕຳແໜ່ງຈັດສົ່ງ (Edit Location / Pin Map)</span>
+          <svg viewBox="0 0 24 24"><path d="M7.41 8.59L12 13.17l4.59-4.58L18 10l-6 6-6-6 1.41-1.41z"/></svg>
+        </div>
+        <div class="accordion-content">
+          ບິນບໍ່ມີພິກັດ Lat/Lng ➔ Office ໃຊ້ Dialog <b>"ແກ້ໄຂຕຳແໜ່ງ"</b> (WI-A5) ເພື່ອປັກໝຸດເທິງແຜນທີ່ Google Maps, ຄົນຂັບຈະເຫັນແຜນທີ່ນຳທາງໄດ້ທັນທີ.
+        </div>
+      </div>
+
+      <div class="accordion-item">
+        <div class="accordion-header">
+          <span>7. ກຳນົດວັນ/ຮອບຈັດສົ່ງໃໝ່ (Reschedule Date & Round)</span>
+          <svg viewBox="0 0 24 24"><path d="M7.41 8.59L12 13.17l4.59-4.58L18 10l-6 6-6-6 1.41-1.41z"/></svg>
+        </div>
+        <div class="accordion-content">
+          ລູກຄ້າຂໍເລື່ອນວັນຈັດສົ່ງ ➔ ຝ່າຍຂາຍ ຫຼື Office ໃຊ້ Dialog <b>"ກຳນົດວັນຈັດສົ່ງ"</b> ເພື່ອຍ້າຍວັນ ແລະ ຮອບຈັດສົ່ງໄປວັນໃໝ່.
+        </div>
+      </div>
+
+      <div class="accordion-item">
+        <div class="accordion-header">
+          <span>8. ບັນທຶກເຕີມນ້ຳມັນ (Fuel Entry)</span>
+          <svg viewBox="0 0 24 24"><path d="M7.41 8.59L12 13.17l4.59-4.58L18 10l-6 6-6-6 1.41-1.41z"/></svg>
+        </div>
+        <div class="accordion-content">
+          ຄົນຂັບເຕີມນ້ຳມັນ ➔ ເປີດແອັບ ➔ ປ້ອນ ເງິນ, ລິດ, ເລກກິໂລແມັດ + ຖ່າຍຮູບໃບບິນ (WI-C6) ➔ Office ກວດອະນຸມັດໃນໜ້າ *ນ້ຳມັນ*.
+        </div>
+      </div>
+
+      <div class="accordion-item">
+        <div class="accordion-header">
+          <span>9. ຕິດຕໍ່ WhatsApp & ຕິດຕາມສາທາລະນະ (/track & /rate)</span>
+          <svg viewBox="0 0 24 24"><path d="M7.41 8.59L12 13.17l4.59-4.58L18 10l-6 6-6-6 1.41-1.41z"/></svg>
+        </div>
+        <div class="accordion-content">
+          ກົດ <b>WhatsApp Link</b> ຢູ່ໜ້າບິນ ເພື່ອສົ່ງ Link ຕິດຕາມ <code>/track</code> ຫາລູກຄ້າ. ເມື່ອໄດ້ຮັບສິນຄ້າ ລູກຄ້າສາມາດໃຫ້ຄະແນນ 1-5 ດາວໄດ້ຢູ່ <code>/rate</code>.
+        </div>
+      </div>
+
+      <div class="accordion-item">
+        <div class="accordion-header">
+          <span>10. ແກ້ໄຂ GPS Offline & Session Expired 8h</span>
+          <svg viewBox="0 0 24 24"><path d="M7.41 8.59L12 13.17l4.59-4.58L18 10l-6 6-6-6 1.41-1.41z"/></svg>
+        </div>
+        <div class="accordion-content">
+          ຖ້າ GPS ບໍ່ອັບເດດ: ໃຫ້ເປີດ Location Permission <b>Allow all the time</b> + ປິດ Battery Optimization. ຖ້າ Session ໝົດ (8h) ໃຫ້ Re-login ເພື່ອຮັບ Token ໃໝ່.
+        </div>
+      </div>
+    </section>
+
+    <!-- ============ SECTION 3: SOP ============ -->
+    <section class="doc" id="sop">
+      <div class="sec-head">
+        <span class="sec-num">03</span>
+        <h2>SOP — ລະບຽບການປະຕິບັດງານ (Standard Operating Procedures)</h2>
+      </div>
+      <p class="intro">ມາດຕະຖານການປະຕິບັດງານ 5 ບົດບາດ ເພື່ອໃຫ້ການເຮັດວຽກຖືກຕ້ອງ, ທັນເວລາ ແລະ ກວດສອບໄດ້.</p>
+
+      <div class="grid-2">
+        <!-- SOP 1 -->
+        <div class="card" style="--role-color:var(--s-plan)" data-role="office">
+          <h4>Office / Dispatch</h4>
+          <span class="role-tag">SOP-1 · ຈັດຖ້ຽວ & ໃບງານ</span>
+          <ol>
+            <li><b>ຕົ້ນວັນ:</b> ກວດໜ້າ <i>ລໍຖ້າຈັດຖ້ຽວ</i> ທັງໝົດ.</li>
+            <li><b>ຈັດຖ້ຽວ:</b> ກຳນົດ ວັນ/ຮອບ/ເສັ້ນທາງ, ຈັດບິນທາງດຽວກັນເຂົ້າໃບງານດຽວ.</li>
+            <li><b>ສ້າງໃບງານ:</b> ຈັບຄູ່ ລົດ + ຄົນຂັບ ໃຫ້ເໝາະກັບນ້ຳໜັກບັນຈຸ.</li>
+            <li><b>ສົ່ງອະນຸມັດ:</b> ກວດຄວາມຖືກຕ້ອງ ➔ ສົ່ງໃຫ້ຫົວໜ້າ.</li>
+            <li><b>ຕິດຕາມ:</b> ເຝົ້າເບິ່ງບິນຄ້າງ + ຕິດຕາມ GPS ຕະຫຼອດວັນ.</li>
+            <li><b>ກວດຮັບ:</b> ກວດຫຼັກຖານການສົ່ງ ➔ ປິດສຳເລັດ.</li>
+          </ol>
+
+          <div class="rule-box">
+            <b>ກົດລະບຽບ (MUST):</b> ຫ້າມສ້າງໃບງານທີ່ນ້ຳໜັກເກີນລົດ · ທຸກການຍົກເລີກບິນຕ້ອງມີເຫດຜົນ+ອະນຸມັດ.
+          </div>
+        </div>
+
+        <!-- SOP 2 -->
+        <div class="card" style="--role-color:var(--s-approve)" data-role="head">
+          <h4>ຫົວໜ້າ / ຜູ້ຄຸມ (Supervisor)</h4>
+          <span class="role-tag">SOP-2 · ອະນຸມັດ & ຕິດຕາມ KPI</span>
+          <ol>
+            <li><b>ອະນຸມັດໃບງານ:</b> ກວດ ລົດ/ຄົນຂັບ/ນ້ຳໜັກ ພາຍໃນ SLA &lt; 2h.</li>
+            <li><b>ຕິດຕາມ Realtime:</b> ເບິ່ງແຜນທີ່ລົດ ແລະ ຕຳແໜ່ງຄົນຂັບ.</li>
+            <li><b>ຕິດຕາມ KPI:</b> ກວດລາຍງານປະຈຳວັນ, ຄ້າງສົ່ງ, Leaderboard.</li>
+            <li><b>ຈັດການເຫດການ:</b> ແກ້ໄຂບິນຄ້າງນານ / ຫຼຸດເສັ້ນທາງ.</li>
+            <li><b>ພິຈາລະນາ:</b> ອະນຸຍາດຄຳຂໍຍົກເລີກ ຫຼື ແກ້ໄຂບິນ.</li>
+          </ol>
+
+          <div class="rule-box">
+            <b>ກົດລະບຽບ (MUST):</b> ບໍ່ອະນຸມັດໃບງານທີ່ຂໍ້ມູນບໍ່ຄົບ · ຕີກັບຕ້ອງລະບຸເຫດຜົນຊັດເຈນ.
+          </div>
+        </div>
+
+        <!-- SOP 3 -->
+        <div class="card" style="--role-color:var(--s-transit)" data-role="driver">
+          <h4>ຄົນຂັບລົດ (Driver)</h4>
+          <span class="role-tag">SOP-3 · ຮັບ – ຈັດສົ່ງ ຕໍ່ຖ້ຽວ</span>
+          <ol>
+            <li><b>ກ່ອນອອກງານ:</b> Login, ເປີດ GPS Always + Notifications.</li>
+            <li><b>ຮັບຖ້ຽວ & ເບີກ:</b> ຮັບໃບງານ ➔ ເບີກເຄື່ອງຢູ່ສາງ (ກວດຈຳນວນ).</li>
+            <li><b>ເລີ່ມຈັດສົ່ງ:</b> ກົດເລີ່ມຈັດສົ່ງ ➔ ເຊັກອິນເມື່ອຮອດຈຸດ.</li>
+            <li><b>ຫຼັກຖານການສົ່ງ:</b> ຖ່າຍຮູບສິນຄ້າ/ລາຍເຊັນ ➔ ກົດສົ່ງສຳເລັດ.</li>
+            <li><b>ສົ່ງບໍ່ໄດ້:</b> ກົດສົ່ງຄືນ + ໃສ່ເຫດຜົນ + ຮູບ.</li>
+            <li><b>ນ້ຳມັນ & ປິດງານ:</b> ບັນທຶກນ້ຳມັນ ➔ ກົດປິດງານ.</li>
+          </ol>
+
+          <div class="rule-box">
+            <b>ກົດລະບຽບ (MUST):</b> ຫ້າມກົດສົ່ງສຳເລັດໂດຍບໍ່ມີຮູບ · ຫ້າມປິດ GPS ຂະນະຈັດສົ່ງ.
+          </div>
+        </div>
+
+        <!-- SOP 4 -->
+        <div class="card" style="--role-color:var(--s-done)" data-role="sales">
+          <h4>ຝ່າຍຂາຍ (Sales)</h4>
+          <span class="role-tag">SOP-4 · ຕິດຕາມລູກຄ້າ & ວັນຈັດສົ່ງ</span>
+          <ol>
+            <li><b>ຕິດຕາມ:</b> ເບິ່ງ <i>ບິນສົ່ງບໍ່ສຳເລັດ</i> ຂອງລູກຄ້າຕົນ.</li>
+            <li><b>ກຳນົດວັນ:</b> ປະສານ Office ຍ້າຍວັນ/ຮອບຈັດສົ່ງ.</li>
+            <li><b>ຢືນຢັນ:</b> ຕິດຕາມຄຳຕິຊົມ ແລະ ຄະແນນ 1-5 ດາວ.</li>
+          </ol>
+
+          <div class="rule-box">
+            <b>ໝາຍເຫດ:</b> ບັນຊີຝ່າຍຂາຍຖືກຈຳກັດຂອບເຂດຂໍ້ມູນສະເພາະສາຍຂາຍຕົນເອງ.
+          </div>
+        </div>
+
+        <!-- SOP 5 -->
+        <div class="card" style="--role-color:#a855f7" data-role="admin">
+          <h4>ຜູ້ດູແລລະບົບ (Admin)</h4>
+          <span class="role-tag">SOP-5 · Master Data & System Admin</span>
+          <ol>
+            <li><b>Master Data:</b> ຮັກສາຂໍ້ມູນ ລົດ, ພະນັກງານ, ເສັ້ນທາງ, ຮອບ.</li>
+            <li><b>Access Control:</b> ກຳນົດສິດ 5 Roles ໃຫ້ຖືກຕ້ອງ.</li>
+            <li><b>Audit Log:</b> ກວດ Activity Log ເປັນປະຈຳ.</li>
+            <li><b>Security:</b> ຮັບປະກັນ Database Backup ແລະ System Security.</li>
+          </ol>
+
+          <div class="rule-box">
+            <b>ກົດລະບຽບ (MUST):</b> ຫ້າມໃຫ້ສິດ Admin ແກ່ຜູ້ບໍ່ກ່ຽວຂ້ອງ · ກວດ Audit Log ເປັນປະຈຳ.
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ============ SECTION 4: WI WORK INSTRUCTIONS ============ -->
+    <section class="doc" id="wi">
+      <div class="sec-head">
+        <span class="sec-num">04</span>
+        <h2>WI — ຄຳແນະນຳການເຮັດວຽກ 1-2-3 (Work Instructions)</h2>
+      </div>
+      <p class="intro">ບັດຂັ້ນຕອນການເຮັດວຽກ 1-2-3 ແຍກຕາມແຕ່ລະວຽກ (Work Instruction Cards).</p>
+
+      <div class="grid-3">
+        <div class="wi-card" data-role="office">
+          <div class="wi-head"><span class="wi-code">WI-A1</span><h4>ຈັດຖ້ຽວບິນ</h4></div>
+          <ol>
+            <li>ເປີດ <span class="path">ຂົນສົ່ງ › ລໍຖ້າຈັດຖ້ຽວ</span></li>
+            <li>ໝາຍເລືອກບິນ (ໄດ້ຫຼາຍໃບ)</li>
+            <li>ກຳນົດ ວັນ · ຮອບ · ເສັ້ນທາງ</li>
+            <li>ບັນທຶກ ➔ ບິນ ໄປ <i>ບິນລໍຕາມເສັ້ນທາງ</i></li>
+          </ol>
+        </div>
+
+        <div class="wi-card" data-role="office">
+          <div class="wi-head"><span class="wi-code">WI-A2</span><h4>ສ້າງໃບງານ</h4></div>
+          <ol>
+            <li>ເປີດ <span class="path">ບິນລໍຕາມເສັ້ນທາງ</span></li>
+            <li>ເລືອກກຸ່ມ ➔ ກົດ <b>ສ້າງໃບງານ</b></li>
+            <li>ເລືອກ ລົດ + ຄົນຂັບ (ກວດນ້ຳໜັກ)</li>
+            <li>ກົດ <b>ສົ່ງອະນຸມັດ</b></li>
+          </ol>
+        </div>
+
+        <div class="wi-card" data-role="office">
+          <div class="wi-head"><span class="wi-code">WI-A3</span><h4>ກວດຮັບ & ປິດງານ</h4></div>
+          <ol>
+            <li>ເປີດ <span class="path">ຄົນຂັບປິດງານ</span></li>
+            <li>ກວດຮູບ + ຈຳນວນ ຕໍ່ບິນ</li>
+            <li>ຄົບ ➔ ກົດ <b>ປິດສຳເລັດ</b></li>
+            <li>ຂາດ/ຜິດ ➔ ກົດ <b>ຕີກັບ (Revert)</b></li>
+          </ol>
+        </div>
+
+        <div class="wi-card" data-role="office">
+          <div class="wi-head"><span class="wi-code">WI-A4</span><h4>ແຍກບິນຕາມສາຂາ</h4></div>
+          <ol>
+            <li>ຢູ່ໜ້າ <span class="path">ລໍຖ້າຈັດຖ້ຽວ</span></li>
+            <li>ເລືອກບິນ ➔ ກົດ <b>ແຍກບິນຕາມສາຂາ</b></li>
+            <li>ເລືອກລາຍການ ➔ ລະບຸສາຂາປາຍທາງ</li>
+            <li>ບັນທຶກ ➔ ໄດ້ບິນຍ່ອຍແຍກສາຂາ</li>
+          </ol>
+        </div>
+
+        <div class="wi-card" data-role="office">
+          <div class="wi-head"><span class="wi-code">WI-A5</span><h4>ປັກໝຸດແຜນທີ່ (Pin Map)</h4></div>
+          <ol>
+            <li>ຖ້າບິນບໍ່ມີພິກັດ Lat/Lng</li>
+            <li>ກົດ <b>ແກ້ໄຂຕຳແໜ່ງ</b> ຢູ່ໜ້າບິນ</li>
+            <li>ຄົ້ນຫາ/ຍ້າຍໝຸດ ➔ ບັນທຶກ</li>
+          </ol>
+        </div>
+
+        <div class="wi-card" data-role="head">
+          <div class="wi-head"><span class="wi-code">WI-B1</span><h4>ອະນຸມັດ / ຕີກັບ</h4></div>
+          <ol>
+            <li>ເປີດ <span class="path">ອະນຸມັດ › ລໍອະນຸມັດ</span></li>
+            <li>ກວດ ລົດ/ຄົນຂັບ/ນ້ຳໜັກ/ເສັ້ນທາງ</li>
+            <li>ຖືກ ➔ ກົດ <b>ອະນຸມັດ</b></li>
+            <li>ຜິດ ➔ ກົດ <b>ຕີກັບ</b> + ໃສ່ເຫດຜົນ</li>
+          </ol>
+        </div>
+
+        <div class="wi-card" data-role="driver">
+          <div class="wi-head"><span class="wi-code">WI-C1..3</span><h4>ຄົນຂັບ: ຮັບ ➔ ສົ່ງ</h4></div>
+          <ol>
+            <li>ກົດ <b>ຮັບຖ້ຽວ</b> ➔ ເບີກເຄື່ອງຢູ່ສາງ</li>
+            <li>ກົດ <b>ເລີ່ມຈັດສົ່ງ</b> (GPS ເປີດຕະຫຼອດ)</li>
+            <li>ຮອດຈຸດ ➔ ກົດ <b>ເຊັກອິນ</b></li>
+            <li>ມອບ ➔ ຖ່າຍຮູບ ➔ ກົດ <b>ສົ່ງສຳເລັດ</b></li>
+          </ol>
+        </div>
+
+        <div class="wi-card" data-role="driver">
+          <div class="wi-head"><span class="wi-code">WI-C4..6</span><h4>ຄົນຂັບ: ບໍ່ຄົບ & ນ້ຳມັນ</h4></div>
+          <ol>
+            <li>ສົ່ງບໍ່ໄດ້ ➔ ກົດ <b>ສົ່ງຄືນ</b> + ເຫດຜົນ</li>
+            <li>ເຕີມນ້ຳມັນ ➔ ປ້ອນເງິນ/ລິດ + ຖ່າຍໃບບິນ</li>
+            <li>ຈົບ ➔ ກົດ <b>ປິດງານ</b></li>
+          </ol>
+        </div>
+
+        <div class="wi-card" data-role="sales">
+          <div class="wi-head"><span class="wi-code">WI-D1</span><h4>ຝ່າຍຂາຍ: ຕິດຕາມບິນ</h4></div>
+          <ol>
+            <li>ເປີດ <span class="path">ຕິດຕາມ › ບິນສົ່ງບໍ່ສຳເລັດ</span></li>
+            <li>ຄົ້ນຫາຕາມລູກຄ້າ / ເລກບິນ</li>
+            <li>ກຳນົດວັນຈັດສົ່ງ (ປະສານ Office)</li>
+          </ol>
+        </div>
+      </div>
+    </section>
+
+    <!-- ============ SECTION 5: FAQ & TROUBLESHOOTING ============ -->
+    <section class="doc" id="faq">
+      <div class="sec-head">
+        <span class="sec-num">05</span>
+        <h2>FAQ & Troubleshooting — ຄຳຖາມທີ່ພົບເລື້ອຍ ແລະ ວິທີແກ້ໄຂ</h2>
+      </div>
+      <p class="intro">ວິທີແກ້ໄຂບັນຫາທີ່ພົບເລື້ອຍໃນການປະຕິບັດງານປະຈຳວັນ.</p>
+
+      <div class="accordion-item">
+        <div class="accordion-header">
+          <span>⚠️ ຄົນຂັບກົດ "ສົ່ງບິນສຳເລັດ" ບໍ່ໄດ້ ເຮັດແນວໃດ?</span>
+          <svg viewBox="0 0 24 24"><path d="M7.41 8.59L12 13.17l4.59-4.58L18 10l-6 6-6-6 1.41-1.41z"/></svg>
+        </div>
+        <div class="accordion-content">
+          1. ກວດສັນຍານອິນເຕີເນັດ handheld/ມືຖື.<br>
+          2. ຖ້າ Session ໝົດອາຍຸ (ຫຼຸດ 8h) ➔ ໃຫ້ Logout ແລ້ວ Login ໃໝ່.<br>
+          3. ຖ້າຮູບໃຫຍ່ເກີນ 8MB ➔ ໃຫ້ຫຼຸດຄວາມລະອຽດກ້ອງມືຖື ຫຼື ຖ່າຍໃໝ່.
+        </div>
+      </div>
+
+      <div class="accordion-item">
+        <div class="accordion-header">
+          <span>⚠️ ຕຳແໜ່ງ GPS ລົດບໍ່ອັບເດດ ເທິງແຜນທີ່?</span>
+          <svg viewBox="0 0 24 24"><path d="M7.41 8.59L12 13.17l4.59-4.58L18 10l-6 6-6-6 1.41-1.41z"/></svg>
+        </div>
+        <div class="accordion-content">
+          1. ເປີດ Settings ມືຖືຄົນຂັບ ➔ Location Permissions ➔ ເລືອກ <b>"Allow all the time"</b>.<br>
+          2. ປິດ Battery Saver Mode / Battery Optimization ຂອງແອັບ.<br>
+          3. ຖ້າໃຊ້ GPS Hardware ➔ ກວດສອບກ່ອງ GPS ເທິງລົດ ແລະ ສັນຍານ SIM.
+        </div>
+      </div>
+
+      <div class="accordion-item">
+        <div class="accordion-header">
+          <span>⚠️ ກົດສົ່ງບິນຜັດ ຫຼື ປ້ອນຈຳນວນຜິດ ຢາກຍ້ອນກັບແກ້ໄຂ?</span>
+          <svg viewBox="0 0 24 24"><path d="M7.41 8.59L12 13.17l4.59-4.58L18 10l-6 6-6-6 1.41-1.41z"/></svg>
+        </div>
+        <div class="accordion-content">
+          Office ຢູ່ໜ້າ <i>ຄົນຂັບປິດງານ</i> ສາມາດກົດປຸ່ມ <b>"ຍ້ອນກັບ (Revert)"</b> ເພື່ອສົ່ງບິນກັບໄປໃຫ້ຄົນຂັບແກ້ໄຂໃໝ່ໄດ້ ກ່ອນທີ່ຈະກົດ <i>ປິດສຳເລັດ</i>.
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <footer>
+    <div class="wrap">
+      ODG TMS · ຄູ່ມືລະບົບບໍລິຫານການຂົນສົ່ງແບບຄົບວົງຈອນ · Version 1.0 — 2026-07-22<br>
+      ເອກະສານຕົ້ນສະບັບຢູ່ <code>docs/guide/</code>. ຮັກສາໃຫ້ທັນສະໄໝເມື່ອມີການອັບເດດລະບົບ.
     </div>
-  </section>
+  </footer>
 
-  <!-- ============ SOP ============ -->
-  <section class="doc" id="sop">
-    <div class="wrap" style="padding:0">
-      <div class="sec-head"><span class="sec-num">03</span><h2>SOP — ລະບຽບການປະຕິບັດງານ</h2></div>
-      <p class="intro">ມາດຕະຖານ ໃຜຕ້ອງເຮັດຫຍັງ ເມື່ອໃດ ໃຫ້ສະໝ່ຳສະເໝີ ແລະ ກວດສອບໄດ້.</p>
-      <div class="grid">
-        <div class="card" style="--role:var(--s-plan)">
-          <h4>Office / Dispatch</h4><span class="role-tag">SOP-1 · ຈັດຖ້ຽວ & ໃບງານ</span>
-          <ol>
-            <li>ຕົ້ນວັນ: ກວດ <i>ລໍຖ້າຈັດຖ້ຽວ</i> ທັງໝົດ</li>
-            <li>ຈັດ ວັນ/ຮອບ/ເສັ້ນທາງ, ຈັດບິນທາງດຽວກັນເຂົ້າໃບງານດຽວ</li>
-            <li>ຈັບຄູ່ ລົດ + ຄົນຂັບ ໃຫ້ພໍກັບນ້ຳໜັກ</li>
-            <li>ກວດ → ສົ່ງອະນຸມັດ</li>
-            <li>ຕິດຕາມບິນຄ້າງ + GPS ຕະຫຼອດວັນ</li>
-            <li>ກວດຮັບ → ປິດງານ; ທ້າຍວັນອອກລາຍງານ</li>
-          </ol>
-          <p class="rule"><b>ຕ້ອງ:</b> ບໍ່ເກີນຄວາມສາມາດລົດ · ຍົກເລີກຕ້ອງມີເຫດຜົນ+ອະນຸຍາດ</p>
-        </div>
-        <div class="card" style="--role:var(--s-approve)">
-          <h4>ຫົວໜ້າ / ຜູ້ຄຸມ</h4><span class="role-tag">SOP-2 · ອະນຸມັດ & KPI</span>
-          <ol>
-            <li>ອະນຸມັດໃບງານພາຍໃນ SLA</li>
-            <li>ຕິດຕາມ realtime ຜ່ານແຜນທີ່</li>
-            <li>ຕິດຕາມ KPI ຈາກລາຍງານ</li>
-            <li>ຈັດການເຫດ: ຄ້າງນານ / ບໍ່ຄົບ / ຫຼຸດເສັ້ນທາງ</li>
-            <li>ພິຈາລະນາຄຳຂໍ ຍົກເລີກ/ແກ້ໄຂ</li>
-          </ol>
-          <p class="rule"><b>ຕ້ອງ:</b> ບໍ່ອະນຸມັດຂໍ້ມູນບໍ່ຄົບ · ຕີກັບຕ້ອງມີເຫດຜົນ</p>
-        </div>
-        <div class="card" style="--role:var(--s-transit)">
-          <h4>ຄົນຂັບລົດ</h4><span class="role-tag">SOP-3 · ຮັບ–ສົ່ງ ຕໍ່ຖ້ຽວ</span>
-          <ol>
-            <li>ກ່ອນອອກ: login, ເປີດ GPS+Notification, ກວດ battery</li>
-            <li>ຮັບຖ້ຽວ → ເບີກເຄື່ອງ (ກວດຈຳນວນ)</li>
-            <li>ເລີ່ມສົ່ງ → ເຊັກອິນ → ຖ່າຍຮູບ → ສົ່ງສຳເລັດ</li>
-            <li>ບໍ່ຄົບ → ສົ່ງຄືນ+ເຫດຜົນ</li>
-            <li>ບັນທຶກນ້ຳມັນ → ປິດງານ</li>
-          </ol>
-          <p class="rule"><b>ຕ້ອງ:</b> ບໍ່ສົ່ງສຳເລັດໂດຍບໍ່ມີຮູບ · ຫ້າມປິດ GPS · ຮູບ &lt; 8MB</p>
-        </div>
-        <div class="card" style="--role:var(--s-done)">
-          <h4>ຝ່າຍຂາຍ</h4><span class="role-tag">SOP-4 · ຕິດຕາມລູກຄ້າ</span>
-          <ol>
-            <li>ຕິດຕາມ <i>ບິນສົ່ງບໍ່ສຳເລັດ</i> ຂອງລູກຄ້າຕົນ</li>
-            <li>ກຳນົດວັນຈັດສົ່ງຮ່ວມ office</li>
-            <li>ຢືນຢັນ <i>ບິນສົ່ງສຳເລັດ</i> + ຕິດຕາມຄຳຕິຊົມ</li>
-          </ol>
-          <p class="rule">ໝາຍເຫດ: ບັນຊີຝ່າຍຂາຍຖືກຈຳກັດຂອບເຂດການເຫັນຂໍ້ມູນ</p>
-        </div>
-      </div>
-    </div>
-  </section>
+  <!-- Interactive JavaScript Logic -->
+  <script>
+    // ---------- Theme Switcher ----------
+    (function () {
+      var btn = document.getElementById('themeBtn');
+      var root = document.documentElement;
+      
+      // Load saved theme or system preference
+      var saved = localStorage.getItem('tms_theme');
+      if (saved) {
+        root.setAttribute('data-theme', saved);
+      }
 
-  <!-- ============ WI ============ -->
-  <section class="doc" id="wi">
-    <div class="wrap" style="padding:0">
-      <div class="sec-head"><span class="sec-num">04</span><h2>WI — ຄຳແນະນຳການເຮັດວຽກ</h2></div>
-      <p class="intro">ບັດຂັ້ນຕອນ ເຮັດຕາມໄດ້ທັນທີ 1-2-3. ແຕ່ລະບັດ = 1 ວຽກ.</p>
-      <div class="grid">
-        <div class="wi"><span class="wi-code">WI-A1</span><h4>ຈັດຖ້ຽວບິນ</h4><ol>
-          <li>ເມນູ <span class="path">ຂົນສົ່ງ › ລໍຖ້າຈັດຖ້ຽວ</span></li>
-          <li>ໝາຍເລືອກບິນ (ໄດ້ຫຼາຍໃບ)</li>
-          <li>ກຳນົດ ວັນ · ຮອບ · ເສັ້ນທາງ</li>
-          <li>ບັນທຶກ → ໄປ <i>ບິນລໍຕາມເສັ້ນທາງ</i></li>
-        </ol></div>
-        <div class="wi"><span class="wi-code">WI-A2</span><h4>ສ້າງໃບງານ</h4><ol>
-          <li>ເມນູ <span class="path">ບິນລໍຕາມເສັ້ນທາງ</span></li>
-          <li>ເລືອກກຸ່ມ → ສ້າງໃບງານ</li>
-          <li>ເລືອກ ລົດ + ຄົນຂັບ (ກວດນ້ຳໜັກ)</li>
-          <li>ສົ່ງອະນຸມັດ</li>
-        </ol></div>
-        <div class="wi"><span class="wi-code">WI-A3</span><h4>ກວດຮັບ & ປິດງານ</h4><ol>
-          <li>ເມນູ <span class="path">ຄົນຂັບປິດງານ</span></li>
-          <li>ກວດຮູບ + ຈຳນວນ ຕໍ່ບິນ</li>
-          <li>ຄົບ → ປິດສຳເລັດ</li>
-          <li>ຂາດ → ຕີກັບພ້ອມໝາຍເຫດ</li>
-        </ol></div>
-        <div class="wi"><span class="wi-code">WI-B1</span><h4>ອະນຸມັດ / ຕີກັບ</h4><ol>
-          <li>ເມນູ <span class="path">ອະນຸມັດ › ລໍອະນຸມັດ</span></li>
-          <li>ກວດ ລົດ/ຄົນຂັບ/ນ້ຳໜັກ/ເສັ້ນທາງ</li>
-          <li>ຖືກ → ອະນຸມັດ · ບໍ່ຖືກ → ຕີກັບ+ເຫດຜົນ</li>
-        </ol></div>
-        <div class="wi"><span class="wi-code">WI-C1–3</span><h4>ຄົນຂັບ: ຮັບ → ສົ່ງ</h4><ol>
-          <li>ຮັບຖ້ຽວ → ເບີກເຄື່ອງ (ກວດຈຳນວນ)</li>
-          <li>ເລີ່ມຈັດສົ່ງ (GPS ຫ້າມປິດ)</li>
-          <li>ຮອດຈຸດ → ເຊັກອິນ</li>
-          <li>ມອບ → ຖ່າຍຮູບ → ສົ່ງບິນສຳເລັດ</li>
-        </ol></div>
-        <div class="wi"><span class="wi-code">WI-C4–6</span><h4>ຄົນຂັບ: ບໍ່ຄົບ & ນ້ຳມັນ</h4><ol>
-          <li>ບໍ່ຄົບ → ສົ່ງຄືນ + ເຫດຜົນ (+ຮູບ)</li>
-          <li>ຍົກເລີກ → ເຫດຜົນ (ຕ້ອງອະນຸຍາດ)</li>
-          <li>ນ້ຳມັນ → ໃສ່ຈຳນວນ + ຮູບໃບບິນ</li>
-          <li>ຈົບ → ປິດງານ</li>
-        </ol></div>
-        <div class="wi"><span class="wi-code">WI-D1</span><h4>ຝ່າຍຂາຍ: ຕິດຕາມບິນ</h4><ol>
-          <li>ເມນູ <span class="path">ຝ່າຍຂາຍ › ບິນສົ່ງບໍ່ສຳເລັດ</span></li>
-          <li>ຄົ້ນຫາຕາມລູກຄ້າ/ເລກບິນ</li>
-          <li>ກຳນົດວັນຈັດສົ່ງ (ປະສານ office)</li>
-        </ol></div>
-        <div class="wi"><span class="wi-code">WI-E1</span><h4>ລູກຄ້າ: ຕິດຕາມ</h4><ol>
-          <li>ເປີດ <span class="path">/track</span></li>
-          <li>ໃສ່ເລກບິນ → ເບິ່ງສະຖານະ</li>
-          <li>ໃຫ້ຄະແນນທີ່ <span class="path">/rate</span></li>
-        </ol></div>
-      </div>
-      <div class="callout" style="--c:var(--s-alert);margin-top:18px">
-        <h5>⚠️ ຄົນຂັບກົດສົ່ງບໍ່ໄດ້?</h5>
-        <p>ກວດເນັດ · token ໝົດອາຍຸ (ຫຼຸດ 8 ຊມ) → login ໃໝ່ · ຮູບໃຫຍ່ເກີນ → ຫຼຸດ &lt; 8MB.</p>
-      </div>
-    </div>
-  </section>
-</main>
+      btn.addEventListener('click', function () {
+        var cur = root.getAttribute('data-theme');
+        if (!cur) cur = matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
+        var next = cur === 'dark' ? 'light' : 'dark';
+        root.setAttribute('data-theme', next);
+        localStorage.setItem('tms_theme', next);
+      });
+    })();
 
-<footer>
-  <div class="wrap">
-    ODG TMS · ຄູ່ມືຄົບທັງລະບົບ · ຮຸ່ນ 1.0 — ອັບເດດ 2026-07-22.
-    ເອກະສານ Markdown ຕົ້ນສະບັບຢູ່ <span class="path">docs/guide/</span>. ຮັກສາໃຫ້ທັນສະໄໝ ເມື່ອໜ້າຈໍ ຫຼື ຂັ້ນຕອນປ່ຽນ.
-  </div>
-</footer>
+    // ---------- Pipeline Stepper Builder ----------
+    (function () {
+      var stages = [
+        ['1','ລໍຖ້າຈັດຖ້ຽວ','Office','--s-pending'],
+        ['2','ລໍຕາມເສັ້ນທາງ','Office','--s-plan'],
+        ['3','ໃບງານ','Office','--s-plan'],
+        ['4','ອະນຸມັດ','ຫົວໜ້າ','--s-approve'],
+        ['5','ລໍຮັບຖ້ຽວ','ຄົນຂັບ','--s-transit'],
+        ['6','ເບີກເຄື່ອງ','ຄົນຂັບ','--s-transit'],
+        ['7','ລໍຈັດສົ່ງ','ຄົນຂັບ','--s-transit'],
+        ['8','ກຳລັງສົ່ງ','ຄົນຂັບ','--s-transit'],
+        ['9','ສຳເລັດ','ຄົນຂັບ','--s-done'],
+        ['10','ປິດງານ','ຄົນຂັບ','--s-done'],
+        ['11','ປິດສຳເລັດ','Office','--s-done']
+      ];
+      
+      var host = document.getElementById('steps');
+      stages.forEach(function (s) {
+        var el = document.createElement('div');
+        el.className = 'step';
+        el.innerHTML =
+          '<span class="dot" style="background:var(' + s[3] + ')">' + s[0] + '</span>' +
+          '<span class="lbl">' + s[1] + '</span>' +
+          '<span class="stage">' + s[2] + '</span>';
+          
+        el.addEventListener('click', function () {
+          document.querySelectorAll('.step').forEach(function(st){ st.classList.remove('active'); });
+          el.classList.add('active');
+          // Filter search by step label
+          var searchInput = document.getElementById('searchInput');
+          searchInput.value = s[1];
+          searchInput.dispatchEvent(new Event('input'));
+        });
+        
+        host.appendChild(el);
+      });
+    })();
 
-<script>
-  // theme toggle
-  (function () {
-    var btn = document.getElementById('themeBtn');
-    var root = document.documentElement;
-    btn.addEventListener('click', function () {
-      var cur = root.getAttribute('data-theme');
-      if (!cur) cur = matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
-      root.setAttribute('data-theme', cur === 'dark' ? 'light' : 'dark');
+    // ---------- Live Search & Role Filter ----------
+    (function () {
+      var searchInput = document.getElementById('searchInput');
+      var roleSelect = document.getElementById('roleSelect');
+
+      function filterContent() {
+        var q = searchInput.value.toLowerCase().trim();
+        var role = roleSelect.value;
+
+        // Filter Table Rows
+        document.querySelectorAll('tbody tr').forEach(function (row) {
+          var text = row.innerText.toLowerCase();
+          var rowRole = row.getAttribute('data-role') || 'all';
+          
+          var matchSearch = !q || text.indexOf(q) !== -1;
+          var matchRole = role === 'all' || rowRole === 'all' || rowRole === role;
+
+          row.style.display = (matchSearch && matchRole) ? '' : 'none';
+        });
+
+        // Filter Cards & WI
+        document.querySelectorAll('.card, .wi-card').forEach(function (card) {
+          var text = card.innerText.toLowerCase();
+          var cardRole = card.getAttribute('data-role') || 'all';
+
+          var matchSearch = !q || text.indexOf(q) !== -1;
+          var matchRole = role === 'all' || cardRole === 'all' || cardRole === role;
+
+          card.style.display = (matchSearch && matchRole) ? '' : 'none';
+        });
+      }
+
+      searchInput.addEventListener('input', filterContent);
+      roleSelect.addEventListener('change', filterContent);
+    })();
+
+    // ---------- Accordion Logic ----------
+    document.querySelectorAll('.accordion-header').forEach(function (head) {
+      head.addEventListener('click', function () {
+        var item = head.parentElement;
+        item.classList.toggle('open');
+      });
     });
-  })();
-
-  // build pipeline stepper
-  (function () {
-    var stages = [
-      ['1','ລໍຖ້າຈັດຖ້ຽວ','office','--s-pending'],
-      ['2','ລໍຕາມເສັ້ນທາງ','office','--s-plan'],
-      ['3','ໃບງານ','office','--s-plan'],
-      ['4','ອະນຸມັດ','ຫົວໜ້າ','--s-approve'],
-      ['5','ລໍຮັບຖ້ຽວ','ຄົນຂັບ','--s-transit'],
-      ['6','ເບີກເຄື່ອງ','ຄົນຂັບ','--s-transit'],
-      ['7','ລໍຈັດສົ່ງ','ຄົນຂັບ','--s-transit'],
-      ['8','ກຳລັງສົ່ງ','ຄົນຂັບ','--s-transit'],
-      ['9','ສຳເລັດ','ຄົນຂັບ','--s-done'],
-      ['10','ປິດງານ','ຄົນຂັບ','--s-done'],
-      ['11','ປິດສຳເລັດ','office','--s-done']
-    ];
-    var host = document.getElementById('steps');
-    stages.forEach(function (s) {
-      var el = document.createElement('div');
-      el.className = 'step';
-      el.innerHTML =
-        '<span class="dot" style="background:var(' + s[3] + ')">' + s[0] + '</span>' +
-        '<span class="lbl">' + s[1] + '</span>' +
-        '<span class="stage">' + s[2] + '</span>';
-      host.appendChild(el);
-    });
-  })();
-
-  // smooth anchor scroll
-  document.querySelectorAll('nav.docnav a').forEach(function (a) {
-    a.addEventListener('click', function (e) {
-      var t = document.querySelector(a.getAttribute('href'));
-      if (t) { e.preventDefault(); t.scrollIntoView({ behavior: 'smooth' }); }
-    });
-  });
-</script>
+  </script>
+</body>
+</html>

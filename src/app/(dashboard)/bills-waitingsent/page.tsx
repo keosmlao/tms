@@ -104,6 +104,7 @@ export interface WaitingSentBillDetail {
   bill_date: string;
   date_logistic: string;
   customer: string;
+  cust_area?: string;
   telephone: string;
   count_item: number;
   recipt_job: string;
@@ -676,6 +677,9 @@ export default function BillsWaitingSentClient({
                                                   <div>
                                                     <p className="text-xs font-semibold text-slate-800">{detail.bill_no}</p>
                                                     <p className="text-[10px] text-slate-500">{detail.customer}</p>
+                                                    {detail.cust_area && (
+                                                      <p className="text-[10px] text-slate-400">📍 {detail.cust_area}</p>
+                                                    )}
                                                     <p className="text-[10px] text-slate-400 mt-0.5">
                                                       ວັນທີອອກບິນ: <span className="font-medium text-slate-600 dark:text-slate-300">{detail.bill_date}</span>
                                                       {detail.date_logistic && (

@@ -1,7 +1,14 @@
 "use client";
 
 import Link from "next/link";
-import { useDeferredValue, useEffect, useMemo, useRef, useState } from "react";
+import {
+  useCallback,
+  useDeferredValue,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 import { useRouter } from "next/navigation";
 import { useConfirm } from "@/components/confirm-dialog";
 import {
@@ -18,6 +25,7 @@ import {
   FaSave,
   FaSearch,
   FaSpinner,
+  FaSyncAlt,
   FaTimes,
   FaTrash,
   FaTruck,
@@ -568,6 +576,66 @@ export default function AddJobClient({
     } catch {}
   }, [addedByBill, isEdit]);
 
+  // The ready-to-dispatch pool is fetched once when the page opens and then
+  // filtered client-side by date / route / round. That left a stale snapshot:
+  // bills scheduled AFTER the page was opened never showed up when the
+  // dispatcher picked another ວັນທີຈັດສົ່ງ. Refetch whenever the date or the
+  // branch changes, and expose a manual refresh for the same pool.
+  const addedByBillRef = useRef(addedByBill);
+  useEffect(() => {
+    addedByBillRef.current = addedByBill;
+  }, [addedByBill]);
+  // doc_nos that only exist client-side because the ic_trans search pulled them
+  // in — the pool query doesn't return them, so a refresh must not drop them.
+  const searchAddedRef = useRef<Set<string>>(new Set());
+  const [refreshingPool, setRefreshingPool] = useState(false);
+  const poolRequestRef = useRef(0);
+
+  // Only the selected day is refetched. The unfiltered pool is the whole fixed
+  // year — ~2,000 bills / ~860 KB — to display the handful due on one date, and
+  // re-downloading that on every date change is what made the page crawl.
+  const refreshAvailableBills = useCallback(async (day: string) => {
+    if (!day) return;
+    const requestId = ++poolRequestRef.current;
+    setRefreshingPool(true);
+    try {
+      const data = await Actions.getAvailableBills(day);
+      // A slower earlier request must not overwrite a newer one's result.
+      if (requestId !== poolRequestRef.current) return;
+      const fresh = (data ?? []) as AvailableBill[];
+      const freshCodes = new Set(fresh.map((b) => b.doc_no));
+      setAvailableBills((prev) => [
+        ...fresh,
+        ...prev.filter(
+          (b) =>
+            !freshCodes.has(b.doc_no) &&
+            // Replace this day's slice wholesale (bills scheduled away or
+            // dispatched elsewhere must disappear), keep every other day, plus
+            // the rows the pool query can't produce: bills already dragged into
+            // this trip (edit-mode seeds included) and search-only hits.
+            (b.scheduled_date !== day ||
+              addedByBillRef.current[b.doc_no] ||
+              searchAddedRef.current.has(b.doc_no))
+        ),
+      ]);
+    } catch (error) {
+      console.error("refresh available bills failed", error);
+    } finally {
+      if (requestId === poolRequestRef.current) setRefreshingPool(false);
+    }
+  }, []);
+
+  // Skip the very first run — the mount effect above already loaded the pool.
+  const poolLoadedRef = useRef(false);
+  useEffect(() => {
+    if (!poolLoadedRef.current) {
+      poolLoadedRef.current = true;
+      return;
+    }
+    if (!dateLog) return;
+    void refreshAvailableBills(dateLog);
+  }, [dateLog, selectedBranch, refreshAvailableBills]);
+
   // ic_trans server-side search
   useEffect(() => {
     const q = deferredSearchText.trim();
@@ -590,6 +658,8 @@ export default function AddJobClient({
             const seen = new Set(prev.map((b) => b.doc_no));
             const additions = list.filter((b) => !seen.has(b.doc_no));
             if (additions.length === 0) return prev;
+            // Remember them so a pool refresh (date change) keeps them around.
+            for (const b of additions) searchAddedRef.current.add(b.doc_no);
             return [...prev, ...additions];
           });
         })
@@ -694,6 +764,138 @@ export default function AddJobClient({
     } catch (e) {
       console.error(e);
     }
+  };
+
+  // ── Pre-add item picker on the available card ──
+  // Tapping a card opens its item list showing the quantity still owed to the
+  // customer (getAvailableBillProducts already nets out what other trips hold
+  // and what has been delivered). From there the dispatcher ticks the lines to
+  // send and edits each quantity, then commits only that selection to the trip.
+  // Kept in local state — the bill must stay in the available column while they
+  // are choosing, so it can't be bound to addedByBill directly.
+  const [expandedAvailable, setExpandedAvailable] = useState<Set<string>>(new Set());
+  const [previewSelection, setPreviewSelection] = useState<
+    Record<string, Record<string, { checked: boolean; qty: string }>>
+  >({});
+
+  const toggleAvailablePreview = (billNo: string) => {
+    setExpandedAvailable((prev) => {
+      const next = new Set(prev);
+      if (next.has(billNo)) next.delete(billNo);
+      else next.add(billNo);
+      return next;
+    });
+    if (!billProductsByNo[billNo]) {
+      void ensureBillProducts(billNo).catch((err) =>
+        console.error("load bill products failed", err)
+      );
+    }
+  };
+
+  // Defaults (everything ticked at its full remaining qty) are applied lazily so
+  // an untouched bill needs no state at all.
+  const previewEntry = (billNo: string, product: Product) =>
+    previewSelection[billNo]?.[product.item_code] ?? {
+      checked: true,
+      qty: String(product.qty),
+    };
+
+  const setPreviewEntry = (
+    billNo: string,
+    itemCode: string,
+    patch: Partial<{ checked: boolean; qty: string }>,
+    fallback: { checked: boolean; qty: string }
+  ) =>
+    setPreviewSelection((prev) => ({
+      ...prev,
+      [billNo]: {
+        ...prev[billNo],
+        [itemCode]: { ...fallback, ...prev[billNo]?.[itemCode], ...patch },
+      },
+    }));
+
+  const togglePreviewItem = (billNo: string, product: Product) => {
+    const current = previewEntry(billNo, product);
+    setPreviewEntry(
+      billNo,
+      product.item_code,
+      { checked: !current.checked },
+      { checked: true, qty: String(product.qty) }
+    );
+  };
+
+  const togglePreviewAll = (billNo: string, checked: boolean) => {
+    const products = billProductsByNo[billNo] ?? [];
+    setPreviewSelection((prev) => {
+      const next = { ...(prev[billNo] ?? {}) };
+      for (const p of products) {
+        next[p.item_code] = {
+          qty: next[p.item_code]?.qty ?? String(p.qty),
+          checked,
+        };
+      }
+      return { ...prev, [billNo]: next };
+    });
+  };
+
+  const setPreviewQty = (billNo: string, product: Product, value: string) =>
+    setPreviewEntry(
+      billNo,
+      product.item_code,
+      { qty: value },
+      { checked: true, qty: String(product.qty) }
+    );
+
+  // Clamp on blur so typing is unrestricted but what lands in the trip never
+  // exceeds the quantity still owed (nor drops below 1).
+  const commitPreviewQty = (billNo: string, product: Product) => {
+    const entry = previewEntry(billNo, product);
+    const parsed = Number(entry.qty);
+    const clamped = Number.isFinite(parsed)
+      ? Math.max(1, Math.min(parsed, product.qty))
+      : product.qty;
+    setPreviewEntry(
+      billNo,
+      product.item_code,
+      { qty: String(clamped) },
+      { checked: true, qty: String(product.qty) }
+    );
+  };
+
+  const previewCheckedItems = (billNo: string): SelectedProduct[] => {
+    const products = billProductsByNo[billNo] ?? [];
+    return products
+      .filter((p) => previewEntry(billNo, p).checked)
+      .map((p) => {
+        const parsed = Number(previewEntry(billNo, p).qty);
+        return {
+          ...p,
+          selectedQty: Number.isFinite(parsed)
+            ? Math.max(1, Math.min(parsed, p.qty))
+            : p.qty,
+        };
+      });
+  };
+
+  const handleAddSelectedItems = (billNo: string) => {
+    const bill = availableBills.find((b) => b.doc_no === billNo);
+    if (!bill || addedByBill[billNo]) return;
+    const items = previewCheckedItems(billNo);
+    if (items.length === 0) return;
+    setAddedByBill((prev) => ({
+      ...prev,
+      [billNo]: { bill, items, delivery_condition: "to_customer" },
+    }));
+    setExpandedAvailable((prev) => {
+      const next = new Set(prev);
+      next.delete(billNo);
+      return next;
+    });
+    setPreviewSelection((prev) => {
+      const next = { ...prev };
+      delete next[billNo];
+      return next;
+    });
   };
 
   const toggleAddedItem = (bill: AvailableBill, product: Product) => {
@@ -1237,9 +1439,20 @@ export default function AddJobClient({
                   )}
                 </div>
                 <div className="flex items-center justify-between gap-2">
-                  <p className="text-[11px] font-medium text-slate-400 dark:text-slate-500">
+                  <p className="flex items-center gap-1.5 text-[11px] font-medium text-slate-400 dark:text-slate-500">
                     ສະແດງສະເພາະບິນທີ່ກົງກັບວັນຈັດສົ່ງ ແລະ ຮອບທີ່ເລືອກ
+                    {refreshingPool && <FaSpinner className="animate-spin text-teal-500" size={10} />}
                   </p>
+                  <button
+                    type="button"
+                    onClick={() => void refreshAvailableBills(dateLog)}
+                    disabled={refreshingPool}
+                    title="ໂຫຼດລາຍການບິນຄືນໃໝ່"
+                    className="inline-flex shrink-0 cursor-pointer items-center gap-1.5 rounded-md border border-slate-200 bg-white/60 px-2.5 py-1.5 text-[11px] font-semibold text-slate-600 transition-colors hover:bg-white disabled:opacity-50 dark:border-white/10 dark:bg-white/5 dark:text-slate-300 dark:hover:bg-white/10"
+                  >
+                    <FaSyncAlt className={refreshingPool ? "animate-spin" : ""} size={10} />
+                    ໂຫຼດຄືນ
+                  </button>
                   {availableColumnBills.length > 0 && (
                     <button
                       type="button"
@@ -1279,6 +1492,15 @@ export default function AddJobClient({
                     }}
                     onAdd={() => void handleAddBillFull(bill.doc_no)}
                     loading={loadingBillNo === bill.doc_no}
+                    expanded={expandedAvailable.has(bill.doc_no)}
+                    onToggleExpand={() => toggleAvailablePreview(bill.doc_no)}
+                    products={billProductsByNo[bill.doc_no]}
+                    entryFor={(product) => previewEntry(bill.doc_no, product)}
+                    onToggleItem={(product) => togglePreviewItem(bill.doc_no, product)}
+                    onToggleAll={(checked) => togglePreviewAll(bill.doc_no, checked)}
+                    onQtyChange={(product, value) => setPreviewQty(bill.doc_no, product, value)}
+                    onQtyCommit={(product) => commitPreviewQty(bill.doc_no, product)}
+                    onAddSelected={() => handleAddSelectedItems(bill.doc_no)}
                   />
                 ))}
               </div>
@@ -1455,6 +1677,15 @@ function AvailableCard({
   onDragEnd,
   onAdd,
   loading,
+  expanded,
+  onToggleExpand,
+  products,
+  entryFor,
+  onToggleItem,
+  onToggleAll,
+  onQtyChange,
+  onQtyCommit,
+  onAddSelected,
 }: {
   bill: AvailableBill;
   dragging: boolean;
@@ -1462,16 +1693,37 @@ function AvailableCard({
   onDragEnd: React.DragEventHandler<HTMLDivElement>;
   onAdd: () => void;
   loading: boolean;
+  expanded: boolean;
+  onToggleExpand: () => void;
+  products: Product[] | undefined;
+  entryFor: (product: Product) => { checked: boolean; qty: string };
+  onToggleItem: (product: Product) => void;
+  onToggleAll: (checked: boolean) => void;
+  onQtyChange: (product: Product, value: string) => void;
+  onQtyCommit: (product: Product) => void;
+  onAddSelected: () => void;
 }) {
+  const list = products ?? [];
+  const checkedCount = list.filter((p) => entryFor(p).checked).length;
+  const allChecked = list.length > 0 && checkedCount === list.length;
+  const remainingTotal = list.reduce((sum, p) => sum + Number(p.qty ?? 0), 0);
+
   return (
     <div
       draggable
       onDragStart={onDragStart}
       onDragEnd={onDragEnd}
-      className={`group flex cursor-grab items-center gap-2.5 rounded-md border border-slate-200 bg-white px-2.5 py-2 transition-colors hover:border-teal-300 hover:bg-teal-50/40 active:cursor-grabbing dark:border-slate-800 dark:bg-slate-900 dark:hover:border-teal-800 dark:hover:bg-teal-950/20 ${dragging ? "opacity-40" : ""}`}
+      className={`group rounded-md border border-slate-200 bg-white transition-colors hover:border-teal-300 dark:border-slate-800 dark:bg-slate-900 dark:hover:border-teal-800 ${
+        dragging ? "opacity-40" : ""
+      } ${expanded ? "border-teal-300 dark:border-teal-800" : ""}`}
     >
+      <div
+        onClick={onToggleExpand}
+        className="flex cursor-pointer items-center gap-2.5 px-2.5 py-2 hover:bg-teal-50/40 active:cursor-grabbing dark:hover:bg-teal-950/20"
+        title="ກົດເພື່ອເບິ່ງ / ເລືອກລາຍການສິນຄ້າ"
+      >
       <div className="flex h-8 w-8 flex-shrink-0 items-center justify-center rounded border border-slate-200 bg-slate-100 text-slate-500 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-400">
-        <FaBoxOpen size={12} />
+        {expanded ? <FaChevronDown size={11} /> : <FaBoxOpen size={12} />}
       </div>
       <div className="min-w-0 flex-1">
         <div className="flex items-center gap-2">
@@ -1524,13 +1776,118 @@ function AvailableCard({
       </div>
       <button
         type="button"
-        onClick={onAdd}
+        onClick={(e) => {
+          e.stopPropagation();
+          onAdd();
+        }}
         disabled={loading}
         className="flex h-7 w-7 flex-shrink-0 cursor-pointer items-center justify-center rounded bg-teal-600 text-white transition-colors hover:bg-teal-700 active:scale-95 disabled:opacity-50"
-        title="ເພີ່ມເຂົ້າຖ້ຽວ"
+        title="ເພີ່ມທັງບິນເຂົ້າຖ້ຽວ"
       >
         {loading ? <FaSpinner className="animate-spin" size={11} /> : <FaPlus size={11} />}
       </button>
+      </div>
+
+      {/* Item picker — quantities are what is still owed to the customer */}
+      {expanded && (
+        <div
+          className="border-t border-slate-200 px-2.5 py-2 dark:border-slate-800"
+          onClick={(e) => e.stopPropagation()}
+        >
+          {loading && list.length === 0 ? (
+            <p className="flex items-center gap-2 py-2 text-[11px] text-slate-500">
+              <FaSpinner className="animate-spin" size={10} /> ກຳລັງໂຫຼດລາຍການສິນຄ້າ...
+            </p>
+          ) : list.length === 0 ? (
+            <p className="py-2 text-[11px] text-slate-500">ບໍ່ມີສິນຄ້າຄົງເຫຼືອທີ່ຕ້ອງສົ່ງ</p>
+          ) : (
+            <>
+              <div className="mb-1.5 flex items-center justify-between gap-2">
+                <button
+                  type="button"
+                  onClick={() => onToggleAll(!allChecked)}
+                  className="inline-flex items-center gap-1.5 text-[11px] font-bold text-slate-600 dark:text-slate-300"
+                >
+                  <span
+                    className={`flex h-4 w-4 items-center justify-center rounded transition-colors ${
+                      allChecked
+                        ? "bg-teal-600 text-white"
+                        : "border border-slate-300 bg-white dark:border-slate-700 dark:bg-slate-900"
+                    }`}
+                  >
+                    {allChecked && <FaCheck size={8} />}
+                  </span>
+                  ເລືອກທັງໝົດ
+                </button>
+                <span className="text-[10px] font-semibold text-slate-400">
+                  ຄົງເຫຼືອທີ່ຕ້ອງສົ່ງ · ລວມ {remainingTotal}
+                </span>
+              </div>
+
+              <div className="space-y-1">
+                {list.map((p) => {
+                  const entry = entryFor(p);
+                  return (
+                    <div
+                      key={p.item_code}
+                      className={`flex items-center gap-2 rounded border px-2 py-1.5 ${
+                        entry.checked
+                          ? "border-teal-200 bg-teal-50/60 dark:border-teal-900 dark:bg-teal-950/20"
+                          : "border-slate-200 bg-white dark:border-slate-800 dark:bg-slate-900"
+                      }`}
+                    >
+                      <button
+                        type="button"
+                        onClick={() => onToggleItem(p)}
+                        className={`flex h-5 w-5 flex-shrink-0 cursor-pointer items-center justify-center rounded transition-colors active:scale-95 ${
+                          entry.checked
+                            ? "bg-teal-600 text-white"
+                            : "border border-slate-300 bg-white hover:bg-slate-100 dark:border-slate-700 dark:bg-slate-900 dark:hover:bg-slate-800"
+                        }`}
+                        title={entry.checked ? "ບໍ່ສົ່ງລາຍການນີ້" : "ເລືອກສົ່ງລາຍການນີ້"}
+                      >
+                        {entry.checked && <FaCheck size={9} />}
+                      </button>
+                      <div className="min-w-0 flex-1">
+                        <p className="truncate text-[11px] font-bold text-slate-800 dark:text-slate-100">
+                          {p.item_name}
+                        </p>
+                        <p className="truncate font-mono text-[10px] text-slate-400">
+                          {p.item_code} · ຄົງເຫຼືອ {p.qty} {p.unit_code}
+                        </p>
+                      </div>
+                      <input
+                        type="number"
+                        min={1}
+                        max={p.qty}
+                        value={entry.qty}
+                        disabled={!entry.checked}
+                        onChange={(e) => onQtyChange(p, e.target.value)}
+                        onBlur={() => onQtyCommit(p)}
+                        className="h-7 w-16 flex-shrink-0 rounded border border-slate-300 bg-white px-1.5 text-center text-[11px] font-bold text-slate-800 disabled:opacity-40 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-100"
+                        title={`ສູງສຸດ ${p.qty}`}
+                      />
+                      <span className="w-10 shrink-0 truncate text-[10px] text-slate-400">
+                        {p.unit_code}
+                      </span>
+                    </div>
+                  );
+                })}
+              </div>
+
+              <button
+                type="button"
+                onClick={onAddSelected}
+                disabled={checkedCount === 0}
+                className="mt-2 inline-flex w-full cursor-pointer items-center justify-center gap-1.5 rounded-md bg-teal-600 px-2.5 py-1.5 text-[11px] font-bold text-white transition-colors hover:bg-teal-700 active:scale-95 disabled:opacity-40"
+              >
+                <FaPlus size={10} />
+                ເພີ່ມທີ່ເລືອກ ({checkedCount}/{list.length})
+              </button>
+            </>
+          )}
+        </div>
+      )}
     </div>
   );
 }

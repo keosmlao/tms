@@ -14,6 +14,7 @@ import {
   getReportDeliveredDaily as svcGetReportDeliveredDaily,
   getReportCancelledDaily as svcGetReportCancelledDaily,
   getReportDailyActivity as svcGetReportDailyActivity,
+  getReportDailyDepartment as svcGetReportDailyDepartment,
   getAttemptDeliveryItems as svcGetAttemptDeliveryItems,
 } from "@/queries/reports.js";
 
@@ -83,6 +84,15 @@ export async function getReportCancelledDaily(fromDate: string, toDate: string) 
 export async function getReportDailyActivity(fromDate: string, toDate: string) {
   const s = await requireSession();
   return svcGetReportDailyActivity(s, fromDate, toDate);
+}
+
+export async function getReportDailyDepartment(
+  fromDate: string,
+  toDate: string,
+  salesOnly = true
+) {
+  const s = await requireSession();
+  return svcGetReportDailyDepartment(s, fromDate, toDate, salesOnly);
 }
 
 export async function getAttemptDeliveryItems(docNo: string, billNo: string) {

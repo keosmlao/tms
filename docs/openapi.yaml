@@ -111,6 +111,10 @@ paths:
         `dispatch_started_at`. The only hard preconditions are:
 
           - `approve_status = 1` (trip approved by dispatcher)
+          - `job_status >= 1` for `pickup_bill` / `receive_customer_bill` — the
+            driver must call `receive` (ຮັບຖ້ຽວ) first. These two used to
+            auto-receive; taking the trip is now an explicit step, so goods
+            never leave a warehouse against a trip nobody has accepted.
           - `recipt_job IS NOT NULL` for checkin/complete on warehouse-pickup
             bills — driver must have picked up the goods first
           - `job_status < 3` — once the trip is closed, no edits are accepted
@@ -460,9 +464,29 @@ components:
     PickupBillAction:
       type: object
       required: [action, bill_no]
+      description: |
+        Driver picks the bill's goods up at the warehouse. `items` is optional:
+        send it to report the quantity ACTUALLY handed over per item. Any line
+        below the planned quantity rewrites `odg_tms_detail_item.selected_qty`
+        for this trip (so the shortfall returns to the pending pool), logs a row
+        in `odg_tms_pickup_variance`, and notifies the dispatcher. A line above
+        the planned quantity is logged but NOT applied. Omit `items` for the
+        plain / bulk pickup tap, which takes the full planned quantity.
+        Rejected with 400 when every item is reported as zero — use
+        `cancel_bill` instead.
       properties:
         action: { const: pickup_bill }
         bill_no: { type: string }
+        comment: { type: string, description: Driver note stored on each variance row }
+        items:
+          type: array
+          description: Actual received quantity per item (optional)
+          items:
+            type: object
+            required: [item_code, qty]
+            properties:
+              item_code: { type: string }
+              qty: { type: number, minimum: 0 }
     StartDispatchAction:
       type: object
       required: [action, doc_no, miles_start]

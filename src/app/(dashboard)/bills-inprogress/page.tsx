@@ -106,6 +106,7 @@ export interface InProgressBillDetail {
   bill_no: string;
   bill_date: string;
   customer: string;
+  cust_area?: string;
   telephone: string;
   count_item: number;
   recipt_job: string;
@@ -838,6 +839,9 @@ export default function BillsInProgressClient({
                                                   <div>
                                                     <p className="text-xs font-semibold text-slate-800">{detail.bill_no}</p>
                                                     <p className="text-[10px] text-slate-500">{detail.bill_date} · {detail.customer}</p>
+                                                    {detail.cust_area && (
+                                                      <p className="text-[10px] text-slate-400">📍 {detail.cust_area}</p>
+                                                    )}
                                                   </div>
                                                 </div>
                                                 <div className="flex items-center gap-2">

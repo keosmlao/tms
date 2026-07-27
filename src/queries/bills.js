@@ -5,6 +5,7 @@ const {
   getFixedYearSqlFilter,
 } = require("../lib/fixed-year");
 const {
+  customerAreaSql,
   getBranchScope,
   branchFilterShipment,
   branchFilterJob,
@@ -451,6 +452,7 @@ async function getAvailableBillsWithProducts(session) {
   const [shipmentBills, manualBills] = await Promise.all([
     query(
     `SELECT a.doc_no, to_char(a.doc_date,'DD-MM-YYYY') as doc_date, a.cust_code, b.name_1 as cust_name, b.telephone,
+    ${customerAreaSql('a.cust_code')} as cust_area,
       (SELECT count(item_code) FROM ic_trans_detail WHERE doc_no=a.doc_no AND item_code NOT LIKE '97%') as count_item,
       ${SCHEDULED_BILL_FIELDS},
       COALESCE(a.transport_code, '') as origin_transport_code,
@@ -499,18 +501,37 @@ async function getAvailableBillsWithProducts(session) {
   return result;
 }
 
-async function getAvailableBills(session) {
+// scheduledDate (YYYY-MM-DD, optional) narrows the pool to bills due that day.
+// The create-trip page only ever displays one day at a time, and the unfiltered
+// pool is the whole fixed year — ~2,000 bills / ~860 KB shipped to the browser
+// to show a handful. Callers that still need the full pool (the route dropdown
+// lists every route that has bills, regardless of date) just omit it.
+async function getAvailableBills(session, scheduledDate) {
   await ensurePendingBillSchema();
   await ensureForwardBranchColumn();
   const scope = getBranchScope(session);
+  const day = coerceDateToFixedYear(
+    typeof scheduledDate === "string" && /^\d{4}-\d{2}-\d{2}$/.test(scheduledDate.trim())
+      ? scheduledDate.trim()
+      : null,
+    null
+  );
+  const dayClause = day ? `AND pb.scheduled_date::date = '${day}'::date` : "";
   const [shipmentBills, manualBills] = await Promise.all([
     query(
     `SELECT a.doc_no, to_char(a.doc_date,'DD-MM-YYYY') as doc_date, a.cust_code,
       b.name_1 as cust_name, b.telephone,
+      ${customerAreaSql('a.cust_code')} as cust_area,
       (SELECT count(item_code) FROM ic_trans_detail WHERE doc_no=a.doc_no AND item_code NOT LIKE '97%') as count_item,
       ${SCHEDULED_BILL_FIELDS},
-      COALESCE(a.transport_code, '') as origin_transport_code,
-      COALESCE(tt.name_1, '') as origin_transport_name,
+      -- Pickup point shown as "ຮັບເຄື່ອງ / ຄ່າເລີ່ມຕົ້ນ" on the create-trip page.
+      -- The dispatcher's assigned branch wins over the raw ERP transport_code,
+      -- which is often a pseudo-branch describing a handover MODE rather than a
+      -- warehouse (02-0004 ລູກຄ້າຮັບເອງ …). Reading the ERP value here is what
+      -- made this page disagree with bills-pending and made the driver app
+      -- refuse the pickup as "ບິນສາຂາອື່ນ".
+      COALESCE(NULLIF(TRIM(pb.transport_code), ''), a.transport_code, '') as origin_transport_code,
+      COALESCE(NULLIF(TRIM(ptt.name_1), ''), NULLIF(TRIM(tt.name_1), ''), '') as origin_transport_name,
       -- Effective delivery branch (pending override wins, else the shipment's) —
       -- used by the create-trip page so a manager can pick a branch and a branch
       -- admin defaults to their own.
@@ -526,6 +547,9 @@ async function getAvailableBills(session) {
     LEFT JOIN ar_customer_detail acd ON acd.ar_code = a.cust_code
     LEFT JOIN public.transport_type tt ON tt.code = a.transport_code
     ${SCHEDULED_BILL_JOIN}
+    -- Name for the dispatcher's assigned branch (origin_transport_name above).
+    -- Must come AFTER SCHEDULED_BILL_JOIN, which is what introduces pb.
+    LEFT JOIN public.transport_type ptt ON ptt.code = NULLIF(TRIM(pb.transport_code), '')
     LEFT JOIN LATERAL (
       SELECT d.bill_no,
              COALESCE(j.origin_transport_code, '') as origin_transport_code,
@@ -544,9 +568,10 @@ async function getAvailableBills(session) {
     WHERE a.trans_flag=44
       ${branchFilterShipment(scope, "a")}
       AND ${getFixedYearSqlFilter("a.doc_date")}
+      ${dayClause}
     ORDER BY pb.scheduled_date ASC, a.doc_date DESC`
     ),
-    getManualReadyBills(),
+    getManualReadyBills(day),
   ]);
   const shipmentDocNos = new Set(shipmentBills.map((bill) => bill.doc_no));
   const bills = [...shipmentBills, ...manualBills.filter((bill) => !shipmentDocNos.has(bill.doc_no))];
@@ -571,6 +596,7 @@ async function searchManualPendingBills(q) {
             to_char(a.doc_date,'DD-MM-YYYY') as doc_date,
             a.cust_code,
             COALESCE(NULLIF(TRIM(b.name_1), ''), a.cust_code, '') as cust_name,
+            ${customerAreaSql('a.cust_code')} as cust_area,
             COALESCE(b.telephone, '') as telephone,
             a.trans_flag as source_trans_flag,
             to_char(pb.scheduled_date,'YYYY-MM-DD') as scheduled_date,
@@ -780,13 +806,17 @@ async function removeManualPendingBill(billNo) {
   return { success: true };
 }
 
-async function getManualReadyBills() {
+// day (YYYY-MM-DD, already coerced) narrows to bills scheduled that day —
+// see getAvailableBills. Null/undefined = every scheduled day.
+async function getManualReadyBills(day) {
   await ensurePendingBillSchema();
+  const dayClause = day ? `AND pb.scheduled_date::date = '${day}'::date` : "";
   const icRows = await query(
     `SELECT a.doc_no,
             to_char(a.doc_date,'DD-MM-YYYY') as doc_date,
             a.cust_code,
             COALESCE(NULLIF(TRIM(b.name_1), ''), a.cust_code, '') as cust_name,
+            ${customerAreaSql('a.cust_code')} as cust_area,
             COALESCE(b.telephone, '') as telephone,
             (SELECT count(item_code) FROM ic_trans_detail WHERE doc_no=a.doc_no AND item_code NOT LIKE '97%') as count_item,
             ${SCHEDULED_BILL_FIELDS},
@@ -806,6 +836,7 @@ async function getManualReadyBills() {
      ${SCHEDULED_BILL_JOIN}
      WHERE a.trans_flag IN (${manualFlagListSql()})
        AND COALESCE(pb.action_status, '') = 'contacted_ready'
+       ${dayClause}
      ORDER BY pb.scheduled_date ASC, a.doc_date DESC`
   );
   const readySchedules = await query(
@@ -821,7 +852,8 @@ async function getManualReadyBills() {
      LEFT JOIN public.odg_tms_delivery_round dr ON dr.code = pb.delivery_round_code
      WHERE pb.scheduled_date IS NOT NULL
        AND COALESCE(NULLIF(TRIM(pb.delivery_round_code), ''), NULL) IS NOT NULL
-       AND COALESCE(pb.action_status, '') = 'contacted_ready'`
+       AND COALESCE(pb.action_status, '') = 'contacted_ready'
+       ${dayClause}`
   );
   const scheduledDocNos = readySchedules.map((row) => row.bill_no);
   const existingIc = new Set(icRows.map((row) => row.doc_no));
@@ -922,6 +954,7 @@ async function getManualPendingRowsForPending(fromDate, toDate, transportCode = 
       to_char(a.doc_date,'DD-MM-YYYY') as doc_date,
       a.cust_code,
       COALESCE(NULLIF(TRIM(cust.name_1), ''), a.cust_code, '') as cust_name,
+      ${customerAreaSql('a.cust_code')} as cust_area,
       COALESCE(NULLIF(TRIM(cust.name_1), ''), a.cust_code, '') as transport_name,
       COALESCE(NULLIF(TRIM(acd.latitude::text), ''), '') as cust_lat,
       COALESCE(NULLIF(TRIM(acd.longitude::text), ''), '') as cust_lng,
@@ -1080,6 +1113,7 @@ async function getBillsPending(session, fromDate, toDate, transportCode) {
         COALESCE(NULLIF(TRIM(pbov.transport_code), ''), a.transport_code) as transport_code,
         a.cust_code,
         COALESCE(NULLIF(TRIM(cust.name_1), ''), a.cust_code, '') as cust_name,
+        ${customerAreaSql('a.cust_code')} as cust_area,
         COALESCE(NULLIF(TRIM(acd.latitude::text), ''), '') as cust_lat,
         COALESCE(NULLIF(TRIM(acd.longitude::text), ''), '') as cust_lng,
         COALESCE(NULLIF(TRIM(cust.telephone), ''), '') as cust_phone,
@@ -1501,6 +1535,7 @@ async function getBillsWaitingSentDetails(docNo) {
       d.bill_no, to_char(d.bill_date,'DD-MM-YYYY') as bill_date,
       to_char(d.date_logistic,'DD-MM-YYYY') as date_logistic,
       COALESCE(NULLIF(TRIM(c.name_1), ''), d.cust_code, '-') as customer,
+      ${customerAreaSql('d.cust_code')} as cust_area,
       COALESCE(NULLIF(TRIM(d.telephone), ''), NULLIF(TRIM(c.telephone), ''), '-') as telephone,
       COALESCE(d.count_item::int, 0) as count_item,
       COALESCE(to_char(d.recipt_job,'DD-MM-YYYY HH24:MI'), '-') as recipt_job,
@@ -1740,6 +1775,7 @@ async function getBillsCancelledList(session, fromDate, toDate) {
       to_char(d.sent_end,'DD-MM-YYYY HH24:MI') as cancelled_at,
       d.cust_code,
       COALESCE(NULLIF(TRIM(cu.name_1), ''), d.cust_code, '-') as cust_name,
+      ${customerAreaSql('d.cust_code')} as cust_area,
       COALESCE(d.telephone, '') as telephone,
       COALESCE(NULLIF(TRIM(car.name_1), ''), a.car, '-') as car,
       COALESCE(NULLIF(TRIM(drv.name_1), ''), a.driver, '-') as driver,
@@ -1790,6 +1826,7 @@ async function getBillsPartialList(session, fromDate, toDate) {
       to_char(d.sent_end,'DD-MM-YYYY HH24:MI') as completed_at,
       d.cust_code,
       COALESCE(NULLIF(TRIM(cu.name_1), ''), d.cust_code, '-') as cust_name,
+      ${customerAreaSql('d.cust_code')} as cust_area,
       COALESCE(d.telephone, '') as telephone,
       COALESCE(NULLIF(TRIM(car.name_1), ''), a.car, '-') as car,
       COALESCE(NULLIF(TRIM(drv.name_1), ''), a.driver, '-') as driver,

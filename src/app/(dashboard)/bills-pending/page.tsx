@@ -58,6 +58,8 @@ export interface Bill {
   sale: string;
   department: string;
   transport: string;
+  // ບ້ານ · ເມືອງ · ແຂວງ of the customer (joined from the ERP area codes).
+  cust_area?: string;
   transport_code?: string;
   time_open: string;
   time_use: TimeUse | null;
@@ -132,6 +134,7 @@ interface ManualPendingBill {
   doc_date: string;
   cust_code: string;
   cust_name: string;
+  cust_area?: string;
   telephone: string;
   count_item: number;
   source_trans_flag: number;
@@ -1393,6 +1396,14 @@ export default function BillsPendingClient() {
                                   <div className="text-[10px] text-slate-400 dark:text-slate-500 truncate">
                                     {[bill.sale, bill.department, bill.transport].filter(Boolean).join(" · ")}
                                   </div>
+                                  {bill.cust_area && (
+                                    <div
+                                      className="text-[10px] text-slate-400 dark:text-slate-500 truncate"
+                                      title={`ທີ່ຢູ່ລູກຄ້າ: ${bill.cust_area}`}
+                                    >
+                                      📍 {bill.cust_area}
+                                    </div>
+                                  )}
                                   {bill.sales_remark && (
                                     <div
                                       className="mt-0.5 flex items-center gap-1 truncate text-[10px] font-medium text-amber-700 dark:text-amber-400"
@@ -1887,6 +1898,11 @@ export default function BillsPendingClient() {
                             <p className="mt-1 truncate text-[11px] text-slate-500">
                               {bill.cust_name || bill.cust_code} · {bill.doc_date}
                             </p>
+                            {bill.cust_area && (
+                              <p className="mt-0.5 truncate text-[10px] text-slate-400">
+                                📍 {bill.cust_area}
+                              </p>
+                            )}
                             {(bill.scheduled_date_display || bill.delivery_round_name) && (
                               <p className="mt-1 text-[10px] text-amber-600 dark:text-amber-400">
                                 ເຄີຍກຳນົດ: {bill.scheduled_date_display || "-"} {bill.delivery_round_name ? `· ${bill.delivery_round_name}` : ""}
@@ -2153,6 +2169,15 @@ export default function BillsPendingClient() {
                           <span className="text-slate-400 block mb-0.5">ຊື່ລົງທະບຽນ (ລະບົບ)</span>
                           <span className="font-semibold text-slate-800 dark:text-slate-200 break-words leading-snug">
                             {drawerBill.cust_name}
+                          </span>
+                        </div>
+                      )}
+                      {drawerBill.cust_area && (
+                        <div className="col-span-2">
+                          <span className="text-slate-400 block mb-0.5">ທີ່ຢູ່ (ບ້ານ · ເມືອງ · ແຂວງ)</span>
+                          <span className="font-semibold text-slate-800 dark:text-slate-200 break-words leading-snug flex items-start gap-1">
+                            <FaMapMarkerAlt size={10} className="mt-1 shrink-0 text-slate-400" />
+                            {drawerBill.cust_area}
                           </span>
                         </div>
                       )}

@@ -55,6 +55,12 @@ const ReceiveJob = z.object({
 const PickupBill = z.object({
   action: z.literal("pickup_bill"),
   bill_no: NonEmptyString,
+  // Quantity actually handed over at the warehouse, per item. Optional: a
+  // plain tap (bulk pickup) sends nothing and picks up the full planned qty.
+  // Anything short corrects the trip and notifies the dispatcher — see
+  // computePickupVariance in src/lib/pickup-variance.ts.
+  items: z.array(z.record(z.string(), z.unknown())).default([]),
+  comment: OptionalString,
 });
 // Receive goods at the customer's yard ('__CUSTOMER__' pickup). Photo +
 // signature are uploaded separately via attach_bill_image (pickup kinds).

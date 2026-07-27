@@ -400,6 +400,86 @@ async function notifyJobCreatedToSales(docNo) {
   }
 }
 
+// ບິນເບີກບໍ່ຄົບ — the driver reported a different quantity at the warehouse
+// than the trip planned, so the trip was corrected down and the shortfall went
+// back into the pending pool. Push the news to the people who own the plan:
+// the dispatcher who created the trip, plus dispatch staff of the trip's origin
+// branch. The same event also lands in the web activity feed (see the
+// 'pickup_variance' branch in getActivityNotifications), which is the durable
+// channel — this push is the immediate nudge.
+//
+// Fire-and-forget: callers `void` it, and every failure is swallowed so a push
+// problem can never undo a committed pickup.
+async function notifyPickupVariance({ billNo, docNo, driverCode, variance }) {
+  try {
+    const bill = String(billNo ?? "").trim();
+    const doc = String(docNo ?? "").trim();
+    if (!bill || !doc || !variance?.lines?.length) return;
+
+    const job = await queryOne(
+      `SELECT COALESCE(NULLIF(TRIM(j.user_created), ''), '') AS user_created,
+              COALESCE(NULLIF(TRIM(j.origin_transport_code), ''), '') AS origin_transport_code,
+              COALESCE(NULLIF(TRIM(drv.name_1), ''), j.driver, '') AS driver_name,
+              COALESCE(NULLIF(TRIM(cust.name_1), ''), d.cust_code, '') AS cust_name
+       FROM public.odg_tms j
+       LEFT JOIN public.odg_tms_driver drv ON drv.code = j.driver
+       LEFT JOIN public.odg_tms_detail d ON d.doc_no = j.doc_no AND d.bill_no = $2
+       LEFT JOIN public.ar_customer cust ON cust.code = d.cust_code
+       WHERE j.doc_no = $1
+       LIMIT 1`,
+      [doc, bill]
+    ).catch(() => null);
+
+    const codes = new Set();
+    if (job?.user_created) codes.add(job.user_created);
+    if (job?.origin_transport_code) {
+      const branchStaff = await query(
+        `SELECT code FROM erp_user WHERE NULLIF(TRIM(logistic_code), '') = $1`,
+        [job.origin_transport_code]
+      ).catch(() => []);
+      for (const row of branchStaff) {
+        if (row?.code) codes.add(row.code);
+      }
+    }
+    // Never ping the driver about their own report.
+    codes.delete(String(driverCode ?? "").trim());
+    if (codes.size === 0) return;
+
+    const { describePickupVariance } = require("../lib/pickup-variance");
+    const detail = variance.lines
+      .slice(0, 4)
+      .map(
+        (line) =>
+          `• ${line.item_name}: ຖ້ຽວ ${line.planned_qty} → ຮັບ ${line.reported_qty}${
+            line.over_reported ? " (ເກີນ — ບໍ່ໄດ້ປັບ)" : ""
+          }`
+      )
+      .join("\n");
+    const more = variance.lines.length > 4 ? `\n… ອີກ ${variance.lines.length - 4} ລາຍການ` : "";
+    const body = [
+      `ບິນ ${bill}${job?.cust_name ? ` · ${job.cust_name}` : ""}`,
+      job?.driver_name ? `ຄົນຂັບ ${job.driver_name} · ຖ້ຽວ ${doc}` : `ຖ້ຽວ ${doc}`,
+      describePickupVariance(variance),
+      detail + more,
+    ]
+      .filter(Boolean)
+      .join("\n");
+
+    const { pushToEmployees, pushToDriver } = require("./push");
+    const recipients = Array.from(codes);
+    const data = { type: "pickup_variance", bill_no: bill, doc_no: doc };
+    await Promise.allSettled([
+      pushToEmployees(recipients, "⚠️ ເບີກເຄື່ອງບໍ່ຄົບຕາມຖ້ຽວ", body, data),
+      // Dispatchers who only have the driver app installed still get it.
+      ...recipients.map((code) =>
+        pushToDriver(code, "⚠️ ເບີກເຄື່ອງບໍ່ຄົບຕາມຖ້ຽວ", body, data)
+      ),
+    ]);
+  } catch (err) {
+    console.warn("[notify] pickup-variance failed:", err?.message ?? err);
+  }
+}
+
 // Fan-out a status update to both the sales OA and the customer LINE in one
 // call so mobile.js doesn't have to remember both.
 async function notifyBillStatus(billNo, statusLabel, options = {}) {
@@ -464,6 +544,35 @@ async function getActivityNotifications(session, limit = 30) {
       WHERE d.recipt_job IS NOT NULL
         AND ${getFixedYearSqlFilter("d.doc_date")}
         ${branchFilterJob(scope, "a")}
+
+      UNION ALL
+
+      -- ເບີກເຄື່ອງບໍ່ຄົບ: one entry per pickup event (rows written in the same
+      -- transaction share created_at to the second), not one per item line.
+      SELECT
+        'pickup_variance' AS type,
+        v.doc_no,
+        v.bill_no,
+        'ເບີກເຄື່ອງບໍ່ຄົບຕາມຖ້ຽວ' AS title,
+        CONCAT(
+          'ບິນ ', v.bill_no, ' · ', COALESCE(NULLIF(TRIM(cu.name_1), ''), d.cust_code, '-'),
+          ' · ', COUNT(*)::text, ' ລາຍການ',
+          CASE WHEN SUM(GREATEST(-v.diff_qty, 0)) > 0
+               THEN CONCAT(' · ຂາດ ', TRIM(TO_CHAR(SUM(GREATEST(-v.diff_qty, 0)), 'FM999999990.###')), ' ໜ່ວຍ')
+               ELSE '' END
+        ) AS body,
+        MAX(v.created_at) AS event_at,
+        CONCAT('/tracking?search=', v.bill_no) AS href,
+        'rose' AS tone
+      FROM public.odg_tms_pickup_variance v
+      LEFT JOIN public.odg_tms a ON a.doc_no = v.doc_no
+      LEFT JOIN public.odg_tms_detail d ON d.doc_no = v.doc_no AND d.bill_no = v.bill_no
+      LEFT JOIN public.ar_customer cu ON cu.code = d.cust_code
+      WHERE v.created_at IS NOT NULL
+        AND ${getFixedYearSqlFilter("a.doc_date")}
+        ${branchFilterJob(scope, "a")}
+      GROUP BY v.doc_no, v.bill_no, date_trunc('second', v.created_at),
+               cu.name_1, d.cust_code
 
       UNION ALL
 
@@ -689,6 +798,7 @@ module.exports = {
   notifyJobCreatedToSales,
   notifyBillForwardedToBranch,
   notifyBillStatus,
+  notifyPickupVariance,
   notifyCustomerLine,
   notifySalesLine,
   getActivityNotifications,
