@@ -76,14 +76,24 @@ paths:
       description: |
         Default scope returns the authenticated driver's jobs. Supervisor-capable
         tokens may pass `scope=all` to return all drivers' jobs, optionally
-        filtered by driver/status/date.
+        filtered by driver/status/date. Drivers may pass `scope=report` with
+        `from` and `to` to return their own trips by delivery date, including
+        trips that have already been closed.
       parameters:
         - in: query
           name: date
           schema: { type: string, format: date }
         - in: query
           name: scope
-          schema: { type: string, enum: [all] }
+          schema: { type: string, enum: [all, report] }
+        - in: query
+          name: from
+          description: Required when scope=report.
+          schema: { type: string, format: date }
+        - in: query
+          name: to
+          description: Required when scope=report.
+          schema: { type: string, format: date }
         - in: query
           name: driver_id
           schema: { type: string }

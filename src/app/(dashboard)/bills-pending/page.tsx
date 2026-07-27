@@ -60,6 +60,9 @@ export interface Bill {
   transport: string;
   // ບ້ານ · ເມືອງ · ແຂວງ of the customer (joined from the ERP area codes).
   cust_area?: string;
+  cust_village?: string;
+  cust_district?: string;
+  cust_province?: string;
   transport_code?: string;
   time_open: string;
   time_use: TimeUse | null;
@@ -401,6 +404,9 @@ export default function BillsPendingClient() {
   const [transportCode, setTransportCode] = useState("all");
   const [searchText, setSearchText] = useState("");
   const [departmentFilter, setDepartmentFilter] = useState("all");
+  // ທີ່ຢູ່ລູກຄ້າ: ເລືອກແຂວງກ່ອນ ແລ້ວຈຶ່ງເມືອງ (ລາຍການເມືອງຂຶ້ນກັບແຂວງທີ່ເລືອກ).
+  const [provinceFilter, setProvinceFilter] = useState("all");
+  const [districtFilter, setDistrictFilter] = useState("all");
   const [loading, setLoading] = useState(false);
   const [modalOpen, setModalOpen] = useState(false);
   const [selectedBill, setSelectedBill] = useState<Bill | null>(null);
@@ -565,6 +571,19 @@ export default function BillsPendingClient() {
   };
 
   const deptList = [...new Set(bills.map((b) => b.department).filter(Boolean))].sort();
+  const provinceList = [
+    ...new Set(bills.map((b) => b.cust_province).filter((v): v is string => !!v)),
+  ].sort((a, b) => a.localeCompare(b, "lo"));
+  // Districts are scoped to the chosen province so the list stays short
+  // (77 districts nationwide, roughly ten per province).
+  const districtList = [
+    ...new Set(
+      bills
+        .filter((b) => provinceFilter === "all" || b.cust_province === provinceFilter)
+        .map((b) => b.cust_district)
+        .filter((v): v is string => !!v)
+    ),
+  ].sort((a, b) => a.localeCompare(b, "lo"));
 
   const isNotYetTime = (b: Bill): boolean => {
     const d = b.send_date;
@@ -617,6 +636,8 @@ export default function BillsPendingClient() {
   const kw = searchText.trim().toLowerCase();
   const filtered = bills.filter((b) => {
     if (departmentFilter !== "all" && b.department !== departmentFilter) return false;
+    if (provinceFilter !== "all" && b.cust_province !== provinceFilter) return false;
+    if (districtFilter !== "all" && b.cust_district !== districtFilter) return false;
 
     // queueFilter is legacy (kept for the manual-add code path, fixed to
     // "all"); the visible status filtering is now the tab bar (activeStep).
@@ -637,6 +658,7 @@ export default function BillsPendingClient() {
       b.sale,
       b.department,
       b.transport,
+      b.cust_area,
       b.sales_remark,
       b.time_open,
       b.partial_delivery ? "ກຳລັງທະຍອຍສົ່ງ partial delivery" : "",
@@ -1071,6 +1093,22 @@ export default function BillsPendingClient() {
             <select value={departmentFilter} onChange={(e) => setDepartmentFilter(e.target.value)} className={`${inputCls} sm:w-44`}>
               <option value="all">ພະແນກ: ທັງໝົດ</option>
               {deptList.map((d) => <option key={d} value={d}>{d}</option>)}
+            </select>
+            <select
+              value={provinceFilter}
+              onChange={(e) => {
+                setProvinceFilter(e.target.value);
+                // A district from the previous province would hide every row.
+                setDistrictFilter("all");
+              }}
+              className={`${inputCls} sm:w-44`}
+            >
+              <option value="all">ແຂວງ: ທັງໝົດ</option>
+              {provinceList.map((p) => <option key={p} value={p}>{p}</option>)}
+            </select>
+            <select value={districtFilter} onChange={(e) => setDistrictFilter(e.target.value)} className={`${inputCls} sm:w-40`}>
+              <option value="all">ເມືອງ: ທັງໝົດ</option>
+              {districtList.map((d) => <option key={d} value={d}>{d}</option>)}
             </select>
             <button type="submit" disabled={loading} className="inline-flex items-center justify-center gap-2 rounded-lg px-4 py-2 text-xs font-semibold text-white disabled:opacity-60 transition-colors bg-teal-600 hover:bg-teal-700 dark:bg-teal-500 cursor-pointer shrink-0">
               {loading ? <FaSpinner className="animate-spin" size={11} /> : <FaSearch size={11} />}

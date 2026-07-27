@@ -5,6 +5,7 @@ import {
   LocationBatchSchema,
   PublicTrackSchema,
   FuelListQuerySchema,
+  JobsListQuerySchema,
 } from "./mobile-schemas";
 
 describe("LoginSchema", () => {
@@ -181,5 +182,31 @@ describe("FuelListQuerySchema", () => {
   });
   it("rejects non-numeric limit", () => {
     expect(() => FuelListQuerySchema.parse({ limit: "abc" })).toThrow();
+  });
+});
+
+describe("JobsListQuerySchema", () => {
+  it("accepts a report date range", () => {
+    expect(
+      JobsListQuerySchema.parse({
+        scope: "report",
+        from: "2026-07-01",
+        to: "2026-07-27",
+      })
+    ).toMatchObject({
+      scope: "report",
+      from: "2026-07-01",
+      to: "2026-07-27",
+    });
+  });
+
+  it("rejects malformed report dates", () => {
+    expect(() =>
+      JobsListQuerySchema.parse({
+        scope: "report",
+        from: "01-07-2026",
+        to: "2026-07-27",
+      })
+    ).toThrow();
   });
 });

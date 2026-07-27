@@ -80,8 +80,8 @@ export default function DailyReportPage() {
           <FaCalendarDay className="text-white text-lg" />
         </div>
         <div>
-          <h1 className="text-lg font-bold text-slate-800 dark:text-white">ລາຍງານປະຈຳວັນ</h1>
-          <p className="text-xs text-slate-500 dark:text-slate-400">ສະຫຼຸບການຈັດສົ່ງແຍກຕາມຊ່ວງວັນທີ</p>
+          <h1 className="text-lg font-bold text-slate-800 dark:text-white">ລາຍງານການຈັດສົ່ງປະຈຳວັນ</h1>
+          <p className="text-xs text-slate-500 dark:text-slate-400">ສະຫຼຸບຖ້ຽວຕາມວັນທີຈັດສົ່ງ ຈາກວັນທີ–ຫາວັນທີ</p>
         </div>
       </div>
 
@@ -103,7 +103,7 @@ export default function DailyReportPage() {
               type="date"
               value={fromDate}
               min={FIXED_YEAR_START}
-              max={FIXED_YEAR_END}
+              max={toDate || FIXED_YEAR_END}
               onChange={(e) => setFromDate(e.target.value)}
               className="w-full px-3 py-2 glass-input rounded-lg text-xs"
             />
@@ -117,7 +117,7 @@ export default function DailyReportPage() {
             <input
               type="date"
               value={toDate}
-              min={FIXED_YEAR_START}
+              min={fromDate || FIXED_YEAR_START}
               max={FIXED_YEAR_END}
               onChange={(e) => setToDate(e.target.value)}
               className="w-full px-3 py-2 glass-input rounded-lg text-xs"
@@ -194,6 +194,7 @@ export default function DailyReportPage() {
                   <thead>
                     <tr className="bg-white/30 dark:bg-white/5 border-b border-slate-200/30 dark:border-white/5">
                       <th className="px-4 py-3 text-left font-semibold text-slate-600 dark:text-slate-300">#</th>
+                      <th className="px-4 py-3 text-left font-semibold text-slate-600 dark:text-slate-300">ວັນທີຈັດສົ່ງ</th>
                       <th className="px-4 py-3 text-left font-semibold text-slate-600 dark:text-slate-300">ວັນທີເປີດ</th>
                       <th className="px-4 py-3 text-left font-semibold text-slate-600 dark:text-slate-300">ເລກທີ</th>
                       <th className="px-4 py-3 text-left font-semibold text-slate-600 dark:text-slate-300">ລົດ / ຄົນຂັບ</th>
@@ -219,6 +220,7 @@ export default function DailyReportPage() {
                               {(currentPage - 1) * perPage + index + 1}
                             </span>
                           </td>
+                          <td className="px-4 py-3 font-semibold text-slate-700 dark:text-slate-200">{item.date_logistic}</td>
                           <td className="px-4 py-3 text-slate-500 dark:text-slate-400">{item.doc_date}</td>
                           <td className="px-4 py-3 font-semibold text-slate-800 dark:text-white">{item.doc_no}</td>
                           <td className="px-4 py-3">

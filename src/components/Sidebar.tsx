@@ -89,6 +89,7 @@ const navSections: NavSection[] = [
     items: [
       { label: "ລໍຖ້າຈັດຖ້ຽວ", href: "/bills-pending", icon: <FaBox size={13} /> },
       { label: "ບິນລໍຕາມເສັ້ນທາງ", href: "/bills-waiting-routes", icon: <FaRoute size={13} /> },
+      { label: "ຮ່າງຖ້ຽວ (ວັນ/ຮອບ/ສາຍ)", href: "/jobs/drafts", icon: <FaRoute size={13} /> },
       { label: "ໃບງານ/ລໍຖ້າອະນຸມັດ", href: "/jobs", icon: <FaClipboardCheck size={13} /> },
       { label: "ລໍຖ້າຮັບຖ້ຽວ", href: "/jobs/waiting-receive", icon: <FaClock size={13} /> },
       { label: "ລໍຖ້າເບີກເຄື່ອງ", href: "/jobs/waiting-pickup", icon: <FaBox size={13} /> },
@@ -106,7 +107,7 @@ const navSections: NavSection[] = [
     icon: <FaChartPie size={16} />,
     key: "report",
     items: [
-      { label: "ປະຈຳວັນ", href: "/reports/daily", icon: <FaCalendarDay size={13} /> },
+      { label: "ການຈັດສົ່ງປະຈຳວັນ", href: "/reports/daily", icon: <FaCalendarDay size={13} /> },
       { label: "ເຄື່ອນໄຫວ/ວັນ (ບິນ)", href: "/reports/daily-activity-bills", icon: <FaFileInvoice size={13} /> },
       { label: "ເຄື່ອນໄຫວ/ວັນ (ສິນຄ້າ)", href: "/reports/daily-activity-products", icon: <FaBox size={13} /> },
       { label: "ປະຈຳວັນ/ພະແນກ", href: "/reports/daily-department", icon: <FaBuilding size={13} /> },

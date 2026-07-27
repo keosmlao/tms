@@ -21,6 +21,7 @@ import * as reports from "@/actions/reports";
 import * as settings from "@/actions/settings";
 import * as thunjai from "@/actions/thunjai";
 import * as tracking from "@/actions/tracking";
+import * as tripDraft from "@/actions/trip-draft";
 
 export const Actions = {
   // Dashboard
@@ -33,6 +34,19 @@ export const Actions = {
 
   // Audit log
   getAuditLog: auditLog.getAuditLog,
+
+  // ຮ່າງຖ້ຽວ (ວັນ × ຮອບ × ສາຍ) — planning before a trip exists
+  listTripDrafts: tripDraft.listTripDrafts,
+  getTripDraftBills: tripDraft.getTripDraftBills,
+  listDraftedBillNos: tripDraft.listDraftedBillNos,
+  getTripDraftCandidates: tripDraft.getTripDraftCandidates,
+  createTripDraft: tripDraft.createTripDraft,
+  updateTripDraft: tripDraft.updateTripDraft,
+  deleteTripDraft: tripDraft.deleteTripDraft,
+  addBillsToTripDraft: tripDraft.addBillsToTripDraft,
+  removeBillFromTripDraft: tripDraft.removeBillFromTripDraft,
+  setTripDraftBillOptions: tripDraft.setTripDraftBillOptions,
+  dispatchTripDraft: tripDraft.dispatchTripDraft,
 
   // Pickup variance (ບິນເບີກບໍ່ຄົບ)
   getPickupVarianceList: pickupVariance.getPickupVarianceList,
@@ -118,6 +132,8 @@ export const Actions = {
   getReportDeliveredDaily: reports.getReportDeliveredDaily,
   getReportCancelledDaily: reports.getReportCancelledDaily,
   getReportDailyActivity: reports.getReportDailyActivity,
+  getReportDailyActivityBills: reports.getReportDailyActivityBills,
+  getReportDailyActivityItems: reports.getReportDailyActivityItems,
   getReportDailyDepartment: reports.getReportDailyDepartment,
   getAttemptDeliveryItems: reports.getAttemptDeliveryItems,
 

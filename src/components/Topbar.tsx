@@ -120,7 +120,10 @@ export default function Topbar() {
       return;
     }
     void loadNotifications();
-    const timer = window.setInterval(() => void loadNotifications(), 30000);
+    // 60s, not 30s: this query is the most expensive thing that runs on every
+    // page (measured ~720 ms average in the dev log), and nothing in the feed
+    // is urgent enough to justify polling it twice a minute.
+    const timer = window.setInterval(() => void loadNotifications(), 60000);
     return () => window.clearInterval(timer);
   }, [isSaleLogin, loadNotifications]);
 

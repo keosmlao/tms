@@ -1,6 +1,7 @@
 const { query, queryOne } = require("../lib/db");
 const { getFixedYearSqlFilter } = require("../lib/fixed-year");
 const {
+  customerAreaSql,
   getBranchScope,
   branchFilterJob,
   ensureForwardBranchColumn,
@@ -9,7 +10,7 @@ const {
 async function getReportDaily(session, fromDate, toDate) {
   const scope = getBranchScope(session);
   await ensureForwardBranchColumn();
-  return query(`SELECT to_char(a.create_date_time_now,'DD-MM-YYYY HH24:MI') as doc_date, doc_no, to_char(date_logistic,'DD-MM-YYYY') as date_logistic, to_char(a.job_close,'DD-MM-YYYY HH24:MI') as job_code, b.name_1 as car, c.name_1 as driver, item_bill, d.name_1 as user_created, approve_status, case when approve_status=0 then 'ລໍຖ້າອະນຸມັດ' else case when job_status=0 then 'ລໍຖ້າຈັດສົ່ງ' when job_status=1 then 'ຮັບຖ້ຽວ / ເບີກເຄື່ອງ' when job_status=2 then 'ກຳລັງຈັດສົ່ງ' when job_status=3 then 'ຄົນຂັບປິດງານ' else 'admin ປິດຖ້ຽວ' end end as status, job_status, coalesce(b.imei,'') as imei FROM odg_tms a LEFT JOIN public.odg_tms_car b ON b.code=a.car LEFT JOIN public.odg_tms_driver c ON c.code=a.driver LEFT JOIN erp_user d ON d.code=a.user_created WHERE doc_date BETWEEN $1 AND $2 ${branchFilterJob(scope, "a")} ORDER BY a.create_date_time_now`, [fromDate, toDate]);
+  return query(`SELECT to_char(a.create_date_time_now,'DD-MM-YYYY HH24:MI') as doc_date, doc_no, to_char(date_logistic,'DD-MM-YYYY') as date_logistic, to_char(a.job_close,'DD-MM-YYYY HH24:MI') as job_code, b.name_1 as car, c.name_1 as driver, item_bill, d.name_1 as user_created, approve_status, case when approve_status=0 then 'ລໍຖ້າອະນຸມັດ' else case when job_status=0 then 'ລໍຖ້າຈັດສົ່ງ' when job_status=1 then 'ຮັບຖ້ຽວ / ເບີກເຄື່ອງ' when job_status=2 then 'ກຳລັງຈັດສົ່ງ' when job_status=3 then 'ຄົນຂັບປິດງານ' else 'admin ປິດຖ້ຽວ' end end as status, job_status, coalesce(b.imei,'') as imei FROM odg_tms a LEFT JOIN public.odg_tms_car b ON b.code=a.car LEFT JOIN public.odg_tms_driver c ON c.code=a.driver LEFT JOIN erp_user d ON d.code=a.user_created WHERE date_logistic BETWEEN $1 AND $2 ${branchFilterJob(scope, "a")} ORDER BY a.date_logistic, a.create_date_time_now`, [fromDate, toDate]);
 }
 
 async function getReportByDriver(session, fromDate, toDate, driverId) {
@@ -995,12 +996,26 @@ async function getReportDailyActivity(session, fromDate, toDate) {
 const UNASSIGNED_DEPARTMENT = "(ບໍ່ກຳນົດພະແນກ)";
 const SALES_DIVISION_CODE = "200";
 
-async function getReportDailyDepartment(session, fromDate, toDate, salesOnly = true) {
+async function getReportDailyDepartment(
+  session,
+  fromDate,
+  toDate,
+  salesOnly = true,
+  transportCode = ""
+) {
   const scope = getBranchScope(session);
   await ensureForwardBranchColumn();
-  const branchList = scope.scoped
-    ? scope.branchListSql
-    : MONTHLY_DELIVERY_BRANCH_CODES.map((c) => `'${c}'`).join(", ");
+  // Branches this report may cover: the user's own when they are branch-scoped,
+  // otherwise the three delivery branches the ledger is defined over.
+  const allowedBranches = scope.scoped ? scope.branches : MONTHLY_DELIVERY_BRANCH_CODES;
+  // ສາຂາຂົນສົ່ງ filter — ignored when it names a branch outside the caller's
+  // scope, so the parameter can never widen what a branch user may see.
+  const picked = String(transportCode ?? "").trim();
+  const selectedBranch = allowedBranches.includes(picked) ? picked : "";
+  const activeBranches = selectedBranch ? [selectedBranch] : allowedBranches;
+  const branchList = activeBranches
+    .map((c) => `'${String(c).replace(/'/g, "''")}'`)
+    .join(", ");
 
   // Department master: gives the sales-division whitelist (matched by NAME,
   // because the pending list only carries the display name) and the code used
@@ -1026,6 +1041,10 @@ async function getReportDailyDepartment(session, fromDate, toDate, salesOnly = t
   const pendingRows = (pending && pending.trans) || [];
   const pendingByDept = new Map();
   for (const row of pendingRows) {
+    // The pending list is session-scoped, not filtered by the picked branch —
+    // apply the same ສາຂາ filter the flow query uses, or ຄົງເຫຼືອ would keep
+    // counting every branch while ເປີດບິນ / ຈັດສົ່ງ show only one.
+    if (selectedBranch && (row.transport_code || "").trim() !== selectedBranch) continue;
     const dept = (row.department && String(row.department).trim()) || UNASSIGNED_DEPARTMENT;
     if (!isIncluded(dept)) continue;
     const cur = pendingByDept.get(dept) || { bills: 0, qty: 0 };
@@ -1171,7 +1190,168 @@ async function getReportDailyDepartment(session, fromDate, toDate, salesOnly = t
       carry_qty: 0, opened_qty: 0, delivered_qty: 0, remaining_qty: 0,
     }
   );
-  return { fromDate, toDate, salesOnly, departments, total };
+  // Branch picker options come from the query itself so the dropdown can never
+  // offer a branch this report (or this user) doesn't cover.
+  const branchNameRows = allowedBranches.length
+    ? await query(
+        `SELECT code, COALESCE(NULLIF(TRIM(name_1), ''), code) AS name
+         FROM transport_type WHERE code = ANY($1::varchar[])`,
+        [allowedBranches]
+      )
+    : [];
+  const branchNames = new Map(branchNameRows.map((r) => [r.code, r.name]));
+  const branchOptions = allowedBranches.map((code) => ({
+    code,
+    name: branchNames.get(code) ?? MONTHLY_DELIVERY_BRANCH_NAMES[code] ?? code,
+  }));
+
+  return {
+    fromDate,
+    toDate,
+    salesOnly,
+    transportCode: selectedBranch,
+    branchOptions,
+    departments,
+    total,
+  };
+}
+
+// Bills behind one cell of the daily-activity report. The report only shows
+// totals, so a figure that looks wrong is impossible to check — this returns
+// the actual rows for a branch + bucket.
+//
+// bucket: opened | delivered | remaining. ຍອດຍົກມາ (carry) is DERIVED
+// (remaining + delivered − opened) and has no bill list of its own.
+async function getReportDailyActivityBills(session, fromDate, toDate, branchCode, bucket) {
+  const scope = getBranchScope(session);
+  await ensureForwardBranchColumn();
+  const allowed = scope.scoped ? scope.branches : MONTHLY_DELIVERY_BRANCH_CODES;
+  const branch = String(branchCode ?? "").trim();
+  const branchList = (allowed.includes(branch) ? [branch] : allowed)
+    .map((c) => `'${String(c).replace(/'/g, "''")}'`)
+    .join(", ");
+  const kind = ["opened", "delivered", "remaining"].includes(String(bucket))
+    ? String(bucket)
+    : "opened";
+
+  if (kind === "remaining") {
+    // ຄົງເຫຼືອ is whatever the canonical pending list says right now — same
+    // source the report totals use, so the rows always add up to the figure.
+    const { getBillsPending } = require("./bills.js");
+    const { FIXED_YEAR_START, FIXED_YEAR_END } = require("../lib/fixed-year");
+    const pending = await getBillsPending(session, FIXED_YEAR_START, FIXED_YEAR_END, "all");
+    return ((pending && pending.trans) || [])
+      .filter((r) => !branch || (r.transport_code || "").trim() === branch)
+      .map((r) => ({
+        bill_no: r.doc_no,
+        doc_date: r.doc_date,
+        cust_name: r.transport_name || r.cust_name || r.cust_code || "-",
+        cust_area: r.cust_area || "",
+        sale: r.sale || "",
+        department: r.department || "",
+        qty: Number(r.remaining_qty_total ?? 0),
+        item_count: Number(r.remaining_count ?? 0),
+        note: r.scheduled_date_display ? `ນັດ ${r.scheduled_date_display}` : "",
+      }));
+  }
+
+  const dateCol = kind === "opened" ? "sb.doc_date" : "dd.completion_date";
+  return query(
+    `WITH sale_bills AS (
+      SELECT a.doc_no,
+             b.doc_date::date AS doc_date,
+             COALESCE(NULLIF(TRIM(pb.transport_code), ''), a.transport_code) AS branch_code
+      FROM ic_trans_shipment a
+      JOIN ic_trans b ON b.doc_no = a.doc_no
+      LEFT JOIN public.odg_tms_pending_bill pb ON pb.bill_no = a.doc_no
+      WHERE a.trans_flag = 44
+        AND b.doc_date::date <= $2::date
+        AND ${getFixedYearSqlFilter("a.doc_date")}
+        AND COALESCE(NULLIF(TRIM(pb.transport_code), ''), a.transport_code) IN (${branchList})
+    ),
+    bill_items AS (
+      SELECT d.doc_no AS bill_no, SUM(COALESCE(d.qty, 0))::numeric AS total_qty,
+             COUNT(DISTINCT d.item_code)::int AS item_count
+      FROM ic_trans_detail d
+      WHERE d.item_code NOT LIKE '97%' AND d.doc_no IN (SELECT doc_no FROM sale_bills)
+      GROUP BY d.doc_no
+    ),
+    returned AS (
+      SELECT rd.ref_doc_no AS bill_no, SUM(ABS(COALESCE(rd.qty, 0)))::numeric AS returned_qty
+      FROM ic_trans_detail rd
+      JOIN ic_trans r ON r.doc_no = rd.doc_no AND r.trans_flag = 48
+      WHERE rd.item_code NOT LIKE '97%' AND rd.ref_doc_no IN (SELECT doc_no FROM sale_bills)
+      GROUP BY rd.ref_doc_no
+    ),
+    del_dates AS (
+      SELECT d.bill_no, MAX(d.sent_end)::date AS completion_date
+      FROM public.odg_tms_detail d
+      WHERE COALESCE(d.status, 0) = 1
+        AND NULLIF(TRIM(d.forward_transport_code), '') IS NULL
+        AND d.bill_no IN (SELECT doc_no FROM sale_bills)
+      GROUP BY d.bill_no
+    )
+    SELECT sb.doc_no AS bill_no,
+           to_char(sb.doc_date, 'DD-MM-YYYY') AS doc_date,
+           COALESCE(NULLIF(TRIM(cust.name_1), ''), s.cust_code, '-') AS cust_name,
+           ${customerAreaSql("s.cust_code")} AS cust_area,
+           COALESCE(NULLIF(TRIM(oe.fullname_lo), ''), NULLIF(TRIM(oe.nickname), ''), ic.sale_code, '') AS sale,
+           COALESCE(NULLIF(TRIM(od.department_name_lo), ''), '') AS department,
+           GREATEST(COALESCE(bi.total_qty, 0) - COALESCE(rt.returned_qty, 0), 0)::numeric AS qty,
+           COALESCE(bi.item_count, 0) AS item_count,
+           COALESCE(to_char(dd.completion_date, 'DD-MM-YYYY'), '') AS note
+    FROM sale_bills sb
+    LEFT JOIN ic_trans_shipment s ON s.doc_no = sb.doc_no
+    LEFT JOIN ic_trans ic ON ic.doc_no = sb.doc_no
+    LEFT JOIN ar_customer cust ON cust.code = s.cust_code
+    LEFT JOIN public.odg_employee oe ON oe.employee_code = ic.sale_code
+    LEFT JOIN public.odg_department od ON od.department_code = oe.department_code
+    LEFT JOIN bill_items bi ON bi.bill_no = sb.doc_no
+    LEFT JOIN returned rt ON rt.bill_no = sb.doc_no
+    LEFT JOIN del_dates dd ON dd.bill_no = sb.doc_no
+    WHERE GREATEST(COALESCE(bi.total_qty, 0) - COALESCE(rt.returned_qty, 0), 0) > 0
+      AND ${dateCol} BETWEEN $1::date AND $2::date
+    ORDER BY ${dateCol}, sb.doc_no`,
+    [fromDate, toDate]
+  );
+}
+
+// Same three buckets as getReportDailyActivityBills, but exploded to one row
+// per product line — what the dispatcher exports when they need to see the
+// goods, not just the bill count.
+async function getReportDailyActivityItems(session, fromDate, toDate, branchCode, bucket) {
+  const bills = await getReportDailyActivityBills(session, fromDate, toDate, branchCode, bucket);
+  const billNos = bills.map((b) => b.bill_no).filter(Boolean);
+  if (billNos.length === 0) return [];
+  const meta = new Map(bills.map((b) => [b.bill_no, b]));
+  const rows = await query(
+    `SELECT d.doc_no AS bill_no,
+            d.item_code,
+            MAX(d.item_name) AS item_name,
+            SUM(COALESCE(d.qty, 0))::numeric AS qty,
+            MAX(d.unit_code) AS unit_code
+     FROM ic_trans_detail d
+     WHERE d.doc_no = ANY($1::varchar[]) AND d.item_code NOT LIKE '97%'
+     GROUP BY d.doc_no, d.item_code
+     ORDER BY d.doc_no, d.item_code`,
+    [billNos]
+  );
+  return rows.map((r) => {
+    const b = meta.get(r.bill_no) ?? {};
+    return {
+      bill_no: r.bill_no,
+      doc_date: b.doc_date ?? "",
+      cust_name: b.cust_name ?? "",
+      cust_area: b.cust_area ?? "",
+      sale: b.sale ?? "",
+      department: b.department ?? "",
+      item_code: r.item_code,
+      item_name: r.item_name,
+      qty: Number(r.qty ?? 0),
+      unit_code: r.unit_code ?? "",
+      note: b.note ?? "",
+    };
+  });
 }
 
 module.exports = {
@@ -1187,6 +1367,8 @@ module.exports = {
   getReportDeliveredDaily,
   getReportCancelledDaily,
   getReportDailyActivity,
+  getReportDailyActivityBills,
+  getReportDailyActivityItems,
   getReportDailyDepartment,
   getAttemptDeliveryItems,
 };

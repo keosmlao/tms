@@ -13,12 +13,18 @@ const {
   coerceDateToFixedYear,
   getFixedYearSqlFilter,
 } = require("../lib/fixed-year");
-const { effectivePickupCodeSql, customerAreaSql } = require("./helpers");
+const {
+  effectivePickupCodeSql,
+  customerAreaSql,
+  ensureTmsWorkerTable,
+} = require("./helpers");
 const { saveToken: saveFcmToken, deleteToken: deleteFcmToken } = require("./push");
 const { saveFuelRefill, getFuelLogs, getFuelSummary } = require("./fuel");
 const { notifyBillStatus, notifyPickupVariance } = require("./notifications");
 const { computePickupVariance } = require("../lib/pickup-variance");
 const { assertJobGeofence } = require("./geofence");
+const { ensureDeliveryRouteSchema } = require("./delivery-route");
+const { ensureDeliveryRoundSchema } = require("./delivery-round");
 
 function asText(value) {
   return typeof value === "string" ? value.trim() : "";
@@ -144,12 +150,30 @@ async function mobileLogin(body) {
   throw err;
 }
 
-async function mobileJobsList(driverId, date) {
+async function mobileJobsList(driverId, date, options = {}) {
+  await Promise.all([
+    ensureTmsWorkerTable(),
+    ensureDeliveryRouteSchema(),
+    ensureDeliveryRoundSchema(),
+  ]);
   const fixedDate = date ? coerceDateToFixedYear(date) : null;
+  const reportFrom = options.fromDate
+    ? coerceDateToFixedYear(options.fromDate)
+    : null;
+  const reportTo = options.toDate
+    ? coerceDateToFixedYear(options.toDate)
+    : null;
   let sql = `
     WITH bill_summary AS (
       SELECT
         d.doc_no, COUNT(*)::int AS total_bills,
+        SUM(
+          CASE
+            WHEN COALESCE(d.count_item::text, '') ~ '^[0-9]+$'
+              THEN d.count_item::text::int
+            ELSE 0
+          END
+        )::int AS item_count,
         COUNT(*) FILTER (WHERE COALESCE(d.status, 0) NOT IN (1, 2) AND d.sent_start IS NULL)::int AS waiting_bill_count,
         COUNT(*) FILTER (WHERE COALESCE(d.status, 0) NOT IN (1, 2) AND d.sent_start IS NOT NULL)::int AS inprogress_bill_count,
         COUNT(*) FILTER (WHERE COALESCE(d.status, 0) = 1)::int AS completed_bill_count,
@@ -159,12 +183,27 @@ async function mobileJobsList(driverId, date) {
       FROM public.odg_tms_detail d
       WHERE ${getFixedYearSqlFilter("d.doc_date")}
       GROUP BY d.doc_no
+    ),
+    worker_summary AS (
+      SELECT doc_no, COUNT(*)::int AS worker_count,
+        string_agg(worker_name, ', ' ORDER BY worker_name) AS workers
+      FROM public.odg_tms_worker
+      GROUP BY doc_no
     )
     SELECT
       to_char(a.doc_date,'DD-MM-YYYY') as doc_date, a.doc_no,
       to_char(a.date_logistic,'DD-MM-YYYY') as date_logistic,
       a.car as car_code, b.name_1 as car, c.name_1 as driver,
-      COALESCE(bs.total_bills, 0) as item_bill, d.name_1 as user_created,
+      COALESCE(bs.total_bills, 0) as item_bill,
+      COALESCE(bs.item_count, 0) as item_count,
+      COALESCE(ws.worker_count, 0) as worker_count,
+      COALESCE(ws.workers, '') as workers,
+      COALESCE(a.delivery_route_code, '') as delivery_route_code,
+      COALESCE(rt.name, '') as delivery_route_name,
+      COALESCE(a.delivery_round_code, '') as delivery_round_code,
+      COALESCE(dr.name, '') as delivery_round_name,
+      COALESCE(dr.time_label, '') as delivery_round_time_label,
+      d.name_1 as user_created,
       a.approve_status::text, a.job_status,
       COALESCE(bs.waiting_bill_count, 0) as waiting_bill_count,
       COALESCE(bs.inprogress_bill_count, 0) as inprogress_bill_count,
@@ -173,6 +212,7 @@ async function mobileJobsList(driverId, date) {
       COALESCE(to_char(bs.received_at,'DD-MM-YYYY HH24:MI'), '-') as received_at,
       COALESCE(to_char(a.dispatch_started_at,'DD-MM-YYYY HH24:MI'), '-') as dispatch_started_at,
       COALESCE(a.miles_start, '') as miles_start,
+      COALESCE(lm.latest_miles, '') as latest_miles,
       -- Same rationale as the bills query — keep image bytes out of the list
       -- response, expose only a presence flag. Drivers rarely need to see
       -- their own odometer photo, so lazy-loading is fine when they do.
@@ -194,7 +234,37 @@ async function mobileJobsList(driverId, date) {
     LEFT JOIN public.odg_tms_car b ON b.code = a.car
     LEFT JOIN public.odg_tms_driver c ON c.code = a.driver
     LEFT JOIN erp_user d ON d.code = a.user_created
-    LEFT JOIN bill_summary bs ON bs.doc_no = a.doc_no`;
+    LEFT JOIN bill_summary bs ON bs.doc_no = a.doc_no
+    LEFT JOIN worker_summary ws ON ws.doc_no = a.doc_no
+    LEFT JOIN public.odg_tms_delivery_route rt
+      ON rt.code = a.delivery_route_code
+    LEFT JOIN public.odg_tms_delivery_round dr
+      ON dr.code = a.delivery_round_code
+    LEFT JOIN LATERAL (
+      SELECT COALESCE(
+        NULLIF(TRIM(previous.miles_end), ''),
+        NULLIF(TRIM(previous.miles_start), '')
+      ) AS latest_miles
+      FROM public.odg_tms previous
+      WHERE previous.car = a.car
+        AND previous.doc_no <> a.doc_no
+        AND (
+          NULLIF(TRIM(previous.miles_end), '') IS NOT NULL
+          OR NULLIF(TRIM(previous.miles_start), '') IS NOT NULL
+        )
+      ORDER BY previous.doc_date DESC,
+        previous.create_date_time_now DESC NULLS LAST,
+        previous.doc_no DESC
+      LIMIT 1
+    ) lm ON TRUE`;
+
+  if (reportFrom && reportTo) {
+    sql += ` WHERE a.driver=$1
+      AND a.date_logistic BETWEEN $2 AND $3
+      AND ${getFixedYearSqlFilter("a.doc_date")}
+      ORDER BY a.date_logistic DESC, a.doc_no DESC`;
+    return await query(sql, [driverId, reportFrom, reportTo]);
+  }
 
   if (date) {
     sql += ` WHERE a.driver=$1 AND a.job_status != 4 AND a.doc_date=$2 AND ${getFixedYearSqlFilter("a.doc_date")} ORDER BY a.doc_no`;
@@ -738,9 +808,6 @@ async function mobileJobAction(body) {
       case "dispatch":
       case "start_dispatch": {
         if (!docNo) throw new Error("doc_no is required");
-        // No pending_pickup_count check — a single trip may pick up from
-        // multiple warehouses or from a customer's home/shop, so the driver
-        // can leave (start_dispatch) before all bills have been picked up.
         const jobRow = await client.query(
           `SELECT approve_status, job_status
            FROM odg_tms
@@ -756,6 +823,30 @@ async function mobileJobAction(body) {
           return { success: true, already_started: true };
         }
         if (currentJobStatus > 2) throw new Error("ຖ້ຽວນີ້ປິດແລ້ວ ບໍ່ສາມາດເລີ່ມຈັດສົ່ງ");
+
+        // Goods owned by the trip's origin branch must be explicitly picked up
+        // before the truck may leave. Bills collected at the customer or at a
+        // different branch are intentionally excluded because they are picked
+        // up later along the route.
+        const pendingOriginPickup = await client.query(
+          `SELECT COUNT(*)::int AS count
+           FROM public.odg_tms_detail d
+           INNER JOIN odg_tms j ON j.doc_no = d.doc_no
+           WHERE d.doc_no = $1
+             AND COALESCE(d.status, 0) NOT IN (1, 2)
+             AND d.recipt_job IS NULL
+             AND COALESCE(d.pickup_transport_code, '') <> '__CUSTOMER__'
+             AND ${effectivePickupCodeSql('d')} = COALESCE(j.origin_transport_code, '')
+             AND ${getFixedYearSqlFilter("d.doc_date")}`,
+          [docNo]
+        );
+        const pendingOriginPickupCount = Number(pendingOriginPickup.rows[0]?.count ?? 0);
+        if (pendingOriginPickupCount > 0) {
+          throw new Error(
+            `ຕ້ອງເບີກສິນຄ້າຂອງສາຂານີ້ໃຫ້ຄົບກ່ອນ (ຍັງເຫຼືອ ${pendingOriginPickupCount} ບິນ)`
+          );
+        }
+
         // Geofence: when the branch requires it, the driver must be at the
         // configured start point (within radius) to begin dispatch. No-op when
         // the branch hasn't enabled it. Runs before any write so a blocked
@@ -1081,7 +1172,7 @@ async function mobileJobAction(body) {
 
         const billRow = await client.query(
           `SELECT d.doc_no, t.approve_status, t.job_status, d.recipt_job, d.forward_transport_code,
-                  d.pickup_transport_code,
+                  d.pickup_transport_code, d.url_img,
                   COALESCE(t.origin_transport_code, '') AS origin_transport_code,
                   ${effectivePickupCodeSql('d')} AS effective_pickup_code,
                   COALESCE(d.status, 0) AS status
@@ -1109,6 +1200,12 @@ async function mobileJobAction(body) {
             already_completed: true,
             open_bill_count: openBillCount,
           };
+        }
+        // Current app uploads photos in separate attach_bill_image requests
+        // before complete_bill, so accept either an inline image or the primary
+        // image already persisted on the bill.
+        if (deliveryImages.length === 0 && !asNullableText(currentBill.url_img)) {
+          throw new Error("ຕ້ອງຖ່າຍຮູບຫຼັກຖານກ່ອນສົ່ງສຳເລັດ");
         }
         if (Number(currentBill.approve_status ?? 0) !== 1) throw new Error("ຖ້ຽວນີ້ຍັງບໍ່ຖືກອະນຸມັດ");
         if (Number(currentBill.job_status ?? 0) >= 3) throw new Error("ຖ້ຽວນີ້ປິດແລ້ວ ບໍ່ສາມາດສຳເລັດ");
@@ -1566,23 +1663,9 @@ async function mobileJobAction(body) {
              WHERE bill_no = $1 AND doc_no = $2 AND ${getFixedYearSqlFilter("doc_date")}`,
             [billNo, currentDocNo]
           );
-          // Reset job_status to 0 if no other bills in this job are still received.
-          const stillPicked = await client.query(
-            `SELECT 1 FROM public.odg_tms_detail
-             WHERE doc_no = $1 AND recipt_job IS NOT NULL
-               AND ${getFixedYearSqlFilter("doc_date")}
-             LIMIT 1`,
-            [currentDocNo]
-          );
-          if (stillPicked.rowCount === 0) {
-            await client.query(
-              `UPDATE odg_tms
-               SET job_status = 0
-               WHERE doc_no = $1 AND COALESCE(job_status, 0) = 1
-                 AND ${getFixedYearSqlFilter("doc_date")}`,
-              [currentDocNo]
-            );
-          }
+          // Keep the trip at job_status=1 ("ຮັບຖ້ຽວແລ້ວ"). Undoing one
+          // bill's warehouse pickup must not undo the driver's acceptance of
+          // the whole trip or force them to tap "ຮັບຖ້ຽວ" again.
           const openBillCount = await getOpenBillCount(currentDocNo, client);
           await client.query("COMMIT");
           void notifyBillStatus(billNo, "↩️ ຍົກເລີກເບີກເຄື່ອງ", {

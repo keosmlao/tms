@@ -348,6 +348,33 @@ async function createJob(session, data) {
          WHERE doc_no = ANY($1::varchar[]) AND ${getFixedYearSqlFilter("doc_date")}`,
         [billNos]
       );
+
+      // ຮ່າງຖ້ຽວ = ວັນ × ຮອບ × ສາຍ. The trip already holds all three (plus the
+      // branch), so a bill that was never scheduled inherits them simply by
+      // being put on the trip — the dispatcher no longer has to schedule each
+      // bill on a separate screen before a trip can be built. Bills that were
+      // already scheduled keep their own values: only the blanks are filled.
+      await client.query(
+        `INSERT INTO public.odg_tms_pending_bill
+           (bill_no, scheduled_date, delivery_route_code, delivery_round_code, transport_code, updated_by, updated_at)
+         SELECT b.bill_no, $2::date, $3, $4, $5, $6, LOCALTIMESTAMP(0)
+         FROM unnest($1::varchar[]) AS b(bill_no)
+         ON CONFLICT (bill_no) DO UPDATE SET
+           scheduled_date = COALESCE(public.odg_tms_pending_bill.scheduled_date, EXCLUDED.scheduled_date),
+           delivery_route_code = COALESCE(NULLIF(TRIM(public.odg_tms_pending_bill.delivery_route_code), ''), EXCLUDED.delivery_route_code),
+           delivery_round_code = COALESCE(NULLIF(TRIM(public.odg_tms_pending_bill.delivery_round_code), ''), EXCLUDED.delivery_round_code),
+           transport_code = COALESCE(NULLIF(TRIM(public.odg_tms_pending_bill.transport_code), ''), EXCLUDED.transport_code),
+           updated_by = EXCLUDED.updated_by,
+           updated_at = LOCALTIMESTAMP(0)`,
+        [
+          billNos,
+          fixedDateLog,
+          deliveryRouteCode,
+          deliveryRoundCode,
+          originBranch || null,
+          session.usercode,
+        ]
+      );
     }
     await client.query("DELETE FROM public.odg_tms_listbill_draft WHERE user_create=$1", [session.usercode]);
     await client.query("COMMIT");
@@ -1398,10 +1425,15 @@ async function removeBillFromDraft(session, billNo) {
   return { drafts, bills };
 }
 
+// Bill search for the trip builder. Scheduling is NOT required: a bill that
+// nobody has scheduled yet is still findable here and can be dropped straight
+// into a ຮ່າງຖ້ຽວ — the trip's own ວັນ / ຮອບ / ສາຍ then become the bill's
+// schedule when the trip is saved (see scheduleBillsFromJob in createJob).
+// `unscheduled` lets the UI mark those so the dispatcher knows what they are.
 async function searchBills(session, q) {
   await ensurePendingBillSchema();
   const scope = getBranchScope(session);
-  return query(`SELECT a.doc_no, t.doc_date, to_char(t.doc_date,'DD-MM-YYYY') as doc_date_display, a.cust_code, b.telephone, (SELECT count(item_code) FROM ic_trans_detail WHERE doc_no=a.doc_no) as count_item FROM ic_trans_shipment a LEFT JOIN ic_trans t ON t.doc_no=a.doc_no LEFT JOIN ar_customer b ON b.code=a.cust_code INNER JOIN public.odg_tms_pending_bill pb ON pb.bill_no = a.doc_no AND pb.scheduled_date IS NOT NULL AND COALESCE(NULLIF(TRIM(pb.delivery_round_code), ''), NULL) IS NOT NULL WHERE a.trans_flag=44 AND a.check_status=0 AND NOT EXISTS (SELECT 1 FROM public.odg_tms_detail d WHERE d.bill_no = a.doc_no AND COALESCE(d.status, 0) NOT IN (1, 2)) AND a.doc_no NOT IN (SELECT bill_no FROM odg_tms_listbill_draft) ${branchFilterShipment(scope, "a")} AND ${getFixedYearSqlFilter("a.doc_date")} AND (a.doc_no LIKE $1 OR a.cust_code LIKE $1) LIMIT 10`, [`%${q}%`]);
+  return query(`SELECT a.doc_no, t.doc_date, to_char(t.doc_date,'DD-MM-YYYY') as doc_date_display, a.cust_code, b.telephone, (SELECT count(item_code) FROM ic_trans_detail WHERE doc_no=a.doc_no) as count_item, (pb.bill_no IS NULL OR pb.scheduled_date IS NULL OR NULLIF(TRIM(pb.delivery_round_code), '') IS NULL) as unscheduled FROM ic_trans_shipment a LEFT JOIN ic_trans t ON t.doc_no=a.doc_no LEFT JOIN ar_customer b ON b.code=a.cust_code LEFT JOIN public.odg_tms_pending_bill pb ON pb.bill_no = a.doc_no WHERE a.trans_flag=44 AND a.check_status=0 AND NOT EXISTS (SELECT 1 FROM public.odg_tms_detail d WHERE d.bill_no = a.doc_no AND COALESCE(d.status, 0) NOT IN (1, 2)) AND a.doc_no NOT IN (SELECT bill_no FROM odg_tms_listbill_draft) ${branchFilterShipment(scope, "a")} AND ${getFixedYearSqlFilter("a.doc_date")} AND (a.doc_no LIKE $1 OR a.cust_code LIKE $1) LIMIT 10`, [`%${q}%`]);
 }
 
 // Free-text search across ic_trans master so admins can attach bills that

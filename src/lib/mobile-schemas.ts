@@ -15,6 +15,8 @@ export type LoginInput = z.infer<typeof LoginSchema>;
 
 export const JobsListQuerySchema = z.object({
   date: z.string().trim().optional(),
+  from: DateLike,
+  to: DateLike,
   scope: OptionalString,
   driver_id: OptionalString,
   status: OptionalString,

@@ -6,6 +6,8 @@ const {
 } = require("../lib/fixed-year");
 const {
   customerAreaSql,
+  customerAreaJoins,
+  customerAreaFields,
   getBranchScope,
   branchFilterShipment,
   branchFilterJob,
@@ -452,7 +454,7 @@ async function getAvailableBillsWithProducts(session) {
   const [shipmentBills, manualBills] = await Promise.all([
     query(
     `SELECT a.doc_no, to_char(a.doc_date,'DD-MM-YYYY') as doc_date, a.cust_code, b.name_1 as cust_name, b.telephone,
-    ${customerAreaSql('a.cust_code')} as cust_area,
+    ${customerAreaFields()},
       (SELECT count(item_code) FROM ic_trans_detail WHERE doc_no=a.doc_no AND item_code NOT LIKE '97%') as count_item,
       ${SCHEDULED_BILL_FIELDS},
       COALESCE(a.transport_code, '') as origin_transport_code,
@@ -462,7 +464,7 @@ async function getAvailableBillsWithProducts(session) {
       COALESCE(fwd.origin_transport_name, '') as forward_from_transport_name,
       COALESCE(fwd.forwarded_at, '') as forwarded_at
     FROM ic_trans_shipment a
-    LEFT JOIN ar_customer b ON b.code=a.cust_code
+    LEFT JOIN ar_customer b ON b.code=a.cust_code${customerAreaJoins('b')}
     LEFT JOIN public.transport_type tt ON tt.code = a.transport_code
     ${SCHEDULED_BILL_JOIN}
     LEFT JOIN LATERAL (
@@ -506,6 +508,10 @@ async function getAvailableBillsWithProducts(session) {
 // pool is the whole fixed year — ~2,000 bills / ~860 KB shipped to the browser
 // to show a handful. Callers that still need the full pool (the route dropdown
 // lists every route that has bills, regardless of date) just omit it.
+//
+// Unscheduled bills deliberately do NOT appear here — there are ~18,000 of them
+// and listing them would sink the page. They are reachable through searchBills,
+// and adding one to a trip is what schedules it (see createJob).
 async function getAvailableBills(session, scheduledDate) {
   await ensurePendingBillSchema();
   await ensureForwardBranchColumn();
@@ -521,7 +527,7 @@ async function getAvailableBills(session, scheduledDate) {
     query(
     `SELECT a.doc_no, to_char(a.doc_date,'DD-MM-YYYY') as doc_date, a.cust_code,
       b.name_1 as cust_name, b.telephone,
-      ${customerAreaSql('a.cust_code')} as cust_area,
+      ${customerAreaFields()},
       (SELECT count(item_code) FROM ic_trans_detail WHERE doc_no=a.doc_no AND item_code NOT LIKE '97%') as count_item,
       ${SCHEDULED_BILL_FIELDS},
       -- Pickup point shown as "ຮັບເຄື່ອງ / ຄ່າເລີ່ມຕົ້ນ" on the create-trip page.
@@ -543,7 +549,7 @@ async function getAvailableBills(session, scheduledDate) {
       COALESCE(pb.planned_lat::text, NULLIF(TRIM(acd.latitude::text), ''), '') as planned_lat,
       COALESCE(pb.planned_lng::text, NULLIF(TRIM(acd.longitude::text), ''), '') as planned_lng
     FROM ic_trans_shipment a
-    LEFT JOIN ar_customer b ON b.code=a.cust_code
+    LEFT JOIN ar_customer b ON b.code=a.cust_code${customerAreaJoins('b')}
     LEFT JOIN ar_customer_detail acd ON acd.ar_code = a.cust_code
     LEFT JOIN public.transport_type tt ON tt.code = a.transport_code
     ${SCHEDULED_BILL_JOIN}
@@ -596,7 +602,7 @@ async function searchManualPendingBills(q) {
             to_char(a.doc_date,'DD-MM-YYYY') as doc_date,
             a.cust_code,
             COALESCE(NULLIF(TRIM(b.name_1), ''), a.cust_code, '') as cust_name,
-            ${customerAreaSql('a.cust_code')} as cust_area,
+            ${customerAreaFields()},
             COALESCE(b.telephone, '') as telephone,
             a.trans_flag as source_trans_flag,
             to_char(pb.scheduled_date,'YYYY-MM-DD') as scheduled_date,
@@ -608,7 +614,7 @@ async function searchManualPendingBills(q) {
             COALESCE(pb.transport_code, '') as transport_code,
             'ic_trans' as source_type
      FROM ic_trans a
-     LEFT JOIN ar_customer b ON b.code = a.cust_code
+     LEFT JOIN ar_customer b ON b.code = a.cust_code${customerAreaJoins('b')}
      LEFT JOIN public.odg_tms_pending_bill pb ON pb.bill_no = a.doc_no
      LEFT JOIN public.odg_tms_delivery_round dr ON dr.code = pb.delivery_round_code
      WHERE a.trans_flag IN (${manualFlagListSql()})
@@ -816,7 +822,7 @@ async function getManualReadyBills(day) {
             to_char(a.doc_date,'DD-MM-YYYY') as doc_date,
             a.cust_code,
             COALESCE(NULLIF(TRIM(b.name_1), ''), a.cust_code, '') as cust_name,
-            ${customerAreaSql('a.cust_code')} as cust_area,
+            ${customerAreaFields()},
             COALESCE(b.telephone, '') as telephone,
             (SELECT count(item_code) FROM ic_trans_detail WHERE doc_no=a.doc_no AND item_code NOT LIKE '97%') as count_item,
             ${SCHEDULED_BILL_FIELDS},
@@ -832,7 +838,7 @@ async function getManualReadyBills(day) {
             a.trans_flag as source_trans_flag,
             'ic_trans' as source_type
      FROM ic_trans a
-     LEFT JOIN ar_customer b ON b.code = a.cust_code
+     LEFT JOIN ar_customer b ON b.code = a.cust_code${customerAreaJoins('b')}
      ${SCHEDULED_BILL_JOIN}
      WHERE a.trans_flag IN (${manualFlagListSql()})
        AND COALESCE(pb.action_status, '') = 'contacted_ready'
@@ -954,7 +960,7 @@ async function getManualPendingRowsForPending(fromDate, toDate, transportCode = 
       to_char(a.doc_date,'DD-MM-YYYY') as doc_date,
       a.cust_code,
       COALESCE(NULLIF(TRIM(cust.name_1), ''), a.cust_code, '') as cust_name,
-      ${customerAreaSql('a.cust_code')} as cust_area,
+      ${customerAreaFields()},
       COALESCE(NULLIF(TRIM(cust.name_1), ''), a.cust_code, '') as transport_name,
       COALESCE(NULLIF(TRIM(acd.latitude::text), ''), '') as cust_lat,
       COALESCE(NULLIF(TRIM(acd.longitude::text), ''), '') as cust_lng,
@@ -979,7 +985,7 @@ async function getManualPendingRowsForPending(fromDate, toDate, transportCode = 
       ON pb.bill_no = a.doc_no
       AND pb.scheduled_date IS NOT NULL
       AND COALESCE(NULLIF(TRIM(pb.delivery_round_code), ''), NULL) IS NOT NULL
-    LEFT JOIN ar_customer cust ON cust.code = a.cust_code
+    LEFT JOIN ar_customer cust ON cust.code = a.cust_code${customerAreaJoins('cust')}
     LEFT JOIN ar_customer_detail acd ON acd.ar_code = a.cust_code
     LEFT JOIN public.odg_employee oe ON oe.employee_code = a.sale_code
     LEFT JOIN public.odg_department od ON od.department_code = oe.department_code
@@ -1113,7 +1119,7 @@ async function getBillsPending(session, fromDate, toDate, transportCode) {
         COALESCE(NULLIF(TRIM(pbov.transport_code), ''), a.transport_code) as transport_code,
         a.cust_code,
         COALESCE(NULLIF(TRIM(cust.name_1), ''), a.cust_code, '') as cust_name,
-        ${customerAreaSql('a.cust_code')} as cust_area,
+        ${customerAreaFields()},
         COALESCE(NULLIF(TRIM(acd.latitude::text), ''), '') as cust_lat,
         COALESCE(NULLIF(TRIM(acd.longitude::text), ''), '') as cust_lng,
         COALESCE(NULLIF(TRIM(cust.telephone), ''), '') as cust_phone,
@@ -1139,7 +1145,7 @@ async function getBillsPending(session, fromDate, toDate, transportCode) {
         COALESCE(fwd.forwarded_at, '') as forwarded_at
       FROM ic_trans_shipment a
       LEFT JOIN ic_trans b ON b.doc_no=a.doc_no
-      LEFT JOIN ar_customer cust ON cust.code = a.cust_code
+      LEFT JOIN ar_customer cust ON cust.code = a.cust_code${customerAreaJoins('cust')}
       LEFT JOIN ar_customer_detail acd ON acd.ar_code = a.cust_code
       LEFT JOIN public.odg_employee oe ON oe.employee_code = b.sale_code
       LEFT JOIN public.odg_department od ON od.department_code = oe.department_code

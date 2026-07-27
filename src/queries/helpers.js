@@ -682,7 +682,37 @@ function customerAreaSql(custCodeExpr) {
   ), '')`;
 }
 
+// Same three levels as customerAreaSql, but for queries that ALREADY join
+// ar_customer: plain joins on the indexed code columns, no correlated
+// subquery, and the parts come back separately so the UI can filter by
+// ແຂວງ / ເມືອງ instead of only displaying the combined string.
+//
+// custAlias = the ar_customer alias in the surrounding query.
+function customerAreaJoins(custAlias = "cust") {
+  return `
+    LEFT JOIN erp_tambon arx_tb ON arx_tb.code = NULLIF(TRIM(${custAlias}.tambon), '')
+    LEFT JOIN erp_amper arx_am ON arx_am.code = NULLIF(TRIM(${custAlias}.amper), '')
+    LEFT JOIN erp_province arx_pv ON arx_pv.code = NULLIF(TRIM(${custAlias}.province), '')`;
+}
+
+// SELECT list to pair with customerAreaJoins(): the display string plus each
+// level on its own, so the page can build ແຂວງ / ເມືອງ dropdowns from the rows
+// it already has.
+function customerAreaFields() {
+  return `
+    COALESCE(NULLIF(CONCAT_WS(' · ',
+      NULLIF(TRIM(arx_tb.name_1), ''),
+      NULLIF(TRIM(arx_am.name_1), ''),
+      NULLIF(TRIM(arx_pv.name_1), '')
+    ), ''), '') as cust_area,
+    COALESCE(NULLIF(TRIM(arx_tb.name_1), ''), '') as cust_village,
+    COALESCE(NULLIF(TRIM(arx_am.name_1), ''), '') as cust_district,
+    COALESCE(NULLIF(TRIM(arx_pv.name_1), ''), '') as cust_province`;
+}
+
 module.exports = {
+  customerAreaJoins,
+  customerAreaFields,
   customerAreaSql,
   effectivePickupCodeSql,
   safeDdl,

@@ -38,10 +38,28 @@ function gpsAgeSeconds(value: unknown) {
 export async function GET(request: NextRequest) {
   try {
     const session = await requireMobileSession(request);
-    const { date, scope, driver_id, status } = parseSearchParams(
+    const { date, from, to, scope, driver_id, status } = parseSearchParams(
       request.nextUrl.searchParams,
       JobsListQuerySchema
     );
+    if (scope === "report") {
+      if (!from || !to) {
+        const error = new Error("from and to are required");
+        (error as Error & { status?: number }).status = 400;
+        throw error;
+      }
+      if (from > to) {
+        const error = new Error("from must not be after to");
+        (error as Error & { status?: number }).status = 400;
+        throw error;
+      }
+      const data = await mobileJobsList(
+        session.driver_id,
+        "",
+        { fromDate: from, toDate: to }
+      );
+      return Response.json(data);
+    }
     if (scope === "all") {
       if (!canUseSupervisorScope(session)) {
         const error = new Error("Forbidden");

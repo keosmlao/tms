@@ -33,10 +33,17 @@ interface DeptRow {
   remaining_qty: number;
 }
 
+interface BranchOption {
+  code: string;
+  name: string;
+}
+
 interface DeptData {
   fromDate: string;
   toDate: string;
   salesOnly: boolean;
+  transportCode: string;
+  branchOptions: BranchOption[];
   departments: DeptRow[];
   total: Omit<DeptRow, "department" | "department_code">;
 }
@@ -50,15 +57,23 @@ export default function DailyDepartmentReport() {
   const [fromDate, setFromDate] = useState(() => today);
   const [toDate, setToDate] = useState(() => today);
   const [salesOnly, setSalesOnly] = useState(true);
+  // ສາຂາຂົນສົ່ງ — "" = every branch this user may see. The option list comes
+  // back with the data so it always matches what the report can cover.
+  const [transportCode, setTransportCode] = useState("");
+  const [branchOptions, setBranchOptions] = useState<BranchOption[]>([]);
   const [data, setData] = useState<DeptData | null>(null);
   const [loading, setLoading] = useState(true);
 
   // salesOnly is read at call time so the checkbox can refetch immediately
   // without waiting for the state to land in a re-render.
-  const fetchData = (onlySales = salesOnly) => {
+  const fetchData = (onlySales = salesOnly, branch = transportCode) => {
     setLoading(true);
-    Actions.getReportDailyDepartment(fromDate, toDate, onlySales)
-      .then((d) => setData(d as DeptData))
+    Actions.getReportDailyDepartment(fromDate, toDate, onlySales, branch)
+      .then((d) => {
+        const result = d as DeptData;
+        setData(result);
+        if (Array.isArray(result.branchOptions)) setBranchOptions(result.branchOptions);
+      })
       .catch(console.error)
       .finally(() => setLoading(false));
   };
@@ -74,7 +89,12 @@ export default function DailyDepartmentReport() {
       ...data.departments.map((d, i) => ({ no: String(i + 1), ...d })),
       { no: "", department: "ລວມທັງໝົດ", department_code: "", ...data.total },
     ];
-    exportToExcel(`daily-department_${data.fromDate}_to_${data.toDate}`, rows, [
+    exportToExcel(
+      `daily-department_${data.fromDate}_to_${data.toDate}${
+        data.transportCode ? `_${data.transportCode}` : ""
+      }`,
+      rows,
+      [
       { key: "no", header: "#", width: 6 },
       { key: "department_code", header: "ລະຫັດ", width: 8 },
       { key: "department", header: "ພະແນກ", width: 26 },
@@ -143,13 +163,34 @@ export default function DailyDepartmentReport() {
               className="w-full px-3 py-2 glass-input rounded-lg text-xs"
             />
           </div>
+          <div className="flex-1 min-w-[160px]">
+            <label className="block text-xs font-medium text-slate-600 dark:text-slate-300 mb-1.5">
+              <FaTruck className="inline mr-1.5 text-slate-400" size={11} />
+              ສາຂາຂົນສົ່ງ
+            </label>
+            <select
+              value={transportCode}
+              onChange={(e) => {
+                setTransportCode(e.target.value);
+                fetchData(salesOnly, e.target.value);
+              }}
+              className="w-full px-3 py-2 glass-input rounded-lg text-xs"
+            >
+              <option value="">ທຸກສາຂາ</option>
+              {branchOptions.map((b) => (
+                <option key={b.code} value={b.code}>
+                  {b.name}
+                </option>
+              ))}
+            </select>
+          </div>
           <label className="flex items-center gap-2 pb-2 text-xs font-medium text-slate-600 dark:text-slate-300 cursor-pointer select-none">
             <input
               type="checkbox"
               checked={salesOnly}
               onChange={(e) => {
                 setSalesOnly(e.target.checked);
-                fetchData(e.target.checked);
+                fetchData(e.target.checked, transportCode);
               }}
               className="w-3.5 h-3.5 accent-teal-600"
             />
@@ -228,6 +269,12 @@ export default function DailyDepartmentReport() {
             <div className="flex items-center justify-between px-4 py-3 border-b border-slate-200/30 dark:border-white/5">
               <p className="text-xs font-semibold text-slate-700 dark:text-slate-200">
                 {data.salesOnly ? "ແຍກຕາມພະແນກຂາຍ" : "ແຍກຕາມພະແນກ (ທັງໝົດ)"}
+                {data.transportCode && (
+                  <span className="ml-2 rounded bg-teal-500/10 px-1.5 py-0.5 text-[10px] font-bold text-teal-600 dark:text-teal-400">
+                    {branchOptions.find((b) => b.code === data.transportCode)?.name ??
+                      data.transportCode}
+                  </span>
+                )}
               </p>
               <p className="text-[11px] text-slate-400">{data.fromDate} → {data.toDate}</p>
             </div>

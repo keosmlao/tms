@@ -14,6 +14,8 @@ import {
   getReportDeliveredDaily as svcGetReportDeliveredDaily,
   getReportCancelledDaily as svcGetReportCancelledDaily,
   getReportDailyActivity as svcGetReportDailyActivity,
+  getReportDailyActivityBills as svcGetReportDailyActivityBills,
+  getReportDailyActivityItems as svcGetReportDailyActivityItems,
   getReportDailyDepartment as svcGetReportDailyDepartment,
   getAttemptDeliveryItems as svcGetAttemptDeliveryItems,
 } from "@/queries/reports.js";
@@ -86,13 +88,36 @@ export async function getReportDailyActivity(fromDate: string, toDate: string) {
   return svcGetReportDailyActivity(s, fromDate, toDate);
 }
 
+// Bills behind one figure of the daily-activity report.
+export async function getReportDailyActivityBills(
+  fromDate: string,
+  toDate: string,
+  branchCode: string,
+  bucket: "opened" | "delivered" | "remaining"
+) {
+  const s = await requireSession();
+  return svcGetReportDailyActivityBills(s, fromDate, toDate, branchCode, bucket);
+}
+
+// Same drill-down, one row per product line (for the ສິນຄ້າ export).
+export async function getReportDailyActivityItems(
+  fromDate: string,
+  toDate: string,
+  branchCode: string,
+  bucket: "opened" | "delivered" | "remaining"
+) {
+  const s = await requireSession();
+  return svcGetReportDailyActivityItems(s, fromDate, toDate, branchCode, bucket);
+}
+
 export async function getReportDailyDepartment(
   fromDate: string,
   toDate: string,
-  salesOnly = true
+  salesOnly = true,
+  transportCode = ""
 ) {
   const s = await requireSession();
-  return svcGetReportDailyDepartment(s, fromDate, toDate, salesOnly);
+  return svcGetReportDailyDepartment(s, fromDate, toDate, salesOnly, transportCode);
 }
 
 export async function getAttemptDeliveryItems(docNo: string, billNo: string) {
