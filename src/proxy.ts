@@ -19,8 +19,11 @@ async function isValidToken(token: string | undefined): Promise<boolean> {
   }
 }
 
-// Routes customers can reach without logging in.
-const PUBLIC_PREFIXES = ["/track"];
+// Routes reachable without a staff login. `/tv` is the wall-mounted delivery
+// monitor: it has no keyboard to log in with and guards itself with the
+// TV_DASHBOARD_TOKEN key its data endpoint requires, so the page shell is left
+// open here and the data behind it is not.
+const PUBLIC_PREFIXES = ["/track", "/tv"];
 
 function isPublicPath(pathname: string): boolean {
   return PUBLIC_PREFIXES.some(

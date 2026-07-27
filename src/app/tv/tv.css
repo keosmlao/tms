@@ -1,0 +1,516 @@
+/* TV mode — ຈໍຕິດຝາຫ້ອງຈັດສົ່ງ. ໂຕໜັງສືໃຫຍ່, ພື້ນດຳ, ບໍ່ມີ scroll. */
+html,
+      body {
+        margin: 0;
+        padding: 0;
+        background: #05070d;
+        overflow: hidden;
+      }
+      .tv-root {
+        height: 100vh;
+        width: 100vw;
+        display: flex;
+        flex-direction: column;
+        background: #05070d;
+        color: #e8eefc;
+        font-size: 22px;
+        line-height: 1.7;
+        cursor: none;
+        user-select: none;
+      }
+      .tv-center {
+        align-items: center;
+        justify-content: center;
+      }
+      .tv-boot {
+        font-size: 40px;
+        color: #7b8aa8;
+      }
+      .tv-head {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        padding: 18px 34px 12px;
+        border-bottom: 2px solid #16203a;
+      }
+      .tv-head-left {
+        display: flex;
+        align-items: baseline;
+        gap: 18px;
+      }
+      .tv-title {
+        font-size: 34px;
+        font-weight: 700;
+        color: #ffffff;
+      }
+      .tv-date {
+        font-size: 26px;
+        color: #8ea0c4;
+      }
+      .tv-tabs {
+        display: flex;
+        gap: 10px;
+      }
+      .tv-tab {
+        font-size: 20px;
+        padding: 6px 18px;
+        border-radius: 999px;
+        color: #6d7f9f;
+        background: #0d1526;
+      }
+      .tv-tab-on {
+        color: #05070d;
+        background: #38bdf8;
+        font-weight: 700;
+      }
+      .tv-head-right {
+        display: flex;
+        align-items: baseline;
+        gap: 16px;
+      }
+      .tv-clock {
+        font-size: 40px;
+        font-weight: 700;
+        font-variant-numeric: tabular-nums;
+      }
+      .tv-stale {
+        font-size: 18px;
+        color: #64748b;
+      }
+      .tv-stale-warn {
+        color: #fbbf24;
+      }
+      .tv-stale-bad {
+        color: #f87171;
+        font-weight: 700;
+      }
+      .tv-body {
+        flex: 1;
+        min-height: 0;
+        padding: 22px 34px;
+        overflow: hidden;
+      }
+
+      /* ໜ້າ 1 */
+      .tv-overview {
+        height: 100%;
+        display: flex;
+        flex-direction: column;
+        gap: 26px;
+        justify-content: center;
+      }
+      .tv-kpis {
+        display: grid;
+        grid-template-columns: repeat(4, 1fr);
+        gap: 20px;
+      }
+      .tv-kpi {
+        background: #0b1322;
+        border: 2px solid #16203a;
+        border-radius: 20px;
+        padding: 22px 26px;
+      }
+      .tv-kpi-value {
+        font-size: 92px;
+        font-weight: 800;
+        line-height: 1.1;
+        font-variant-numeric: tabular-nums;
+      }
+      .tv-kpi-label {
+        font-size: 24px;
+        color: #8ea0c4;
+      }
+      .tv-tone-good .tv-kpi-value {
+        color: #34d399;
+      }
+      .tv-tone-warn .tv-kpi-value {
+        color: #fbbf24;
+      }
+      .tv-tone-bad .tv-kpi-value {
+        color: #f87171;
+      }
+      .tv-progress-wrap {
+        display: flex;
+        flex-direction: column;
+        gap: 10px;
+      }
+      .tv-progress-head {
+        display: flex;
+        justify-content: space-between;
+        font-size: 26px;
+        color: #8ea0c4;
+      }
+      .tv-progress-pct {
+        font-size: 40px;
+        font-weight: 800;
+        color: #34d399;
+      }
+      .tv-progress {
+        height: 32px;
+        background: #0d1526;
+        border-radius: 999px;
+        overflow: hidden;
+      }
+      .tv-progress-fill {
+        height: 100%;
+        background: linear-gradient(90deg, #059669, #34d399);
+        transition: width 600ms ease;
+      }
+      .tv-subrow {
+        display: flex;
+        gap: 40px;
+      }
+      .tv-sub {
+        display: flex;
+        align-items: baseline;
+        gap: 10px;
+      }
+      .tv-sub-value {
+        font-size: 40px;
+        font-weight: 700;
+        font-variant-numeric: tabular-nums;
+      }
+      .tv-tone-warn .tv-sub-value {
+        color: #fbbf24;
+      }
+      .tv-tone-bad .tv-sub-value {
+        color: #f87171;
+      }
+      .tv-sub-label {
+        font-size: 22px;
+        color: #8ea0c4;
+      }
+
+      /* ໜ້າ 2 */
+      .tv-two-col {
+        height: 100%;
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 18px;
+        align-content: start;
+      }
+      .tv-col {
+        display: flex;
+        flex-direction: column;
+        gap: 12px;
+      }
+      .tv-trip {
+        background: #0b1322;
+        border-left: 8px solid #38bdf8;
+        border-radius: 14px;
+        padding: 12px 18px;
+      }
+      .tv-trip-stalled {
+        border-left-color: #f87171;
+        background: #1a0f14;
+      }
+      .tv-trip-done {
+        border-left-color: #34d399;
+      }
+      .tv-trip-main {
+        display: flex;
+        align-items: baseline;
+        gap: 14px;
+      }
+      .tv-trip-car {
+        font-size: 30px;
+        font-weight: 800;
+      }
+      .tv-trip-driver {
+        font-size: 24px;
+        color: #cbd5e1;
+      }
+      .tv-trip-route {
+        font-size: 20px;
+        color: #7b8aa8;
+      }
+      .tv-trip-bar {
+        position: relative;
+        height: 26px;
+        background: #0d1526;
+        border-radius: 999px;
+        overflow: hidden;
+        margin: 6px 0 4px;
+      }
+      .tv-trip-fill {
+        height: 100%;
+        background: #0ea5e9;
+        transition: width 600ms ease;
+      }
+      .tv-trip-done .tv-trip-fill {
+        background: #34d399;
+      }
+      .tv-trip-stalled .tv-trip-fill {
+        background: #f87171;
+      }
+      .tv-trip-count {
+        position: absolute;
+        right: 14px;
+        top: 0;
+        font-size: 18px;
+        font-weight: 700;
+        color: #e8eefc;
+      }
+      .tv-trip-meta {
+        font-size: 19px;
+        color: #8ea0c4;
+      }
+      .tv-flag {
+        color: #f87171;
+        font-weight: 700;
+      }
+      .tv-flag-ok {
+        color: #34d399;
+        font-weight: 700;
+      }
+      .tv-more {
+        grid-column: 1 / -1;
+        text-align: center;
+        color: #7b8aa8;
+        font-size: 20px;
+      }
+
+      /* ໜ້າ 3 */
+      .tv-alerts {
+        height: 100%;
+        display: grid;
+        grid-template-columns: repeat(3, 1fr);
+        gap: 18px;
+      }
+      .tv-panel {
+        background: #0b1322;
+        border: 2px solid #16203a;
+        border-radius: 18px;
+        padding: 16px 20px;
+        overflow: hidden;
+      }
+      .tv-panel-title {
+        margin: 0 0 10px;
+        font-size: 26px;
+        font-weight: 700;
+        color: #ffffff;
+      }
+      .tv-panel-empty {
+        font-size: 22px;
+        color: #4b5b76;
+      }
+      .tv-panel-row {
+        border-top: 1px solid #16203a;
+        padding: 8px 0;
+      }
+      .tv-panel-main {
+        display: flex;
+        justify-content: space-between;
+        gap: 12px;
+      }
+      .tv-panel-name {
+        font-size: 24px;
+        font-weight: 700;
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+      }
+      .tv-panel-side {
+        font-size: 22px;
+        font-weight: 700;
+        white-space: nowrap;
+      }
+      .tv-tone-warn .tv-panel-side {
+        color: #fbbf24;
+      }
+      .tv-tone-bad .tv-panel-side {
+        color: #f87171;
+      }
+      .tv-panel-meta {
+        font-size: 19px;
+        color: #7b8aa8;
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+      }
+
+      /* ໜ້າ 4 */
+      .tv-vehicles {
+        height: 100%;
+        display: flex;
+        flex-direction: column;
+        gap: 14px;
+        min-height: 0;
+      }
+      .tv-empty {
+        height: 100%;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        font-size: 44px;
+        color: #3c4a63;
+      }
+
+      /* ແຖບແລ່ນ */
+      .tv-ticker {
+        display: flex;
+        align-items: center;
+        gap: 18px;
+        border-top: 2px solid #16203a;
+        background: #080d18;
+        padding: 8px 0 8px 24px;
+        overflow: hidden;
+      }
+      .tv-ticker-tag {
+        flex: none;
+        font-size: 20px;
+        font-weight: 700;
+        color: #05070d;
+        background: #34d399;
+        padding: 4px 16px;
+        border-radius: 999px;
+      }
+      .tv-ticker-empty {
+        font-size: 20px;
+        color: #4b5b76;
+      }
+      .tv-ticker-track {
+        display: flex;
+        gap: 44px;
+        white-space: nowrap;
+        animation: tv-marquee 48s linear infinite;
+      }
+      .tv-ticker-item {
+        font-size: 21px;
+        color: #cbd5e1;
+      }
+      .tv-ticker-item b {
+        color: #34d399;
+        margin-right: 8px;
+        font-variant-numeric: tabular-nums;
+      }
+      .tv-ticker-item em {
+        color: #7b8aa8;
+        font-style: normal;
+        margin-left: 10px;
+      }
+      @keyframes tv-marquee {
+        from {
+          transform: translateX(0);
+        }
+        to {
+          transform: translateX(-50%);
+        }
+      }
+
+/* ── ໜ້າ 4: ແຜນທີ່ ─────────────────────────────────────────────── */
+.tv-map {
+  flex: 1;
+  min-height: 0;
+  border-radius: 18px;
+  overflow: hidden;
+  border: 2px solid #16203a;
+  background: #0b1322;
+}
+.tv-map-loading {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 28px;
+  color: #4b5b76;
+}
+/* ຈໍ TV ອ່ານໄກ — ຫຼຸດຄວາມສະຫວ່າງຂອງ tile ລົງໃຫ້ໝຸດເດັ່ນຂຶ້ນ */
+.tv-map .leaflet-tile-pane {
+  filter: grayscale(0.35) brightness(0.62) contrast(1.12);
+}
+.tv-map .leaflet-container {
+  background: #0b1322;
+}
+.tv-pin-wrap {
+  pointer-events: none;
+}
+.tv-pin {
+  position: relative;
+  transform: translate(-50%, -100%);
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  white-space: nowrap;
+  padding: 5px 14px 5px 10px;
+  border-radius: 999px;
+  background: rgba(5, 7, 13, 0.9);
+  border: 2px solid #38bdf8;
+  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.55);
+}
+.tv-pin-dot {
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  background: #38bdf8;
+  flex: none;
+}
+.tv-pin-name {
+  font-size: 20px;
+  font-weight: 700;
+  color: #ffffff;
+}
+.tv-pin-speed {
+  font-size: 17px;
+  color: #8ea0c4;
+}
+.tv-pin-move {
+  border-color: #34d399;
+}
+.tv-pin-move .tv-pin-dot {
+  background: #34d399;
+  animation: tv-pulse 1.6s ease-in-out infinite;
+}
+.tv-pin-stop {
+  border-color: #fbbf24;
+}
+.tv-pin-stop .tv-pin-dot {
+  background: #fbbf24;
+}
+.tv-pin-stale {
+  border-color: #f87171;
+  opacity: 0.8;
+}
+.tv-pin-stale .tv-pin-dot {
+  background: #f87171;
+}
+@keyframes tv-pulse {
+  0%,
+  100% {
+    box-shadow: 0 0 0 0 rgba(52, 211, 153, 0.7);
+  }
+  50% {
+    box-shadow: 0 0 0 10px rgba(52, 211, 153, 0);
+  }
+}
+.tv-legend {
+  margin-left: auto;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 20px;
+  color: #8ea0c4;
+}
+.tv-dot {
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  display: inline-block;
+  margin-left: 14px;
+}
+.tv-dot-move {
+  background: #34d399;
+}
+.tv-dot-stop {
+  background: #fbbf24;
+}
+.tv-dot-stale {
+  background: #f87171;
+}
+
+/* ໜ້າຢູ່ຄົງທີ່ ພຽງແຕ່ເຊື່ອງ — ບໍ່ຖອດອອກ ເພື່ອບໍ່ໃຫ້ແຜນທີ່ໂຫຼດ tile ຄືນທຸກຮອບ */
+.tv-page {
+  height: 100%;
+}
+.tv-page-off {
+  display: none;
+}
