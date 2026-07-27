@@ -1222,7 +1222,10 @@ async function getReportDailyDepartment(
 //
 // bucket: opened | delivered | remaining. ຍອດຍົກມາ (carry) is DERIVED
 // (remaining + delivered − opened) and has no bill list of its own.
-async function getReportDailyActivityBills(session, fromDate, toDate, branchCode, bucket) {
+async function getReportDailyActivityBills(session, fromDate, toDate, branchCode, bucket, department) {
+  // department (optional) narrows to one sale department — used by the
+  // ແຍກຕາມພະແນກ report, which shows the same buckets split that way.
+  const dept = String(department ?? "").trim();
   const scope = getBranchScope(session);
   await ensureForwardBranchColumn();
   const allowed = scope.scoped ? scope.branches : MONTHLY_DELIVERY_BRANCH_CODES;
@@ -1242,6 +1245,7 @@ async function getReportDailyActivityBills(session, fromDate, toDate, branchCode
     const pending = await getBillsPending(session, FIXED_YEAR_START, FIXED_YEAR_END, "all");
     return ((pending && pending.trans) || [])
       .filter((r) => !branch || (r.transport_code || "").trim() === branch)
+      .filter((r) => !dept || (r.department || "").trim() === dept)
       .map((r) => ({
         bill_no: r.doc_no,
         doc_date: r.doc_date,
@@ -1311,16 +1315,17 @@ async function getReportDailyActivityBills(session, fromDate, toDate, branchCode
     LEFT JOIN del_dates dd ON dd.bill_no = sb.doc_no
     WHERE GREATEST(COALESCE(bi.total_qty, 0) - COALESCE(rt.returned_qty, 0), 0) > 0
       AND ${dateCol} BETWEEN $1::date AND $2::date
+      ${dept ? `AND COALESCE(NULLIF(TRIM(od.department_name_lo), ''), '') = $3` : ""}
     ORDER BY ${dateCol}, sb.doc_no`,
-    [fromDate, toDate]
+    dept ? [fromDate, toDate, dept] : [fromDate, toDate]
   );
 }
 
 // Same three buckets as getReportDailyActivityBills, but exploded to one row
 // per product line — what the dispatcher exports when they need to see the
 // goods, not just the bill count.
-async function getReportDailyActivityItems(session, fromDate, toDate, branchCode, bucket) {
-  const bills = await getReportDailyActivityBills(session, fromDate, toDate, branchCode, bucket);
+async function getReportDailyActivityItems(session, fromDate, toDate, branchCode, bucket, department) {
+  const bills = await getReportDailyActivityBills(session, fromDate, toDate, branchCode, bucket, department);
   const billNos = bills.map((b) => b.bill_no).filter(Boolean);
   if (billNos.length === 0) return [];
   const meta = new Map(bills.map((b) => [b.bill_no, b]));

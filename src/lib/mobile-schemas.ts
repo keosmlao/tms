@@ -22,6 +22,12 @@ export const JobsListQuerySchema = z.object({
   status: OptionalString,
 });
 
+// Manager dashboard filters. Both optional: no date = today, no branch = all.
+export const ManagerDashboardQuerySchema = z.object({
+  date: z.string().trim().optional(),
+  branch: OptionalString,
+});
+
 export const BillsListQuerySchema = z.object({
   doc_no: OptionalString,
   bill_no: OptionalString,

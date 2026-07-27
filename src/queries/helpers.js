@@ -363,7 +363,56 @@ async function getRemainingBillProductsMap(billNos) {
   return map;
 }
 
+// ── Remaining-count cache ──────────────────────────────────────────────────
+// getRemainingSummaryMap has to read ic_trans_detail (2.1 GB / 1.3M rows) to
+// work out what is still owed on each bill. Measured at ~15 s for the whole
+// pending pool, it was ~99% of getBillsPending's 1.16 s average and the main
+// reason the dispatch screens felt slow.
+//
+// The answer only changes when a bill is dispatched, delivered, returned or
+// cancelled — rare compared to how often these screens are opened — so results
+// are cached PER BILL for a short window. Callers that change any of those
+// things must call invalidateRemainingSummary() so the next read is fresh;
+// the TTL is the safety net, not the mechanism.
+const REMAINING_CACHE_TTL_MS = 30_000;
+const remainingCache = new Map(); // bill_no -> { at, value }
+
+function invalidateRemainingSummary(billNos) {
+  if (!billNos) {
+    remainingCache.clear();
+    return;
+  }
+  for (const b of Array.isArray(billNos) ? billNos : [billNos]) {
+    remainingCache.delete(String(b ?? "").trim());
+  }
+}
+
 async function getRemainingSummaryMap(billNos) {
+  await ensureTmsDetailItemTable();
+  if (billNos.length === 0) return new Map();
+
+  // Serve what is still fresh, and only hit the database for the rest.
+  const now = Date.now();
+  const result = new Map();
+  const missing = [];
+  for (const raw of billNos) {
+    const bill = String(raw ?? "").trim();
+    if (!bill) continue;
+    const hit = remainingCache.get(bill);
+    if (hit && now - hit.at < REMAINING_CACHE_TTL_MS) result.set(bill, hit.value);
+    else missing.push(bill);
+  }
+  if (missing.length === 0) return result;
+  const fresh = await getRemainingSummaryMapUncached(missing);
+  for (const bill of missing) {
+    const value = fresh.get(bill) ?? { remaining_count: 0, remaining_qty_total: 0 };
+    remainingCache.set(bill, { at: now, value });
+    result.set(bill, value);
+  }
+  return result;
+}
+
+async function getRemainingSummaryMapUncached(billNos) {
   await ensureTmsDetailItemTable();
   if (billNos.length === 0) return new Map();
 
@@ -711,6 +760,7 @@ function customerAreaFields() {
 }
 
 module.exports = {
+  invalidateRemainingSummary,
   customerAreaJoins,
   customerAreaFields,
   customerAreaSql,

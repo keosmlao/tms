@@ -6,6 +6,7 @@ const {
   getFixedYearSqlFilter,
 } = require("../lib/fixed-year");
 const {
+  invalidateRemainingSummary,
   getBranchScope,
   branchFilterShipment,
   branchFilterJob,
@@ -378,6 +379,10 @@ async function createJob(session, data) {
     }
     await client.query("DELETE FROM public.odg_tms_listbill_draft WHERE user_create=$1", [session.usercode]);
     await client.query("COMMIT");
+    // These bills' remaining quantities just changed — drop them from the
+    // short-lived cache so the next screen reads the truth, not a 30-second-old
+    // snapshot that still shows them as available.
+    invalidateRemainingSummary(billNos);
   } catch (error) {
     await client.query("ROLLBACK").catch(() => {});
     throw error;

@@ -250,6 +250,111 @@ paths:
         '200': { description: Token removed }
         '401': { $ref: '#/components/responses/Unauthorized' }
 
+  /api/mobile/manager:
+    get:
+      tags: [jobs]
+      summary: Manager dashboard — day and month activity, per-person figures and the exception queues.
+      description: |
+        One call backs the whole manager screen in the driver app. Restricted to
+        supervisor/manager/admin sessions (a plain driver gets 403), since it
+        reports fleet-wide figures rather than the caller's own trips.
+
+        `returned_to_store` is derived from the shortfall on a closed bill
+        (planned - delivered): the goods that did not reach the customer are the
+        goods that come back on the truck. `returned_qty` is reported alongside
+        but is not relied on, as it is almost never written.
+      parameters:
+        - in: query
+          name: date
+          schema: { type: string, example: "2026-06-26" }
+          description: Day to report on. Defaults to today (coerced into the fixed active year).
+        - in: query
+          name: branch
+          schema: { type: string, example: "02-0001" }
+          description: Restrict every figure to one transport branch. Omit for all branches.
+      responses:
+        "200":
+          description: Dashboard payload.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  date: { type: string, example: "2026-06-26" }
+                  month: { type: string, example: "2026-06" }
+                  branch: { type: string }
+                  today: { $ref: '#/components/schemas/ManagerTotals' }
+                  month_total: { $ref: '#/components/schemas/ManagerTotals' }
+                  series:
+                    type: array
+                    description: One entry per day of the month, for the bar chart.
+                    items:
+                      type: object
+                      properties:
+                        day: { type: string, example: "2026-06-26" }
+                        label: { type: string, example: "26" }
+                        trips: { type: integer }
+                        delivered: { type: integer }
+                  drivers:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        code: { type: string }
+                        name: { type: string }
+                        trips: { type: integer }
+                        bills: { type: integer }
+                        delivered: { type: integer }
+                        cancelled: { type: integer }
+                        cod: { type: number }
+                        success_rate: { type: integer, description: delivered/bills as a percentage. }
+                  workers: { $ref: '#/components/schemas/ManagerPeople' }
+                  dispatchers: { $ref: '#/components/schemas/ManagerPeople' }
+                  pickup_variance:
+                    type: array
+                    description: Pickup shortfalls - who picked up less than the trip planned.
+                    items:
+                      type: object
+                      properties:
+                        name: { type: string }
+                        bills: { type: integer }
+                        missing_qty: { type: number }
+                  returned_to_store:
+                    type: array
+                    description: Closed bills whose load was not fully delivered, so the rest returns to the warehouse.
+                    items:
+                      type: object
+                      properties:
+                        bill_no: { type: string }
+                        doc_no: { type: string }
+                        cust_name: { type: string }
+                        driver: { type: string }
+                        planned: { type: number }
+                        delivered: { type: number }
+                        short_qty: { type: number, description: What must come back to the warehouse. }
+                        returned_qty: { type: number }
+                  open_trips:
+                    type: array
+                    description: Dispatched trips the driver never closed.
+                    items:
+                      type: object
+                      properties:
+                        doc_no: { type: string }
+                        day: { type: string, example: "26-06-2026" }
+                        driver: { type: string }
+                        car: { type: string }
+                        job_status: { type: integer }
+                        bills: { type: integer }
+                        open_bills: { type: integer }
+                        days_open: { type: integer }
+                  delivery_proof:
+                    type: object
+                    description: Completions with and without an end position recorded at the drop-off.
+                    properties:
+                      with_gps: { type: integer }
+                      without_gps: { type: integer }
+        "401": { $ref: '#/components/responses/Unauthorized' }
+        "403": { $ref: '#/components/responses/Forbidden' }
   /api/mobile/location:
     post:
       tags: [jobs]
@@ -402,6 +507,26 @@ components:
           schema: { $ref: '#/components/schemas/Error' }
 
   schemas:
+    ManagerTotals:
+      type: object
+      description: Trip and bill counters for one window (a day or a month-to-date).
+      properties:
+        trips: { type: integer }
+        trips_closed: { type: integer }
+        bills: { type: integer }
+        delivered: { type: integer }
+        cancelled: { type: integer }
+        pending: { type: integer }
+        qty_delivered: { type: number }
+        cod: { type: number }
+    ManagerPeople:
+      type: array
+      items:
+        type: object
+        properties:
+          code: { type: string }
+          name: { type: string }
+          trips: { type: integer }
     Error:
       type: object
       required: [error]

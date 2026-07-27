@@ -93,10 +93,11 @@ export async function getReportDailyActivityBills(
   fromDate: string,
   toDate: string,
   branchCode: string,
-  bucket: "opened" | "delivered" | "remaining"
+  bucket: "opened" | "delivered" | "remaining",
+  department = ""
 ) {
   const s = await requireSession();
-  return svcGetReportDailyActivityBills(s, fromDate, toDate, branchCode, bucket);
+  return svcGetReportDailyActivityBills(s, fromDate, toDate, branchCode, bucket, department);
 }
 
 // Same drill-down, one row per product line (for the ສິນຄ້າ export).
@@ -104,10 +105,11 @@ export async function getReportDailyActivityItems(
   fromDate: string,
   toDate: string,
   branchCode: string,
-  bucket: "opened" | "delivered" | "remaining"
+  bucket: "opened" | "delivered" | "remaining",
+  department = ""
 ) {
   const s = await requireSession();
-  return svcGetReportDailyActivityItems(s, fromDate, toDate, branchCode, bucket);
+  return svcGetReportDailyActivityItems(s, fromDate, toDate, branchCode, bucket, department);
 }
 
 export async function getReportDailyDepartment(

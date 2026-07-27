@@ -15,6 +15,7 @@ import {
 import { FIXED_YEAR_END, FIXED_YEAR_START, getFixedTodayDate } from "@/lib/fixed-year";
 import { Actions } from "@/lib/api";
 import { exportToExcel } from "@/lib/excel-export";
+import { FaTimes } from "react-icons/fa";
 
 // Daily transport ledger split by sale department:
 //   ຄ້າງສົ່ງຍົກມາ + ເປີດບິນໃນວັນ − ຈັດສົ່ງໃນວັນ = ຄົງເຫຼືອ
@@ -61,6 +62,12 @@ export default function DailyDepartmentReport() {
   // back with the data so it always matches what the report can cover.
   const [transportCode, setTransportCode] = useState("");
   const [branchOptions, setBranchOptions] = useState<BranchOption[]>([]);
+  // Drill-down: which department + bucket was clicked, and the bills behind it.
+  const [drill, setDrill] = useState<
+    { dept: string; bucket: "opened" | "delivered" | "remaining"; label: string } | null
+  >(null);
+  const [drillRows, setDrillRows] = useState<Array<Record<string, unknown>>>([]);
+  const [drillLoading, setDrillLoading] = useState(false);
   const [data, setData] = useState<DeptData | null>(null);
   const [loading, setLoading] = useState(true);
 
@@ -82,6 +89,56 @@ export default function DailyDepartmentReport() {
     fetchData();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  const openDrill = (
+    dept: string,
+    bucket: "opened" | "delivered" | "remaining",
+    label: string
+  ) => {
+    setDrill({ dept, bucket, label });
+    setDrillRows([]);
+    setDrillLoading(true);
+    Actions.getReportDailyActivityBills(fromDate, toDate, transportCode, bucket, dept)
+      .then((rows) => setDrillRows((rows ?? []) as Array<Record<string, unknown>>))
+      .catch(console.error)
+      .finally(() => setDrillLoading(false));
+  };
+
+  const exportDrill = async (as: "bills" | "items") => {
+    if (!drill) return;
+    const base = `${drill.bucket}_${as}_${fromDate}_to_${toDate}`;
+    if (as === "bills") {
+      exportToExcel(
+        base,
+        drillRows.map((r, i) => ({ no: i + 1, ...r })) as Array<Record<string, unknown>>,
+        [
+        { key: "no", header: "#", width: 6 },
+        { key: "bill_no", header: "ເລກບິນ", width: 18 },
+        { key: "doc_date", header: "ວັນທີບິນ", width: 13 },
+        { key: "cust_name", header: "ລູກຄ້າ", width: 30 },
+        { key: "cust_area", header: "ບ້ານ · ເມືອງ · ແຂວງ", width: 30 },
+        { key: "sale", header: "ພະນັກງານຂາຍ", width: 18 },
+        { key: "department", header: "ພະແນກ", width: 22 },
+        { key: "item_count", header: "ລາຍການ", width: 9 },
+        { key: "qty", header: "ຈຳນວນສິນຄ້າ", width: 12 },
+        ]
+      );
+      return;
+    }
+    const rows = ((await Actions.getReportDailyActivityItems(
+      fromDate, toDate, transportCode, drill.bucket, drill.dept
+    )) ?? []) as Array<Record<string, unknown>>;
+    exportToExcel(base, rows.map((r, i) => ({ no: i + 1, ...r })) as Array<Record<string, unknown>>, [
+      { key: "no", header: "#", width: 6 },
+      { key: "bill_no", header: "ເລກບິນ", width: 18 },
+      { key: "cust_name", header: "ລູກຄ້າ", width: 28 },
+      { key: "item_code", header: "ລະຫັດສິນຄ້າ", width: 16 },
+      { key: "item_name", header: "ຊື່ສິນຄ້າ", width: 34 },
+      { key: "qty", header: "ຈຳນວນ", width: 10 },
+      { key: "unit_code", header: "ໜ່ວຍ", width: 9 },
+      { key: "department", header: "ພະແນກ", width: 22 },
+    ]);
+  };
 
   const handleExport = () => {
     if (!data || data.departments.length === 0) return;
@@ -315,11 +372,17 @@ export default function DailyDepartmentReport() {
                       </td>
                       <td className="px-3 py-3 text-right tabular-nums text-amber-700 dark:text-amber-400 border-l border-slate-200/20 dark:border-white/5">{fmt(d.carry_bills)}</td>
                       <td className="px-3 py-3 text-right tabular-nums text-amber-700/70 dark:text-amber-400/70">{fmt(d.carry_qty)}</td>
-                      <td className="px-3 py-3 text-right tabular-nums text-sky-700 dark:text-sky-400 border-l border-slate-200/20 dark:border-white/5">{fmt(d.opened_bills)}</td>
+                      <td className="px-3 py-3 text-right tabular-nums text-sky-700 dark:text-sky-400 border-l border-slate-200/20 dark:border-white/5">
+                        <button type="button" onClick={() => openDrill(d.department, "opened", `ເປີດບິນ · ${d.department}`)} className="cursor-pointer underline decoration-dotted underline-offset-2 hover:opacity-70">{fmt(d.opened_bills)}</button>
+                      </td>
                       <td className="px-3 py-3 text-right tabular-nums text-sky-700/70 dark:text-sky-400/70">{fmt(d.opened_qty)}</td>
-                      <td className="px-3 py-3 text-right tabular-nums text-emerald-700 dark:text-emerald-400 border-l border-slate-200/20 dark:border-white/5">{fmt(d.delivered_bills)}</td>
+                      <td className="px-3 py-3 text-right tabular-nums text-emerald-700 dark:text-emerald-400 border-l border-slate-200/20 dark:border-white/5">
+                        <button type="button" onClick={() => openDrill(d.department, "delivered", `ຈັດສົ່ງ · ${d.department}`)} className="cursor-pointer underline decoration-dotted underline-offset-2 hover:opacity-70">{fmt(d.delivered_bills)}</button>
+                      </td>
                       <td className="px-3 py-3 text-right tabular-nums text-emerald-700/70 dark:text-emerald-400/70">{fmt(d.delivered_qty)}</td>
-                      <td className="px-3 py-3 text-right tabular-nums font-semibold text-rose-700 dark:text-rose-400 border-l border-slate-200/20 dark:border-white/5">{fmt(d.remaining_bills)}</td>
+                      <td className="px-3 py-3 text-right tabular-nums font-semibold text-rose-700 dark:text-rose-400 border-l border-slate-200/20 dark:border-white/5">
+                        <button type="button" onClick={() => openDrill(d.department, "remaining", `ຄົງເຫຼືອ · ${d.department}`)} className="cursor-pointer underline decoration-dotted underline-offset-2 hover:opacity-70">{fmt(d.remaining_bills)}</button>
+                      </td>
                       <td className="px-3 py-3 text-right tabular-nums text-rose-700/70 dark:text-rose-400/70">{fmt(d.remaining_qty)}</td>
                     </tr>
                   ))}
@@ -339,6 +402,71 @@ export default function DailyDepartmentReport() {
             </div>
           </div>
         </>
+      )}
+
+      {drill && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/50 p-4">
+          <div className="flex max-h-[85vh] w-full max-w-3xl flex-col rounded-xl bg-white shadow-xl dark:bg-slate-900">
+            <div className="flex items-center justify-between border-b border-slate-200 px-4 py-3 dark:border-slate-800">
+              <div>
+                <p className="text-sm font-bold text-slate-800 dark:text-white">{drill.label}</p>
+                <p className="text-[11px] text-slate-500">
+                  {fromDate} → {toDate} · {drillRows.length} ບິນ ·{" "}
+                  {fmt(drillRows.reduce((n, r) => n + Number(r.qty ?? 0), 0))} ສິນຄ້າ
+                </p>
+              </div>
+              <div className="flex items-center gap-2">
+                <button type="button" onClick={() => void exportDrill("bills")} disabled={drillLoading || drillRows.length === 0}
+                  className="cursor-pointer rounded-lg bg-emerald-600 px-2.5 py-1.5 text-[11px] font-bold text-white hover:bg-emerald-700 disabled:opacity-40">
+                  Excel (ບິນ)
+                </button>
+                <button type="button" onClick={() => void exportDrill("items")} disabled={drillLoading || drillRows.length === 0}
+                  className="cursor-pointer rounded-lg bg-teal-600 px-2.5 py-1.5 text-[11px] font-bold text-white hover:bg-teal-700 disabled:opacity-40">
+                  Excel (ສິນຄ້າ)
+                </button>
+                <button type="button" onClick={() => setDrill(null)}
+                  className="cursor-pointer rounded p-1 text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800">
+                  <FaTimes size={13} />
+                </button>
+              </div>
+            </div>
+            <div className="overflow-auto px-4 py-3">
+              {drillLoading ? (
+                <p className="py-10 text-center text-xs text-slate-500">
+                  <FaSpinner className="mr-2 inline animate-spin" /> ກຳລັງໂຫຼດ...
+                </p>
+              ) : drillRows.length === 0 ? (
+                <p className="py-10 text-center text-xs text-slate-500">ບໍ່ມີບິນ</p>
+              ) : (
+                <table className="w-full text-xs">
+                  <thead>
+                    <tr className="border-b border-slate-200 text-slate-500 dark:border-slate-800">
+                      <th className="py-2 text-left font-semibold">ເລກບິນ</th>
+                      <th className="py-2 text-left font-semibold">ລູກຄ້າ</th>
+                      <th className="py-2 text-left font-semibold">ພະນັກງານຂາຍ</th>
+                      <th className="py-2 text-right font-semibold">ລາຍການ</th>
+                      <th className="py-2 text-right font-semibold">ສິນຄ້າ</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {drillRows.map((r) => (
+                      <tr key={String(r.bill_no)} className="border-b border-slate-100 dark:border-slate-800/60">
+                        <td className="py-1.5 font-semibold text-slate-800 dark:text-slate-100">{String(r.bill_no)}</td>
+                        <td className="py-1.5 text-slate-600 dark:text-slate-300">
+                          {String(r.cust_name ?? "")}
+                          {r.cust_area ? <span className="block text-[10px] text-slate-400">📍 {String(r.cust_area)}</span> : null}
+                        </td>
+                        <td className="py-1.5 text-[10px] text-slate-500">{String(r.sale ?? "")}</td>
+                        <td className="py-1.5 text-right tabular-nums text-slate-600 dark:text-slate-300">{String(r.item_count ?? 0)}</td>
+                        <td className="py-1.5 text-right tabular-nums font-semibold text-slate-800 dark:text-slate-100">{fmt(Number(r.qty ?? 0))}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              )}
+            </div>
+          </div>
+        </div>
       )}
     </div>
   );

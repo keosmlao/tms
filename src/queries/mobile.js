@@ -11,12 +11,14 @@ const {
 } = require("./delivery");
 const {
   coerceDateToFixedYear,
+  getFixedTodayDate,
   getFixedYearSqlFilter,
 } = require("../lib/fixed-year");
 const {
   effectivePickupCodeSql,
   customerAreaSql,
   ensureTmsWorkerTable,
+  invalidateRemainingSummary,
 } = require("./helpers");
 const { saveToken: saveFcmToken, deleteToken: deleteFcmToken } = require("./push");
 const { saveFuelRefill, getFuelLogs, getFuelSummary } = require("./fuel");
@@ -442,6 +444,14 @@ async function notifyJobDispatchStarted(docNo) {
 
 async function mobileJobAction(body) {
   const client = await pool.connect();
+  // Any driver action can change what a bill still owes (pickup corrections,
+  // deliveries, returns, cancels). Instead of sprinkling invalidation through a
+  // dozen switch branches, clear this bill's cached remaining count once the
+  // action finishes — the next read recomputes it.
+  const invalidateAfter = () => {
+    const bill = asText(body?.bill_no);
+    if (bill) invalidateRemainingSummary(bill);
+  };
   try {
     const action = asText(body.action);
     const docNo = asText(body.doc_no);
@@ -686,6 +696,7 @@ async function mobileJobAction(body) {
         );
 
         await client.query("COMMIT");
+        invalidateRemainingSummary(billNo);
         void notifyBillStatus(billNo, "📦 ເບີກເຄື່ອງແລ້ວ");
         if (variance) {
           // Fire-and-forget: the pickup itself must not fail because a push
@@ -2029,6 +2040,7 @@ async function mobileJobAction(body) {
     await client.query("ROLLBACK").catch(() => undefined);
     throw error;
   } finally {
+    invalidateAfter();
     client.release();
   }
 }
@@ -2437,6 +2449,248 @@ async function mobileSaveLocations({ doc_no, driver_id, imei, device, points }) 
 }
 
 // Supervisor KPI summary for a single day (Module F.2). Defaults to today.
+// Manager dashboard: one call returns the four blocks the manager screen shows
+// — today, this month (with a per-day series), a driver leaderboard, and the
+// other staff involved. Kept as a single endpoint so the app makes one request
+// instead of four on a phone connection.
+async function mobileManagerDashboard({ date = "", branch = "" } = {}) {
+  const day = coerceDateToFixedYear(date || getFixedTodayDate());
+  const monthStart = `${day.slice(0, 7)}-01`;
+  const branchCode = asText(branch);
+  const branchClause = branchCode
+    ? `AND COALESCE(NULLIF(TRIM(t.origin_transport_code), ''), '') = '${branchCode.replace(/'/g, "''")}'`
+    : "";
+
+  // Totals for an arbitrary window — reused for both ມື້ນີ້ and ເດືອນນີ້ so the
+  // two blocks can never be computed differently.
+  const totalsSql = `
+    SELECT
+      COUNT(DISTINCT t.doc_no)::int AS trips,
+      COUNT(DISTINCT t.doc_no) FILTER (WHERE COALESCE(t.job_status,0) >= 3)::int AS trips_closed,
+      COUNT(d.bill_no)::int AS bills,
+      COUNT(*) FILTER (WHERE COALESCE(d.status,0) = 1)::int AS delivered,
+      COUNT(*) FILTER (WHERE COALESCE(d.status,0) = 2)::int AS cancelled,
+      COUNT(*) FILTER (WHERE COALESCE(d.status,0) NOT IN (1,2))::int AS pending,
+      COALESCE(SUM(i.delivered_qty), 0)::numeric AS qty_delivered,
+      COALESCE(SUM(d.collected_amount), 0)::numeric AS cod
+    FROM odg_tms t
+    LEFT JOIN public.odg_tms_detail d ON d.doc_no = t.doc_no
+    LEFT JOIN LATERAL (
+      SELECT SUM(COALESCE(x.delivered_qty,0))::numeric AS delivered_qty
+      FROM public.odg_tms_detail_item x
+      WHERE x.doc_no = d.doc_no AND x.bill_no = d.bill_no
+    ) i ON true
+    WHERE t.date_logistic::date BETWEEN $1::date AND $2::date
+      AND ${getFixedYearSqlFilter("t.doc_date")}
+      ${branchClause}`;
+
+  const [todayRow, monthRow, series, drivers, workers, dispatchers, variance] =
+    await Promise.all([
+      queryOne(totalsSql, [day, day]),
+      queryOne(totalsSql, [monthStart, day]),
+      // Per-day series for the month chart.
+      query(
+        `SELECT to_char(t.date_logistic,'DD') AS day_label,
+                to_char(t.date_logistic,'YYYY-MM-DD') AS day,
+                COUNT(DISTINCT t.doc_no)::int AS trips,
+                COUNT(*) FILTER (WHERE COALESCE(d.status,0) = 1)::int AS delivered
+         FROM odg_tms t
+         LEFT JOIN public.odg_tms_detail d ON d.doc_no = t.doc_no
+         WHERE t.date_logistic::date BETWEEN $1::date AND $2::date
+           AND ${getFixedYearSqlFilter("t.doc_date")}
+           ${branchClause}
+         GROUP BY 1, 2 ORDER BY 2`,
+        [monthStart, day]
+      ),
+      // Driver leaderboard for the month.
+      query(
+        `SELECT COALESCE(NULLIF(TRIM(drv.name_1), ''), t.driver, '-') AS name,
+                t.driver AS code,
+                COUNT(DISTINCT t.doc_no)::int AS trips,
+                COUNT(*) FILTER (WHERE COALESCE(d.status,0) = 1)::int AS delivered,
+                COUNT(*) FILTER (WHERE COALESCE(d.status,0) = 2)::int AS cancelled,
+                COUNT(d.bill_no)::int AS bills,
+                COALESCE(SUM(d.collected_amount), 0)::numeric AS cod
+         FROM odg_tms t
+         LEFT JOIN public.odg_tms_detail d ON d.doc_no = t.doc_no
+         LEFT JOIN public.odg_tms_driver drv ON drv.code = t.driver
+         WHERE t.date_logistic::date BETWEEN $1::date AND $2::date
+           AND NULLIF(TRIM(t.driver), '') IS NOT NULL
+           AND ${getFixedYearSqlFilter("t.doc_date")}
+           ${branchClause}
+         GROUP BY 1, 2 ORDER BY delivered DESC, trips DESC LIMIT 40`,
+        [monthStart, day]
+      ),
+      // Crew: how many trips each worker joined.
+      query(
+        `SELECT w.worker_name AS name, w.worker_code AS code,
+                COUNT(DISTINCT w.doc_no)::int AS trips
+         FROM public.odg_tms_worker w
+         JOIN odg_tms t ON t.doc_no = w.doc_no
+         WHERE t.date_logistic::date BETWEEN $1::date AND $2::date
+           AND ${getFixedYearSqlFilter("t.doc_date")}
+           ${branchClause}
+         GROUP BY 1, 2 ORDER BY trips DESC LIMIT 40`,
+        [monthStart, day]
+      ),
+      // Who planned the trips.
+      query(
+        `SELECT COALESCE(NULLIF(TRIM(u.name_1), ''), t.user_created, '-') AS name,
+                t.user_created AS code,
+                COUNT(*)::int AS trips
+         FROM odg_tms t
+         LEFT JOIN erp_user u ON u.code = t.user_created
+         WHERE t.date_logistic::date BETWEEN $1::date AND $2::date
+           AND NULLIF(TRIM(t.user_created), '') IS NOT NULL
+           AND ${getFixedYearSqlFilter("t.doc_date")}
+           ${branchClause}
+         GROUP BY 1, 2 ORDER BY trips DESC LIMIT 20`,
+        [monthStart, day]
+      ),
+      // Pickup shortfalls per driver — the quality signal for the month.
+      query(
+        `SELECT COALESCE(NULLIF(TRIM(drv.name_1), ''), v.driver, '-') AS name,
+                COUNT(DISTINCT v.bill_no)::int AS bills,
+                COALESCE(SUM(GREATEST(-v.diff_qty, 0)), 0)::numeric AS missing_qty
+         FROM public.odg_tms_pickup_variance v
+         LEFT JOIN public.odg_tms_driver drv ON drv.code = v.driver
+         WHERE v.created_at::date BETWEEN $1::date AND $2::date
+         GROUP BY 1 ORDER BY missing_qty DESC LIMIT 20`,
+        [monthStart, day]
+      ),
+    ]);
+
+  // ── Exception blocks the manager acts on ──────────────────────────────
+  // Each one is a queue of work, not a statistic: bills that came back, bills
+  // that were never fully picked up, trips still open, and proof that the
+  // delivery actually happened at the customer's location.
+  const [partial, openTrips, deliveredOnSite] = await Promise.all([
+    // ສົ່ງບໍ່ໝົດ — finished, but part of the load is still owed.
+    query(
+      `SELECT d.bill_no, d.doc_no,
+              COALESCE(NULLIF(TRIM(cu.name_1), ''), d.cust_code, '-') AS cust_name,
+              COALESCE(NULLIF(TRIM(drv.name_1), ''), t.driver, '-') AS driver,
+              SUM(COALESCE(i.selected_qty,0))::numeric AS planned,
+              SUM(COALESCE(i.delivered_qty,0))::numeric AS delivered,
+              SUM(COALESCE(i.returned_qty,0))::numeric AS returned_qty,
+              SUM(GREATEST(COALESCE(i.selected_qty,0) - COALESCE(i.delivered_qty,0), 0))::numeric AS short_qty
+       FROM public.odg_tms_detail_item i
+       JOIN public.odg_tms_detail d ON d.doc_no = i.doc_no AND d.bill_no = i.bill_no
+       JOIN odg_tms t ON t.doc_no = d.doc_no
+       LEFT JOIN public.ar_customer cu ON cu.code = d.cust_code
+       LEFT JOIN public.odg_tms_driver drv ON drv.code = t.driver
+       WHERE COALESCE(d.status,0) = 1
+         AND t.date_logistic::date BETWEEN $1::date AND $2::date
+         AND ${getFixedYearSqlFilter("t.doc_date")}
+         ${branchClause}
+       GROUP BY d.bill_no, d.doc_no, cu.name_1, d.cust_code, drv.name_1, t.driver
+       HAVING SUM(GREATEST(COALESCE(i.selected_qty,0) - COALESCE(i.delivered_qty,0), 0)) > 0
+       ORDER BY short_qty DESC LIMIT 50`,
+      [monthStart, day]
+    ),
+    // ຄ້າງປິດຖ້ຽວ — the trip left but was never closed.
+    query(
+      `SELECT t.doc_no,
+              to_char(t.date_logistic,'DD-MM-YYYY') AS day,
+              COALESCE(NULLIF(TRIM(drv.name_1), ''), t.driver, '-') AS driver,
+              COALESCE(NULLIF(TRIM(car.name_1), ''), t.car, '-') AS car,
+              COALESCE(t.job_status, 0)::int AS job_status,
+              COUNT(d.bill_no)::int AS bills,
+              COUNT(*) FILTER (WHERE COALESCE(d.status,0) NOT IN (1,2))::int AS open_bills,
+              (CURRENT_DATE - t.date_logistic::date)::int AS days_open
+       FROM odg_tms t
+       LEFT JOIN public.odg_tms_detail d ON d.doc_no = t.doc_no
+       LEFT JOIN public.odg_tms_driver drv ON drv.code = t.driver
+       LEFT JOIN public.odg_tms_car car ON car.code = t.car
+       WHERE COALESCE(t.job_status,0) BETWEEN 1 AND 2
+         AND t.date_logistic::date BETWEEN $1::date AND $2::date
+         AND ${getFixedYearSqlFilter("t.doc_date")}
+         ${branchClause}
+       GROUP BY t.doc_no, t.date_logistic, drv.name_1, t.driver, car.name_1, t.car, t.job_status
+       ORDER BY days_open DESC, t.doc_no LIMIT 50`,
+      [monthStart, day]
+    ),
+    // ສຳເລັດຢູ່ຈຸດສົ່ງ — completed WITH an end position recorded, i.e. there is
+    // GPS proof the driver was at the drop-off. Bills closed without one are
+    // the ones worth questioning, so both counts come back.
+    queryOne(
+      `SELECT
+         COUNT(*) FILTER (WHERE NULLIF(TRIM(d.lat_end), '') IS NOT NULL)::int AS with_gps,
+         COUNT(*) FILTER (WHERE NULLIF(TRIM(d.lat_end), '') IS NULL)::int AS without_gps
+       FROM public.odg_tms_detail d
+       JOIN odg_tms t ON t.doc_no = d.doc_no
+       WHERE COALESCE(d.status,0) = 1
+         AND t.date_logistic::date BETWEEN $1::date AND $2::date
+         AND ${getFixedYearSqlFilter("t.doc_date")}
+         ${branchClause}`,
+      [monthStart, day]
+    ),
+  ]);
+
+  const num = (row, key) => Number(row?.[key] ?? 0);
+  const shape = (row) => ({
+    trips: num(row, "trips"),
+    trips_closed: num(row, "trips_closed"),
+    bills: num(row, "bills"),
+    delivered: num(row, "delivered"),
+    cancelled: num(row, "cancelled"),
+    pending: num(row, "pending"),
+    qty_delivered: num(row, "qty_delivered"),
+    cod: num(row, "cod"),
+  });
+
+  return {
+    date: day,
+    month: day.slice(0, 7),
+    branch: branchCode,
+    today: shape(todayRow),
+    month_total: shape(monthRow),
+    series: series.map((r) => ({
+      day: r.day,
+      label: r.day_label,
+      trips: Number(r.trips ?? 0),
+      delivered: Number(r.delivered ?? 0),
+    })),
+    drivers: drivers.map((r) => ({
+      code: r.code,
+      name: r.name,
+      trips: Number(r.trips ?? 0),
+      bills: Number(r.bills ?? 0),
+      delivered: Number(r.delivered ?? 0),
+      cancelled: Number(r.cancelled ?? 0),
+      cod: Number(r.cod ?? 0),
+      success_rate:
+        Number(r.bills ?? 0) > 0
+          ? Math.round((Number(r.delivered ?? 0) / Number(r.bills)) * 100)
+          : 0,
+    })),
+    workers: workers.map((r) => ({ code: r.code, name: r.name, trips: Number(r.trips ?? 0) })),
+    dispatchers: dispatchers.map((r) => ({ code: r.code, name: r.name, trips: Number(r.trips ?? 0) })),
+    pickup_variance: variance.map((r) => ({
+      name: r.name,
+      bills: Number(r.bills ?? 0),
+      missing_qty: Number(r.missing_qty ?? 0),
+    })),
+    // ສົ່ງບໍ່ໝົດ = ຕ້ອງຄືນສາງ (ຈຳນວນທີ່ບໍ່ໄດ້ສົ່ງ ຄືຈຳນວນທີ່ຂຶ້ນລົດກັບຄືນ)
+    returned_to_store: partial.map((r) => ({
+      bill_no: r.bill_no, doc_no: r.doc_no, cust_name: r.cust_name, driver: r.driver,
+      planned: Number(r.planned ?? 0), delivered: Number(r.delivered ?? 0),
+      short_qty: Number(r.short_qty ?? 0), returned_qty: Number(r.returned_qty ?? 0),
+    })),
+    // ຄ້າງປິດຖ້ຽວ
+    open_trips: openTrips.map((r) => ({
+      doc_no: r.doc_no, day: r.day, driver: r.driver, car: r.car,
+      job_status: Number(r.job_status ?? 0), bills: Number(r.bills ?? 0),
+      open_bills: Number(r.open_bills ?? 0), days_open: Number(r.days_open ?? 0),
+    })),
+    // ສຳເລັດການຈັດສົ່ງຢູ່ບ່ອນຈັດສົ່ງ (ມີ GPS ຢືນຢັນ / ບໍ່ມີ)
+    delivery_proof: {
+      with_gps: Number(deliveredOnSite?.with_gps ?? 0),
+      without_gps: Number(deliveredOnSite?.without_gps ?? 0),
+    },
+  };
+}
+
 async function mobileSupervisorKpi({ date = "" } = {}) {
   const day = coerceDateToFixedYear(
     date || new Date().toISOString().split("T")[0]
@@ -2466,6 +2720,7 @@ module.exports = {
   mobileJobsList,
   mobileJobsListAll,
   mobileSupervisorKpi,
+  mobileManagerDashboard,
   mobileJobAction,
   mobileBills,
   mobileFuelLogs,
