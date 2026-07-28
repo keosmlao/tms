@@ -45,6 +45,10 @@ type RunningTrip = {
   out_minutes: number | null;
   out_seconds: number | null;
   from_base_m: number | null;
+  last_stop: string;
+  place_is_live: boolean;
+  last_stop_at: string;
+  has_tracker: boolean;
   eta_seconds: number | null;
   distance_km: number | null;
   bills: number;
@@ -168,6 +172,7 @@ type TvData = {
   date: string;
   branch: string;
   branch_name: string;
+  screen: { pages: string; secs: number };
   live: boolean;
   generated_at: string;
   totals: Totals;
@@ -194,22 +199,47 @@ const PAGES = ["ພາບລວມມື້ນີ້", "ຕ້ອງແກ້ດ
  * ບໍ່ໃສ່ = ໝຸນຄົບທຸກໜ້າ.
  */
 /**
- * ?page=N ລັອກໃຫ້ສະແດງໜ້ານັ້ນໜ້າດຽວ (ສຳລັບຈໍທີ່ມີໜ້າທີ່ຂອງມັນເອງ).
- * ບໍ່ໃສ່ = ໝຸນຄົບທຸກໜ້າ.
+ * ຕັ້ງຄ່າວ່າຈໍນີ້ຈະສະແດງໜ້າໃດແດ່ — ຜ່ານ URL ຈຶ່ງແຕ່ລະຈໍຕັ້ງເອງໄດ້
+ * ໂດຍບໍ່ຕ້ອງມີໜ້າຕັ້ງຄ່າ ແລະ ບໍ່ຕ້ອງ login.
+ *
+ *   ?pages=1,3   ສະແດງແຕ່ໜ້າ 1 ກັບ 3 ໝຸນສະຫຼັບກັນ
+ *   ?page=2      ໜ້າດຽວ ບໍ່ໝຸນ (ຄືກັບ ?pages=2)
+ *   ?secs=30     ປ່ຽນໜ້າທຸກ 30 ວິນາທີ (ຕັ້ງຕົ້ນ 20)
+ *   ບໍ່ໃສ່        ໝຸນຄົບທຸກໜ້າ
  */
-function requestedPage(): number | null {
-  if (typeof window === "undefined") return null;
-  const raw = new URLSearchParams(window.location.search).get("page");
-  if (!raw) return null;
-  const index = Number(raw) - 1;
-  return Number.isInteger(index) && index >= 0 && index < PAGES.length ? index : null;
+function readConfig(saved?: {
+  pages: string;
+  secs: number;
+}): { pages: number[]; intervalMs: number } {
+  const all = PAGES.map((_, index) => index);
+  if (typeof window === "undefined") return { pages: all, intervalMs: PAGE_MS };
+  const params = new URLSearchParams(window.location.search);
+
+  // URL ຊະນະຄ່າທີ່ຕັ້ງໄວ້ — ຈໍໜຶ່ງໜ່ວຍຢາກເບິ່ງໜ້າອື່ນຊົ່ວຄາວກໍ່ເຮັດໄດ້
+  const raw = params.get("pages") ?? params.get("page") ?? saved?.pages ?? "";
+  const picked = raw
+    .split(",")
+    .map((part) => Number(part.trim()) - 1)
+    .filter((index) => Number.isInteger(index) && index >= 0 && index < PAGES.length);
+
+  const secs = Number(params.get("secs") ?? saved?.secs);
+  const intervalMs =
+    Number.isFinite(secs) && secs >= 5 ? Math.round(secs) * 1000 : PAGE_MS;
+
+  // ເອົາຊ້ຳອອກ ແລະ ຮັກສາລຳດັບທີ່ຜູ້ໃຊ້ພິມ
+  const unique = [...new Set(picked)];
+  return { pages: unique.length > 0 ? unique : all, intervalMs };
 }
 
 export default function TvPage() {
   const [data, setData] = useState<TvData | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [page, setPage] = useState(0);
-  const [locked, setLocked] = useState<number | null>(null);
+  // ໜ້າທີ່ຈໍນີ້ຕັ້ງໄວ້ໃຫ້ສະແດງ ແລະ ຄວາມໄວການໝຸນ
+  const [config, setConfig] = useState<{ pages: number[]; intervalMs: number }>({
+    pages: PAGES.map((_, index) => index),
+    intervalMs: PAGE_MS,
+  });
   const [clock, setClock] = useState("");
   const [fetchedAt, setFetchedAt] = useState<number | null>(null);
 
@@ -238,34 +268,44 @@ export default function TvPage() {
   }, [load]);
 
   // Read once on mount: the URL cannot change on a kiosk without a reload.
+  // ອ່ານຫຼັງໄດ້ຂໍ້ມູນຮອບທຳອິດ ເພື່ອໃຫ້ໄດ້ຄ່າທີ່ຜູ້ຈັດການຕັ້ງໄວ້ນຳ
+  const screen = data?.screen;
   useEffect(() => {
-    const index = requestedPage();
-    if (index === null) return;
-    setLocked(index);
-    setPage(index);
-  }, []);
+    if (!screen) return;
+    const next = readConfig(screen);
+    setConfig(next);
+    setPage(next.pages[0]);
+  }, [screen?.pages, screen?.secs]);
 
   // ໝຸນໜ້າເອງເມື່ອບໍ່ໄດ້ລັອກ — ຈໍດຽວຈຶ່ງເຫັນຂໍ້ມູນຄົບທຸກໜ້າ.
   // ກົດ Space ຢຸດ · ← → ປ່ຽນເອງ ເວລາມີຄົນຍ່າງມາເບິ່ງ.
   useEffect(() => {
-    if (locked !== null) return;
+    const list = config.pages;
+    const step = (delta: number) =>
+      setPage((current) => {
+        const at = list.indexOf(current);
+        const next = (at < 0 ? 0 : at + delta + list.length) % list.length;
+        return list[next];
+      });
     let paused = false;
-    const timer = setInterval(() => {
-      if (!paused) setPage((current) => (current + 1) % PAGES.length);
-    }, PAGE_MS);
+    // ໜ້າດຽວກໍ່ບໍ່ຕ້ອງໝຸນ ແຕ່ຍັງໃຫ້ກົດປ່ຽນເອງໄດ້
+    const timer =
+      list.length > 1
+        ? setInterval(() => {
+            if (!paused) step(1);
+          }, config.intervalMs)
+        : null;
     const onKey = (event: KeyboardEvent) => {
       if (event.code === "Space") paused = !paused;
-      else if (event.code === "ArrowRight")
-        setPage((current) => (current + 1) % PAGES.length);
-      else if (event.code === "ArrowLeft")
-        setPage((current) => (current - 1 + PAGES.length) % PAGES.length);
+      else if (event.code === "ArrowRight") step(1);
+      else if (event.code === "ArrowLeft") step(-1);
     };
     window.addEventListener("keydown", onKey);
     return () => {
-      clearInterval(timer);
+      if (timer) clearInterval(timer);
       window.removeEventListener("keydown", onKey);
     };
-  }, [locked]);
+  }, [config]);
 
   useEffect(() => {
     const tick = () => {
@@ -309,18 +349,14 @@ export default function TvPage() {
           )}
         </div>
         <nav className="tv-tabs">
-          {locked !== null ? (
-            <span className="tv-tab tv-tab-on">{PAGES[locked]}</span>
-          ) : (
-            PAGES.map((label, index) => (
-              <span
-                key={label}
-                className={index === page ? "tv-tab tv-tab-on" : "tv-tab"}
-              >
-                {label}
-              </span>
-            ))
-          )}
+          {config.pages.map((index) => (
+            <span
+              key={PAGES[index]}
+              className={index === page ? "tv-tab tv-tab-on" : "tv-tab"}
+            >
+              {PAGES[index]}
+            </span>
+          ))}
         </nav>
         <div className="tv-head-right">
           <span className="tv-clock">{clock}</span>
@@ -683,13 +719,18 @@ function RunningStrip({
               {trip.distance_km !== null && (
                 <span className="tv-scard-km"> · ແລ່ນ {trip.distance_km} ກມ</span>
               )}
-              {trip.from_base_m !== null && (
-                <span className="tv-scard-km">
-                  {" · ຫ່າງສາງ "}
-                  {distanceLabel(trip.from_base_m)}
-                </span>
-              )}
             </div>
+            {trip.last_stop && (
+              <div className="tv-scard-where">
+                📍 {trip.last_stop}
+                {!trip.place_is_live && trip.last_stop_at && ` · ${trip.last_stop_at}`}
+              </div>
+            )}
+            {trip.from_base_m !== null && (
+              <div className="tv-scard-where">
+                🚚 ຫ່າງສາງ {distanceLabel(trip.from_base_m)}
+              </div>
+            )}
             {trip.eta_seconds !== null && trip.eta_seconds > 0 && (
               <div className="tv-scard-eta">
                 ຄາດສຳເລັດ {etaClock(trip.eta_seconds - drift)}

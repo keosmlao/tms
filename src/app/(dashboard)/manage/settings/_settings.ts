@@ -16,9 +16,13 @@ export interface NotifySettings {
   "kpi.target_avg_close_minutes": string;
   "kpi.alert_enabled": string;
   "kpi.alert_line_to": string;
+  "tv.pages": string;
+  "tv.secs": string;
 }
 
 export const EMPTY_SETTINGS: NotifySettings = {
+  "tv.pages": "1,2,3",
+  "tv.secs": "20",
   "line.test_enabled": "",
   "line.test_to": "",
   "line.customer.test_enabled": "",
@@ -39,6 +43,13 @@ export const EMPTY_SETTINGS: NotifySettings = {
 };
 
 export const SETTING_TOPICS = [
+  {
+    key: "tv",
+    title: "ຈໍ TV ຫ້ອງຈັດສົ່ງ",
+    subtitle: "ເລືອກໜ້າທີ່ຈໍຈະສະແດງ ແລະ ຄວາມໄວການໝຸນ",
+    icon: "chart",
+    tone: "sky",
+  },
   {
     key: "app",
     title: "App ຄົນຂັບ",

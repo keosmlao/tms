@@ -59,11 +59,15 @@ async function resolveCar(docNo, carCode) {
 async function readMileage(carCode) {
   const code = String(carCode || "").trim();
   if (!code) return null;
+  // ລະຫັດລົດໃນຖ້ຽວກັບໃນ tracker ບໍ່ກົງກັນສະເໝີ ('1857' ຕໍ່ 'ບຈ1857')
+  // ຈຶ່ງລອງທັງລະຫັດ ແລະ IMEI ຈາກຂໍ້ມູນລົດ
   const row = await queryOne(
-    `SELECT NULLIF(TRIM(mileage), '')::numeric AS mileage,
-            COALESCE(recorded_at, '') AS recorded_at
-     FROM public.odg_tms_gps_current
-     WHERE car_code = $1 AND NULLIF(TRIM(mileage), '') IS NOT NULL
+    `SELECT NULLIF(TRIM(g.mileage), '')::numeric AS mileage,
+            COALESCE(g.recorded_at, '') AS recorded_at
+     FROM public.odg_tms_gps_current g
+     LEFT JOIN public.odg_tms_car c ON c.code = $1
+     WHERE (g.car_code = $1 OR (NULLIF(TRIM(c.imei), '') IS NOT NULL AND g.imei = TRIM(c.imei)))
+       AND NULLIF(TRIM(g.mileage), '') IS NOT NULL
      LIMIT 1`,
     [code]
   );
@@ -139,7 +143,10 @@ async function getDistanceMap(docNos) {
               END
             ) AS distance_km
      FROM public.odg_tms_trip_distance td
-     LEFT JOIN public.odg_tms_gps_current g ON g.car_code = td.car_code
+     LEFT JOIN public.odg_tms_car c ON c.code = td.car_code
+     LEFT JOIN public.odg_tms_gps_current g
+       ON g.car_code = td.car_code
+      OR (NULLIF(TRIM(c.imei), '') IS NOT NULL AND g.imei = TRIM(c.imei))
      WHERE td.doc_no = ANY($1::varchar[])`,
     [list]
   );

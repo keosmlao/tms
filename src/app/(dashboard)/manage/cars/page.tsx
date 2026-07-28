@@ -44,6 +44,8 @@ interface CarProfile {
   car_type: string;
   transport_code: string;
   transport_name?: string;
+  tracker_code?: string;
+  gps_recorded_at?: string;
   drivers: Option[];
   workers: Option[];
 }
@@ -924,6 +926,15 @@ export default function CarsManagePage() {
                           <CarTypeBadge carType={car.car_type} />
                         </td>
                         <td className="px-4 py-3">
+                          {(car.tracker_code ?? "") !== "" &&
+                            car.tracker_code !== car.code && (
+                              <div
+                                className="mb-1 inline-flex items-center gap-1 rounded-md bg-rose-500/10 px-1.5 py-0.5 text-[10px] font-semibold text-rose-700 dark:text-rose-400"
+                                title={`ຕົວຕິດຕາມສົ່ງລະຫັດມາວ່າ "${car.tracker_code}" ແຕ່ລະຫັດລົດໃນລະບົບແມ່ນ "${car.code}" — ຕຳແໜ່ງອາດໄປໃສ່ຄັນອື່ນ ຄວນແກ້ຊື່ໃນລະບົບຕິດຕາມ`}
+                              >
+                                ⚠ tracker ສົ່ງ &quot;{car.tracker_code}&quot;
+                              </div>
+                            )}
                           {car.transport_name ? (
                             <span className="inline-flex items-center rounded-md bg-sky-500/10 px-2 py-0.5 text-[11px] font-semibold text-sky-700 dark:text-sky-300">
                               {car.transport_name}

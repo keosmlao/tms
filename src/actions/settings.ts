@@ -33,6 +33,8 @@ const NOTIFY_KEYS = [
   // user/group. Empty = disabled.
   "kpi.alert_enabled",
   "kpi.alert_line_to",
+  "tv.pages",
+  "tv.secs",
 ] as const;
 
 export interface NotifySettings {
@@ -53,6 +55,8 @@ export interface NotifySettings {
   "kpi.target_avg_close_minutes": string;
   "kpi.alert_enabled": string;
   "kpi.alert_line_to": string;
+  "tv.pages": string;
+  "tv.secs": string;
 }
 
 export async function getNotifySettings(): Promise<NotifySettings> {

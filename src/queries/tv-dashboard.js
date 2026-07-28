@@ -124,10 +124,11 @@ async function getTvDashboard({ date = "", branch = "" } = {}) {
                     power(sin(radians(gc.lng::numeric - gf.start_lng::numeric) / 2), 2)
                   )))::numeric, 0)
                  FROM (
-                   SELECT NULLIF(TRIM(lat), '')::numeric AS lat,
-                          NULLIF(TRIM(lng), '')::numeric AS lng, car_code
-                   FROM public.odg_tms_gps_current
-                   WHERE NULLIF(TRIM(lat), '') IS NOT NULL
+                   SELECT NULLIF(TRIM(g.lat), '')::numeric AS lat,
+                          NULLIF(TRIM(g.lng), '')::numeric AS lng,
+                          g.car_code, g.imei
+                   FROM public.odg_tms_gps_current g
+                   WHERE NULLIF(TRIM(g.lat), '') IS NOT NULL
                  ) gc
                  CROSS JOIN (
                    SELECT NULLIF(TRIM(start_lat), '')::numeric AS start_lat,
@@ -138,7 +139,23 @@ async function getTvDashboard({ date = "", branch = "" } = {}) {
                    LIMIT 1
                  ) gf
                  WHERE gc.car_code = t.car::text
+                    OR gc.imei = (
+                         SELECT NULLIF(TRIM(c2.imei), '')
+                         FROM public.odg_tms_car c2
+                         WHERE c2.code::text = t.car::text
+                         LIMIT 1
+                       )
                  LIMIT 1) AS from_base_m,
+                (SELECT NULLIF(TRIM(g2.address), '')
+                 FROM public.odg_tms_gps_current g2
+                 WHERE g2.car_code = t.car::text
+                    OR g2.imei = (
+                         SELECT NULLIF(TRIM(c3.imei), '')
+                         FROM public.odg_tms_car c3
+                         WHERE c3.code::text = t.car::text
+                         LIMIT 1
+                       )
+                 LIMIT 1) AS gps_place,
                 t.car::text AS car_code
          FROM odg_tms t
          LEFT JOIN public.odg_tms_detail d ON d.doc_no = t.doc_no
@@ -403,6 +420,18 @@ async function getTvDashboard({ date = "", branch = "" } = {}) {
     }
   }
 
+  // ຕັ້ງຄ່າຈໍ — ເກັບຮ່ວມກັບຄ່າຕັ້ງອື່ນຂອງລະບົບ
+  const [tvPages, tvSecs] = await Promise.all([
+    queryOne(
+      `SELECT COALESCE(value, '') AS value FROM public.odg_tms_setting WHERE key = 'tv.pages'`,
+      []
+    ).catch(() => null),
+    queryOne(
+      `SELECT COALESCE(value, '') AS value FROM public.odg_tms_setting WHERE key = 'tv.secs'`,
+      []
+    ).catch(() => null),
+  ]);
+
   const int = (row, key) => Number(row?.[key] ?? 0);
   const mins = (value) =>
     value === null || value === undefined ? null : Math.max(0, Math.round(Number(value)));
@@ -416,6 +445,40 @@ async function getTvDashboard({ date = "", branch = "" } = {}) {
   // ໄລຍະທາງມາຈາກເລກໄມລ໌ຂອງ tracker (ຈົດຕອນອອກ ລົບກັບເລກດຽວນີ້)
   // ບໍ່ແມ່ນບວກຈາກຈຸດ GPS — ເບິ່ງເຫດຜົນໃນ trip-distance.js
   const distanceByTrip = await getDistanceMap(trips.map((row) => row.doc_no));
+
+  // ຈຸດສົ່ງລ່າສຸດຂອງແຕ່ລະຖ້ຽວ — ໃຊ້ບອກຕຳແໜ່ງລົດເມື່ອລົດຄັນນັ້ນບໍ່ມີ tracker
+  // (ຫຼື tracker ເສຍ). ພິກັດນີ້ມາຈາກໂທລະສັບຄົນຂັບຕອນກົດສົ່ງສຳເລັດ ຈຶ່ງມີ
+  // ໃຫ້ທຸກຄັນ ບໍ່ວ່າຈະຕິດ tracker ຫຼືບໍ່.
+  const lastStopByTrip = new Map(
+    tripPoints.map((row) => [
+      row.doc_no,
+      {
+        name: String(row.cust_name || ""),
+        at: row.at,
+        lat: Number(row.lat),
+        lng: Number(row.lng),
+      },
+    ])
+  );
+  const base = await queryOne(
+    `SELECT NULLIF(TRIM(start_lat), '')::numeric AS lat,
+            NULLIF(TRIM(start_lng), '')::numeric AS lng
+     FROM public.odg_tms_geofence
+     WHERE transport_code = ${branchList} AND NULLIF(TRIM(start_lat), '') IS NOT NULL
+     LIMIT 1`,
+    []
+  );
+  // ໄລຍະເສັ້ນຊື່ເປັນແມັດ (haversine) — ໃຊ້ຕອນບໍ່ມີ tracker ຈຶ່ງຄິດຈາກຈຸດສົ່ງ
+  const metresFromBase = (lat, lng) => {
+    if (!base?.lat || !Number.isFinite(lat) || !Number.isFinite(lng)) return null;
+    const toRad = (deg) => (deg * Math.PI) / 180;
+    const dLat = toRad(lat - Number(base.lat));
+    const dLng = toRad(lng - Number(base.lng));
+    const a =
+      Math.sin(dLat / 2) ** 2 +
+      Math.cos(toRad(Number(base.lat))) * Math.cos(toRad(lat)) * Math.sin(dLng / 2) ** 2;
+    return Math.round(6371000 * 2 * Math.asin(Math.sqrt(a)));
+  };
 
   // ຈັງຫວະການສົ່ງລວມຂອງມື້ນີ້ — ໃຊ້ຄາດເວລາໃຫ້ຖ້ຽວທີ່ຍັງບໍ່ທັນສົ່ງບິນໃດເລີຍ
   // ເພາະຖ້ຽວນັ້ນຍັງບໍ່ມີຈັງຫວະຂອງຕົນເອງໃຫ້ຄິດ.
@@ -457,10 +520,20 @@ async function getTvDashboard({ date = "", branch = "" } = {}) {
       doc_no: row.doc_no,
       car: row.car,
       eta_seconds: etaSeconds,
+      // tracker ກ່ອນ (ສົດກວ່າ) ບໍ່ມີຈຶ່ງໃຊ້ຈຸດສົ່ງລ່າສຸດ
       from_base_m:
         row.from_base_m === null || row.from_base_m === undefined
-          ? null
+          ? metresFromBase(
+              lastStopByTrip.get(row.doc_no)?.lat,
+              lastStopByTrip.get(row.doc_no)?.lng
+            )
           : Number(row.from_base_m),
+      // ຊື່ບ່ອນສົດຈາກ tracker ກ່ອນ ບໍ່ມີຈຶ່ງໃຊ້ຊື່ລູກຄ້າຂອງຈຸດສົ່ງລ່າສຸດ
+      last_stop:
+        row.gps_place || lastStopByTrip.get(row.doc_no)?.name || "",
+      place_is_live: Boolean(row.gps_place),
+      last_stop_at: lastStopByTrip.get(row.doc_no)?.at ?? "",
+      has_tracker: row.from_base_m !== null && row.from_base_m !== undefined,
       distance_km: km === undefined ? null : Math.round(km * 10) / 10,
       driver: row.driver,
       route: row.route,
@@ -480,6 +553,11 @@ async function getTvDashboard({ date = "", branch = "" } = {}) {
   const payload = {
     date: day,
     branch: branchCode,
+    // ຄ່າທີ່ຜູ້ຈັດການຕັ້ງໄວ້ໃນ ຕັ້ງຄ່າ → ຈໍ TV ຫ້ອງຈັດສົ່ງ
+    screen: {
+      pages: String(tvPages?.value || "1,2,3"),
+      secs: Number(tvSecs?.value || 20),
+    },
     branch_name: branchName,
     live: isLiveDay,
     // Stamped server-side so a screen can show how stale its own copy is even

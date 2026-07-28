@@ -110,9 +110,16 @@ async function getCarProfiles() {
              COALESCE(c.plate_no,'') AS plate_no, COALESCE(c.tank_no,'') AS tank_no,
              COALESCE(c.car_type,'') AS car_type,
              COALESCE(c.transport_code,'') AS transport_code,
-             COALESCE(NULLIF(TRIM(tt.name_1), ''), '') AS transport_name
+             COALESCE(NULLIF(TRIM(tt.name_1), ''), '') AS transport_name,
+             -- tracker ບາງເຄື່ອງຕັ້ງຊື່ໄວ້ຄົນລະຢ່າງກັບລະຫັດລົດໃນລະບົບ ເຊິ່ງ
+             -- ເຮັດໃຫ້ຕຳແໜ່ງໄປໃສ່ຄັນອື່ນເມື່ອບ່ອນໃດ join ດ້ວຍລະຫັດ. ດຶງມາ
+             -- ໃຫ້ເຫັນເພື່ອໃຫ້ຄົນແກ້ໄດ້.
+             COALESCE(NULLIF(TRIM(g.car_code), ''), '') AS tracker_code,
+             COALESCE(g.recorded_at, '') AS gps_recorded_at
            FROM public.odg_tms_car c
            LEFT JOIN transport_type tt ON tt.code = c.transport_code
+           LEFT JOIN public.odg_tms_gps_current g
+             ON NULLIF(TRIM(c.imei), '') IS NOT NULL AND g.imei = TRIM(c.imei)
            ORDER BY c.name_1 ASC, c.code ASC`),
     query(`SELECT car_code, driver_code AS code, driver_name AS name_1 FROM public.odg_tms_car_driver ORDER BY car_code ASC, driver_name ASC, driver_code ASC`),
     query(`SELECT car_code, worker_code AS code, worker_name AS name_1 FROM public.odg_tms_car_worker ORDER BY car_code ASC, worker_name ASC, worker_code ASC`),

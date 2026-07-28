@@ -1372,3 +1372,12 @@ html,
     animation: none;
   }
 }
+
+/* ຕຳແໜ່ງລົດ — tracker ຫຼື ຈຸດສົ່ງລ່າສຸດ */
+.tv-scard-where {
+  font-size: 15px;
+  color: var(--tv-text-2);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}

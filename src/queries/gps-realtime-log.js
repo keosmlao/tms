@@ -214,6 +214,32 @@ async function runTick() {
         );
       }
     }
+    // ຕື່ມຊື່ບ່ອນໃຫ້ຄັນທີ່ຍັງບໍ່ມີ — ຈຳກັດຕໍ່ຮອບ ເພື່ອບໍ່ໃຫ້ຍິງບໍລິການ
+    // ພາຍນອກເກີນ 1 ຄັ້ງ/ວິນາທີ ຕາມກົດການໃຊ້ງານ
+    try {
+      const { reverseGeocode } = require("./geocode");
+      const stale = await query(
+        `SELECT imei, NULLIF(TRIM(lat), '')::numeric AS lat,
+                NULLIF(TRIM(lng), '')::numeric AS lng
+         FROM public.odg_tms_gps_current
+         WHERE COALESCE(NULLIF(TRIM(address), ''), '') = ''
+           AND NULLIF(TRIM(lat), '') IS NOT NULL
+         LIMIT 3`
+      );
+      for (const row of stale) {
+        const place = await reverseGeocode(row.lat, row.lng);
+        if (place) {
+          await query(
+            `UPDATE public.odg_tms_gps_current SET address = $2 WHERE imei = $1`,
+            [row.imei, place]
+          );
+        }
+        await new Promise((resolve) => setTimeout(resolve, 1100));
+      }
+    } catch (err) {
+      console.error("[geocode] tick failed:", err?.message ?? err);
+    }
+
     const elapsed = Date.now() - started;
     console.log(
       `[gps-realtime-log] tick log_inserted=${inserted} log_skipped=${skipped} log_errors=${errors} current_ok=${currentOk} current_fail=${currentFail} current_stale=${currentStale} elapsed=${elapsed}ms`
