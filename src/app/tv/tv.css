@@ -1,9 +1,64 @@
 /* TV mode — ຈໍຕິດຝາຫ້ອງຈັດສົ່ງ. ໂຕໜັງສືໃຫຍ່, ພື້ນດຳ, ບໍ່ມີ scroll. */
+
+/* ຊຸດສີ. ຈໍຢູ່ໄກ 4-5 ແມັດ ແລະ ຫ້ອງມີແສງ ຈຶ່ງຕ້ອງໃຫ້ຄ່າຄວາມຕ່າງສູງກວ່າ
+   ໜ້າເວັບທຳມະດາ — ສີເທົາຈາງທີ່ອ່ານໄດ້ເທິງຄອມ ຈະຫາຍໄປເທິງຈໍ TV. */
+:root {
+  --tv-bg: #eef3fa;
+  --tv-road: rgba(2, 132, 199, 0.055);
+  --tv-route: rgba(0, 160, 107, 0.075);
+  --tv-card: #ffffff;
+  --tv-line: #d3ddec;
+  --tv-track: #e6edf7;
+
+  --tv-text: #0f1c30;
+  --tv-text-2: #45566f; /* ຄຳອະທິບາຍ — ຍັງອ່ານໄດ້ຊັດຢູ່ໄກ */
+  --tv-text-3: #5c6e88; /* ຂໍ້ມູນຮອງ */
+  --tv-text-4: #7c8ca4; /* ຈາງສຸດ ໃຊ້ໜ້ອຍທີ່ສຸດ */
+
+  /* ສີສະຖານະເຂັ້ມກວ່າໂທນມືດ ເພາະສີອ່ອນຈະຈືດຫາຍເທິງພື້ນຂາວ */
+  --tv-ok: #00a06b;
+  --tv-ok-deep: #007a52;
+  --tv-warn: #e07800;
+  --tv-bad: #e0263a;
+  --tv-info: #0284c7;
+
+  /* ພື້ນຈາງໆບອກສະຖານະ — ເຫັນສີກ່ອນອ່ານໂຕເລກ */
+  --tv-ok-bg: rgba(0, 160, 107, 0.09);
+  --tv-warn-bg: rgba(224, 120, 0, 0.1);
+  --tv-bad-bg: rgba(224, 38, 58, 0.09);
+
+  /* ໂຕໜັງສືເທິງປ້າຍສີ — ຂາວສະເໝີ ບໍ່ແມ່ນສີພື້ນ ບໍ່ດັ່ງນັ້ນຈະຈືດ */
+  --tv-on-accent: #ffffff;
+}
 html,
       body {
         margin: 0;
         padding: 0;
-        background: #05070d;
+        background-color: var(--tv-bg);
+        /* ລາຍແຜນທີ່ຂົນສົ່ງ: ຈຸດຮັບ-ສົ່ງ + ເສັ້ນຖະໜົນຕັດກັນ.
+           ຄວາມເຂັ້ມຕ່ຳເພື່ອບໍ່ແຂ່ງກັບຕົວເລກເທິງຈໍ. */
+        background-image:
+          radial-gradient(circle at 18px 18px, var(--tv-route) 0 3px, transparent 4px),
+          radial-gradient(circle at 72px 54px, var(--tv-route) 0 2px, transparent 3px),
+          repeating-linear-gradient(
+            28deg,
+            transparent 0 26px,
+            var(--tv-road) 27px 29px,
+            transparent 30px 58px
+          ),
+          repeating-linear-gradient(
+            152deg,
+            transparent 0 44px,
+            rgba(2, 132, 199, 0.035) 45px 47px,
+            transparent 48px 92px
+          );
+        background-position: 0 0;
+        background-size:
+          108px 72px,
+          108px 72px,
+          150px 150px,
+          210px 210px;
+        background-repeat: repeat;
         overflow: hidden;
       }
       .tv-root {
@@ -11,8 +66,8 @@ html,
         width: 100vw;
         display: flex;
         flex-direction: column;
-        background: #05070d;
-        color: #e8eefc;
+        background-color: transparent;
+        color: var(--tv-text);
         font-size: 22px;
         line-height: 1.7;
         cursor: none;
@@ -24,14 +79,15 @@ html,
       }
       .tv-boot {
         font-size: 40px;
-        color: #7b8aa8;
+        color: var(--tv-text-3);
       }
       .tv-head {
+        background: var(--tv-card);
         display: flex;
         align-items: center;
         justify-content: space-between;
         padding: 18px 34px 12px;
-        border-bottom: 2px solid #16203a;
+        border-bottom: 2px solid var(--tv-line);
       }
       .tv-head-left {
         display: flex;
@@ -41,26 +97,28 @@ html,
       .tv-title {
         font-size: 34px;
         font-weight: 700;
-        color: #ffffff;
+        color: var(--tv-text);
       }
       .tv-date {
         font-size: 26px;
-        color: #8ea0c4;
+        color: var(--tv-text-2);
       }
       .tv-tabs {
         display: flex;
-        gap: 10px;
+        gap: 7px;
+        flex-wrap: wrap;
+        justify-content: center;
       }
       .tv-tab {
-        font-size: 20px;
-        padding: 6px 18px;
+        font-size: 18px;
+        padding: 5px 13px;
         border-radius: 999px;
-        color: #6d7f9f;
-        background: #0d1526;
+        color: var(--tv-text-3);
+        background: var(--tv-track);
       }
       .tv-tab-on {
-        color: #05070d;
-        background: #38bdf8;
+        color: var(--tv-on-accent);
+        background: var(--tv-info);
         font-weight: 700;
       }
       .tv-head-right {
@@ -74,18 +132,22 @@ html,
         font-variant-numeric: tabular-nums;
       }
       .tv-stale {
-        font-size: 18px;
-        color: #64748b;
+        font-size: 20px;
+        color: var(--tv-text-4);
       }
       .tv-stale-warn {
-        color: #fbbf24;
+        color: var(--tv-warn);
       }
       .tv-stale-bad {
-        color: #f87171;
+        color: var(--tv-bad);
         font-weight: 700;
       }
       .tv-body {
         flex: 1;
+        background-color: transparent;
+        background-image:
+          radial-gradient(circle at 12% 18%, rgba(2, 132, 199, 0.07), transparent 24%),
+          radial-gradient(circle at 88% 82%, rgba(0, 160, 107, 0.06), transparent 25%);
         min-height: 0;
         padding: 22px 34px;
         overflow: hidden;
@@ -99,86 +161,326 @@ html,
         gap: 26px;
         justify-content: center;
       }
-      .tv-kpis {
+      /* ── ໜ້າ 1: 3 ແຖບເຕັມຄວາມກວ້າງ ── */
+      .tv-overview {
+        height: 100%;
+        display: flex;
+        flex-direction: column;
+        gap: 14px;
+        min-height: 0;
+      }
+      /* ວົງກວມແຕ່ສອງແຖບເທິງ — ແຖບຖ້ຽວກຳລັງແລ່ນເຕັມຄວາມກວ້າງລຸ່ມສຸດ */
+      .tv-top {
         display: grid;
-        grid-template-columns: repeat(4, 1fr);
-        gap: 20px;
+        grid-template-columns: 480px 1fr;
+        gap: 14px;
+        min-height: 0;
       }
-      .tv-kpi {
-        background: #0b1322;
-        border: 2px solid #16203a;
-        border-radius: 20px;
-        padding: 22px 26px;
+      .tv-right {
+        display: flex;
+        flex-direction: column;
+        gap: 14px;
+        min-width: 0;
+        min-height: 0;
       }
-      .tv-kpi-value {
-        font-size: 92px;
+
+      /* ແຖບ 1 — ໂຕເລກຫຼັກ */
+
+
+      .tv-hl {
+        position: relative;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        background: var(--tv-card);
+        border: 2px solid var(--tv-line);
+        border-radius: 18px;
+        padding: 12px;
+      }
+      .tv-hl-svg {
+        width: 100%;
+        max-width: 330px;
+        height: auto;
+      }
+      .tv-hl-arc {
+        transition: stroke-dasharray 700ms ease;
+      }
+      .tv-hl-mid {
+        position: absolute;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+      }
+      .tv-hl-cap {
+        font-size: 18px;
+        color: var(--tv-text-2);
+      }
+      .tv-hl-pct {
+        font-size: 62px;
         font-weight: 800;
-        line-height: 1.1;
+        line-height: 1.05;
         font-variant-numeric: tabular-nums;
       }
-      .tv-kpi-label {
+      .tv-hl-pct.tv-tone-ok {
+        color: var(--tv-ok);
+      }
+      .tv-hl-pct.tv-tone-warn {
+        color: var(--tv-warn);
+      }
+      .tv-hl-pct.tv-tone-bad {
+        color: var(--tv-bad);
+      }
+      .tv-hl-count {
+        font-size: 20px;
+        font-weight: 700;
+        color: var(--tv-text);
+      }
+      .tv-hl-rest {
+        font-size: 17px;
+        color: var(--tv-text-3);
+      }
+
+      /* ແຖບໄຫລວຽກ */
+      .tv-flow {
+        display: flex;
+        flex-direction: column;
+        justify-content: center;
+        gap: 12px;
+        background: var(--tv-card);
+        border: 2px solid var(--tv-line);
+        border-radius: 18px;
+        padding: 16px 22px;
+      }
+      .tv-flow-head {
+        display: flex;
+        justify-content: space-between;
+        align-items: baseline;
+        font-size: 20px;
+        color: var(--tv-text-2);
+      }
+      .tv-flow-total {
+        font-size: 40px;
+        font-weight: 800;
+        color: var(--tv-text);
+        font-variant-numeric: tabular-nums;
+      }
+      .tv-flow-bar {
+        display: flex;
+        gap: 4px;
+        height: 46px;
+      }
+      .tv-flow-seg {
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        min-width: 0;
+        border-radius: 8px;
         font-size: 24px;
-        color: #8ea0c4;
+        font-weight: 800;
+        color: var(--tv-on-accent);
+        font-variant-numeric: tabular-nums;
+        transition: flex-grow 600ms ease;
       }
-      .tv-tone-good .tv-kpi-value {
-        color: #34d399;
+      .tv-seg-done {
+        background: var(--tv-ok);
       }
-      .tv-tone-warn .tv-kpi-value {
-        color: #fbbf24;
+      .tv-seg-truck {
+        background: var(--tv-info);
       }
-      .tv-tone-bad .tv-kpi-value {
-        color: #f87171;
+      .tv-seg-waiting {
+        background: var(--tv-warn);
       }
-      .tv-progress-wrap {
+      .tv-flow-legend {
+        display: flex;
+        gap: 22px;
+        font-size: 19px;
+        color: var(--tv-text-2);
+      }
+      .tv-flow-key b {
+        color: var(--tv-text);
+        font-variant-numeric: tabular-nums;
+      }
+      .tv-flow-dot {
+        display: inline-block;
+        width: 13px;
+        height: 13px;
+        border-radius: 4px;
+        margin-right: 7px;
+      }
+      .tv-flow-kpi {
+        display: flex;
+        gap: 30px;
+        border-top: 1px solid var(--tv-line);
+        padding-top: 10px;
+        font-size: 19px;
+        color: var(--tv-text-2);
+      }
+      .tv-flow-kpi-part {
+        display: flex;
+        align-items: baseline;
+        gap: 8px;
+      }
+      .tv-flow-kpi-part b {
+        font-size: 30px;
+        font-weight: 800;
+        font-variant-numeric: tabular-nums;
+      }
+      .tv-flow-kpi-part b.tv-tone-ok {
+        color: var(--tv-ok);
+      }
+      .tv-flow-kpi-part b.tv-tone-bad {
+        color: var(--tv-bad);
+      }
+      .tv-flow-kpi-part em {
+        font-style: normal;
+        font-size: 18px;
+        color: var(--tv-text-3);
+      }
+
+      /* ແຖບ 2 — ວຽກທີ່ຕ້ອງຈັດ */
+      .tv-todo {
+        background: var(--tv-card);
+        border: 2px solid var(--tv-line);
+        border-radius: 18px;
+        padding: 8px 16px 12px;
+      }
+      .tv-todo-head {
+        display: flex;
+        justify-content: space-between;
+        align-items: baseline;
+        font-size: 20px;
+        color: var(--tv-text-2);
+        padding-bottom: 6px;
+      }
+      .tv-todo-total {
+        font-size: 24px;
+        font-weight: 800;
+        color: var(--tv-warn);
+        font-variant-numeric: tabular-nums;
+      }
+      .tv-todo-clear {
+        font-size: 28px;
+        color: var(--tv-ok);
+        padding: 10px 0;
+      }
+      .tv-tiles {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(108px, 1fr));
+        gap: 8px;
+      }
+      .tv-tile {
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        gap: 1px;
+        padding: 5px 6px;
+        border-radius: 11px;
+        border: 2px solid var(--tv-line);
+        border-top-width: 5px;
+        background: var(--tv-track);
+      }
+      .tv-tile-count {
+        font-size: 30px;
+        font-weight: 800;
+        line-height: 1.05;
+        color: var(--tv-text);
+        font-variant-numeric: tabular-nums;
+      }
+      .tv-tile-due {
+        font-size: 17px;
+        color: var(--tv-text-2);
+        font-variant-numeric: tabular-nums;
+      }
+      .tv-tile-late {
+        font-size: 16px;
+        font-weight: 700;
+      }
+      .tv-tile-ok {
+        border-top-color: var(--tv-ok);
+      }
+      .tv-tile-ok .tv-tile-late {
+        color: var(--tv-ok);
+      }
+      .tv-tile-warn {
+        border-top-color: var(--tv-warn);
+      }
+      .tv-tile-warn .tv-tile-late {
+        color: var(--tv-warn);
+      }
+      .tv-tile-bad {
+        border-top-color: var(--tv-bad);
+      }
+      .tv-tile-bad .tv-tile-late {
+        color: var(--tv-bad);
+      }
+      .tv-tile-soon {
+        border-top-color: var(--tv-text-4);
+      }
+      .tv-tile-soon .tv-tile-late {
+        color: var(--tv-text-3);
+      }
+
+      /* ແຖບ 3 — ຖ້ຽວກຳລັງແລ່ນ */
+      .tv-trips {
+        flex: 1;
+        min-height: 0;
         display: flex;
         flex-direction: column;
         gap: 10px;
+        background: var(--tv-card);
+        border: 2px solid var(--tv-line);
+        border-radius: 18px;
+        padding: 12px 20px 16px;
       }
-      .tv-progress-head {
+      .tv-trips-head {
         display: flex;
         justify-content: space-between;
-        font-size: 26px;
-        color: #8ea0c4;
-      }
-      .tv-progress-pct {
-        font-size: 40px;
-        font-weight: 800;
-        color: #34d399;
-      }
-      .tv-progress {
-        height: 32px;
-        background: #0d1526;
-        border-radius: 999px;
-        overflow: hidden;
-      }
-      .tv-progress-fill {
-        height: 100%;
-        background: linear-gradient(90deg, #059669, #34d399);
-        transition: width 600ms ease;
-      }
-      .tv-subrow {
-        display: flex;
-        gap: 40px;
-      }
-      .tv-sub {
-        display: flex;
         align-items: baseline;
-        gap: 10px;
+        gap: 16px;
+        font-size: 20px;
+        color: var(--tv-text-2);
       }
-      .tv-sub-value {
-        font-size: 40px;
-        font-weight: 700;
+      .tv-trips-counts {
+        font-size: 18px;
+        color: var(--tv-text-2);
         font-variant-numeric: tabular-nums;
       }
-      .tv-tone-warn .tv-sub-value {
-        color: #fbbf24;
+      .tv-fleet-kpi {
+        display: inline-flex;
+        align-items: center;
+        gap: 8px;
+        font-size: 17px;
+        font-variant-numeric: tabular-nums;
       }
-      .tv-tone-bad .tv-sub-value {
-        color: #f87171;
+      .tv-fleet-kpi > span {
+        padding: 3px 10px;
+        border-radius: 999px;
+        border: 1px solid var(--tv-line);
+        white-space: nowrap;
       }
-      .tv-sub-label {
+      .tv-fleet-kpi b {
         font-size: 22px;
-        color: #8ea0c4;
+        font-weight: 900;
+      }
+      .tv-fleet-total {
+        color: var(--tv-info);
+        background: rgba(2, 132, 199, 0.08);
+      }
+      .tv-fleet-free {
+        color: var(--tv-ok-deep);
+        background: var(--tv-ok-bg);
+      }
+      .tv-fleet-busy {
+        color: var(--tv-warn);
+        background: var(--tv-warn-bg);
+      }
+      .tv-count-warn {
+        color: var(--tv-warn);
+        font-weight: 700;
+      }
+      .tv-count-bad {
+        color: var(--tv-bad);
+        font-weight: 700;
       }
 
       /* ໜ້າ 2 */
@@ -195,17 +497,18 @@ html,
         gap: 12px;
       }
       .tv-trip {
-        background: #0b1322;
-        border-left: 8px solid #38bdf8;
+        background: var(--tv-card);
+        border-left: 8px solid var(--tv-info);
         border-radius: 14px;
         padding: 12px 18px;
       }
       .tv-trip-stalled {
-        border-left-color: #f87171;
-        background: #1a0f14;
+        border-left-color: var(--tv-bad);
+        background: var(--tv-bad-bg);
       }
       .tv-trip-done {
-        border-left-color: #34d399;
+        border-left-color: var(--tv-ok);
+        background: var(--tv-ok-bg);
       }
       .tv-trip-main {
         display: flex;
@@ -218,55 +521,55 @@ html,
       }
       .tv-trip-driver {
         font-size: 24px;
-        color: #cbd5e1;
+        color: var(--tv-text);
       }
       .tv-trip-route {
         font-size: 20px;
-        color: #7b8aa8;
+        color: var(--tv-text-3);
       }
       .tv-trip-bar {
         position: relative;
         height: 26px;
-        background: #0d1526;
+        background: var(--tv-track);
         border-radius: 999px;
         overflow: hidden;
         margin: 6px 0 4px;
       }
       .tv-trip-fill {
         height: 100%;
-        background: #0ea5e9;
+        background: var(--tv-info);
         transition: width 600ms ease;
       }
       .tv-trip-done .tv-trip-fill {
-        background: #34d399;
+        background: var(--tv-ok);
       }
       .tv-trip-stalled .tv-trip-fill {
-        background: #f87171;
+        background: var(--tv-bad);
       }
       .tv-trip-count {
         position: absolute;
         right: 14px;
         top: 0;
-        font-size: 18px;
+        font-size: 20px;
         font-weight: 700;
-        color: #e8eefc;
+        color: var(--tv-text);
       }
       .tv-trip-meta {
         font-size: 19px;
-        color: #8ea0c4;
+        color: var(--tv-text-2);
       }
       .tv-flag {
-        color: #f87171;
+        color: var(--tv-bad);
         font-weight: 700;
       }
       .tv-flag-ok {
-        color: #34d399;
+        color: var(--tv-ok);
         font-weight: 700;
       }
       .tv-more {
         grid-column: 1 / -1;
         text-align: center;
-        color: #7b8aa8;
+        color: var(--tv-text-3);
         font-size: 20px;
       }
 
@@ -278,8 +581,8 @@ html,
         gap: 18px;
       }
       .tv-panel {
-        background: #0b1322;
-        border: 2px solid #16203a;
+        background: var(--tv-card);
+        border: 2px solid var(--tv-line);
         border-radius: 18px;
         padding: 16px 20px;
         overflow: hidden;
@@ -288,14 +591,14 @@ html,
         margin: 0 0 10px;
         font-size: 26px;
         font-weight: 700;
-        color: #ffffff;
+        color: var(--tv-text);
       }
       .tv-panel-empty {
         font-size: 22px;
-        color: #4b5b76;
+        color: var(--tv-text-4);
       }
       .tv-panel-row {
-        border-top: 1px solid #16203a;
+        border-top: 1px solid var(--tv-line);
         padding: 8px 0;
       }
       .tv-panel-main {
@@ -316,14 +619,14 @@ html,
         white-space: nowrap;
       }
       .tv-tone-warn .tv-panel-side {
-        color: #fbbf24;
+        color: var(--tv-warn);
       }
       .tv-tone-bad .tv-panel-side {
-        color: #f87171;
+        color: var(--tv-bad);
       }
       .tv-panel-meta {
         font-size: 19px;
-        color: #7b8aa8;
+        color: var(--tv-text-3);
         white-space: nowrap;
         overflow: hidden;
         text-overflow: ellipsis;
@@ -334,16 +637,63 @@ html,
         height: 100%;
         display: flex;
         flex-direction: column;
-        gap: 14px;
+        gap: 10px;
         min-height: 0;
       }
+      .tv-vhead {
+        display: flex;
+        align-items: center;
+        gap: 26px;
+        flex-wrap: wrap;
+      }
+      .tv-vhead-title {
+        font-size: 24px;
+        font-weight: 700;
+        color: var(--tv-text);
+        margin-right: 4px;
+      }
+      .tv-vstat {
+        display: inline-flex;
+        align-items: baseline;
+        gap: 8px;
+        font-size: 20px;
+        color: var(--tv-text-2);
+      }
+      .tv-vstat b {
+        font-size: 30px;
+        font-weight: 800;
+        color: var(--tv-text);
+        font-variant-numeric: tabular-nums;
+      }
+      .tv-vdot {
+        width: 14px;
+        height: 14px;
+        border-radius: 50%;
+        align-self: center;
+      }
+      .tv-vdot-move {
+        background: var(--tv-ok);
+      }
+      .tv-vdot-stop {
+        background: var(--tv-warn);
+      }
+      .tv-vdot-stale {
+        background: var(--tv-bad);
+      }
+      .tv-vdot-bill {
+        background: var(--tv-info);
+      }
+      .tv-vdot-trail {
+        background: var(--tv-text-4);
+      }
+
       .tv-empty {
         height: 100%;
         display: flex;
         align-items: center;
         justify-content: center;
         font-size: 44px;
-        color: #3c4a63;
+        color: var(--tv-text-4);
       }
 
       /* ແຖບແລ່ນ */
@@ -351,8 +701,8 @@ html,
         display: flex;
         align-items: center;
         gap: 18px;
-        border-top: 2px solid #16203a;
-        background: #080d18;
+        border-top: 2px solid var(--tv-line);
+        background: var(--tv-bg);
         padding: 8px 0 8px 24px;
         overflow: hidden;
       }
@@ -360,14 +710,14 @@ html,
         flex: none;
         font-size: 20px;
         font-weight: 700;
-        color: #05070d;
-        background: #34d399;
+        color: var(--tv-bg);
+        background: var(--tv-ok);
         padding: 4px 16px;
         border-radius: 999px;
       }
       .tv-ticker-empty {
         font-size: 20px;
-        color: #4b5b76;
+        color: var(--tv-text-4);
       }
       .tv-ticker-track {
         display: flex;
@@ -377,15 +727,15 @@ html,
       }
       .tv-ticker-item {
         font-size: 21px;
-        color: #cbd5e1;
+        color: var(--tv-text);
       }
       .tv-ticker-item b {
-        color: #34d399;
+        color: var(--tv-ok);
         margin-right: 8px;
         font-variant-numeric: tabular-nums;
       }
       .tv-ticker-item em {
-        color: #7b8aa8;
+        color: var(--tv-text-3);
         font-style: normal;
         margin-left: 10px;
       }
@@ -404,22 +754,22 @@ html,
   min-height: 0;
   border-radius: 18px;
   overflow: hidden;
-  border: 2px solid #16203a;
-  background: #0b1322;
+  border: 2px solid var(--tv-line);
+  background: var(--tv-card);
 }
 .tv-map-loading {
   display: flex;
   align-items: center;
   justify-content: center;
   font-size: 28px;
-  color: #4b5b76;
+  color: var(--tv-text-4);
 }
 /* ຈໍ TV ອ່ານໄກ — ຫຼຸດຄວາມສະຫວ່າງຂອງ tile ລົງໃຫ້ໝຸດເດັ່ນຂຶ້ນ */
 .tv-map .leaflet-tile-pane {
-  filter: grayscale(0.35) brightness(0.62) contrast(1.12);
+  filter: saturate(1.05) contrast(1.04);
 }
 .tv-map .leaflet-container {
-  background: #0b1322;
+  background: var(--tv-card);
 }
 .tv-pin-wrap {
   pointer-events: none;
@@ -433,45 +783,65 @@ html,
   white-space: nowrap;
   padding: 5px 14px 5px 10px;
   border-radius: 999px;
-  background: rgba(5, 7, 13, 0.9);
-  border: 2px solid #38bdf8;
-  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.55);
+  background: rgba(255, 255, 255, 0.95);
+  border: 2px solid var(--tv-info);
+  box-shadow: 0 3px 10px rgba(15, 28, 48, 0.28);
 }
-.tv-pin-dot {
-  width: 12px;
-  height: 12px;
-  border-radius: 50%;
-  background: #38bdf8;
+.tv-pin-car {
+  width: 30px;
+  height: 22px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--tv-info);
   flex: none;
+}
+.tv-pin-car svg {
+  width: 30px;
+  height: 22px;
+  display: block;
 }
 .tv-pin-name {
   font-size: 20px;
   font-weight: 700;
-  color: #ffffff;
+  color: var(--tv-text);
 }
 .tv-pin-speed {
-  font-size: 17px;
-  color: #8ea0c4;
+  font-size: 19px;
+  color: var(--tv-text-2);
 }
 .tv-pin-move {
-  border-color: #34d399;
+  border-color: var(--tv-ok);
 }
-.tv-pin-move .tv-pin-dot {
-  background: #34d399;
+.tv-pin-move .tv-pin-car {
+  color: var(--tv-ok);
   animation: tv-pulse 1.6s ease-in-out infinite;
 }
 .tv-pin-stop {
-  border-color: #fbbf24;
+  border-color: var(--tv-warn);
 }
-.tv-pin-stop .tv-pin-dot {
-  background: #fbbf24;
+.tv-pin-stop .tv-pin-car {
+  color: var(--tv-warn);
 }
 .tv-pin-stale {
-  border-color: #f87171;
+  border-color: var(--tv-bad);
   opacity: 0.8;
 }
-.tv-pin-stale .tv-pin-dot {
-  background: #f87171;
+.tv-pin-stale .tv-pin-car {
+  color: var(--tv-bad);
+}
+.tv-map-arrow-wrap {
+  pointer-events: none;
+}
+.tv-map-arrow {
+  display: block;
+  width: 0;
+  height: 0;
+  border-left: 7px solid transparent;
+  border-right: 7px solid transparent;
+  border-bottom: 16px solid currentColor;
+  filter: drop-shadow(0 1px 2px rgba(15, 28, 48, 0.4));
+  transform-origin: 7px 8px;
 }
 @keyframes tv-pulse {
   0%,
@@ -488,7 +858,7 @@ html,
   align-items: center;
   gap: 8px;
   font-size: 20px;
-  color: #8ea0c4;
+  color: var(--tv-text-2);
 }
 .tv-dot {
   width: 14px;
@@ -498,13 +868,13 @@ html,
   margin-left: 14px;
 }
 .tv-dot-move {
-  background: #34d399;
+  background: var(--tv-ok);
 }
 .tv-dot-stop {
-  background: #fbbf24;
+  background: var(--tv-warn);
 }
 .tv-dot-stale {
-  background: #f87171;
+  background: var(--tv-bad);
 }
 
 /* ໜ້າຢູ່ຄົງທີ່ ພຽງແຕ່ເຊື່ອງ — ບໍ່ຖອດອອກ ເພື່ອບໍ່ໃຫ້ແຜນທີ່ໂຫຼດ tile ຄືນທຸກຮອບ */
@@ -517,14 +887,14 @@ html,
 
 /* ໝຸດຈາກບິນທີ່ປິດລ່າສຸດ — ບອກວ່າຖ້ຽວໄປຮອດໃສແລ້ວ ເມື່ອລົດບໍ່ມີ tracker */
 .tv-pin-bill {
-  border-color: #38bdf8;
+  border-color: var(--tv-info);
   border-style: dashed;
 }
-.tv-pin-bill .tv-pin-dot {
-  background: #38bdf8;
+.tv-pin-bill .tv-pin-car {
+  color: var(--tv-info);
 }
 .tv-dot-bill {
-  background: #38bdf8;
+  background: var(--tv-info);
 }
 
 /* ── ໜ້າ 5: ອັນດັບຄົນຂັບ ──────────────────────────────────────── */
@@ -532,8 +902,8 @@ html,
   display: flex;
   align-items: center;
   gap: 12px;
-  background: #0b1322;
-  border: 2px solid #16203a;
+  background: var(--tv-card);
+  border: 2px solid var(--tv-line);
   border-radius: 14px;
   padding: 8px 16px;
 }
@@ -545,14 +915,14 @@ html,
   align-items: center;
   justify-content: center;
   border-radius: 10px;
-  background: #0d1526;
-  color: #6d7f9f;
+  background: var(--tv-track);
+  color: var(--tv-text-3);
   font-size: 20px;
   font-weight: 800;
 }
 .tv-drv-top {
-  background: #38bdf8;
-  color: #05070d;
+  background: var(--tv-info);
+  color: var(--tv-bg);
 }
 .tv-drv-main {
   flex: 1;
@@ -563,14 +933,14 @@ html,
 .tv-drv-name {
   font-size: 24px;
   font-weight: 700;
-  color: #ffffff;
+  color: var(--tv-text);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
 }
 .tv-drv-meta {
-  font-size: 18px;
-  color: #7b8aa8;
+  font-size: 20px;
+  color: var(--tv-text-3);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -587,16 +957,418 @@ html,
   font-variant-numeric: tabular-nums;
 }
 .tv-drv-pct.tv-tone-good {
-  color: #34d399;
+  color: var(--tv-ok);
 }
 .tv-drv-pct.tv-tone-warn {
-  color: #fbbf24;
+  color: var(--tv-warn);
 }
 .tv-drv-pct.tv-tone-bad {
-  color: #f87171;
+  color: var(--tv-bad);
 }
 .tv-drv-sub {
   font-size: 16px;
-  color: #7b8aa8;
+  color: var(--tv-text-3);
   font-variant-numeric: tabular-nums;
+}
+
+/* ── ແຖບຖ້ຽວກຳລັງແລ່ນ ຢູ່ລຸ່ມໜ້າພາບລວມ ─────────────────────────── */
+.tv-strip {
+  flex: 1;
+  min-height: 0;
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(215px, 1fr));
+  grid-auto-rows: 1fr;
+  gap: 12px;
+}
+.tv-strip-empty {
+  display: block;
+  font-size: 22px;
+  color: var(--tv-text-4);
+  padding: 10px 2px;
+}
+.tv-scard {
+  background: var(--tv-track);
+  border: 2px solid var(--tv-line);
+  border-left-width: 7px;
+  border-left-color: var(--tv-info);
+  border-radius: 14px;
+  padding: 8px 14px;
+  min-width: 0;
+}
+.tv-scard-stalled {
+  border-left-color: var(--tv-bad);
+  background: var(--tv-bad-bg);
+}
+.tv-scard-done {
+  border-left-color: var(--tv-ok);
+  background: var(--tv-ok-bg);
+}
+.tv-scard-top {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 8px;
+}
+/* ເລກຖ້ຽວ — ຢູ່ກາງ ໃຫ້ຫົດໄດ້ກ່ອນເພື່ອນເມື່ອບັດແຄບ */
+.tv-scard-doc {
+  flex: 1;
+  min-width: 0;
+  font-size: 15px;
+  color: var(--tv-text-3);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.tv-scard-car {
+  font-size: 19px;
+  font-weight: 800;
+  color: var(--tv-text);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.tv-scard-count {
+  font-size: 17px;
+  font-weight: 700;
+  color: var(--tv-text);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+.tv-scard-bar {
+  height: 12px;
+  background: var(--tv-track);
+  border-radius: 999px;
+  overflow: hidden;
+  margin: 5px 0 3px;
+}
+.tv-scard-fill {
+  height: 100%;
+  background: var(--tv-info);
+  transition: width 600ms ease;
+}
+.tv-scard-done .tv-scard-fill {
+  background: var(--tv-ok);
+}
+.tv-scard-stalled .tv-scard-fill {
+  background: var(--tv-bad);
+}
+.tv-scard-status {
+  font-size: 16px;
+  font-weight: 700;
+  color: var(--tv-info);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.tv-scard-stalled .tv-scard-status {
+  color: var(--tv-bad);
+}
+.tv-scard-done .tv-scard-status {
+  color: var(--tv-ok);
+}
+.tv-scard-meta {
+  font-size: 15px;
+  color: var(--tv-text-2);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.tv-scard-driver {
+  font-size: 15px;
+  color: var(--tv-text-3);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.tv-scard-more {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 26px;
+  font-weight: 800;
+  color: var(--tv-text-3);
+  border-left-color: var(--tv-line);
+}
+
+/* ── ວຽກມື້ນີ້ + ວຽກທີ່ຕ້ອງໄລ່ຕາມ ─────────────────────────────── */
+.tv-work {
+  display: flex;
+  flex-direction: column;
+  background: linear-gradient(180deg, #16233c 0%, var(--tv-card) 55%);
+  border: 3px solid #33456a;
+  border-radius: 26px;
+  padding: 24px 34px;
+  min-width: 0;
+}
+.tv-work-head {
+  font-size: 21px;
+  font-weight: 700;
+  color: var(--tv-text-2);
+}
+.tv-work-total {
+  font-size: 62px;
+  font-weight: 800;
+  line-height: 1.05;
+  color: var(--tv-text);
+  font-variant-numeric: tabular-nums;
+}
+.tv-work-parts {
+  padding: 6px 0 10px;
+  border-bottom: 1px solid var(--tv-line);
+}
+.tv-part {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 12px;
+  padding: 3px 0;
+}
+.tv-part-label {
+  font-size: 19px;
+  color: var(--tv-text-2);
+}
+.tv-part-value {
+  font-size: 26px;
+  font-weight: 800;
+  color: var(--tv-text);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+.tv-kpi-block {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  justify-content: space-evenly;
+  padding-top: 8px;
+}
+.tv-kpi-line {
+  display: grid;
+  grid-template-rows: auto auto;
+  grid-template-columns: auto 1fr;
+  column-gap: 14px;
+}
+.tv-kpi-label {
+  grid-column: 1 / -1;
+  font-size: 19px;
+  color: var(--tv-text-2);
+}
+.tv-kpi-big {
+  font-size: 44px;
+  font-weight: 800;
+  line-height: 1.05;
+  font-variant-numeric: tabular-nums;
+}
+.tv-kpi-big.tv-tone-ok {
+  color: var(--tv-ok);
+}
+.tv-kpi-big.tv-tone-bad {
+  color: var(--tv-bad);
+}
+.tv-kpi-side {
+  align-self: end;
+  padding-bottom: 8px;
+  font-size: 21px;
+  font-weight: 700;
+  color: var(--tv-text);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+/* ຊື່ສາຂາຢູ່ຫົວຈໍ ເມື່ອຈໍນັ້ນລັອກສາຂາດຽວ */
+.tv-branch {
+  font-size: 26px;
+  font-weight: 700;
+  color: var(--tv-on-accent);
+  background: var(--tv-info);
+  padding: 3px 16px;
+  border-radius: 999px;
+}
+/* ລັອກສາຂາແລ້ວ ບໍ່ຕ້ອງມີຖັນຊື່ສາຂາ */
+
+
+/* ໂມງເດີນ — ໃຫ້ໂຕເລກກວ້າງເທົ່າກັນ ບໍ່ດັ່ງນັ້ນແຖວຈະດີ້ນທຸກວິນາທີ */
+.tv-scard-run {
+  font-variant-numeric: tabular-nums;
+  color: var(--tv-text);
+  font-weight: 700;
+}
+
+.tv-scard-km {
+  color: var(--tv-text-2);
+  font-variant-numeric: tabular-nums;
+}
+.tv-scard-eta {
+  font-size: 15px;
+  font-weight: 700;
+  color: var(--tv-info);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* ── ໜ້າ 6: ບິນທີ່ຊ້າ ເປັນລາຍບິນ ─────────────────────────────── */
+.tv-late {
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.tv-late-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  font-size: 24px;
+  color: var(--tv-text-2);
+}
+.tv-late-total {
+  font-size: 32px;
+  font-weight: 800;
+  color: var(--tv-bad);
+  font-variant-numeric: tabular-nums;
+}
+.tv-late-cols {
+  flex: 1;
+  min-height: 0;
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 14px;
+}
+.tv-late-col {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.tv-late-row {
+  display: grid;
+  grid-template-columns: 104px 1fr 66px;
+  align-items: center;
+  gap: 12px;
+  background: var(--tv-card);
+  border: 2px solid var(--tv-line);
+  border-left-width: 7px;
+  border-radius: 12px;
+  padding: 6px 14px;
+}
+.tv-late-bad {
+  border-left-color: var(--tv-bad);
+}
+.tv-late-warn {
+  border-left-color: var(--tv-warn);
+}
+.tv-late-soon {
+  border-left-color: var(--tv-info);
+}
+.tv-late-days {
+  font-size: 22px;
+  font-weight: 800;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+.tv-late-bad .tv-late-days {
+  color: var(--tv-bad);
+}
+.tv-late-warn .tv-late-days {
+  color: var(--tv-warn);
+}
+.tv-late-soon .tv-late-days {
+  color: var(--tv-info);
+}
+.tv-late-main {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+.tv-late-cust {
+  font-size: 21px;
+  font-weight: 700;
+  color: var(--tv-text);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.tv-late-meta {
+  font-size: 17px;
+  color: var(--tv-text-3);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.tv-late-due {
+  font-size: 19px;
+  color: var(--tv-text-2);
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+.tv-late-rest {
+  font-size: 19px;
+  color: var(--tv-text-3);
+}
+
+/* ── ແຖບຄວາມຄືບໜ້າທີ່ມີຊີວິດ ────────────────────────────────────
+   ລາຍວິ່ງບອກວ່າ "ຍັງເຄື່ອນຢູ່" — ຖ້ຽວທີ່ຄົບແລ້ວບໍ່ຕ້ອງມີ ເພາະມັນຢຸດແລ້ວ. */
+@keyframes tv-stripes {
+  to {
+    background-position: 34px 0;
+  }
+}
+@keyframes tv-glow {
+  0%,
+  100% {
+    opacity: 0.55;
+  }
+  50% {
+    opacity: 1;
+  }
+}
+.tv-scard-fill,
+.tv-trip-fill {
+  position: relative;
+  background-image: repeating-linear-gradient(
+    45deg,
+    rgba(255, 255, 255, 0.28) 0 12px,
+    transparent 12px 24px
+  );
+  background-size: 34px 100%;
+  animation: tv-stripes 900ms linear infinite;
+}
+/* ຫົວແຖບເຫຼື້ອມເປັນຈັງຫວະ — ຈຸດທີ່ຕາຈັບໄດ້ຢູ່ໄກ */
+.tv-scard-fill::after,
+.tv-trip-fill::after {
+  content: "";
+  position: absolute;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  width: 10px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.85);
+  animation: tv-glow 1.2s ease-in-out infinite;
+}
+/* ຄົບແລ້ວ = ຢຸດນິ້ງ */
+.tv-scard-done .tv-scard-fill,
+.tv-trip-done .tv-trip-fill {
+  background-image: none;
+  animation: none;
+}
+.tv-scard-done .tv-scard-fill::after,
+.tv-trip-done .tv-trip-fill::after {
+  display: none;
+}
+/* ຍັງບໍ່ໄດ້ສົ່ງບິນໃດເລີຍ — ບໍ່ມີແຖບໃຫ້ເຫຼື້ອມ */
+.tv-scard-fill[style*="width: 0%"]::after,
+.tv-trip-fill[style*="width: 0%"]::after {
+  display: none;
+}
+@media (prefers-reduced-motion: reduce) {
+  .tv-scard-fill,
+  .tv-trip-fill {
+    animation: none;
+  }
+  .tv-scard-fill::after,
+  .tv-trip-fill::after {
+    animation: none;
+  }
 }

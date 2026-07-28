@@ -110,6 +110,7 @@ export const Actions = {
   getBillsPartialList: bills.getBillsPartialList,
   getPendingBillSchedule: bills.getPendingBillSchedule,
   getPendingBillScheduleHistory: bills.getPendingBillScheduleHistory,
+  getBillDeliveryHistory: bills.getBillDeliveryHistory,
   upsertPendingBillSchedule: bills.upsertPendingBillSchedule,
   bulkUpdatePendingBills: bills.bulkUpdatePendingBills,
   setPendingBillLocation: bills.setPendingBillLocation,

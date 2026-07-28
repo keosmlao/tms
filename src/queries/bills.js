@@ -1904,7 +1904,72 @@ async function sendBillContactLine(billNo, target) {
   return sendLineText(to, msg);
 }
 
+/**
+ * ປະຫວັດການສົ່ງຂອງບິນ — ບິນທີ່ຕ້ອງທະຍອຍສົ່ງຫຼາຍຮອບ.
+ *
+ * ໜ້າ pending ບອກແຕ່ "ເປີດມາ 151 ວັນ" ຄືກັບວ່າບໍ່ມີໃຜແຕະຕ້ອງ ທັງທີ່ບາງບິນ
+ * ສົ່ງມາແລ້ວ 5 ຮອບ. ຟັງຊັນນີ້ຄືນແຕ່ລະຮອບພ້ອມຈຳນວນທີ່ສົ່ງໄດ້ຮອບນັ້ນ ເພື່ອ
+ * ໃຫ້ຜູ້ຈັດຖ້ຽວຮູ້ວ່າຄວນຂຶ້ນເທົ່າໃດໃນຮອບຕໍ່ໄປ.
+ */
+async function getBillDeliveryHistory(billNo) {
+  const bill = String(billNo || "").trim();
+  if (!bill) return { rounds: [], ordered: 0, delivered: 0, remaining: 0 };
+
+  const [rounds, totals] = await Promise.all([
+    query(
+      `SELECT d.doc_no,
+              to_char(t.date_logistic, 'DD/MM/YYYY') AS day,
+              COALESCE(NULLIF(TRIM(dv.name_1), ''), t.driver, '-') AS driver,
+              COALESCE(NULLIF(TRIM(car.name_1), ''), t.car, '-') AS car,
+              COALESCE(d.status, 0)::int AS status,
+              to_char(d.sent_end, 'DD/MM/YYYY HH24:MI') AS closed_at,
+              COALESCE(NULLIF(TRIM(d.remark), ''), '') AS remark,
+              COALESCE(qty.loaded, 0)::numeric AS loaded,
+              COALESCE(qty.delivered, 0)::numeric AS delivered
+       FROM public.odg_tms_detail d
+       LEFT JOIN odg_tms t ON t.doc_no = d.doc_no
+       LEFT JOIN public.odg_tms_driver dv ON dv.code = t.driver
+       LEFT JOIN public.odg_tms_car car ON car.code = t.car
+       LEFT JOIN LATERAL (
+         SELECT SUM(COALESCE(i.selected_qty, 0)) AS loaded,
+                SUM(COALESCE(i.delivered_qty, 0)) AS delivered
+         FROM public.odg_tms_detail_item i
+         WHERE i.doc_no = d.doc_no AND i.bill_no = d.bill_no
+       ) qty ON true
+       WHERE d.bill_no = $1
+       ORDER BY t.date_logistic NULLS LAST, d.doc_no`,
+      [bill]
+    ),
+    queryOne(
+      `SELECT COALESCE(SUM(qty), 0)::numeric AS ordered
+       FROM ic_trans_detail WHERE doc_no = $1`,
+      [bill]
+    ),
+  ]);
+
+  const ordered = Number(totals?.ordered ?? 0);
+  const delivered = rounds.reduce((sum, row) => sum + Number(row.delivered ?? 0), 0);
+  return {
+    rounds: rounds.map((row, index) => ({
+      round: index + 1,
+      doc_no: row.doc_no,
+      day: row.day,
+      driver: row.driver,
+      car: row.car,
+      status: Number(row.status ?? 0),
+      closed_at: row.closed_at,
+      remark: row.remark,
+      loaded: Number(row.loaded ?? 0),
+      delivered: Number(row.delivered ?? 0),
+    })),
+    ordered,
+    delivered,
+    remaining: Math.max(0, ordered - delivered),
+  };
+}
+
 module.exports = {
+  getBillDeliveryHistory,
   applyRemainingCounts,
   sendBillContactLine,
   getAvailableBillsWithProducts,

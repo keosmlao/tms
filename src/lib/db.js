@@ -27,7 +27,10 @@ function buildPoolConfig(prefix, label) {
     database: getRequiredEnv(`PG_DATABASE${prefix}`, label),
     user: getRequiredEnv(`PG_USER${prefix}`, label),
     password: process.env[`PG_PASSWORD${prefix}`] ?? "",
-    max: 10,
+    // 10 ບໍ່ພໍແລ້ວ: ໜ້າ TV ຍິງຫຼາຍ query ພ້ອມກັນ, getBillsPending ຍິງພາຍໃນອີກ
+    // ຫຼາຍອັນ ແລະ worker GPS ກໍ່ຕ້ອງການ connection ຂອງມັນເອງ — ພໍເຕັມ pool
+    // ແລ້ວທຸກຢ່າງ timeout ພ້ອມກັນ. ປັບໄດ້ດ້ວຍ PG_POOL_MAX.
+    max: Number(process.env.PG_POOL_MAX ?? 25),
     idleTimeoutMillis: 30_000,
     connectionTimeoutMillis: 10_000,
     ssl: getSslConfig(process.env[`PG_SSL${prefix}`]),

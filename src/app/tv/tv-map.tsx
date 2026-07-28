@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef } from "react";
+import { useCallback, useEffect, useRef } from "react";
 import L from "leaflet";
 import "leaflet/dist/leaflet.css";
 
@@ -39,7 +39,11 @@ function pinHtml(vehicle: MapVehicle): string {
       : "ຈອດ";
   // Escaped because car names come from the tracker, not from us.
   const name = escapeHtml(vehicle.car_name || vehicle.car_code);
-  return `<div class="tv-pin tv-pin-${tone}"><span class="tv-pin-dot"></span><span class="tv-pin-name">${name}</span><span class="tv-pin-speed">${speed}</span></div>`;
+  return `<div class="tv-pin tv-pin-${tone}"><span class="tv-pin-car">${carSvg()}</span><span class="tv-pin-name">${name}</span><span class="tv-pin-speed">${speed}</span></div>`;
+}
+
+function carSvg(): string {
+  return `<svg viewBox="0 0 32 22" aria-hidden="true"><path d="M4 5h15.5l4.5 5H28v7h-2.2a4 4 0 0 1-7.6 0H12a4 4 0 0 1-7.6 0H2V8a3 3 0 0 1 2-3Zm16.8 5-2.7-3H15v3h5.8ZM8.2 19a2 2 0 1 0 0-4 2 2 0 0 0 0 4Zm13.8 0a2 2 0 1 0 0-4 2 2 0 0 0 0 4Z" fill="currentColor"/></svg>`;
 }
 
 function escapeHtml(value: string): string {
@@ -65,7 +69,7 @@ export type MapTripPoint = {
 function billPinHtml(point: MapTripPoint): string {
   const name = escapeHtml(point.car);
   const at = escapeHtml(point.at ?? "");
-  return `<div class="tv-pin tv-pin-bill"><span class="tv-pin-dot"></span><span class="tv-pin-name">${name}</span><span class="tv-pin-speed">${at}</span></div>`;
+  return `<div class="tv-pin tv-pin-bill"><span class="tv-pin-car">${carSvg()}</span><span class="tv-pin-name">${name}</span><span class="tv-pin-speed">${at}</span></div>`;
 }
 
 export type MapTrail = {
@@ -76,6 +80,70 @@ export type MapTrail = {
 
 // ສີແຍກແຕ່ລະຄັນ — ເລືອກຕາມລະຫັດລົດ ຈຶ່ງໄດ້ສີເກົ່າທຸກຄັ້ງ ບໍ່ປ່ຽນໄປມາ.
 const TRAIL_COLORS = ["#38bdf8", "#f472b6", "#a78bfa", "#fbbf24", "#4ade80", "#22d3ee"];
+
+type SpreadPoint = {
+  key: string;
+  lat: number;
+  lng: number;
+};
+
+type SpreadPlacement = {
+  actual: L.LatLng;
+  display: L.LatLng;
+  spread: boolean;
+  angle: number;
+};
+
+// Labels on a wall screen are much wider than normal map pins. When source
+// points land within 90px, fan them around their shared centre and connect
+// every car back to its true GPS point.
+function spreadOverlaps(map: L.Map, rows: SpreadPoint[]): Map<string, SpreadPlacement> {
+  const groups: SpreadPoint[][] = [];
+  for (const row of rows) {
+    const point = map.latLngToLayerPoint([row.lat, row.lng]);
+    const group = groups.find((items) =>
+      items.some((item) =>
+        map.latLngToLayerPoint([item.lat, item.lng]).distanceTo(point) < 90
+      )
+    );
+    if (group) group.push(row);
+    else groups.push([row]);
+  }
+
+  const placements = new Map<string, SpreadPlacement>();
+  for (const group of groups) {
+    if (group.length === 1) {
+      const row = group[0];
+      const actual = L.latLng(row.lat, row.lng);
+      placements.set(row.key, { actual, display: actual, spread: false, angle: 0 });
+      continue;
+    }
+    const centre = group
+      .map((row) => map.latLngToLayerPoint([row.lat, row.lng]))
+      .reduce((sum, point) => sum.add(point), L.point(0, 0))
+      .divideBy(group.length);
+    const radius = Math.min(190, 105 + group.length * 12);
+    group.forEach((row, index) => {
+      const theta = -Math.PI / 2 + (Math.PI * 2 * index) / group.length;
+      const displayPoint = L.point(
+        centre.x + Math.cos(theta) * radius,
+        centre.y + Math.sin(theta) * radius
+      );
+      const actualPoint = map.latLngToLayerPoint([row.lat, row.lng]);
+      const angle =
+        (Math.atan2(actualPoint.y - displayPoint.y, actualPoint.x - displayPoint.x) *
+          180) /
+        Math.PI;
+      placements.set(row.key, {
+        actual: L.latLng(row.lat, row.lng),
+        display: map.layerPointToLatLng(displayPoint),
+        spread: true,
+        angle,
+      });
+    });
+  }
+  return placements;
+}
 
 function trailColor(carCode: string): string {
   let hash = 0;
@@ -99,9 +167,32 @@ export default function TvMap({
   const markersRef = useRef<Map<string, L.Marker>>(new Map());
   const billMarkersRef = useRef<Map<string, L.Marker>>(new Map());
   const trailsRef = useRef<Map<string, L.Polyline>>(new Map());
+  const connectorsRef = useRef<Map<string, L.Polyline>>(new Map());
+  const arrowsRef = useRef<Map<string, L.Marker>>(new Map());
   // Only auto-fit while the screen has not settled on a view yet, so the map
   // does not lurch every poll once all the trucks are on screen.
   const fittedRef = useRef(false);
+  // ຈຸດຫຼ້າສຸດ — ເກັບໄວ້ເພື່ອຈັດຂອບເຂດໄດ້ຕອນໜ້ານີ້ຖືກສະແດງ ບໍ່ແມ່ນຕອນຮັບຂໍ້ມູນ
+  const pointsRef = useRef<Array<[number, number]>>([]);
+
+  /**
+   * ຈັດຂອບເຂດໃຫ້ເຫັນທຸກຈຸດ.
+   *
+   * ເຮັດໄດ້ສະເພາະຕອນກ່ອງມີຂະໜາດຈິງ — ໜ້ານີ້ຖືກ mount ໄວ້ແຕ່ເຊື່ອງດ້ວຍ
+   * display:none ຈຶ່ງກວ້າງ 0px ຕອນຮັບຂໍ້ມູນຄັ້ງທຳອິດ. ຖ້າ fitBounds ຕອນ
+   * ນັ້ນ Leaflet ຈະຄິດ center/zoom ຜິດ ແລ້ວແຜນທີ່ຈະຄ້າງຢູ່ບ່ອນທີ່ບໍ່ມີລົດ.
+   */
+  const fitToPoints = useCallback(() => {
+    const map = mapRef.current;
+    if (!map || fittedRef.current) return;
+    const size = map.getSize();
+    if (size.x < 50 || size.y < 50) return;
+    const points = pointsRef.current;
+    if (points.length === 0) return;
+    if (points.length === 1) map.setView(points[0], 14);
+    else map.fitBounds(L.latLngBounds(points), { padding: [60, 60], maxZoom: 14 });
+    fittedRef.current = true;
+  }, []);
 
   useEffect(() => {
     if (!containerRef.current || mapRef.current) return;
@@ -126,12 +217,16 @@ export default function TvMap({
     const markers = markersRef.current;
     const billMarkers = billMarkersRef.current;
     const trailLines = trailsRef.current;
+    const connectorLines = connectorsRef.current;
+    const arrowMarkers = arrowsRef.current;
     return () => {
       map.remove();
       mapRef.current = null;
       markers.clear();
       billMarkers.clear();
       trailLines.clear();
+      connectorLines.clear();
+      arrowMarkers.clear();
       fittedRef.current = false;
     };
   }, []);
@@ -167,10 +262,60 @@ export default function TvMap({
     }
 
     const seen = new Set<string>();
+    const spreadRows: SpreadPoint[] = [
+      ...vehicles
+        .filter((v) => Number.isFinite(v.lat) && Number.isFinite(v.lng))
+        .map((v) => ({ key: `vehicle:${v.car_code}`, lat: v.lat, lng: v.lng })),
+      ...tripPoints
+        .filter((p) => Number.isFinite(p.lat) && Number.isFinite(p.lng))
+        .map((p) => ({ key: `bill:${p.doc_no}`, lat: p.lat, lng: p.lng })),
+    ];
+    const placements = spreadOverlaps(map, spreadRows);
+    const seenConnectors = new Set<string>();
+
+    const updateConnector = (key: string, placement: SpreadPlacement, color: string) => {
+      if (!placement.spread) return;
+      seenConnectors.add(key);
+      const points: L.LatLngExpression[] = [placement.display, placement.actual];
+      const existingLine = connectorsRef.current.get(key);
+      if (existingLine) existingLine.setLatLngs(points).setStyle({ color });
+      else {
+        connectorsRef.current.set(
+          key,
+          L.polyline(points, {
+            color,
+            weight: 3,
+            opacity: 0.82,
+            dashArray: "8 7",
+            interactive: false,
+          }).addTo(map)
+        );
+      }
+      const arrowIcon = L.divIcon({
+        html: `<span class="tv-map-arrow" style="color:${color};transform:rotate(${placement.angle + 90}deg)"></span>`,
+        className: "tv-map-arrow-wrap",
+        iconSize: [18, 18],
+        iconAnchor: [9, 9],
+      });
+      const existingArrow = arrowsRef.current.get(key);
+      if (existingArrow) {
+        existingArrow.setLatLng(placement.actual);
+        existingArrow.setIcon(arrowIcon);
+      } else {
+        arrowsRef.current.set(
+          key,
+          L.marker(placement.actual, { icon: arrowIcon, interactive: false }).addTo(map)
+        );
+      }
+    };
+
     for (const vehicle of vehicles) {
       if (!Number.isFinite(vehicle.lat) || !Number.isFinite(vehicle.lng)) continue;
       seen.add(vehicle.car_code);
-      const position: [number, number] = [vehicle.lat, vehicle.lng];
+      const placement = placements.get(`vehicle:${vehicle.car_code}`)!;
+      const position = placement.display;
+      const color = vehicle.stale ? "#e0263a" : vehicle.moving ? "#00a06b" : "#e07800";
+      updateConnector(`vehicle:${vehicle.car_code}`, placement, color);
       const icon = L.divIcon({
         html: pinHtml(vehicle),
         className: "tv-pin-wrap",
@@ -202,7 +347,9 @@ export default function TvMap({
     for (const point of tripPoints) {
       if (!Number.isFinite(point.lat) || !Number.isFinite(point.lng)) continue;
       seenBills.add(point.doc_no);
-      const position: [number, number] = [point.lat, point.lng];
+      const placement = placements.get(`bill:${point.doc_no}`)!;
+      const position = placement.display;
+      updateConnector(`bill:${point.doc_no}`, placement, "#0284c7");
       const icon = L.divIcon({
         html: billPinHtml(point),
         className: "tv-pin-wrap",
@@ -226,36 +373,37 @@ export default function TvMap({
         billMarkersRef.current.delete(docNo);
       }
     }
-
-    if (
-      !fittedRef.current &&
-      markersRef.current.size +
-        billMarkersRef.current.size +
-        trailsRef.current.size >
-        0
-    ) {
-      const points = [
-        ...vehicles.map((v) => [v.lat, v.lng] as [number, number]),
-        ...tripPoints.map((p) => [p.lat, p.lng] as [number, number]),
-        ...trails.flatMap((t) => t.points),
-      ].filter(([lat, lng]) => Number.isFinite(lat) && Number.isFinite(lng));
-      if (points.length === 1) {
-        map.setView(points[0], 14);
-      } else if (points.length > 1) {
-        map.fitBounds(L.latLngBounds(points), { padding: [70, 70], maxZoom: 14 });
+    for (const [key, line] of connectorsRef.current) {
+      if (!seenConnectors.has(key)) {
+        line.remove();
+        connectorsRef.current.delete(key);
       }
-      fittedRef.current = true;
     }
-  }, [vehicles, tripPoints, trails]);
+    for (const [key, arrow] of arrowsRef.current) {
+      if (!seenConnectors.has(key)) {
+        arrow.remove();
+        arrowsRef.current.delete(key);
+      }
+    }
 
-  // The page is hidden with `display: none` between rotations, so Leaflet reads
-  // a zero-sized container while away. Re-measure each time it comes back.
+    pointsRef.current = [
+      ...vehicles.map((v) => [v.lat, v.lng] as [number, number]),
+      ...tripPoints.map((p) => [p.lat, p.lng] as [number, number]),
+      ...trails.flatMap((t) => t.points),
+    ].filter(([lat, lng]) => Number.isFinite(lat) && Number.isFinite(lng));
+    if (active) fitToPoints();
+  }, [vehicles, tripPoints, trails, active, fitToPoints]);
+
+  // ຄືນມາເຫັນອີກເທື່ອ: ວັດຂະໜາດໃໝ່ ແລ້ວຈັດຂອບເຂດຖ້າຍັງບໍ່ທັນຈັດ
   useEffect(() => {
     if (!active || !mapRef.current) return;
     const map = mapRef.current;
-    const timer = setTimeout(() => map.invalidateSize(), 80);
+    const timer = setTimeout(() => {
+      map.invalidateSize();
+      fitToPoints();
+    }, 120);
     return () => clearTimeout(timer);
-  }, [active]);
+  }, [active, fitToPoints]);
 
   return <div ref={containerRef} className="tv-map" />;
 }

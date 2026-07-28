@@ -498,6 +498,43 @@ export default function BillsPendingClient() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [bills]);
 
+  // ປະຫວັດການສົ່ງຂອງບິນ — ບິນທີ່ທະຍອຍສົ່ງຫຼາຍຮອບເບິ່ງບໍ່ອອກວ່າຜ່ານຫຍັງມາແດ່
+  const [deliveryHistory, setDeliveryHistory] = useState<{
+    rounds: Array<{
+      round: number;
+      doc_no: string;
+      day: string;
+      driver: string;
+      car: string;
+      status: number;
+      closed_at: string | null;
+      remark: string;
+      loaded: number;
+      delivered: number;
+    }>;
+    ordered: number;
+    delivered: number;
+    remaining: number;
+  } | null>(null);
+  useEffect(() => {
+    const billNo = drawerBill?.doc_no;
+    if (!billNo) {
+      setDeliveryHistory(null);
+      return;
+    }
+    let active = true;
+    Actions.getBillDeliveryHistory(billNo)
+      .then((data) => {
+        if (active) setDeliveryHistory(data as typeof deliveryHistory);
+      })
+      .catch(() => {
+        if (active) setDeliveryHistory(null);
+      });
+    return () => {
+      active = false;
+    };
+  }, [drawerBill?.doc_no]);
+
   // Load the schedule change history whenever a different bill's drawer opens.
   useEffect(() => {
     const billNo = drawerBill?.doc_no;
@@ -2459,6 +2496,82 @@ export default function BillsPendingClient() {
                       </div>
                     )}
                   </div>
+
+                  {/* ປະຫວັດການສົ່ງ — ບິນທີ່ທະຍອຍສົ່ງຫຼາຍຮອບ */}
+                  {deliveryHistory && deliveryHistory.rounds.length > 0 && (
+                    <div className="bg-slate-500/[0.03] dark:bg-white/[0.015] border border-slate-200/50 dark:border-white/5 rounded-xl p-4 space-y-3">
+                      <h3 className="text-xs font-bold text-slate-700 dark:text-slate-300 uppercase tracking-wider flex items-center gap-1.5">
+                        <FaTruck size={12} className="text-teal-600 dark:text-teal-400" />
+                        ປະຫວັດການສົ່ງ ({deliveryHistory.rounds.length} ຮອບ)
+                      </h3>
+                      <div className="flex flex-wrap items-baseline gap-x-4 gap-y-1 text-[11px] text-slate-500 dark:text-slate-400">
+                        <span>
+                          ສັ່ງ{" "}
+                          <b className="text-slate-700 dark:text-slate-200">
+                            {deliveryHistory.ordered.toLocaleString()}
+                          </b>
+                        </span>
+                        <span>
+                          ສົ່ງແລ້ວ{" "}
+                          <b className="text-teal-600 dark:text-teal-400">
+                            {deliveryHistory.delivered.toLocaleString()}
+                          </b>
+                        </span>
+                        <span>
+                          ຍັງເຫຼືອ{" "}
+                          <b className="text-amber-600 dark:text-amber-400">
+                            {deliveryHistory.remaining.toLocaleString()}
+                          </b>
+                        </span>
+                      </div>
+                      <div className="space-y-1.5">
+                        {deliveryHistory.rounds.map((round) => (
+                          <div
+                            key={round.doc_no}
+                            className="flex items-start gap-2.5 rounded-lg border border-slate-200/60 dark:border-white/10 bg-white/60 dark:bg-white/5 px-2.5 py-1.5"
+                          >
+                            <span className="mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-teal-600/10 text-[10px] font-bold text-teal-700 dark:text-teal-300">
+                              {round.round}
+                            </span>
+                            <div className="min-w-0 flex-1">
+                              <p className="text-[11px] font-semibold text-slate-700 dark:text-slate-200">
+                                {round.day} · {round.driver}
+                                {round.car !== "-" && ` · ${round.car}`}
+                              </p>
+                              <p className="text-[10px] text-slate-400 truncate">
+                                ຖ້ຽວ {round.doc_no}
+                                {round.closed_at && ` · ປິດ ${round.closed_at}`}
+                                {round.remark && ` · ${round.remark}`}
+                              </p>
+                            </div>
+                            <div className="shrink-0 text-right">
+                              <p className="text-[11px] font-bold text-slate-700 dark:text-slate-200">
+                                {round.delivered.toLocaleString()}
+                              </p>
+                              <p className="text-[10px] text-slate-400">
+                                ຂຶ້ນລົດ {round.loaded.toLocaleString()}
+                              </p>
+                            </div>
+                            <span
+                              className={`shrink-0 self-center rounded-md px-1.5 py-0.5 text-[10px] font-semibold ${
+                                round.status === 1
+                                  ? "bg-emerald-500/10 text-emerald-600 dark:text-emerald-400"
+                                  : round.status === 2
+                                    ? "bg-rose-500/10 text-rose-600 dark:text-rose-400"
+                                    : "bg-sky-500/10 text-sky-600 dark:text-sky-400"
+                              }`}
+                            >
+                              {round.status === 1
+                                ? "ສຳເລັດ"
+                                : round.status === 2
+                                  ? "ຍົກເລີກ"
+                                  : "ກຳລັງສົ່ງ"}
+                            </span>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
 
                   {/* Schedule change history */}
                   <div className="bg-slate-500/[0.03] dark:bg-white/[0.015] border border-slate-200/50 dark:border-white/5 rounded-xl p-4 space-y-3">

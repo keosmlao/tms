@@ -442,6 +442,22 @@ async function notifyJobDispatchStarted(docNo) {
   }
 }
 
+// ໄລຍະທາງຈາກ tracker — ຍິງແບບບໍ່ລໍ ແລະ ກືນຄວາມຜິດພາດ ເພາະການບັນທຶກ
+// ໄລຍະບໍ່ຄວນເຮັດໃຫ້ການເລີ່ມ/ປິດຖ້ຽວຂອງຄົນຂັບລົ້ມເຫຼວ.
+function recordTripDistanceStart(docNo, carCode) {
+  const { captureStart } = require("./trip-distance");
+  Promise.resolve(captureStart(docNo, carCode)).catch((error) =>
+    console.error("[trip-distance] start failed", docNo, error?.message ?? error)
+  );
+}
+
+function recordTripDistanceEnd(docNo, carCode) {
+  const { captureEnd } = require("./trip-distance");
+  Promise.resolve(captureEnd(docNo, carCode)).catch((error) =>
+    console.error("[trip-distance] end failed", docNo, error?.message ?? error)
+  );
+}
+
 async function mobileJobAction(body) {
   const client = await pool.connect();
   // Any driver action can change what a bill still owes (pickup corrections,
@@ -878,6 +894,11 @@ async function mobileJobAction(body) {
            WHERE doc_no = $1 AND COALESCE(approve_status, 0) = 1 AND ${getFixedYearSqlFilter("doc_date")}`,
           [docNo, milesStart, startImage, lat, lng]
         );
+
+        // ຈົດເລກໄມລ໌ຈາກ tracker ໄວ້ເປັນຈຸດເລີ່ມນັບໄລຍະຂອງຖ້ຽວນີ້.
+        // ບໍ່ໃຫ້ລົ້ມທັງ transaction ຖ້າ tracker ບໍ່ຕອບ — ໄລຍະທາງເປັນຂໍ້ມູນ
+        // ປະກອບ ບໍ່ຄວນຂວາງຄົນຂັບບໍ່ໃຫ້ເລີ່ມສົ່ງ.
+        recordTripDistanceStart(docNo, carCode);
 
         // Cascade sent_start = dispatch_started_at for bills picked up at
         // the trip's origin warehouse — for those bills, "leaving the depot"
@@ -1958,6 +1979,9 @@ async function mobileJobAction(body) {
              AND ${getFixedYearSqlFilter("doc_date")}`,
           [docNo, milesEnd, endImage, latEnd ?? lat, lngEnd ?? lng, carCode || null]
         );
+
+        // ຈົດເລກໄມລ໌ອີກເທື່ອ ແລ້ວຄິດໄລຍະທີ່ແລ່ນຈິງຂອງຖ້ຽວ.
+        recordTripDistanceEnd(docNo, carCode);
 
         await client.query("COMMIT");
         return { success: true };

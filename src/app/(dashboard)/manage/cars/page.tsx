@@ -42,6 +42,8 @@ interface CarProfile {
   plate_no: string;
   tank_no: string;
   car_type: string;
+  transport_code: string;
+  transport_name?: string;
   drivers: Option[];
   workers: Option[];
 }
@@ -53,6 +55,7 @@ interface CarForm {
   plate_no: string;
   tank_no: string;
   car_type: string;
+  transport_code: string;
   driverCodes: string[];
   workerCodes: string[];
 }
@@ -66,6 +69,7 @@ const emptyForm: CarForm = {
   plate_no: "",
   tank_no: "",
   car_type: "",
+  transport_code: "",
   driverCodes: [],
   workerCodes: [],
 };
@@ -120,6 +124,7 @@ function normalizeCarProfiles(data: unknown): CarProfile[] {
         plate_no: toText(record.plate_no),
         tank_no: toText(record.tank_no),
         car_type: toText(record.car_type),
+        transport_code: toText(record.transport_code),
         drivers: normalizeOptions(record.drivers),
         workers: normalizeOptions(record.workers),
       };
@@ -388,6 +393,21 @@ export default function CarsManagePage() {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [showForm, setShowForm] = useState(false);
+  // ລາຍຊື່ສາຂາຂົນສົ່ງ ສຳລັບກຳນົດວ່າລົດຄັນນີ້ສັງກັດສາຂາໃດ
+  const [branches, setBranches] = useState<Array<{ code: string; name_1: string }>>([]);
+  useEffect(() => {
+    let active = true;
+    Actions.getTransportBranches()
+      .then((rows) => {
+        if (active) setBranches((rows ?? []) as Array<{ code: string; name_1: string }>);
+      })
+      .catch(() => {
+        if (active) setBranches([]);
+      });
+    return () => {
+      active = false;
+    };
+  }, []);
   const [editingCode, setEditingCode] = useState<string | null>(null);
   const [form, setForm] = useState<CarForm>(emptyForm);
   const [carTypeOptions, setCarTypeOptions] = useState<string[]>(CAR_TYPE_OPTIONS);
@@ -503,6 +523,7 @@ export default function CarsManagePage() {
       imei: car.imei ?? "",
       plate_no: car.plate_no ?? "",
       tank_no: car.tank_no ?? "",
+      transport_code: car.transport_code ?? "",
       car_type: car.car_type ?? "",
       driverCodes: car.drivers.map((item) => item.code),
       workerCodes: car.workers
@@ -606,6 +627,7 @@ export default function CarsManagePage() {
       car.plate_no,
       car.tank_no,
       car.car_type,
+      car.transport_name ?? "",
       ...car.drivers.map((d) => d.name_1),
       ...car.drivers.map((d) => d.code),
       ...car.workers.map((w) => w.name_1),
@@ -856,6 +878,7 @@ export default function CarsManagePage() {
                     <th className="px-4 py-2.5 text-left">ສະຖານະ</th>
                     <th className="px-4 py-2.5 text-left">ລົດ</th>
                     <th className="px-4 py-2.5 text-left">ປະເພດລົດ</th>
+                    <th className="px-4 py-2.5 text-left">ສາຂາ</th>
                     <th className="px-4 py-2.5 text-left">GPS / IMEI</th>
                     <th className="px-4 py-2.5 text-left">ຄົນຂັບ</th>
                     <th className="px-4 py-2.5 text-left">ກຳມະກອນຕິດລົດ</th>
@@ -899,6 +922,15 @@ export default function CarsManagePage() {
                         </td>
                         <td className="px-4 py-3">
                           <CarTypeBadge carType={car.car_type} />
+                        </td>
+                        <td className="px-4 py-3">
+                          {car.transport_name ? (
+                            <span className="inline-flex items-center rounded-md bg-sky-500/10 px-2 py-0.5 text-[11px] font-semibold text-sky-700 dark:text-sky-300">
+                              {car.transport_name}
+                            </span>
+                          ) : (
+                            <span className="text-[11px] text-slate-400">ຍັງບໍ່ໄດ້ກຳນົດ</span>
+                          )}
                         </td>
                         <td className="px-4 py-3">
                           {car.imei ? (
@@ -1091,6 +1123,30 @@ export default function CarsManagePage() {
                             {carTypeOptions.map((option) => (
                               <option key={option} value={option}>
                                 {option}
+                              </option>
+                            ))}
+                          </select>
+                        </div>
+                      </div>
+                      <div>
+                        <label className="text-xs font-semibold text-slate-600 dark:text-slate-300">
+                          ສາຂາທີ່ລົດສັງກັດ
+                        </label>
+                        <div className="relative mt-1.5">
+                          <select
+                            value={form.transport_code}
+                            onChange={(event) =>
+                              setForm((current) => ({
+                                ...current,
+                                transport_code: event.target.value,
+                              }))
+                            }
+                            className="glass-input h-10 w-full appearance-none rounded-lg pl-3 pr-9 text-sm"
+                          >
+                            <option value="">— ບໍ່ລະບຸ —</option>
+                            {branches.map((branch) => (
+                              <option key={branch.code} value={branch.code}>
+                                {branch.name_1}
                               </option>
                             ))}
                           </select>

@@ -13,6 +13,7 @@ import {
   dispatchBillRemainingByBranch as svcDispatchBillRemainingByBranch,
   removeManualPendingBill as svcRemoveManualPendingBill,
   getBillsPending as svcGetBillsPending,
+  getBillDeliveryHistory as svcGetBillDeliveryHistory,
   updateBillTransport as svcUpdateBillTransport,
   sendBillContactLine as svcSendBillContactLine,
   getBillProducts as svcGetBillProducts,
@@ -486,4 +487,13 @@ export async function deleteBillTodo(id: number | string) {
     userCode,
   });
   return result;
+}
+
+/**
+ * ປະຫວັດການສົ່ງຂອງບິນ — ບິນທີ່ທະຍອຍສົ່ງຫຼາຍຮອບ.
+ * ຄືນຕາມທີ່ບັນທຶກໄວ້ຈິງ ບໍ່ໄດ້ປັບແຕ່ງໃຫ້ກົງກັບຍອດຄ້າງໃນໜ້າ pending.
+ */
+export async function getBillDeliveryHistory(billNo: string) {
+  await requireSession();
+  return svcGetBillDeliveryHistory(billNo);
 }
