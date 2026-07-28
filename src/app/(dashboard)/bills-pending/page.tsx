@@ -105,6 +105,8 @@ export interface Bill {
   salesperson_phone?: string | null;
   cust_line?: string | null;
   salesperson_line?: string | null;
+  sent_rounds?: number;
+  last_sent_at?: string;
   cust_lat?: string | null;
   cust_lng?: string | null;
   source_format?: string;
@@ -1453,6 +1455,19 @@ export default function BillsPendingClient() {
                                     )}
                                   </div>
                                   <div className="flex flex-wrap items-center gap-x-2 gap-y-0.5 text-[10px] tabular-nums">
+                                    {(bill.sent_rounds ?? 0) > 0 && (
+                                      <span
+                                        className="inline-flex items-center gap-1 rounded-md bg-emerald-500/10 px-1.5 py-0.5 font-semibold text-emerald-700 dark:text-emerald-400"
+                                        title={
+                                          bill.last_sent_at
+                                            ? `ສົ່ງຮອບຫຼ້າສຸດ ${bill.last_sent_at}`
+                                            : undefined
+                                        }
+                                      >
+                                        🔁 ສົ່ງມາແລ້ວ {bill.sent_rounds} ຮອບ
+                                        {bill.last_sent_at ? ` · ${bill.last_sent_at}` : ""}
+                                      </span>
+                                    )}
                                     {bill.time_use && (
                                       <span className={`${
                                         baseSec(bill.time_use) + tick >= 4 * 3600 ? "text-red-500" :

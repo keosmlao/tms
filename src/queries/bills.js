@@ -1212,7 +1212,7 @@ async function getBillsPending(session, fromDate, toDate, transportCode) {
   // schedule map and the todo map all depend only on transRaw/billNos and are
   // independent of each other — run them concurrently so the lighter lookups
   // overlap with applyRemainingCounts instead of stacking after it.
-  const [countedRows, cancelledRows, scheduleMap, rescheduleCountMap, todoMap, activeDispatchRows, forwardedAwayRows, deliveredServiceRows] = await Promise.all([
+  const [countedRows, cancelledRows, scheduleMap, rescheduleCountMap, todoMap, activeDispatchRows, forwardedAwayRows, deliveredServiceRows, sentRoundRows] = await Promise.all([
     applyRemainingCounts(transRaw),
     query(
       `SELECT DISTINCT ON (d.bill_no)
@@ -1270,6 +1270,16 @@ async function getBillsPending(session, fromDate, toDate, transportCode) {
           AND ${getFixedYearSqlFilter("d.doc_date")}`,
       [billNos]
     ),
+    // ບິນທີ່ເຄີຍສົ່ງມາແລ້ວ — ບິນທະຍອຍສົ່ງຢືນຢູ່ໃນຄິວນີ້ຄືກັບບິນໃໝ່ທຸກປະການ
+    // ຈົນຄົນຈັດຖ້ຽວແຍກບໍ່ອອກວ່າອັນໃດຍັງບໍ່ເຄີຍແຕະ ອັນໃດສົ່ງມາແລ້ວ 5 ຮອບ.
+    query(
+      `SELECT bill_no, COUNT(*)::int AS rounds,
+              to_char(MAX(sent_end), 'DD/MM/YYYY') AS last_sent
+       FROM public.odg_tms_detail
+       WHERE bill_no = ANY($1::varchar[]) AND COALESCE(status, 0) = 1
+       GROUP BY bill_no`,
+      [billNos]
+    ),
     // Service bills whose CURRENT scheduled cycle has been delivered. A service
     // bill is re-deliverable, so we can't net out delivered_qty like an ic_trans
     // bill — instead we drop it once it has a completed customer delivery
@@ -1303,6 +1313,12 @@ async function getBillsPending(session, fromDate, toDate, transportCode) {
         total_qty_total: Number(row.total_qty_total ?? 0),
         delivered_qty_total: Number(row.delivered_qty_total ?? 0),
       },
+    ])
+  );
+  const sentRoundMap = new Map(
+    sentRoundRows.map((row) => [
+      row.bill_no,
+      { rounds: Number(row.rounds ?? 0), last_sent: row.last_sent ?? "" },
     ])
   );
   const cancelledMap = new Map(cancelledRows.map((row) => [row.bill_no, row]));
@@ -1381,6 +1397,9 @@ async function getBillsPending(session, fromDate, toDate, transportCode) {
         schedule_updated_by: sched?.updated_by ?? "",
         reschedule_count: rescheduleCount,
         cancelled_delivery: Boolean(cancelled),
+        // ຈຳນວນຮອບທີ່ສົ່ງສຳເລັດມາແລ້ວ ແລະ ຮອບຫຼ້າສຸດເມື່ອໃດ
+        sent_rounds: sentRoundMap.get(bill.doc_no)?.rounds ?? 0,
+        last_sent_at: sentRoundMap.get(bill.doc_no)?.last_sent ?? "",
         cancelled_delivery_job: cancelled?.cancelled_delivery_job ?? "",
         cancelled_delivery_at: cancelled?.cancelled_delivery_at ?? "",
         cancelled_delivery_remark: cancelled?.cancelled_delivery_remark ?? "",
