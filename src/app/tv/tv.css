@@ -526,3 +526,77 @@ html,
 .tv-dot-bill {
   background: #38bdf8;
 }
+
+/* ── ໜ້າ 5: ອັນດັບຄົນຂັບ ──────────────────────────────────────── */
+.tv-drv {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  background: #0b1322;
+  border: 2px solid #16203a;
+  border-radius: 14px;
+  padding: 8px 16px;
+}
+.tv-drv-rank {
+  flex: none;
+  width: 38px;
+  height: 38px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 10px;
+  background: #0d1526;
+  color: #6d7f9f;
+  font-size: 20px;
+  font-weight: 800;
+}
+.tv-drv-top {
+  background: #38bdf8;
+  color: #05070d;
+}
+.tv-drv-main {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+}
+.tv-drv-name {
+  font-size: 24px;
+  font-weight: 700;
+  color: #ffffff;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.tv-drv-meta {
+  font-size: 18px;
+  color: #7b8aa8;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.tv-drv-right {
+  flex: none;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+}
+.tv-drv-pct {
+  font-size: 26px;
+  font-weight: 800;
+  font-variant-numeric: tabular-nums;
+}
+.tv-drv-pct.tv-tone-good {
+  color: #34d399;
+}
+.tv-drv-pct.tv-tone-warn {
+  color: #fbbf24;
+}
+.tv-drv-pct.tv-tone-bad {
+  color: #f87171;
+}
+.tv-drv-sub {
+  font-size: 16px;
+  color: #7b8aa8;
+  font-variant-numeric: tabular-nums;
+}

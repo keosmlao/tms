@@ -97,6 +97,22 @@ type TripPoint = {
   running: boolean;
 };
 
+type Trail = {
+  car_code: string;
+  car_name: string;
+  points: Array<[number, number]>;
+};
+
+type DriverRow = {
+  name: string;
+  car: string;
+  trips: number;
+  bills: number;
+  delivered: number;
+  cancelled: number;
+  percent: number;
+};
+
 type Vehicle = {
   car_code: string;
   car_name: string;
@@ -123,9 +139,17 @@ type TvData = {
   feed: FeedRow[];
   vehicles: Vehicle[];
   trip_points: TripPoint[];
+  trails: Trail[];
+  drivers: DriverRow[];
 };
 
-const PAGES = ["ພາບລວມມື້ນີ້", "ຖ້ຽວກຳລັງແລ່ນ", "ຕ້ອງແກ້ດຽວນີ້", "ຕຳແໜ່ງລົດ"];
+const PAGES = [
+  "ພາບລວມມື້ນີ້",
+  "ຖ້ຽວກຳລັງແລ່ນ",
+  "ຕ້ອງແກ້ດຽວນີ້",
+  "ແຜນທີ່ສົດ",
+  "ອັນດັບຄົນຂັບ",
+];
 
 export default function TvPage() {
   const [data, setData] = useState<TvData | null>(null);
@@ -254,8 +278,12 @@ export default function TvPage() {
           <Vehicles
             vehicles={data.vehicles}
             tripPoints={data.trip_points}
+            trails={data.trails}
             active={page === 3}
           />
+        </Page>
+        <Page active={page === 4}>
+          <Drivers rows={data.drivers} />
         </Page>
       </section>
 
@@ -486,10 +514,12 @@ function AlertPanel({
 function Vehicles({
   vehicles,
   tripPoints,
+  trails,
   active,
 }: {
   vehicles: Vehicle[];
   tripPoints: TripPoint[];
+  trails: Trail[];
   active: boolean;
 }) {
   if (vehicles.length === 0 && tripPoints.length === 0) {
@@ -506,13 +536,59 @@ function Vehicles({
         <Sub label="ຈອດຢູ່" value={stopped} tone="warn" />
         <Sub label="ຂາດສັນຍານ" value={stale} tone={stale > 0 ? "bad" : "plain"} />
         <Sub label="ຈຸດສົ່ງລ່າສຸດ" value={tripPoints.length} />
+        <Sub label="ມີເສັ້ນທາງ" value={trails.length} />
         <span className="tv-legend">
           <i className="tv-dot tv-dot-move" /> GPS ແລ່ນ
           <i className="tv-dot tv-dot-stop" /> GPS ຈອດ
           <i className="tv-dot tv-dot-bill" /> ຈຸດສົ່ງລ່າສຸດ
         </span>
       </div>
-      <TvMap vehicles={vehicles} tripPoints={tripPoints} active={active} />
+      <TvMap
+        vehicles={vehicles}
+        tripPoints={tripPoints}
+        trails={trails}
+        active={active}
+      />
+    </div>
+  );
+}
+
+function Drivers({ rows }: { rows: DriverRow[] }) {
+  if (rows.length === 0) return <Empty text="ຍັງບໍ່ມີຖ້ຽວທີ່ມີຄົນຂັບ" />;
+  const shown = rows.slice(0, 12);
+  const half = Math.ceil(shown.length / 2);
+  const columns = [shown.slice(0, half), shown.slice(half)];
+  return (
+    <div className="tv-two-col">
+      {columns.map((column, columnIndex) => (
+        <div className="tv-col" key={columnIndex}>
+          {column.map((row, index) => {
+            const rank = columnIndex * half + index + 1;
+            const tone =
+              row.percent >= 95 ? "good" : row.percent >= 70 ? "warn" : "bad";
+            return (
+              <div className="tv-drv" key={`${row.name}-${row.car}-${rank}`}>
+                <span className={rank <= 3 ? "tv-drv-rank tv-drv-top" : "tv-drv-rank"}>
+                  {rank}
+                </span>
+                <span className="tv-drv-main">
+                  <span className="tv-drv-name">{row.name}</span>
+                  <span className="tv-drv-meta">
+                    {row.car} · ຖ້ຽວ {row.trips} · ບິນ {row.bills}
+                    {row.cancelled > 0 && ` · ຍົກເລີກ ${row.cancelled}`}
+                  </span>
+                </span>
+                <span className="tv-drv-right">
+                  <span className={`tv-drv-pct tv-tone-${tone}`}>{row.percent}%</span>
+                  <span className="tv-drv-sub">
+                    {row.delivered}/{row.bills}
+                  </span>
+                </span>
+              </div>
+            );
+          })}
+        </div>
+      ))}
     </div>
   );
 }

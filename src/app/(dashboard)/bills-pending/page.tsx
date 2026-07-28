@@ -473,6 +473,18 @@ export default function BillsPendingClient() {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   useEffect(() => { void fetchBills(); }, []);
 
+  // Opened from the draft page's bill pool with ?add=1 — jump straight into the
+  // manual-bill form instead of making the dispatcher hunt for the button.
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    if (new URLSearchParams(window.location.search).get("add") !== "1") return;
+    openManualModal();
+    const url = new URL(window.location.href);
+    url.searchParams.delete("add");
+    window.history.replaceState({}, "", url.toString());
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   // Sync drawerBill with bills list when state updates (e.g. status changes)
   useEffect(() => {
     if (drawerBill) {

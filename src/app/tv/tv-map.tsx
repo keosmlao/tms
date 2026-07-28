@@ -68,19 +68,37 @@ function billPinHtml(point: MapTripPoint): string {
   return `<div class="tv-pin tv-pin-bill"><span class="tv-pin-dot"></span><span class="tv-pin-name">${name}</span><span class="tv-pin-speed">${at}</span></div>`;
 }
 
+export type MapTrail = {
+  car_code: string;
+  car_name: string;
+  points: Array<[number, number]>;
+};
+
+// ສີແຍກແຕ່ລະຄັນ — ເລືອກຕາມລະຫັດລົດ ຈຶ່ງໄດ້ສີເກົ່າທຸກຄັ້ງ ບໍ່ປ່ຽນໄປມາ.
+const TRAIL_COLORS = ["#38bdf8", "#f472b6", "#a78bfa", "#fbbf24", "#4ade80", "#22d3ee"];
+
+function trailColor(carCode: string): string {
+  let hash = 0;
+  for (let i = 0; i < carCode.length; i++) hash = (hash * 31 + carCode.charCodeAt(i)) >>> 0;
+  return TRAIL_COLORS[hash % TRAIL_COLORS.length];
+}
+
 export default function TvMap({
   vehicles,
   tripPoints,
+  trails,
   active,
 }: {
   vehicles: MapVehicle[];
   tripPoints: MapTripPoint[];
+  trails: MapTrail[];
   active: boolean;
 }) {
   const containerRef = useRef<HTMLDivElement | null>(null);
   const mapRef = useRef<L.Map | null>(null);
   const markersRef = useRef<Map<string, L.Marker>>(new Map());
   const billMarkersRef = useRef<Map<string, L.Marker>>(new Map());
+  const trailsRef = useRef<Map<string, L.Polyline>>(new Map());
   // Only auto-fit while the screen has not settled on a view yet, so the map
   // does not lurch every poll once all the trucks are on screen.
   const fittedRef = useRef(false);
@@ -107,11 +125,13 @@ export default function TvMap({
     mapRef.current = map;
     const markers = markersRef.current;
     const billMarkers = billMarkersRef.current;
+    const trailLines = trailsRef.current;
     return () => {
       map.remove();
       mapRef.current = null;
       markers.clear();
       billMarkers.clear();
+      trailLines.clear();
       fittedRef.current = false;
     };
   }, []);
@@ -119,6 +139,32 @@ export default function TvMap({
   useEffect(() => {
     const map = mapRef.current;
     if (!map) return;
+
+    const seenTrails = new Set<string>();
+    for (const trail of trails) {
+      if (trail.points.length < 2) continue;
+      seenTrails.add(trail.car_code);
+      const existing = trailsRef.current.get(trail.car_code);
+      if (existing) {
+        existing.setLatLngs(trail.points);
+      } else {
+        trailsRef.current.set(
+          trail.car_code,
+          L.polyline(trail.points, {
+            color: trailColor(trail.car_code),
+            weight: 4,
+            opacity: 0.75,
+            interactive: false,
+          }).addTo(map)
+        );
+      }
+    }
+    for (const [code, line] of trailsRef.current) {
+      if (!seenTrails.has(code)) {
+        line.remove();
+        trailsRef.current.delete(code);
+      }
+    }
 
     const seen = new Set<string>();
     for (const vehicle of vehicles) {
@@ -183,11 +229,15 @@ export default function TvMap({
 
     if (
       !fittedRef.current &&
-      markersRef.current.size + billMarkersRef.current.size > 0
+      markersRef.current.size +
+        billMarkersRef.current.size +
+        trailsRef.current.size >
+        0
     ) {
       const points = [
         ...vehicles.map((v) => [v.lat, v.lng] as [number, number]),
         ...tripPoints.map((p) => [p.lat, p.lng] as [number, number]),
+        ...trails.flatMap((t) => t.points),
       ].filter(([lat, lng]) => Number.isFinite(lat) && Number.isFinite(lng));
       if (points.length === 1) {
         map.setView(points[0], 14);
@@ -196,7 +246,7 @@ export default function TvMap({
       }
       fittedRef.current = true;
     }
-  }, [vehicles, tripPoints]);
+  }, [vehicles, tripPoints, trails]);
 
   // The page is hidden with `display: none` between rotations, so Leaflet reads
   // a zero-sized container while away. Re-measure each time it comes back.

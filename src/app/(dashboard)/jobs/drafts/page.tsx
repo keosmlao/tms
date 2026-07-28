@@ -1042,15 +1042,27 @@ export default function TripDraftsPage() {
         {/* Bill pool for the day */}
         <div className="glass h-fit rounded-lg">
           <div className="border-b border-slate-200/50 px-3 py-2.5 dark:border-white/5">
-            <p className="text-xs font-bold text-slate-700 dark:text-slate-200">
-              ບິນລໍຈັດຖ້ຽວ ({candidatesForDraft.length})
-              {draftedBills.size > 0 && (
-                <span className="ml-1.5 text-[10px] font-medium text-slate-400">
-                  · ຢູ່ໃນຮ່າງແລ້ວ{" "}
-                  {candidatesForDraft.filter((c) => draftedBills.has(c.doc_no)).length}
-                </span>
-              )}
-            </p>
+            <div className="flex items-start justify-between gap-2">
+              <p className="text-xs font-bold text-slate-700 dark:text-slate-200">
+                ບິນລໍຈັດຖ້ຽວ ({candidatesForDraft.length})
+                {draftedBills.size > 0 && (
+                  <span className="ml-1.5 text-[10px] font-medium text-slate-400">
+                    · ຢູ່ໃນຮ່າງແລ້ວ{" "}
+                    {candidatesForDraft.filter((c) => draftedBills.has(c.doc_no)).length}
+                  </span>
+                )}
+              </p>
+              <a
+                href="/bills-pending?add=1"
+                target="_blank"
+                rel="noopener noreferrer"
+                title="ເປີດແທັບໃໝ່ເພື່ອເພີ່ມບິນໂອນ ແລ້ວກັບມາກົດໂຫຼດຄືນ"
+                className="inline-flex shrink-0 items-center gap-1 rounded-lg bg-teal-600 px-2.5 py-1 text-[10px] font-semibold text-white transition-colors hover:bg-teal-700 dark:bg-teal-500 dark:hover:bg-teal-600"
+              >
+                <FaPlus size={9} />
+                ເພີ່ມບິນໂອນ (72)
+              </a>
+            </div>
             <p className="text-[10px] text-slate-400">
               {isBranchStaff
                 ? "ບິນ pending ຂອງສາຂາທ່ານ · ບໍ່ກອງວັນຈັດສົ່ງ, ບໍ່ກອງຮອບ/ສາຍ"

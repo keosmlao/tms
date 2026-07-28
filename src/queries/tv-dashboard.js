@@ -41,7 +41,7 @@ async function getTvDashboard({ date = "", branch = "" } = {}) {
   const yearFilter = getFixedYearSqlFilter("t.doc_date");
   const scope = `t.date_logistic::date = $1::date AND ${yearFilter}${branchClause}`;
 
-  const [totals, doneToday, trips, notStarted, alerts, cancelled, feed, vehicles, tripPoints] =
+  const [totals, doneToday, trips, notStarted, alerts, cancelled, feed, vehicles, tripPoints, trails, drivers] =
     await Promise.all([
       // ── ໜ້າ 1: ໂຕເລກໃຫຍ່ຂອງມື້ ──
       queryOne(
@@ -154,7 +154,9 @@ async function getTvDashboard({ date = "", branch = "" } = {}) {
          JOIN odg_tms t ON t.doc_no = d.doc_no
          LEFT JOIN public.ar_customer cu ON cu.code = d.cust_code
          LEFT JOIN public.odg_tms_driver dv ON dv.code::text = t.driver::text
-         WHERE ${scope} AND COALESCE(d.status,0) = 2
+         WHERE d.sent_end::date = $1::date
+           AND COALESCE(d.status,0) = 2
+           AND ${yearFilter}${branchClause}
          ORDER BY d.sent_end DESC NULLS LAST
          LIMIT 12`,
         params
@@ -170,7 +172,9 @@ async function getTvDashboard({ date = "", branch = "" } = {}) {
          JOIN odg_tms t ON t.doc_no = d.doc_no
          LEFT JOIN public.ar_customer cu ON cu.code = d.cust_code
          LEFT JOIN public.odg_tms_driver dv ON dv.code::text = t.driver::text
-         WHERE ${scope} AND COALESCE(d.status,0) = 1 AND d.sent_end IS NOT NULL
+         WHERE d.sent_end::date = $1::date
+           AND COALESCE(d.status,0) = 1
+           AND ${yearFilter}${branchClause}
          ORDER BY d.sent_end DESC
          LIMIT 12`,
         params
@@ -220,6 +224,46 @@ async function getTvDashboard({ date = "", branch = "" } = {}) {
            AND NULLIF(TRIM(d.lng), '') IS NOT NULL
            AND d.sent_end IS NOT NULL
          ORDER BY t.doc_no, d.sent_end DESC`,
+        params
+      ),
+
+      // ── ຫຼັງເສັ້ນທາງຂອງແຕ່ລະຄັນ. ວັນນຶ່ງມີເປັນພັນຈຸດ ຈຶ່ງເກັບຕົວຢ່າງລົງ
+      //    ~150 ຈຸດຕໍ່ຄັນ — ພຽງພໍໃຫ້ເສັ້ນຄົມເທິງຈໍ ໂດຍບໍ່ສົ່ງຂໍ້ມູນໜັກທຸກ 15 ວິນາທີ ──
+      query(
+        `WITH pts AS (
+           SELECT g.car_code, g.car_name, g.recorded_at,
+                  g.lat, g.lng,
+                  ROW_NUMBER() OVER (PARTITION BY g.car_code ORDER BY g.recorded_at) AS rn,
+                  COUNT(*) OVER (PARTITION BY g.car_code) AS total
+           FROM public.odg_tms_gps_realtime_log g
+           WHERE g.recorded_at::date = $1::date
+             AND g.lat IS NOT NULL AND g.lng IS NOT NULL
+         )
+         SELECT car_code,
+                MAX(car_name) AS car_name,
+                json_agg(json_build_array(lat, lng) ORDER BY recorded_at) AS points
+         FROM pts
+         WHERE rn % GREATEST(1, (total / 150)::int) = 0
+         GROUP BY car_code`,
+        [day]
+      ),
+
+      // ── ໜ້າ 5: ອັນດັບຄົນຂັບຂອງມື້ ──
+      query(
+        `SELECT COALESCE(NULLIF(TRIM(dv.name_1), ''), t.driver::text, '-') AS name,
+                COALESCE(NULLIF(TRIM(car.name_1), ''), t.car::text, '-') AS car,
+                COUNT(DISTINCT t.doc_no)::int AS trips,
+                COUNT(d.bill_no)::int AS bills,
+                COUNT(*) FILTER (WHERE COALESCE(d.status,0) = 1)::int AS delivered,
+                COUNT(*) FILTER (WHERE COALESCE(d.status,0) = 2)::int AS cancelled
+         FROM odg_tms t
+         LEFT JOIN public.odg_tms_detail d ON d.doc_no = t.doc_no
+         LEFT JOIN public.odg_tms_driver dv ON dv.code::text = t.driver::text
+         LEFT JOIN public.odg_tms_car car ON car.code::text = t.car::text
+         WHERE ${scope} AND NULLIF(TRIM(t.driver), '') IS NOT NULL
+         GROUP BY dv.name_1, t.driver, car.name_1, t.car
+         ORDER BY delivered DESC, bills DESC
+         LIMIT 14`,
         params
       ),
     ]);
@@ -323,6 +367,31 @@ async function getTvDashboard({ date = "", branch = "" } = {}) {
         age_minutes: age,
         cust_name: row.cust_name,
         running: Number(row.job_status ?? 0) === 2,
+      };
+    }),
+    trails: trails
+      .map((row) => ({
+        car_code: row.car_code,
+        car_name: row.car_name,
+        points: Array.isArray(row.points)
+          ? row.points
+              .map((p) => [Number(p[0]), Number(p[1])])
+              .filter(([lat, lng]) => Number.isFinite(lat) && Number.isFinite(lng))
+          : [],
+      }))
+      // ສອງຈຸດຂຶ້ນໄປຈຶ່ງເປັນເສັ້ນໄດ້
+      .filter((row) => row.points.length > 1),
+    drivers: drivers.map((row) => {
+      const bills = Number(row.bills ?? 0);
+      const delivered = Number(row.delivered ?? 0);
+      return {
+        name: row.name,
+        car: row.car,
+        trips: Number(row.trips ?? 0),
+        bills,
+        delivered,
+        cancelled: Number(row.cancelled ?? 0),
+        percent: bills > 0 ? Math.round((delivered / bills) * 100) : 0,
       };
     }),
     vehicles: vehicles.map((row) => {
