@@ -2,15 +2,8 @@
 
 import { useCallback, useEffect, useState } from "react";
 
-import dynamic from "next/dynamic";
-
 import "./tv.css";
 
-// Leaflet touches `window` at import time, so it must never run on the server.
-const TvMap = dynamic(() => import("./tv-map"), {
-  ssr: false,
-  loading: () => <div className="tv-map tv-map-loading">ກຳລັງໂຫຼດແຜນທີ່...</div>,
-});
 
 /**
  * TV mode — ຈໍຕິດຝາຫ້ອງຈັດສົ່ງ.
@@ -193,14 +186,7 @@ type TvData = {
   workload: Workload;
 };
 
-const PAGES = [
-  "ພາບລວມມື້ນີ້",
-  "ຖ້ຽວກຳລັງແລ່ນ",
-  "ຕ້ອງແກ້ດຽວນີ້",
-  "ແຜນທີ່ສົດ",
-  "ອັນດັບຄົນຂັບ",
-  "ບິນທີ່ຊ້າ",
-];
+const PAGES = ["ພາບລວມມື້ນີ້", "ຕ້ອງແກ້ດຽວນີ້", "ບິນທີ່ຊ້າ"];
 
 /**
  * ລັອກໜ້າ: /tv?page=1 ສະແດງແຕ່ "ພາບລວມມື້ນີ້" ບໍ່ໝຸນ.
@@ -353,23 +339,9 @@ export default function TvPage() {
           <Overview totals={totals} percent={percent} data={data} drift={drift} />
         </Page>
         <Page active={page === 1}>
-          <Running trips={data.running} />
-        </Page>
-        <Page active={page === 2}>
           <Alerts data={data} />
         </Page>
-        <Page active={page === 3}>
-          <Vehicles
-            vehicles={data.vehicles}
-            tripPoints={data.trip_points}
-            trails={data.trails}
-            active={page === 3}
-          />
-        </Page>
-        <Page active={page === 4}>
-          <Drivers rows={data.drivers} />
-        </Page>
-        <Page active={page === 5}>
+        <Page active={page === 2}>
           <LateBills rows={data.late_bills} drift={drift} />
         </Page>
       </section>
@@ -734,59 +706,6 @@ function RunningStrip({
   );
 }
 
-// ── ໜ້າ 2: ຖ້ຽວກຳລັງແລ່ນ ເຕັມຈໍ ──────────────────────────────────────
-
-function Running({ trips }: { trips: RunningTrip[] }) {
-  if (trips.length === 0) return <Empty text="ຍັງບໍ່ມີຖ້ຽວອອກແລ່ນ" />;
-  // ຈໍບໍ່ເລື່ອນ: ແບ່ງ 2 ຖັນ ແລະ ຈຳກັດຈຳນວນທີ່ໜຶ່ງຈໍຮັບໄດ້
-  const shown = trips.slice(0, 16);
-  const half = Math.ceil(shown.length / 2);
-  return (
-    <div className="tv-two-col">
-      <div className="tv-col">
-        {shown.slice(0, half).map((trip) => (
-          <TripRow key={trip.doc_no} trip={trip} />
-        ))}
-      </div>
-      <div className="tv-col">
-        {shown.slice(half).map((trip) => (
-          <TripRow key={trip.doc_no} trip={trip} />
-        ))}
-      </div>
-      {trips.length > shown.length && (
-        <div className="tv-more">ແລະ ອີກ {trips.length - shown.length} ຖ້ຽວ</div>
-      )}
-    </div>
-  );
-}
-
-function TripRow({ trip }: { trip: RunningTrip }) {
-  const percent = trip.bills > 0 ? Math.round((trip.delivered / trip.bills) * 100) : 0;
-  return (
-    <div className={`tv-trip tv-trip-${trip.state}`}>
-      <div className="tv-trip-main">
-        <span className="tv-trip-car">{trip.car}</span>
-        <span className="tv-trip-driver">{trip.driver}</span>
-        {trip.route && <span className="tv-trip-route">{trip.route}</span>}
-      </div>
-      <div className="tv-trip-bar">
-        <div className="tv-trip-fill" style={{ width: `${percent}%` }} />
-        <span className="tv-trip-count">
-          {trip.delivered}/{trip.bills}
-        </span>
-      </div>
-      <div className="tv-trip-meta">
-        {trip.out_at ? `ອອກ ${trip.out_at}` : "ບໍ່ມີເວລາອອກ"}
-        {trip.out_minutes !== null && ` · ${durationLabel(trip.out_minutes)}`}
-        {trip.state === "stalled" && trip.idle_minutes !== null && (
-          <span className="tv-flag"> · ຄ້າງ {durationLabel(trip.idle_minutes)}</span>
-        )}
-        {trip.state === "done" && <span className="tv-flag-ok"> · ຄົບແລ້ວ ລໍປິດຖ້ຽວ</span>}
-      </div>
-    </div>
-  );
-}
-
 // ── ໜ້າ 3: ຕ້ອງແກ້ດຽວນີ້ ──────────────────────────────────────────────
 
 function Alerts({ data }: { data: TvData }) {
@@ -860,106 +779,6 @@ function AlertPanel({
           </div>
         ))
       )}
-    </div>
-  );
-}
-
-// ── ໜ້າ 4: ແຜນທີ່ສົດ ─────────────────────────────────────────────────
-
-function Vehicles({
-  vehicles,
-  tripPoints,
-  trails,
-  active,
-}: {
-  vehicles: Vehicle[];
-  tripPoints: TripPoint[];
-  trails: Trail[];
-  active: boolean;
-}) {
-  if (vehicles.length === 0 && tripPoints.length === 0) {
-    return <Empty text="ຍັງບໍ່ມີພິກັດຈາກລົດ ຫຼື ຈາກການສົ່ງ" />;
-  }
-  const moving = vehicles.filter((v) => v.moving && !v.stale).length;
-  const stopped = vehicles.filter((v) => !v.moving && !v.stale).length;
-  const stale = vehicles.filter((v) => v.stale).length;
-  return (
-    <div className="tv-vehicles">
-      {/* ແຖບດຽວແນວນອນ — ຕົວເລກກັບສີຢູ່ນຳກັນ ບໍ່ຕ້ອງມີ legend ແຍກ */}
-      <div className="tv-vhead">
-        <span className="tv-vhead-title">ແຜນທີ່ສົດ</span>
-        <VStat tone="move" label="ກຳລັງແລ່ນ" value={moving} />
-        <VStat tone="stop" label="ຈອດຢູ່" value={stopped} />
-        <VStat tone="stale" label="ຂາດສັນຍານ" value={stale} />
-        <VStat tone="bill" label="ຈຸດສົ່ງລ່າສຸດ" value={tripPoints.length} />
-        <VStat tone="trail" label="ມີເສັ້ນທາງ" value={trails.length} />
-      </div>
-      <TvMap
-        vehicles={vehicles}
-        tripPoints={tripPoints}
-        trails={trails}
-        active={active}
-      />
-    </div>
-  );
-}
-
-function VStat({
-  tone,
-  label,
-  value,
-}: {
-  tone: "move" | "stop" | "stale" | "bill" | "trail";
-  label: string;
-  value: number;
-}) {
-  return (
-    <span className="tv-vstat">
-      <i className={`tv-vdot tv-vdot-${tone}`} />
-      <b>{value.toLocaleString()}</b>
-      {label}
-    </span>
-  );
-}
-
-// ── ໜ້າ 5: ອັນດັບຄົນຂັບ ───────────────────────────────────────────────
-
-function Drivers({ rows }: { rows: DriverRow[] }) {
-  if (rows.length === 0) return <Empty text="ຍັງບໍ່ມີຖ້ຽວທີ່ມີຄົນຂັບ" />;
-  const shown = rows.slice(0, 12);
-  const half = Math.ceil(shown.length / 2);
-  const columns = [shown.slice(0, half), shown.slice(half)];
-  return (
-    <div className="tv-two-col">
-      {columns.map((column, columnIndex) => (
-        <div className="tv-col" key={columnIndex}>
-          {column.map((row, index) => {
-            const rank = columnIndex * half + index + 1;
-            const tone =
-              row.percent >= 95 ? "good" : row.percent >= 70 ? "warn" : "bad";
-            return (
-              <div className="tv-drv" key={`${row.name}-${row.car}-${rank}`}>
-                <span className={rank <= 3 ? "tv-drv-rank tv-drv-top" : "tv-drv-rank"}>
-                  {rank}
-                </span>
-                <span className="tv-drv-main">
-                  <span className="tv-drv-name">{row.name}</span>
-                  <span className="tv-drv-meta">
-                    {row.car} · ຖ້ຽວ {row.trips} · ບິນ {row.bills}
-                    {row.cancelled > 0 && ` · ຍົກເລີກ ${row.cancelled}`}
-                  </span>
-                </span>
-                <span className="tv-drv-right">
-                  <span className={`tv-drv-pct tv-tone-${tone}`}>{row.percent}%</span>
-                  <span className="tv-drv-sub">
-                    {row.delivered}/{row.bills}
-                  </span>
-                </span>
-              </div>
-            );
-          })}
-        </div>
-      ))}
     </div>
   );
 }
