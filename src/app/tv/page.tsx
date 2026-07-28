@@ -386,7 +386,6 @@ function Overview({
   const work = data.workload;
   const fleet = data.fleet ?? { total: 0, busy: 0, available: 0 };
   const stalled = data.running.filter((trip) => trip.state === "stalled").length;
-  const dayTone = percent >= 80 ? "ok" : percent >= 50 ? "warn" : "bad";
   return (
     <div className="tv-overview">
       <div className="tv-top">
