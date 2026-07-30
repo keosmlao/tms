@@ -262,6 +262,29 @@ async function getRemainingBillProducts(billNo) {
   }));
 }
 
+/**
+ * ບິນໃດແດ່ທີ່ມີລາຍການຢູ່ ERP (ic_trans_detail).
+ *
+ * ໃຊ້ແຍກ 2 ກໍລະນີທີ່ getRemainingBillProductsMap ຄືນ [] ຄືກັນ ແຕ່ຄວາມໝາຍ
+ * ຄົນລະຢ່າງ:
+ *   - ບິນໂອນ/ບິນມືທີ່ບໍ່ມີແຖວໃນ ERP  → ຕ້ອງເຊື່ອລາຍການທີ່ຜູ້ໃຊ້ໃສ່ມາ
+ *   - ບິນ ERP ທີ່ຈັດຄົບໝົດແລ້ວ        → ຕ້ອງປະຕິເສດ ບໍ່ແມ່ນເຊື່ອຜູ້ໃຊ້
+ *
+ * ບໍ່ແຍກສອງອັນນີ້ ເຮັດໃຫ້ບິນທີ່ສົ່ງຄົບແລ້ວຖືກຈັດຖ້ຽວຄືນໄດ້ບໍ່ຈຳກັດ.
+ */
+async function getBillsWithErpDetail(billNos) {
+  const bills = Array.from(
+    new Set((billNos ?? []).map((b) => String(b ?? "").trim()).filter(Boolean))
+  );
+  if (bills.length === 0) return new Set();
+  const rows = await query(
+    `SELECT DISTINCT doc_no FROM ic_trans_detail
+      WHERE doc_no = ANY($1::varchar[]) AND item_code NOT LIKE '97%'`,
+    [bills]
+  );
+  return new Set(rows.map((r) => String(r.doc_no)));
+}
+
 // Batched version of getRemainingBillProducts: the SAME per-item remaining math
 // for many bills in one query. Returns Map<bill_no, [{item_code, item_name,
 // qty, unit_code}]> (only items with qty > 0). Used by createJob/addBillsToJob
@@ -778,6 +801,7 @@ module.exports = {
   ensureTmsDetailItemTable,
   getRemainingBillProducts,
   getRemainingBillProductsMap,
+  getBillsWithErpDetail,
   getRemainingSummaryMap,
   getBillItemsByWarehouse,
   getBillRemainingItemsByWarehouse,

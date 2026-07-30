@@ -15,6 +15,7 @@ const {
   ensurePendingJobListIndex,
   ensureTmsDetailItemTable,
   getRemainingBillProductsMap,
+  getBillsWithErpDetail,
   getRemainingSummaryMap,
 } = require("./helpers");
 const { pushToDriver } = require("./push");
@@ -158,9 +159,15 @@ async function createJob(session, data) {
   // quantity. Runs INSIDE the transaction, after the bill is advisory-locked, so
   // the remaining count reflects every committed reservation and can't be raced
   // by a concurrent dispatch of the same bill.
-  const normalizeBill = (bill, rawRemainingProducts) => {
+  const normalizeBill = (bill, rawRemainingProducts, billHasErpDetail) => {
+    // ບິນ ERP ທີ່ຈັດຄົບແລ້ວ ກັບ ບິນໂອນ/ບິນມືທີ່ບໍ່ມີແຖວໃນ ERP ຄືນ [] ຄືກັນ
+    // ແຕ່ຄວາມໝາຍຄົນລະຢ່າງ. ຕົກໄປເຊື່ອລາຍການທີ່ຜູ້ໃຊ້ສົ່ງມາ ໄດ້ສະເພາະບິນມື —
+    // ບໍ່ດັ່ງນັ້ນບິນທີ່ສົ່ງຄົບແລ້ວຈະຖືກຈັດຖ້ຽວຄືນໄດ້ບໍ່ຈຳກັດ (ພົບຈິງ: ບິນ
+    // ດຽວຖືກຜູກ 9 ຖ້ຽວ ລວມ 1,440 ໜ່ວຍ ທັງທີ່ຍອດບິນມີ 160).
     const remainingProducts = rawRemainingProducts.length > 0
       ? rawRemainingProducts
+      : billHasErpDetail
+      ? []
       : (bill.items ?? []).map((item) => ({
           item_code: item.item_code,
           item_name: item.item_name,
@@ -272,9 +279,16 @@ async function createJob(session, data) {
     // Authoritative validation, under the lock. Remaining qty for every bill is
     // fetched in ONE batched query (not N) to keep the locked section short.
     const remainingMap = await getRemainingBillProductsMap(billNos);
+    const erpBills = await getBillsWithErpDetail(billNos);
     normalizedBills = [];
     for (const bill of billsList) {
-      normalizedBills.push(normalizeBill(bill, remainingMap.get(String(bill.bill_no)) ?? []));
+      normalizedBills.push(
+        normalizeBill(
+          bill,
+          remainingMap.get(String(bill.bill_no)) ?? [],
+          erpBills.has(String(bill.bill_no))
+        )
+      );
     }
 
     docNo = await getNextJobDocNo(client, fixedDocDate);
@@ -497,6 +511,7 @@ async function addBillsToJob(docNo, bills) {
     }
     // Remaining qty for every bill in ONE batched query (not N) under the lock.
     const remainingMap = await getRemainingBillProductsMap(billNos);
+    const erpBills = await getBillsWithErpDetail(billNos);
     for (const entry of billsToAdd) {
       const billNo = entry.bill_no;
       const meta = await queryOne(
@@ -517,8 +532,14 @@ async function addBillsToJob(docNo, bills) {
     // against the remaining quantities, falling back to "all remaining" when
     // the caller didn't pick specific items.
     const rawRemainingProducts = remainingMap.get(String(billNo)) ?? [];
+    // ບິນ ERP ທີ່ຈັດຄົບແລ້ວ ກັບ ບິນໂອນ/ບິນມືທີ່ບໍ່ມີແຖວໃນ ERP ຄືນ [] ຄືກັນ
+    // ແຕ່ຄວາມໝາຍຄົນລະຢ່າງ. ຕົກໄປເຊື່ອລາຍການທີ່ຜູ້ໃຊ້ສົ່ງມາ ໄດ້ສະເພາະບິນມື —
+    // ບໍ່ດັ່ງນັ້ນບິນທີ່ສົ່ງຄົບແລ້ວຈະຖືກຈັດຖ້ຽວຄືນໄດ້ບໍ່ຈຳກັດ (ພົບຈິງ: ບິນ
+    // ດຽວຖືກຜູກ 9 ຖ້ຽວ ລວມ 1,440 ໜ່ວຍ ທັງທີ່ຍອດບິນມີ 160).
     const remainingProducts = rawRemainingProducts.length > 0
       ? rawRemainingProducts
+      : erpBills.has(String(billNo))
+      ? []
       : (entry.items ?? []).map((item) => ({
           item_code: item.item_code,
           item_name: item.item_name,
