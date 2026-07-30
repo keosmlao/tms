@@ -16,12 +16,15 @@ import * as jobs from "@/actions/jobs";
 import * as masterData from "@/actions/master-data";
 import * as notifications from "@/actions/notifications";
 import * as pickupVariance from "@/actions/pickup-variance";
+import * as packDim from "@/actions/pack-dim";
+import * as pipeDim from "@/actions/pipe-dim";
 import * as presence from "@/actions/presence";
 import * as reports from "@/actions/reports";
 import * as settings from "@/actions/settings";
 import * as thunjai from "@/actions/thunjai";
 import * as tracking from "@/actions/tracking";
 import * as tripDraft from "@/actions/trip-draft";
+import * as tripVolume from "@/actions/trip-volume";
 
 export const Actions = {
   // Dashboard
@@ -47,6 +50,13 @@ export const Actions = {
   removeBillFromTripDraft: tripDraft.removeBillFromTripDraft,
   setTripDraftBillOptions: tripDraft.setTripDraftBillOptions,
   dispatchTripDraft: tripDraft.dispatchTripDraft,
+  // ພື້ນທີ່ບັນທຸກ ທຽບຄວາມຈຸລົດ — ຮ່າງຖ້ຽວ, ຖ້ຽວຈິງ ແລະ ລາຍງານຍ້ອນຫຼັງ
+  getTripDraftVolume: tripVolume.getTripDraftVolume,
+  getTripVolume: tripVolume.getTripVolume,
+  getTripVolumesBulk: tripVolume.getTripVolumesBulk,
+  getPendingBillVolumes: tripVolume.getPendingBillVolumes,
+  getBillItemVolumes: tripVolume.getBillItemVolumes,
+  getUtilizationReport: tripVolume.getUtilizationReport,
 
   // Pickup variance (ບິນເບີກບໍ່ຄົບ)
   getPickupVarianceList: pickupVariance.getPickupVarianceList,
@@ -145,6 +155,7 @@ export const Actions = {
   deleteCar: masterData.deleteCar,
   getCarDefaults: masterData.getCarDefaults,
   getCarProfiles: masterData.getCarProfiles,
+  getCarCapacity: masterData.getCarCapacity,
   addCarProfile: masterData.addCarProfile,
   updateCarProfile: masterData.updateCarProfile,
   deleteCarProfile: masterData.deleteCarProfile,
@@ -253,10 +264,25 @@ export const Actions = {
   upsertDeliveryRound: deliveryRound.upsertDeliveryRound,
   deleteDeliveryRound: deliveryRound.deleteDeliveryRound,
 
-  // Car types (ປະເພດລົດ)
+  // Car types (ປະເພດລົດ) — ລວມຄວາມຈຸບັນທຸກເລີ່ມຕົ້ນຂອງແຕ່ລະປະເພດ
   listCarTypes: carType.listCarTypes,
   upsertCarType: carType.upsertCarType,
   deleteCarType: carType.deleteCarType,
+
+  // ຂະໜາດທໍ່ຕາມສູດ — ໃຊ້ຄິດພື້ນທີ່ທໍ່ໂດຍບໍ່ຕ້ອງວັດເປັນລາຍການ
+  listPipeDims: pipeDim.listPipeDims,
+  upsertPipeDim: pipeDim.upsertPipeDim,
+  deletePipeDim: pipeDim.deletePipeDim,
+  getPipeCoverage: pipeDim.getPipeCoverage,
+  resolvePipeItemVolumes: pipeDim.resolvePipeItemVolumes,
+
+  // ຂະໜາດຫີບທີ່ວັດແລ້ວ — ຂໍ້ຕໍ່/ອຸປະກອນ ວັດຫີບແທນວັດຕົວ
+  listPackDims: packDim.listPackDims,
+  upsertPackDim: packDim.upsertPackDim,
+  importPackDims: packDim.importPackDims,
+  deletePackDim: packDim.deletePackDim,
+  getPackCoverage: packDim.getPackCoverage,
+  resolvePackItemVolumes: packDim.resolvePackItemVolumes,
 
   // Chatter (Odoo-style discussion thread + activities + followers)
   getChatterMessages: chatter.getChatterMessages,

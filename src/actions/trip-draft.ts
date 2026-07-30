@@ -48,6 +48,8 @@ export async function createTripDraft(input: {
   originTransportCode?: string;
   deliveryRouteCode: string;
   deliveryRoundCode: string;
+  /** ບັງຄັບ — ບໍ່ມີລົດ ຄິດພື້ນທີ່ບັນທຸກບໍ່ໄດ້ */
+  car: string;
   remark?: string;
 }) {
   const s = await requireDispatchAccess();

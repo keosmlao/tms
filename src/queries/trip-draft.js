@@ -1,6 +1,11 @@
 const { pool, query, queryOne } = require("../lib/db");
 const { getFixedYearSqlFilter } = require("../lib/fixed-year");
-const { getBranchScope, customerAreaJoins, customerAreaFields } = require("./helpers");
+const {
+  getBranchScope,
+  customerAreaJoins,
+  customerAreaFields,
+  getRemainingBillProductsMap,
+} = require("./helpers");
 const { ensurePendingBillSchema } = require("./pending-bill");
 
 // ຮ່າງຖ້ຽວ — the planning stage that comes BEFORE a real trip exists.
@@ -196,6 +201,7 @@ async function createTripDraft(session, input) {
     originTransportCode,
     deliveryRouteCode,
     deliveryRoundCode,
+    car,
     remark,
   } = input || {};
   const day = String(dateLogistic ?? "").trim();
@@ -203,23 +209,28 @@ async function createTripDraft(session, input) {
   const round = String(deliveryRoundCode ?? "").trim();
   const route = String(deliveryRouteCode ?? "").trim();
   const branch = String(originTransportCode ?? "").trim();
+  const carCode = String(car ?? "").trim();
   if (!round) throw new Error("ກະລຸນາເລືອກຮອບຈັດສົ່ງ");
   if (!route) throw new Error("ກະລຸນາເລືອກສາຍຈັດສົ່ງ");
   // Required up front: the branch owns the trip, and leaving it blank pushed
   // the problem to dispatch time where createJob simply refused.
   if (!branch) throw new Error("ກະລຸນາເລືອກສາຂາຂົນສົ່ງ");
+  // ລົດຕ້ອງມີແຕ່ຕົ້ນ: ບໍ່ມີລົດ = ບໍ່ຮູ້ຄວາມຈຸ = ບອກບໍ່ໄດ້ວ່າຖ້ຽວເຕັມຫຼືຍັງ
+  // ເຊິ່ງເປັນເຫດຜົນຫຼັກຂອງການວາງແຜນລ່ວງໜ້າ. ປ່ຽນລົດພາຍຫຼັງໄດ້.
+  if (!carCode) throw new Error("ກະລຸນາເລືອກລົດ — ຕ້ອງມີຈຶ່ງຄິດພື້ນທີ່ບັນທຸກໄດ້");
 
   const row = await queryOne(
     `INSERT INTO public.odg_tms_trip_draft
        (doc_date, date_logistic, origin_transport_code, delivery_route_code,
-        delivery_round_code, remark, created_by, updated_by)
-     VALUES ($1::date, $1::date, $2, $3, $4, $5, $6, $6)
+        delivery_round_code, car, remark, created_by, updated_by)
+     VALUES ($1::date, $1::date, $2, $3, $4, $5, $6, $7, $7)
      RETURNING draft_id`,
     [
       day,
       branch,
       route,
       round,
+      carCode,
       String(remark ?? "").trim() || null,
       session?.usercode ?? null,
     ]
@@ -561,11 +572,74 @@ async function listDraftedBillNos() {
   return rows.map((r) => r.bill_no);
 }
 
+/**
+ * ທຸກລາຍການສິນຄ້າທີ່ຖ້ຽວນີ້ຈະບັນທຸກ ພ້ອມລົດທີ່ຈະໃຊ້ — ໃຫ້ຊັ້ນຄິດພື້ນທີ່ໄປລວມຕໍ່.
+ *
+ * ບິນທີ່ dispatcher ເລືອກລາຍການໄວ້ແລ້ວ ໃຊ້ລາຍການນັ້ນ; ບິນທີ່ items ວ່າງ
+ * ໝາຍ "ທັງບິນ" ເຊິ່ງ createJob ຈະແກ້ເປັນລາຍການທີ່ຍັງເຫຼືອຕອນສົ່ງອອກ — ຢູ່ນີ້
+ * ຈຶ່ງຕ້ອງໃຊ້ getRemainingBillProductsMap ໃຫ້ຕົງກັນ ບໍ່ດັ່ງນັ້ນຕົວເລກທີ່
+ * dispatcher ເຫັນຈະບໍ່ຕົງກັບຂອງທີ່ຂຶ້ນລົດຈິງ.
+ */
+async function getTripDraftLoad(draftId) {
+  await ensureTripDraftSchema();
+  const id = Number(draftId);
+  if (!Number.isFinite(id)) return { car: "", items: [] };
+
+  const draft = await queryOne(
+    `SELECT COALESCE(car, '') AS car FROM public.odg_tms_trip_draft WHERE draft_id = $1`,
+    [id]
+  );
+  const bills = await query(
+    `SELECT bill_no, COALESCE(items, '[]'::jsonb) AS items
+       FROM public.odg_tms_trip_draft_bill
+      WHERE draft_id = $1
+      ORDER BY added_at, bill_no`,
+    [id]
+  );
+
+  const items = [];
+  const wholeBills = [];
+  for (const bill of bills) {
+    const picked = Array.isArray(bill.items) ? bill.items : [];
+    if (picked.length === 0) {
+      wholeBills.push(bill.bill_no);
+      continue;
+    }
+    for (const line of picked) {
+      items.push({
+        bill_no: bill.bill_no,
+        item_code: String(line?.item_code ?? ""),
+        item_name: line?.item_name ?? null,
+        unit_code: line?.unit_code ?? null,
+        qty: Number(line?.qty ?? 0),
+      });
+    }
+  }
+
+  if (wholeBills.length > 0) {
+    const remaining = await getRemainingBillProductsMap(wholeBills);
+    for (const billNo of wholeBills) {
+      for (const line of remaining.get(billNo) ?? []) {
+        items.push({
+          bill_no: billNo,
+          item_code: String(line?.item_code ?? ""),
+          item_name: line?.item_name ?? null,
+          unit_code: line?.unit_code ?? null,
+          qty: Number(line?.qty ?? 0),
+        });
+      }
+    }
+  }
+
+  return { car: draft?.car ?? "", items };
+}
+
 module.exports = {
   ensureTripDraftSchema,
   listDraftedBillNos,
   listTripDrafts,
   getTripDraftBills,
+  getTripDraftLoad,
   getTripDraftCandidates,
   createTripDraft,
   updateTripDraft,
