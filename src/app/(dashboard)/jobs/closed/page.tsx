@@ -257,7 +257,7 @@ export default function JobsClosedPage() {
                     return (
                       <Fragment key={job.doc_no}>
                         <tr className="border-b border-slate-200/20 dark:border-white/5 hover:bg-white/30 dark:hover:bg-white/5 transition-colors">
-                          <td className="px-4 py-3">
+                          <td className="px-4 py-3 whitespace-nowrap">
                             <button
                               onClick={() => void toggleDetails(job.doc_no)}
                               className="flex items-center gap-2 text-left"
@@ -271,7 +271,7 @@ export default function JobsClosedPage() {
                               </span>
                             </button>
                           </td>
-                          <td className="px-4 py-3 text-slate-600 dark:text-slate-300">
+                          <td className="px-4 py-3 text-slate-600 dark:text-slate-300 whitespace-nowrap">
                             <div className="space-y-1">
                               <p>{job.date_logistic}</p>
                               {job.admin_closed_at && (
@@ -279,29 +279,29 @@ export default function JobsClosedPage() {
                               )}
                             </div>
                           </td>
-                          <td className="px-4 py-3 text-slate-700 dark:text-slate-200">
+                          <td className="px-4 py-3 text-slate-700 dark:text-slate-200 whitespace-nowrap">
                             <div className="space-y-1">
                               <p className="text-[11px] text-emerald-600 font-medium">{job.admin_close_user}</p>
                               <p className="font-medium">{job.car}</p>
                               <p className="text-[11px] text-slate-500">{job.driver}</p>
                             </div>
                           </td>
-                          <td className="px-4 py-3">
+                          <td className="px-4 py-3 whitespace-nowrap">
                             <BillProgressPills
                               completed={toNumber(job.completed_count)}
                               cancelled={toNumber(job.cancelled_count)}
                             />
                           </td>
-                          <td className="px-4 py-3">
+                          <td className="px-4 py-3 whitespace-nowrap">
                             <TripLoadCell v={volumes[job.doc_no]} failed={volumesFailed} />
                           </td>
-                          <td className="px-4 py-3 text-slate-600 dark:text-slate-300 text-[11px]">
+                          <td className="px-4 py-3 text-slate-600 dark:text-slate-300 text-[11px] whitespace-nowrap">
                             {job.miles_start || "-"} → {job.miles_end || "-"}
                           </td>
-                          <td className="px-4 py-3">
+                          <td className="px-4 py-3 whitespace-nowrap">
                             <StatusBadge tone="emerald" label="ປິດສຳເລັດແລ້ວ" />
                           </td>
-                          <td className="px-4 py-3 text-center">
+                          <td className="px-4 py-3 text-center whitespace-nowrap">
                             {job.car && (
                               <Link
                                 href={`/tracking/cars-map?focus=${encodeURIComponent(job.car)}`}

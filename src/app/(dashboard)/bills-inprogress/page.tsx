@@ -640,7 +640,7 @@ export default function BillsInProgressClient({
                     return (
                       <Fragment key={job.doc_no}>
                         <tr className="border-b border-slate-200/20 dark:border-white/5 hover:bg-white/30 dark:hover:bg-white/5 transition-colors">
-                          <td className="px-4 py-3">
+                          <td className="px-4 py-3 whitespace-nowrap">
                             <button
                               onClick={() => void toggleDetails(job.doc_no)}
                               className="flex items-center gap-2 text-left"
@@ -654,13 +654,13 @@ export default function BillsInProgressClient({
                               </span>
                             </button>
                           </td>
-                          <td className="px-4 py-3 text-slate-600">
+                          <td className="px-4 py-3 text-slate-600 whitespace-nowrap">
                             <div className="space-y-1">
                               <p className="font-medium text-sky-700">{job.active_sent_start}</p>
                               <p className="text-[11px] text-slate-400">ວັນຈັດສົ່ງ {job.date_logistic}</p>
                             </div>
                           </td>
-                          <td className="px-4 py-3 text-slate-600">
+                          <td className="px-4 py-3 text-slate-600 whitespace-nowrap">
                             <div className="space-y-1">
                               {job.miles_start ? (
                                 <p className="font-medium text-slate-800">{job.miles_start} ກມ</p>
@@ -670,7 +670,7 @@ export default function BillsInProgressClient({
                               <LiveDuration startTime={job.active_sent_start_raw} />
                             </div>
                           </td>
-                          <td className="px-4 py-3 text-slate-600">
+                          <td className="px-4 py-3 text-slate-600 whitespace-nowrap">
                             <div className="space-y-1">
                               {job.current_lat && job.current_lng ? (
                                 <>
@@ -704,7 +704,7 @@ export default function BillsInProgressClient({
                               )}
                             </div>
                           </td>
-                          <td className="px-4 py-3 text-slate-700">
+                          <td className="px-4 py-3 text-slate-700 whitespace-nowrap">
                             <div className="space-y-1">
                               {job.transport_name && job.transport_name !== "-" && (
                                 <p className="text-[10px] text-sky-600 font-medium">{job.transport_name}</p>
@@ -724,7 +724,7 @@ export default function BillsInProgressClient({
                               )}
                             </div>
                           </td>
-                          <td className="px-4 py-3">
+                          <td className="px-4 py-3 whitespace-nowrap">
                             <div className="flex flex-wrap gap-1.5">
                               <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-lg bg-sky-500/10 text-sky-600 dark:text-sky-400 text-[10px] font-semibold">
                                 <FaRoute size={9} />
@@ -746,7 +746,7 @@ export default function BillsInProgressClient({
                               )}
                             </div>
                           </td>
-                          <td className="px-4 py-3 text-slate-600">
+                          <td className="px-4 py-3 text-slate-600 whitespace-nowrap">
                             <div className="space-y-1">
                               <p className="text-[11px]">ສ້າງ: <span className="font-medium text-slate-700">{job.user_created}</span></p>
                               <p className="text-[11px]">ອະນຸມັດ: <span className="font-medium text-slate-700">{job.approve_user}</span></p>
@@ -754,16 +754,16 @@ export default function BillsInProgressClient({
                               <ElapsedTimer createdAt={job.created_at} />
                             </div>
                           </td>
-                          <td className="px-4 py-3">
+                          <td className="px-4 py-3 whitespace-nowrap">
                             <TripLoadCell v={volumes[job.doc_no]} failed={volumesFailed} />
                           </td>
-                          <td className="px-4 py-3">
+                          <td className="px-4 py-3 whitespace-nowrap">
                             <span className="inline-flex items-center gap-1.5 px-2 py-1 rounded-full text-[10px] font-semibold bg-sky-500/10 text-sky-600 dark:text-sky-400">
                               <span className="w-1.5 h-1.5 rounded-full bg-sky-500" />
                               ກຳລັງຈັດສົ່ງ
                             </span>
                           </td>
-                          <td className="px-4 py-3 text-center">
+                          <td className="px-4 py-3 text-center whitespace-nowrap">
                             <div className="flex items-center justify-center gap-1.5">
                               {job.car && (
                                 <Link

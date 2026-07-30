@@ -247,7 +247,7 @@ export default function JobsWaitingReceivePage() {
                     return (
                       <Fragment key={job.doc_no}>
                         <tr className="border-b border-slate-200/20 dark:border-white/5 hover:bg-white/30 dark:hover:bg-white/5 transition-colors">
-                          <td className="px-4 py-3">
+                          <td className="px-4 py-3 whitespace-nowrap">
                             <button
                               onClick={() => void toggleDetails(job.doc_no)}
                               className="flex items-center gap-2 text-left"
@@ -261,35 +261,35 @@ export default function JobsWaitingReceivePage() {
                               </span>
                             </button>
                           </td>
-                          <td className="px-4 py-3 text-slate-600 dark:text-slate-300">
+                          <td className="px-4 py-3 text-slate-600 dark:text-slate-300 whitespace-nowrap">
                             <div className="space-y-1">
                               <p>{job.date_logistic}</p>
                               <p className="text-[11px] text-slate-400">ສ້າງ {job.created_at}</p>
                               <ElapsedTimer since={job.created_at} tone="amber" />
                             </div>
                           </td>
-                          <td className="px-4 py-3 text-slate-700 dark:text-slate-200">
+                          <td className="px-4 py-3 text-slate-700 dark:text-slate-200 whitespace-nowrap">
                             <div className="space-y-1">
                               <p className="font-medium">{job.car}</p>
                               <p className="text-[11px] text-slate-500">{job.driver}</p>
                             </div>
                           </td>
-                          <td className="px-4 py-3 text-center font-bold text-slate-700 dark:text-slate-200">
+                          <td className="px-4 py-3 text-center font-bold text-slate-700 dark:text-slate-200 whitespace-nowrap">
                             {toNumber(job.item_bill)}
                           </td>
-                          <td className="px-4 py-3 text-slate-600 dark:text-slate-300">
+                          <td className="px-4 py-3 text-slate-600 dark:text-slate-300 whitespace-nowrap">
                             <div className="space-y-1">
                               <p className="text-[11px]">ສ້າງ: <span className="font-medium text-slate-700 dark:text-slate-200">{job.user_created}</span></p>
                               <p className="text-[11px]">ອະນຸມັດ: <span className="font-medium text-slate-700 dark:text-slate-200">{job.approve_user}</span></p>
                             </div>
                           </td>
-                          <td className="px-4 py-3">
+                          <td className="px-4 py-3 whitespace-nowrap">
                             <TripLoadCell v={volumes[job.doc_no]} failed={volumesFailed} />
                           </td>
-                          <td className="px-4 py-3">
+                          <td className="px-4 py-3 whitespace-nowrap">
                             <StatusBadge tone="amber" label="ລໍຖ້າຮັບຖ້ຽວ" />
                           </td>
-                          <td className="px-4 py-3 text-center">
+                          <td className="px-4 py-3 text-center whitespace-nowrap">
                             <div className="inline-flex items-center gap-1">
                               <button
                                 type="button"

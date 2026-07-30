@@ -209,7 +209,7 @@ function JobRow({
   return (
     <>
       <tr className={`transition-colors ${expanded ? "bg-teal-500/5" : "hover:bg-white/30 dark:hover:bg-white/5"}`}>
-        <td className="px-3 py-3 w-8">
+        <td className="px-3 py-3 w-8 whitespace-nowrap">
           <button
             type="button"
             onClick={onToggle}
@@ -221,7 +221,7 @@ function JobRow({
             {expanded ? <FaChevronDown size={9} /> : <FaChevronRight size={9} />}
           </button>
         </td>
-        <td className="px-3 py-3">
+        <td className="px-3 py-3 whitespace-nowrap">
           <div className="flex items-center gap-1.5 flex-wrap">
             <p className="text-sm font-bold text-slate-900 dark:text-white">{job.doc_no}</p>
             {job.forward_transport_code ? (
@@ -241,7 +241,7 @@ function JobRow({
             <ElapsedTimer createdAt={job.created_at} now={now} />
           </div>
         </td>
-        <td className="px-3 py-3">
+        <td className="px-3 py-3 whitespace-nowrap">
           <div className="flex flex-col gap-1">
             <span className="inline-flex w-fit items-center gap-1.5 rounded-lg bg-sky-500/10 px-2 py-1 text-[11px] font-semibold text-sky-600 dark:text-sky-400">
               <FaTruck size={9} />
@@ -258,19 +258,19 @@ function JobRow({
             )}
           </div>
         </td>
-        <td className="px-3 py-3">
+        <td className="px-3 py-3 whitespace-nowrap">
           <div className="flex items-center gap-1.5 text-[12px] text-slate-700">
             <FaTruck size={10} className="text-sky-500" />
             <span className="font-medium truncate">{job.car || "-"}</span>
           </div>
         </td>
-        <td className="px-3 py-3">
+        <td className="px-3 py-3 whitespace-nowrap">
           <div className="flex items-center gap-1.5 text-[12px] text-slate-700">
             <FaIdCard size={10} className="text-sky-500" />
             <span className="font-medium truncate">{job.driver || "-"}</span>
           </div>
         </td>
-        <td className="px-3 py-3" title={job.workers || "ບໍ່ມີກຳມະກອນ"}>
+        <td className="px-3 py-3 whitespace-nowrap" title={job.workers || "ບໍ່ມີກຳມະກອນ"}>
           <div className="flex items-center gap-1.5 text-[11px] text-slate-700">
             <FaUsers size={10} className="text-emerald-500" />
             <span className="font-semibold tabular-nums">{job.worker_count}</span>
@@ -280,7 +280,7 @@ function JobRow({
             <p className="text-[9px] text-slate-400 truncate max-w-[160px]">{job.workers}</p>
           )}
         </td>
-        <td className="px-3 py-3 max-w-[220px]">
+        <td className="px-3 py-3 max-w-[220px] whitespace-nowrap">
           <div className="flex flex-col gap-1">
             <span className="inline-flex w-fit items-center gap-1 px-2 py-0.5 rounded-full bg-teal-500/10 text-teal-600 dark:text-teal-400 text-xs font-bold tabular-nums">
               {job.item_bill} ບິນ
@@ -295,10 +295,10 @@ function JobRow({
             )}
           </div>
         </td>
-        <td className="px-3 py-3">
+        <td className="px-3 py-3 whitespace-nowrap">
           <TripLoadCell v={volume} failed={volumeFailed} />
         </td>
-        <td className="px-3 py-3">
+        <td className="px-3 py-3 whitespace-nowrap">
           <div className="flex items-center gap-1 flex-wrap">
             <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-semibold ${status.bg} ${status.text}`}>
               <span className={`w-1.5 h-1.5 rounded-full ${status.dot}`} />
@@ -315,7 +315,7 @@ function JobRow({
             )}
           </div>
         </td>
-        <td className="px-3 py-3">
+        <td className="px-3 py-3 whitespace-nowrap">
           <div className="flex items-center justify-end gap-0.5">
             {job.approve_status !== 1 && (
               <button
