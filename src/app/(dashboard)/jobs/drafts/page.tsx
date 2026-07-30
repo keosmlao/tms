@@ -299,7 +299,9 @@ export default function TripDraftsPage() {
   // ປ່ຽນ ເພື່ອບໍ່ໃຫ້ dispatcher ເຫັນຕົວເລກເກົ່າຫຼັງຍ້າຍບິນ
   useEffect(() => {
     let cancelled = false;
-    const open = [...expanded];
+    // ດຶງໃຫ້ "ທຸກຮ່າງທີ່ເຫັນ" ບໍ່ແມ່ນສະເພາະທີ່ຂະຫຍາຍ — ແຖບພື້ນທີ່ຢູ່ແຖວທີ່
+    // ຫຍໍ້ນຳ ຖ້າດຶງແຕ່ອັນທີ່ເປີດ ແຖວອື່ນຈະຄ້າງເປັນ "…" ຕະຫຼອດ
+    const open = drafts.map((d) => d.draft_id);
     if (open.length === 0) return;
     void (async () => {
       const loaded = await Promise.all(
@@ -322,7 +324,7 @@ export default function TripDraftsPage() {
     return () => {
       cancelled = true;
     };
-  }, [expanded, drafts, billsByDraft]);
+  }, [drafts, billsByDraft]);
 
 
 
