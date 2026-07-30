@@ -119,7 +119,7 @@ async function ensurePipeDimSchema() {
   await pdCache[`${key}_p`];
 }
 
-async function listPipeDims() {
+async function listPipeDimsUncached() {
   await ensurePipeDimSchema();
   return query(
     `SELECT size_key, label, od_mm, COALESCE(length_m, 4) AS length_m,
@@ -132,6 +132,25 @@ async function listPipeDims() {
        FROM public.odg_tms_pipe_dim
       ORDER BY COALESCE(sort_order, 0) ASC, size_key ASC`
   );
+}
+
+// ຕາຕະລາງຕັ້ງຄ່ານ້ອຍ (27 / ຫຼັກສິບແຖວ) ທີ່ຖືກອ່ານທຸກຄັ້ງທີ່ຄິດພື້ນທີ່ —
+// ໜ້າໜຶ່ງມີ 20 ຖ້ຽວກໍອ່ານຊ້ຳ. cache ສັ້ນໆ ຕັດ DB round-trip ອອກ
+// ໂດຍທີ່ຄົນແກ້ຕາຕະລາງແລ້ວຍັງເຫັນຜົນພາຍໃນ {TTL}s.
+const __tmsPipeDimList_TTL_MS = 30_000;
+
+async function listPipeDims() {
+  const now = Date.now();
+  const hit = pdCache.__tmsPipeDimList;
+  if (hit && now - hit.at < __tmsPipeDimList_TTL_MS) return hit.rows;
+  const rows = await listPipeDimsUncached();
+  pdCache.__tmsPipeDimList = { at: now, rows };
+  return rows;
+}
+
+/** ລ້າງ cache ຫຼັງແກ້ຕາຕະລາງ ເພື່ອໃຫ້ເຫັນຜົນທັນທີ */
+function invalidatePipeDimsCache() {
+  pdCache.__tmsPipeDimList = null;
 }
 
 async function upsertPipeDim(session, input) {
@@ -176,6 +195,7 @@ async function upsertPipeDim(session, input) {
       session?.usercode ?? null,
     ]
   );
+  invalidatePipeDimsCache();
   return { success: true };
 }
 
@@ -184,6 +204,7 @@ async function deletePipeDim(sizeKey) {
   await pool.query(`DELETE FROM public.odg_tms_pipe_dim WHERE size_key = $1`, [
     String(sizeKey ?? "").trim(),
   ]);
+  invalidatePipeDimsCache();
   return { success: true };
 }
 

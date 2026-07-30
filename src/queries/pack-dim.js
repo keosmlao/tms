@@ -87,7 +87,7 @@ async function ensurePackDimSchema() {
   await packCache[`${key}_p`];
 }
 
-async function listPackDims() {
+async function listPackDimsUncached() {
   await ensurePackDimSchema();
   return query(
     `SELECT roworder, family, size_key, pack_unit, pack_qty,
@@ -102,6 +102,25 @@ async function listPackDims() {
        FROM public.odg_tms_pack_dim
       ORDER BY family ASC, size_key ASC NULLS FIRST`
   );
+}
+
+// ຕາຕະລາງຕັ້ງຄ່ານ້ອຍ (27 / ຫຼັກສິບແຖວ) ທີ່ຖືກອ່ານທຸກຄັ້ງທີ່ຄິດພື້ນທີ່ —
+// ໜ້າໜຶ່ງມີ 20 ຖ້ຽວກໍອ່ານຊ້ຳ. cache ສັ້ນໆ ຕັດ DB round-trip ອອກ
+// ໂດຍທີ່ຄົນແກ້ຕາຕະລາງແລ້ວຍັງເຫັນຜົນພາຍໃນ {TTL}s.
+const __tmsPackDimList_TTL_MS = 30_000;
+
+async function listPackDims() {
+  const now = Date.now();
+  const hit = packCache.__tmsPackDimList;
+  if (hit && now - hit.at < __tmsPackDimList_TTL_MS) return hit.rows;
+  const rows = await listPackDimsUncached();
+  packCache.__tmsPackDimList = { at: now, rows };
+  return rows;
+}
+
+/** ລ້າງ cache ຫຼັງແກ້ຕາຕະລາງ ເພື່ອໃຫ້ເຫັນຜົນທັນທີ */
+function invalidatePackDimsCache() {
+  packCache.__tmsPackDimList = null;
 }
 
 async function upsertPackDim(session, input) {
@@ -166,6 +185,7 @@ async function upsertPackDim(session, input) {
       session?.usercode ?? null,
     ]
   );
+  invalidatePackDimsCache();
   return { success: true };
 }
 
@@ -174,6 +194,7 @@ async function deletePackDim(roworder) {
   const id = Number(roworder);
   if (!Number.isFinite(id)) throw new Error("roworder is required");
   await pool.query(`DELETE FROM public.odg_tms_pack_dim WHERE roworder = $1`, [id]);
+  invalidatePackDimsCache();
   return { success: true };
 }
 
