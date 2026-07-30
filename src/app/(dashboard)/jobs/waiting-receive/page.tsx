@@ -2,6 +2,7 @@
 
 import { Fragment, useEffect, useMemo, useState } from "react";
 import { TripLoadCell, useTripVolumes } from "@/components/trip-load-cell";
+import { TripLoadPanel } from "@/components/trip-load-strip";
 import Link from "next/link";
 import {
   FaBroadcastTower,
@@ -322,6 +323,9 @@ export default function JobsWaitingReceivePage() {
                         {isExpanded && (
                           <tr>
                             <td colSpan={8} className="px-0 py-0 bg-slate-50/60 dark:bg-black/20">
+                              <div className="px-4 pt-3">
+                                <TripLoadPanel docNo={job.doc_no} />
+                              </div>
                               <JobBillsAccordion
                                 docNo={job.doc_no}
                                 createdAt={job.created_at}

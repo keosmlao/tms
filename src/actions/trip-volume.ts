@@ -10,7 +10,7 @@ import {
 } from "@/queries/trip-load.js";
 import { getCarCapacity } from "@/queries/master-data.js";
 import { getRemainingBillProductsMap } from "@/queries/helpers.js";
-import { getMasterItemDims, getItemCategories } from "@/queries/item-dim.js";
+import { getMasterItemDims } from "@/queries/item-dim.js";
 import { listPipeDims } from "@/queries/pipe-dim.js";
 import { listPackDims } from "@/queries/pack-dim.js";
 // ຕ້ອງມີ .js ຄືກັບບ່ອນອື່ນ (auth.ts, api/health) — ບໍ່ດັ່ງນັ້ນ resolve ບໍ່ຕົງ
@@ -26,9 +26,7 @@ import {
   computeTripVolume,
   resolveItemVolumes,
   sliceByBill,
-  sliceByCategory,
   type CarCapacity,
-  type ItemCategoryRow,
   type MasterDimRow,
   type TripItem,
 } from "@/lib/trip-volume";
@@ -46,9 +44,8 @@ async function computeLoad(
     new Set(items.map((i) => String(i.item_code ?? "").trim()).filter(Boolean))
   );
 
-  const [masterDims, categories, pipeDims, packDims, capacity] = await Promise.all([
+  const [masterDims, pipeDims, packDims, capacity] = await Promise.all([
     getMasterItemDims(itemCodes) as Promise<MasterDimRow[]>,
-    getItemCategories(itemCodes) as Promise<ItemCategoryRow[]>,
     listPipeDims() as Promise<PipeDimRow[]>,
     listPackDims() as Promise<PackDimRow[]>,
     car ? (getCarCapacity(car) as Promise<CarCapacity | null>) : Promise.resolve(null),
@@ -78,7 +75,6 @@ async function computeLoad(
     ...trip,
     freeM3,
     byBill: sliceByBill(items, volumes, trip, billNames),
-    byCategory: sliceByCategory(items, volumes, trip, categories),
     longestItemM: longestM,
     cargoLengthM: length.cargoLengthM,
     lengthFits: length.fits,

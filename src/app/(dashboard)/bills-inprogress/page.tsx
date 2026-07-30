@@ -1,6 +1,8 @@
 "use client";
 
 import { Fragment, useEffect, useMemo, useState } from "react";
+import { TripLoadCell, useTripVolumes } from "@/components/trip-load-cell";
+import { TripLoadPanel } from "@/components/trip-load-strip";
 import Link from "next/link";
 import {
   FaBoxOpen,
@@ -450,6 +452,9 @@ export default function BillsInProgressClient({
     currentPage * perPage
   );
 
+  // % ພື້ນທີ່ບັນທຸກ — ດຶງເປັນກ້ອນດຽວຕໍ່ໜ້າ
+  const { volumes, failed: volumesFailed } = useTripVolumes(pagedJobs.map((j) => j.doc_no));
+
   const handleDelete = async (docNo: string) => {
     if (!await confirm({ title: "ລຶບຖ້ຽວ", message: `ຕ້ອງການລົບຖ້ຽວ ${docNo} ແທ້ບໍ?`, tone: "danger", confirmLabel: "ລຶບ" })) return;
 
@@ -622,6 +627,7 @@ export default function BillsInProgressClient({
                     <th className="px-4 py-3 text-left font-semibold text-slate-600">ລົດ / ຄົນຂັບ</th>
                     <th className="px-4 py-3 text-left font-semibold text-slate-600">ຄວາມຄືບໜ້າບິນ</th>
                     <th className="px-4 py-3 text-left font-semibold text-slate-600">ສ້າງ / ອະນຸມັດ</th>
+                    <th className="px-4 py-3 text-left font-semibold text-slate-600">% ທີ່ຂົນ</th>
                     <th className="px-4 py-3 text-left font-semibold text-slate-600">ສະຖານະ</th>
                     <th className="px-4 py-3 text-center font-semibold text-slate-600">ຈັດການ</th>
                   </tr>
@@ -749,6 +755,9 @@ export default function BillsInProgressClient({
                             </div>
                           </td>
                           <td className="px-4 py-3">
+                            <TripLoadCell v={volumes[job.doc_no]} failed={volumesFailed} />
+                          </td>
+                          <td className="px-4 py-3">
                             <span className="inline-flex items-center gap-1.5 px-2 py-1 rounded-full text-[10px] font-semibold bg-sky-500/10 text-sky-600 dark:text-sky-400">
                               <span className="w-1.5 h-1.5 rounded-full bg-sky-500" />
                               ກຳລັງຈັດສົ່ງ
@@ -793,7 +802,10 @@ export default function BillsInProgressClient({
 
                         {isExpanded && (
                           <tr>
-                            <td colSpan={9} className="px-0 py-0 bg-slate-50/60">
+                            <td colSpan={10} className="px-0 py-0 bg-slate-50/60">
+                              <div className="px-4 pt-3">
+                                <TripLoadPanel docNo={job.doc_no} />
+                              </div>
                               <div className="m-3 rounded-lg glass overflow-hidden">
                                 <div className="px-4 py-3 bg-white/30 dark:bg-white/5 border-b border-slate-200/30 dark:border-white/5 flex items-center justify-between">
                                   <div>
