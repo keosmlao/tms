@@ -26,6 +26,7 @@ import {
 import { Actions } from "@/lib/api";
 import { useConfirm } from "@/components/confirm-dialog";
 import { Pagination } from "@/components/status-page-helpers";
+import { cargoBoxM3, toCapacityNumber, usableM3 } from "@/lib/car-capacity";
 // Ported from server actions: addCarProfile, deleteCarProfile, getCarProfiles, getDispatchDrivers, getDispatchWorkers, updateCarProfile
 
 // ==================== Types ====================
@@ -48,6 +49,18 @@ interface CarProfile {
   gps_recorded_at?: string;
   drivers: Option[];
   workers: Option[];
+  // ຄວາມຈຸເປັນຂອງ "ຄັນ" ນີ້ດຽວ — ບໍ່ຕົກໄປປະເພດລົດ
+  cargo_length_cm: string;
+  cargo_width_cm: string;
+  cargo_height_cm: string;
+  payload_kg: string;
+  pallet_slots: string;
+  stowage_pct: string;
+  capacity_m3: string;
+  usable_m3: string;
+  capacity_verified: boolean;
+  /** 'measured' = ວັດແລ້ວ · 'estimated' = ຄາດຄະເນ · 'none' = ຍັງບໍ່ກຳນົດ */
+  capacity_source: string;
 }
 
 interface CarForm {
@@ -58,6 +71,12 @@ interface CarForm {
   tank_no: string;
   car_type: string;
   transport_code: string;
+  cargo_length_cm: string;
+  cargo_width_cm: string;
+  cargo_height_cm: string;
+  payload_kg: string;
+  pallet_slots: string;
+  stowage_pct: string;
   driverCodes: string[];
   workerCodes: string[];
 }
@@ -72,6 +91,12 @@ const emptyForm: CarForm = {
   tank_no: "",
   car_type: "",
   transport_code: "",
+  cargo_length_cm: "",
+  cargo_width_cm: "",
+  cargo_height_cm: "",
+  payload_kg: "",
+  pallet_slots: "",
+  stowage_pct: "",
   driverCodes: [],
   workerCodes: [],
 };
@@ -94,6 +119,21 @@ function toText(value: unknown) {
   if (value === null || value === undefined) return "";
   return String(value);
 }
+
+const toNum = toCapacityNumber;
+
+interface TypeCapacity {
+  length_cm: number | null;
+  width_cm: number | null;
+  height_cm: number | null;
+  payload_kg: number | null;
+  pallet_slots: number | null;
+  stowage_pct: number;
+  capacity_m3: number | null;
+  usable_m3: number | null;
+}
+
+const boxM3 = cargoBoxM3;
 
 function normalizeOptions(data: unknown): Option[] {
   if (!Array.isArray(data)) return [];
@@ -129,6 +169,16 @@ function normalizeCarProfiles(data: unknown): CarProfile[] {
         transport_code: toText(record.transport_code),
         drivers: normalizeOptions(record.drivers),
         workers: normalizeOptions(record.workers),
+        cargo_length_cm: toText(record.cargo_length_cm),
+        cargo_width_cm: toText(record.cargo_width_cm),
+        cargo_height_cm: toText(record.cargo_height_cm),
+        payload_kg: toText(record.payload_kg),
+        pallet_slots: toText(record.pallet_slots),
+        stowage_pct: toText(record.stowage_pct),
+        capacity_m3: toText(record.capacity_m3),
+        usable_m3: toText(record.usable_m3),
+        capacity_verified: record.capacity_verified === true,
+        capacity_source: toText(record.capacity_source) || "none",
       };
     })
     .filter((car) => car.code.length > 0);
@@ -238,6 +288,44 @@ function CarTypeBadge({ carType }: { carType?: string }) {
     <span className="inline-flex w-fit items-center gap-1 rounded-full bg-violet-500/10 px-2 py-0.5 text-[10px] font-semibold text-violet-600 dark:text-violet-400">
       <FaCarSide size={9} />
       {value}
+    </span>
+  );
+}
+
+// ບອກຄວາມຈຸບັນທຸກທີ່ຈະໃຊ້ຄິດພື້ນທີ່ຖ້ຽວ ພ້ອມບອກວ່າຄ່າມາຈາກໃສ ເພື່ອໃຫ້ເຫັນ
+// ໄວວ່າຄັນໃດຍັງບໍ່ໄດ້ຕັ້ງຄ່າ.
+function CapacityChip({ car }: { car: CarProfile }) {
+  const usable = toNum(car.usable_m3);
+
+  if (!usable) {
+    return (
+      <span
+        className="inline-flex w-fit items-center gap-1 rounded-full bg-amber-500/10 px-2 py-0.5 text-[10px] font-semibold text-amber-600 dark:text-amber-400"
+        title="ຍັງບໍ່ໄດ້ວັດຕູ້ຂອງລົດຄັນນີ້ — ຄິດພື້ນທີ່ຖ້ຽວບໍ່ໄດ້"
+      >
+        <FaWarehouse size={8} />
+        ຍັງບໍ່ໄດ້ວັດ
+      </span>
+    );
+  }
+
+  const measured = car.capacity_source === "measured";
+  return (
+    <span
+      className={`inline-flex w-fit items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-semibold ${
+        measured
+          ? "bg-teal-500/10 text-teal-700 dark:text-teal-400"
+          : "bg-amber-500/10 text-amber-700 dark:text-amber-400"
+      }`}
+      title={
+        measured
+          ? "ວັດຕູ້ຂອງລົດຄັນນີ້ແລ້ວ"
+          : "ຄ່າຄາດຄະເນທີ່ຍ້າຍມາຈາກປະເພດລົດ — ຄວນວັດຕູ້ຄັນນີ້ແລ້ວກົດບັນທຶກ"
+      }
+    >
+      <FaWarehouse size={8} />
+      {usable.toFixed(1)} m³
+      {!measured && "~"}
     </span>
   );
 }
@@ -413,6 +501,8 @@ export default function CarsManagePage() {
   const [editingCode, setEditingCode] = useState<string | null>(null);
   const [form, setForm] = useState<CarForm>(emptyForm);
   const [carTypeOptions, setCarTypeOptions] = useState<string[]>(CAR_TYPE_OPTIONS);
+  // ຄວາມຈຸເລີ່ມຕົ້ນຂອງແຕ່ລະປະເພດ — ໃຊ້ເປັນ placeholder ບອກວ່າ "ວ່າງໄວ້ຈະໄດ້ເທົ່າໃດ"
+  const [carTypeCaps, setCarTypeCaps] = useState<Record<string, TypeCapacity>>({});
   const [searchText, setSearchText] = useState("");
   const [directoryFilter, setDirectoryFilter] = useState<DirectoryFilter>("all");
   const [currentPage, setCurrentPage] = useState(1);
@@ -447,10 +537,25 @@ export default function CarsManagePage() {
   useEffect(() => {
     void Actions.listCarTypes(true)
       .then((data) => {
-        const types = (data as Array<{ name?: string }> | null)
-          ?.map((t) => (t.name ?? "").trim())
-          .filter(Boolean) ?? [];
+        const rows = (data as Array<Record<string, unknown>> | null) ?? [];
+        const types = rows.map((t) => toText(t.name).trim()).filter(Boolean);
         if (types.length > 0) setCarTypeOptions(types);
+        const caps: Record<string, TypeCapacity> = {};
+        for (const row of rows) {
+          const name = toText(row.name).trim();
+          if (!name) continue;
+          caps[name] = {
+            length_cm: toNum(row.cargo_length_cm),
+            width_cm: toNum(row.cargo_width_cm),
+            height_cm: toNum(row.cargo_height_cm),
+            payload_kg: toNum(row.payload_kg),
+            pallet_slots: toNum(row.pallet_slots),
+            stowage_pct: toNum(row.stowage_pct) ?? 80,
+            capacity_m3: toNum(row.capacity_m3),
+            usable_m3: toNum(row.usable_m3),
+          };
+        }
+        setCarTypeCaps(caps);
       })
       .catch(() => undefined);
   }, []);
@@ -527,6 +632,12 @@ export default function CarsManagePage() {
       tank_no: car.tank_no ?? "",
       transport_code: car.transport_code ?? "",
       car_type: car.car_type ?? "",
+      cargo_length_cm: car.cargo_length_cm ?? "",
+      cargo_width_cm: car.cargo_width_cm ?? "",
+      cargo_height_cm: car.cargo_height_cm ?? "",
+      payload_kg: car.payload_kg ?? "",
+      pallet_slots: car.pallet_slots ?? "",
+      stowage_pct: car.stowage_pct ?? "",
       driverCodes: car.drivers.map((item) => item.code),
       workerCodes: car.workers
         .map((item) => item.code)
@@ -542,28 +653,28 @@ export default function CarsManagePage() {
     }
     setSaving(true);
     try {
+      // transport_code ຕ້ອງສົ່ງໄປນຳ ບໍ່ດັ່ງນັ້ນສາຂາທີ່ລົດສັງກັດຈະຫາຍທຸກຄັ້ງທີ່ບັນທຶກ
+      const payload = {
+        code: form.code.trim(),
+        name_1: form.name_1.trim(),
+        imei: form.imei.trim(),
+        plate_no: form.plate_no.trim(),
+        tank_no: form.tank_no.trim(),
+        car_type: form.car_type.trim(),
+        transport_code: form.transport_code.trim(),
+        cargo_length_cm: form.cargo_length_cm.trim(),
+        cargo_width_cm: form.cargo_width_cm.trim(),
+        cargo_height_cm: form.cargo_height_cm.trim(),
+        payload_kg: form.payload_kg.trim(),
+        pallet_slots: form.pallet_slots.trim(),
+        stowage_pct: form.stowage_pct.trim(),
+        driverCodes: form.driverCodes,
+        workerCodes: form.workerCodes,
+      };
       if (editingCode) {
-        await Actions.updateCarProfile({
-          code: form.code.trim(),
-          name_1: form.name_1.trim(),
-          imei: form.imei.trim(),
-          plate_no: form.plate_no.trim(),
-          tank_no: form.tank_no.trim(),
-          car_type: form.car_type.trim(),
-          driverCodes: form.driverCodes,
-          workerCodes: form.workerCodes,
-        });
+        await Actions.updateCarProfile(payload);
       } else {
-        await Actions.addCarProfile({
-          code: form.code.trim(),
-          name_1: form.name_1.trim(),
-          imei: form.imei.trim(),
-          plate_no: form.plate_no.trim(),
-          tank_no: form.tank_no.trim(),
-          car_type: form.car_type.trim(),
-          driverCodes: form.driverCodes,
-          workerCodes: form.workerCodes,
-        });
+        await Actions.addCarProfile(payload);
       }
       resetForm();
       await refreshData();
@@ -806,6 +917,7 @@ export default function CarsManagePage() {
                           </span>
                         )}
                         <CarTypeBadge carType={car.car_type} />
+                        <CapacityChip car={car} />
                         {car.tank_no && (
                           <span className="inline-flex items-center gap-1 text-slate-500">
                             <FaWarehouse size={8} className="text-slate-400" />
@@ -923,7 +1035,10 @@ export default function CarsManagePage() {
                           </div>
                         </td>
                         <td className="px-4 py-3">
-                          <CarTypeBadge carType={car.car_type} />
+                          <div className="flex flex-col gap-1">
+                            <CarTypeBadge carType={car.car_type} />
+                            <CapacityChip car={car} />
+                          </div>
                         </td>
                         <td className="px-4 py-3">
                           {(car.tracker_code ?? "") !== "" &&
@@ -1180,6 +1295,114 @@ export default function CarsManagePage() {
                         />
                       </div>
                     </div>
+                  </section>
+
+                  {/* ===== ຄວາມຈຸບັນທຸກ — override ສະເພາະຄັນ ===== */}
+                  <section className="glass rounded-lg p-4">
+                    <header className="flex items-center justify-between gap-2 mb-3 pb-2.5 border-b border-slate-200/40 dark:border-white/5">
+                      <div className="flex items-center gap-2.5">
+                        <span className="w-8 h-8 rounded-lg bg-teal-500/10 text-teal-600 dark:text-teal-400 flex items-center justify-center">
+                          <FaWarehouse size={12} />
+                        </span>
+                        <div>
+                          <h4 className="text-sm font-bold text-slate-800 dark:text-white">ຄວາມຈຸບັນທຸກ</h4>
+                          <p className="text-[10px] text-slate-500 dark:text-slate-400">
+                            ວັດຕູ້ຂອງລົດຄັນນີ້ — ບໍ່ໄດ້ໃຊ້ຄ່າຂອງປະເພດລົດ
+                          </p>
+                        </div>
+                      </div>
+                    </header>
+
+                    {(() => {
+                      // ຄ່າຂອງປະເພດລົດໃຊ້ເປັນ "ຕົວຊ່ວຍຕື່ມ" ຕອນຍັງບໍ່ໄດ້ວັດເທົ່ານັ້ນ
+                      // — ບໍ່ແມ່ນຄ່າທີ່ລະບົບຈະຕົກໄປໃຊ້ເອງ
+                      const typeCap = carTypeCaps[form.car_type.trim()];
+                      const ownM3 = boxM3(form.cargo_width_cm, form.cargo_length_cm, form.cargo_height_cm);
+                      const stow = toNum(form.stowage_pct) ?? 80;
+                      const fields = [
+                        ["cargo_width_cm", "ກວ້າງ (cm)"],
+                        ["cargo_length_cm", "ຍາວ (cm)"],
+                        ["cargo_height_cm", "ສູງ (cm)"],
+                        ["payload_kg", "ບັນທຸກ (kg)"],
+                        ["pallet_slots", "ພາເລັດ"],
+                        ["stowage_pct", "ໃຊ້ໄດ້ຈິງ (%)"],
+                      ] as const;
+
+                      const fillFromType = () => {
+                        if (!typeCap) return;
+                        setForm((current) => ({
+                          ...current,
+                          cargo_width_cm: typeCap.width_cm != null ? String(typeCap.width_cm) : current.cargo_width_cm,
+                          cargo_length_cm: typeCap.length_cm != null ? String(typeCap.length_cm) : current.cargo_length_cm,
+                          cargo_height_cm: typeCap.height_cm != null ? String(typeCap.height_cm) : current.cargo_height_cm,
+                          payload_kg: typeCap.payload_kg != null ? String(typeCap.payload_kg) : current.payload_kg,
+                          pallet_slots: typeCap.pallet_slots != null ? String(typeCap.pallet_slots) : current.pallet_slots,
+                          stowage_pct: String(typeCap.stowage_pct),
+                        }));
+                      };
+
+                      return (
+                        <>
+                          <div className="grid grid-cols-2 gap-3 md:grid-cols-3">
+                            {fields.map(([key, label]) => (
+                              <div key={key}>
+                                <label className="text-[11px] font-semibold text-slate-600 dark:text-slate-300">
+                                  {label}
+                                </label>
+                                <input
+                                  type="number"
+                                  min={0}
+                                  value={form[key]}
+                                  onChange={(event) =>
+                                    setForm((current) => ({ ...current, [key]: event.target.value }))
+                                  }
+                                  placeholder={key === "stowage_pct" ? "80" : "—"}
+                                  className="glass-input mt-1.5 h-10 w-full rounded-lg px-3 text-sm tabular-nums"
+                                />
+                              </div>
+                            ))}
+                          </div>
+
+                          {typeCap && !ownM3 && (
+                            <button
+                              type="button"
+                              onClick={fillFromType}
+                              className="mt-2 rounded-lg bg-slate-500/10 px-3 py-1.5 text-[11px] font-semibold text-slate-600 hover:bg-slate-500/20 dark:text-slate-300"
+                            >
+                              ຕື່ມຄ່າຄາດຄະເນຂອງ &quot;{form.car_type.trim()}&quot; ໃຫ້ກ່ອນ
+                            </button>
+                          )}
+
+                          <div className="mt-3 rounded-lg bg-slate-500/5 px-3 py-2.5 text-[11px] leading-relaxed">
+                            {ownM3 !== null ? (
+                              <>
+                                <span className="text-slate-500">ຈຸໄດ້</span>{" "}
+                                <span className="font-bold tabular-nums text-slate-700 dark:text-slate-200">
+                                  {ownM3.toFixed(2)} m³
+                                </span>
+                                <span className="text-slate-400"> · </span>
+                                <span className="text-slate-500">ບັນທຸກໄດ້ຈິງປະມານ</span>{" "}
+                                <span className="font-bold tabular-nums text-teal-700 dark:text-teal-400">
+                                  {(usableM3(ownM3, stow) ?? 0).toFixed(2)} m³
+                                </span>
+                              </>
+                            ) : (
+                              <span className="text-amber-600 dark:text-amber-400">
+                                ຍັງບໍ່ໄດ້ວັດຕູ້ຄັນນີ້ — ຄິດພື້ນທີ່ຖ້ຽວຂອງລົດຄັນນີ້ບໍ່ໄດ້
+                              </span>
+                            )}
+                          </div>
+
+                          {editingCode && !cars.find((c) => c.code === editingCode)?.capacity_verified &&
+                            ownM3 !== null && (
+                            <p className="mt-2 text-[10px] text-amber-600 dark:text-amber-400">
+                              ຄ່າປັດຈຸບັນຍ້າຍມາຈາກປະເພດລົດ (ຄາດຄະເນ) — ວັດຕູ້ຈິງແລ້ວກົດບັນທຶກ
+                              ຈະປ່ຽນເປັນ &quot;ວັດແລ້ວ&quot;
+                            </p>
+                          )}
+                        </>
+                      );
+                    })()}
                   </section>
 
                   {/* ===== Section 02 — GPS ===== */}

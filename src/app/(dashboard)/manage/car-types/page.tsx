@@ -13,7 +13,12 @@ interface CarType {
   active: boolean;
 }
 
-const EMPTY: CarType = { code: "", name: "", sort_order: 0, active: true };
+const EMPTY: CarType = {
+  code: "",
+  name: "",
+  sort_order: 0,
+  active: true,
+};
 
 export default function CarTypesPage() {
   const confirm = useConfirm();
@@ -50,7 +55,12 @@ export default function CarTypesPage() {
     setSubmitting(true);
     setError(null);
     try {
-      await Actions.upsertCarType(editing);
+      await Actions.upsertCarType({
+        code: editing.code,
+        name: editing.name.trim(),
+        sort_order: editing.sort_order,
+        active: editing.active,
+      });
       setEditing(null);
       await load();
     } catch (e) {
@@ -157,7 +167,10 @@ export default function CarTypesPage() {
           className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4"
           onClick={() => !submitting && setEditing(null)}
         >
-          <div className="glass rounded-xl w-full max-w-md overflow-hidden" onClick={(e) => e.stopPropagation()}>
+          <div
+            className="glass rounded-xl w-full max-w-md overflow-hidden"
+            onClick={(e) => e.stopPropagation()}
+          >
             <div className="px-5 py-3 border-b border-slate-200/30 dark:border-white/5 bg-white/30 dark:bg-white/5 flex items-center justify-between">
               <h3 className="text-sm font-bold text-slate-800 dark:text-white">
                 {rows.some((x) => x.code === editing.code) ? "ແກ້ໄຂປະເພດລົດ" : "ເພີ່ມປະເພດໃໝ່"}
@@ -218,6 +231,7 @@ export default function CarTypesPage() {
                   </button>
                 </div>
               </div>
+
               {error && <p className="text-[11px] text-rose-500">{error}</p>}
             </div>
             <div className="px-5 py-3 border-t border-slate-200/30 dark:border-white/5 bg-white/30 dark:bg-white/5 flex justify-end gap-2">

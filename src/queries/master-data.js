@@ -1,4 +1,6 @@
 const { pool, query, queryOne } = require("../lib/db");
+const { ensureCarTypeSchema, capacityM3Sql, numOrNull } = require("./car-type.js");
+const { ensureSettingsSchema } = require("./settings");
 
 // ==================== Cars ====================
 
@@ -9,6 +11,23 @@ async function ensureTmsCarAssignmentTables() {
   await query(`ALTER TABLE public.odg_tms_car ADD COLUMN IF NOT EXISTS car_type character varying`);
   // ລົດສັງກັດສາຂາໃດ — ບໍ່ເຄີຍມີບ່ອນເກັບ ຈຶ່ງບອກບໍ່ໄດ້ວ່າຄັນນີ້ຢູ່ສາຂາໃດ
   await query(`ALTER TABLE public.odg_tms_car ADD COLUMN IF NOT EXISTS transport_code character varying`);
+  // ຄວາມຈຸບັນທຸກ — ເກັບຢູ່ "ຄັນ" ເພາະລົດປະເພດດຽວກັນຕູ້ບໍ່ເທົ່າກັນ (ຕໍ່ຄອກ,
+  // ຕັດຕູ້, ຕິດຫຼັງຄາ). ປະເພດລົດເປັນພຽງຄ່າຕັ້ງຕົ້ນຕອນເພີ່ມລົດໃໝ່ ບໍ່ແມ່ນ
+  // ຕົວຕັດສິນ — ເບິ່ງ migrateCarTypeCapacityToCars().
+  for (const col of [
+    "cargo_length_cm numeric",
+    "cargo_width_cm numeric",
+    "cargo_height_cm numeric",
+    "payload_kg numeric",
+    "pallet_slots int",
+    "stowage_pct numeric",
+    // false = ຄ່າທີ່ລະບົບຄາດຄະເນໃຫ້, true = ຄົນວັດລົດຄັນນີ້ແລ້ວຢືນຢັນ
+    "capacity_verified boolean DEFAULT false",
+  ]) {
+    await query(`ALTER TABLE public.odg_tms_car ADD COLUMN IF NOT EXISTS ${col}`);
+  }
+  await ensureCarTypeSchema();
+  await migrateCarTypeCapacityToCars();
   await query(`
     CREATE TABLE IF NOT EXISTS public.odg_tms_car_driver (
       roworder BIGSERIAL PRIMARY KEY,
@@ -33,6 +52,92 @@ async function ensureTmsCarAssignmentTables() {
   `);
   await query(`CREATE INDEX IF NOT EXISTS idx_odg_tms_car_driver_car_code ON public.odg_tms_car_driver (car_code)`);
   await query(`CREATE INDEX IF NOT EXISTS idx_odg_tms_car_worker_car_code ON public.odg_tms_car_worker (car_code)`);
+}
+
+/**
+ * ຍ້າຍຄວາມຈຸຈາກ "ປະເພດລົດ" ໄປໃສ່ "ແຕ່ລະຄັນ" ເທື່ອດຽວ.
+ *
+ * ເປັນຫຍັງ: ລົດ 6 ລໍ້ 23 ຄັນຕູ້ບໍ່ເທົ່າກັນ ແຕ່ຄ່າຢູ່ປະເພດເຮັດໃຫ້ທຸກຄັນໄດ້
+ * 17.64 m³ ຄືກັນ ແລະ ເບິ່ງຄືເຊື່ອຖືໄດ້ ທັ້ງທີ່ບໍ່ມີໃຜວັດ. ຫຼັງຍ້າຍແລ້ວ
+ * ແຕ່ລະຄັນມີເລກຂອງຕົນ ແລະ capacity_verified=false ບອກວ່າຍັງບໍ່ໄດ້ຢືນຢັນ.
+ *
+ * ແລ່ນເທື່ອດຽວ (ຈື່ດ້ວຍ setting key) ເພື່ອບໍ່ໃຫ້ທັບຄ່າທີ່ຄົນລຶບອອກເອງ.
+ */
+async function migrateCarTypeCapacityToCars() {
+  const MIGRATION_KEY = "car_capacity_moved_to_car_v1";
+  // ຕ້ອງແນ່ໃຈວ່າຕາຕະລາງ setting ມີກ່ອນ ບໍ່ດັ່ງນັ້ນ flag ບັນທຶກບໍ່ໄດ້ ແລ້ວ
+  // migration ຈະແລ່ນຄືນທຸກຄັ້ງ ໄປທັບຄ່າທີ່ຄົນລຶບອອກເອງ
+  await ensureSettingsSchema();
+  const done = await queryOne(
+    `SELECT value FROM public.odg_tms_setting WHERE key = $1`,
+    [MIGRATION_KEY]
+  );
+  if (done?.value === "1") return;
+
+  await query(
+    `UPDATE public.odg_tms_car c
+        SET cargo_length_cm = COALESCE(c.cargo_length_cm, ct.cargo_length_cm),
+            cargo_width_cm  = COALESCE(c.cargo_width_cm,  ct.cargo_width_cm),
+            cargo_height_cm = COALESCE(c.cargo_height_cm, ct.cargo_height_cm),
+            payload_kg      = COALESCE(c.payload_kg,      ct.payload_kg),
+            pallet_slots    = COALESCE(c.pallet_slots,    ct.pallet_slots),
+            stowage_pct     = COALESCE(c.stowage_pct,     ct.stowage_pct),
+            capacity_verified = COALESCE(c.capacity_verified, false)
+       FROM public.odg_tms_car_type ct
+      WHERE ct.name = NULLIF(TRIM(c.car_type), '')
+        AND c.cargo_length_cm IS NULL
+        AND ct.cargo_length_cm IS NOT NULL`
+  );
+  await query(
+    `INSERT INTO public.odg_tms_setting (key, value) VALUES ($1, '1')
+     ON CONFLICT (key) DO UPDATE SET value = '1'`,
+    [MIGRATION_KEY]
+  );
+}
+
+// Per-car capacity values, in the column order both the INSERT and the
+// UPDATE use. Empty stays NULL = "ຍັງບໍ່ໄດ້ກຳນົດ" (ບໍ່ແມ່ນ 0).
+function readCapacityInput(data) {
+  return [
+    numOrNull(data?.cargo_length_cm),
+    numOrNull(data?.cargo_width_cm),
+    numOrNull(data?.cargo_height_cm),
+    numOrNull(data?.payload_kg),
+    numOrNull(data?.pallet_slots),
+    numOrNull(data?.stowage_pct),
+  ];
+}
+
+// ຄວາມຈຸຂອງລົດຄັນໜຶ່ງ — ອ່ານຈາກ "ຄັນ" ດຽວ ບໍ່ຕົກໄປປະເພດອີກ.
+//
+// ຕັ້ງໃຈບໍ່ໃຫ້ຕົກໄປປະເພດ: ຖ້າຕົກ ລົດທີ່ຍັງບໍ່ໄດ້ວັດຈະສະແດງເລກຂອງປະເພດ
+// ເຊິ່ງເບິ່ງຄືເຊື່ອຖືໄດ້ ແລະ ຄົນຈະບັນທຸກຕາມ. ວ່າງ = ບອກວ່າຍັງບໍ່ໄດ້ວັດ.
+async function getCarCapacity(carCode) {
+  await ensureTmsCarAssignmentTables();
+  return queryOne(
+    `SELECT c.code,
+            c.cargo_length_cm AS length_cm,
+            c.cargo_width_cm  AS width_cm,
+            c.cargo_height_cm AS height_cm,
+            c.payload_kg,
+            c.pallet_slots,
+            COALESCE(c.stowage_pct, 80) AS stowage_pct,
+            ${capacityM3Sql("c.cargo_length_cm", "c.cargo_width_cm", "c.cargo_height_cm")}
+              AS capacity_m3,
+            ROUND(${capacityM3Sql(
+              "c.cargo_length_cm",
+              "c.cargo_width_cm",
+              "c.cargo_height_cm"
+            )} * COALESCE(c.stowage_pct, 80) / 100, 3) AS usable_m3,
+            CASE
+              WHEN c.cargo_length_cm IS NULL THEN 'none'
+              WHEN c.capacity_verified THEN 'measured'
+              ELSE 'estimated'
+            END AS capacity_source
+       FROM public.odg_tms_car c
+      WHERE c.code = $1`,
+    [carCode]
+  );
 }
 
 async function getTransportEmployeesByCodes(codes) {
@@ -111,6 +216,23 @@ async function getCarProfiles() {
              COALESCE(c.car_type,'') AS car_type,
              COALESCE(c.transport_code,'') AS transport_code,
              COALESCE(NULLIF(TRIM(tt.name_1), ''), '') AS transport_name,
+             -- ຄວາມຈຸເປັນຂອງ "ຄັນ" ດຽວ ບໍ່ຕົກໄປປະເພດ
+             c.cargo_length_cm, c.cargo_width_cm, c.cargo_height_cm,
+             c.payload_kg, c.pallet_slots, c.stowage_pct,
+             COALESCE(c.capacity_verified, false) AS capacity_verified,
+             ${capacityM3Sql("c.cargo_length_cm", "c.cargo_width_cm", "c.cargo_height_cm")}
+               AS capacity_m3,
+             ROUND(${capacityM3Sql(
+               "c.cargo_length_cm",
+               "c.cargo_width_cm",
+               "c.cargo_height_cm"
+             )} * COALESCE(c.stowage_pct, 80) / 100, 3) AS usable_m3,
+             -- ບອກວ່າວັດແລ້ວ ຫຼື ຍັງເປັນຄ່າຄາດຄະເນ
+             CASE
+               WHEN c.cargo_length_cm IS NULL THEN 'none'
+               WHEN c.capacity_verified THEN 'measured'
+               ELSE 'estimated'
+             END AS capacity_source,
              -- tracker ບາງເຄື່ອງຕັ້ງຊື່ໄວ້ຄົນລະຢ່າງກັບລະຫັດລົດໃນລະບົບ ເຊິ່ງ
              -- ເຮັດໃຫ້ຕຳແໜ່ງໄປໃສ່ຄັນອື່ນເມື່ອບ່ອນໃດ join ດ້ວຍລະຫັດ. ດຶງມາ
              -- ໃຫ້ເຫັນເພື່ອໃຫ້ຄົນແກ້ໄດ້.
@@ -158,13 +280,17 @@ async function addCarProfile(session, data) {
   const tankNo = data.tank_no?.trim() ?? "";
   const carType = data.car_type?.trim() ?? "";
   const transportCode = data.transport_code?.trim() ?? "";
+  const cap = readCapacityInput(data);
 
   const client = await pool.connect();
   try {
     await client.query("BEGIN");
     await client.query(
-      "INSERT INTO public.odg_tms_car(code, name_1, imei, plate_no, tank_no, car_type, transport_code, create_date_time_now) VALUES ($1, $2, $3, $4, $5, $6, $7, LOCALTIMESTAMP(0))",
-      [data.code, data.name_1, imei, plateNo, tankNo, carType, transportCode]
+      `INSERT INTO public.odg_tms_car(code, name_1, imei, plate_no, tank_no, car_type, transport_code,
+         cargo_length_cm, cargo_width_cm, cargo_height_cm, payload_kg, pallet_slots, stowage_pct,
+         capacity_verified, create_date_time_now)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, LOCALTIMESTAMP(0))`,
+      [data.code, data.name_1, imei, plateNo, tankNo, carType, transportCode, ...cap, cap[0] !== null]
     );
     await replaceCarDriverAssignments(client, data.code, driverCodes, userCreate);
     await replaceCarWorkerAssignments(client, data.code, data.workerCodes, driverCodes, userCreate);
@@ -186,13 +312,20 @@ async function updateCarProfile(session, data) {
   const tankNo = data.tank_no?.trim() ?? "";
   const carType = data.car_type?.trim() ?? "";
   const transportCode = data.transport_code?.trim() ?? "";
+  const cap = readCapacityInput(data);
 
   const client = await pool.connect();
   try {
     await client.query("BEGIN");
     await client.query(
-      "UPDATE public.odg_tms_car SET name_1=$1, imei=$2, plate_no=$3, tank_no=$4, car_type=$5, transport_code=$6 WHERE code=$7",
-      [data.name_1, imei, plateNo, tankNo, carType, transportCode, data.code]
+      `UPDATE public.odg_tms_car
+          SET name_1=$1, imei=$2, plate_no=$3, tank_no=$4, car_type=$5, transport_code=$6,
+              cargo_length_cm=$7, cargo_width_cm=$8, cargo_height_cm=$9,
+              payload_kg=$10, pallet_slots=$11, stowage_pct=$12,
+              -- ຄົນກົດບັນທຶກພ້ອມຂະໜາດ = ຢືນຢັນວ່າວັດລົດຄັນນີ້ແລ້ວ
+              capacity_verified=$13
+        WHERE code=$14`,
+      [data.name_1, imei, plateNo, tankNo, carType, transportCode, ...cap, cap[0] !== null, data.code]
     );
     await replaceCarDriverAssignments(client, data.code, driverCodes, userCreate);
     await replaceCarWorkerAssignments(client, data.code, data.workerCodes, driverCodes, userCreate);
@@ -241,11 +374,27 @@ async function getTransportDepartmentEmployees(session, role = null) {
   await ensureWorkerBranchTable();
   const branch = session?.logistic_code?.trim() ?? "";
   const scoped = !!branch && branch !== "02-0004";
+  // ຄົນຂັບຕ້ອງເຫັນສະເພາະຄົນຂັບ, ກຳມະກອນສະເພາະກຳມະກອນ.
+  //
+  // ບັນຫາ: ພະນັກງານບາງຄົນຍັງບໍ່ໄດ້ກຳນົດ position_code ແຕ່ຂັບຖ້ຽວຈິງມາເປັນຮ້ອຍ
+  // ຄັ້ງ — ຖ້າຮັດແບບກົງໆ dispatcher ຈະເລືອກເຂົາບໍ່ໄດ້ ແລະ ຈັດຖ້ຽວບໍ່ໄດ້.
+  // ຈຶ່ງອະນຸມານຈາກປະຫວັດແທນ: ເຄີຍຂັບ = ຄົນຂັບ, ຢູ່ທີມລົດ = ກຳມະກອນ.
+  // ຄົນທີ່ບໍ່ມີທັງຕຳແໜ່ງ ແລະ ບໍ່ມີປະຫວັດ ຈະບໍ່ຂຶ້ນທັງສອງບ່ອນ — ຕ້ອງໃຫ້ admin
+  // ໄປກຳນົດຕຳແໜ່ງທີ່ໜ້າ "ພະນັກງານຂົນສົ່ງ" ກ່ອນ.
   const roleFilter =
     role === "driver"
-      ? "AND (wb.position_code IS NULL OR wb.position_code = '' OR wb.position_code IN ('driver', 'both'))"
+      ? `AND (
+           wb.position_code IN ('driver', 'both')
+           OR (COALESCE(NULLIF(TRIM(wb.position_code), ''), '') = ''
+               AND EXISTS (SELECT 1 FROM public.odg_tms j WHERE j.driver = e.employee_code))
+         )`
       : role === "worker"
-        ? "AND (wb.position_code IS NULL OR wb.position_code = '' OR wb.position_code IN ('worker', 'both'))"
+        ? `AND (
+             wb.position_code IN ('worker', 'both')
+             OR (COALESCE(NULLIF(TRIM(wb.position_code), ''), '') = ''
+                 AND EXISTS (SELECT 1 FROM public.odg_tms_car_worker cw
+                              WHERE cw.worker_code = e.employee_code))
+           )`
         : "";
 
   if (!scoped) {
@@ -457,6 +606,7 @@ module.exports = {
   deleteCar,
   getCarDefaults,
   getCarProfiles,
+  getCarCapacity,
   addCarProfile,
   updateCarProfile,
   deleteCarProfile,

@@ -12,6 +12,19 @@ export interface CarType {
   name: string;
   sort_order?: number;
   active?: boolean;
+  // ຄວາມຈຸບັນທຸກ — ວັດເປັນ cm, null = ຍັງບໍ່ໄດ້ກຳນົດ
+  cargo_length_cm?: number | null;
+  cargo_width_cm?: number | null;
+  cargo_height_cm?: number | null;
+  payload_kg?: number | null;
+  pallet_slots?: number | null;
+  /** % ທີ່ບັນທຸກໄດ້ຈິງຫຼັງຫັກຊ່ອງຫວ່າງລະຫວ່າງກ່ອງ (ຄ່າເລີ່ມຕົ້ນ 80) */
+  stowage_pct?: number | null;
+  /** 'default' = ຄ່າຄາດຄະເນຂອງລະບົບ, 'measured' = ຄົນຢືນຢັນແລ້ວ */
+  capacity_source?: string;
+  /** ຄິດໃຫ້ຈາກ DB — ບໍ່ຕ້ອງສົ່ງມາ */
+  capacity_m3?: number | null;
+  usable_m3?: number | null;
 }
 
 export async function listCarTypes(activeOnly = false) {

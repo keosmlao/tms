@@ -8,6 +8,7 @@ import {
   deleteCar as svcDeleteCar,
   getCarDefaults as svcGetCarDefaults,
   getCarProfiles as svcGetCarProfiles,
+  getCarCapacity as svcGetCarCapacity,
   addCarProfile as svcAddCarProfile,
   updateCarProfile as svcUpdateCarProfile,
   deleteCarProfile as svcDeleteCarProfile,
@@ -53,6 +54,10 @@ export async function getCarDefaults(carCode: string) {
 export async function getCarProfiles() {
   await requireSession();
   return svcGetCarProfiles();
+}
+export async function getCarCapacity(carCode: string) {
+  await requireSession();
+  return svcGetCarCapacity(carCode);
 }
 export async function addCarProfile(data: unknown) {
   const s = await requireSession();
