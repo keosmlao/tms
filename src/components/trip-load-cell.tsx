@@ -79,6 +79,22 @@ export function TripLoadCell({ v, failed }: { v?: TripVolume; failed?: boolean }
       >
         {v.usableM3 === null ? "ບໍ່ມີຄວາມຈຸ" : "ຂໍ້ມູນບໍ່ພໍ"}
         <span className="block tabular-nums text-slate-400">{v.m3.toFixed(1)} m³</span>
+        {/* ຍັງຢູ່ເທິງລົດເປັນ m³ ບອກໄດ້ເຖິງບໍ່ຮູ້ຄວາມຈຸລົດ ຫຼື ຂະໜາດບໍ່ຄົບ —
+            ບໍ່ຄວນເຊື່ອງພ້ອມກັບ % */}
+        {v.m3 > 0 && (
+          <span
+            className={`block tabular-nums ${
+              v.m3Remaining <= 0
+                ? "text-slate-400"
+                : "font-bold text-sky-600 dark:text-sky-400"
+            }`}
+            title={`ສົ່ງລົງແລ້ວ ${(v.deliveredPct ?? 0).toFixed(0)}%`}
+          >
+            {v.m3Remaining <= 0
+              ? "ລົງໝົດແລ້ວ"
+              : `ເຫຼືອ ${v.m3Remaining.toFixed(1)} m³`}
+          </span>
+        )}
       </span>
     );
   }

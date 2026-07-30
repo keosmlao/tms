@@ -187,10 +187,11 @@ export function TripLoadStrip({ v }: { v: TripVolumeInfo }) {
         </div>
       )}
 
-      {v.remainingPct !== null && v.deliveredPct !== null && v.deliveredPct > 0 && (
+      {v.deliveredPct !== null && v.deliveredPct > 0 && (
         <p className="mt-1 flex flex-wrap items-baseline gap-x-2 whitespace-nowrap text-[10px]">
           <span className="font-bold text-sky-700 dark:text-sky-400">
-            ຍັງຢູ່ເທິງລົດ {v.remainingPct.toFixed(0)}%
+            ຍັງຢູ່ເທິງລົດ
+            {v.remainingPct !== null ? ` ${v.remainingPct.toFixed(0)}%` : ""}
           </span>
           <span className="tabular-nums text-slate-400">{v.m3Remaining.toFixed(2)} m³</span>
           <span className="text-emerald-600 dark:text-emerald-400">
