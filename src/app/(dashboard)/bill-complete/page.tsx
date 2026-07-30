@@ -1,6 +1,8 @@
 "use client";
 
 import { Fragment, useEffect, useMemo, useState } from "react";
+import { TripLoadCell, useTripVolumes } from "@/components/trip-load-cell";
+import { TripLoadPanel } from "@/components/trip-load-strip";
 import {
   FaBoxOpen,
   FaCheckCircle,
@@ -368,6 +370,9 @@ export default function BillCompleteClient({
     currentPage * perPage
   );
 
+  // % ພື້ນທີ່ບັນທຸກ — ດຶງເປັນກ້ອນດຽວຕໍ່ໜ້າ
+  const { volumes, failed: volumesFailed } = useTripVolumes(pagedJobs.map((j) => j.doc_no));
+
   const handleDelete = async (docNo: string) => {
     if (!await confirm({ title: "ລຶບຖ້ຽວ", message: `ຕ້ອງການລົບຖ້ຽວ ${docNo} ແທ້ບໍ?`, tone: "danger", confirmLabel: "ລຶບ" })) return;
     setDeletingDoc(docNo);
@@ -534,13 +539,14 @@ export default function BillCompleteClient({
               <table className="w-full text-xs">
                 <thead>
                   <tr className="bg-white/30 dark:bg-white/5 border-b border-slate-200/30 dark:border-white/5">
-                    <th className="px-4 py-3 text-left font-semibold text-slate-600">ເລກທີ / ວັນທີ</th>
-                    <th className="px-4 py-3 text-left font-semibold text-slate-600">ຈົບການສົ່ງ</th>
-                    <th className="px-4 py-3 text-left font-semibold text-slate-600">ລົດ / ຄົນຂັບ</th>
-                    <th className="px-4 py-3 text-left font-semibold text-slate-600">ຜົນການສົ່ງ</th>
-                    <th className="px-4 py-3 text-left font-semibold text-slate-600">ສະຖານະການປິດ</th>
-                    <th className="px-4 py-3 text-left font-semibold text-slate-600">ສ້າງ / ອະນຸມັດ</th>
-                    <th className="px-4 py-3 text-center font-semibold text-slate-600">ລົບ</th>
+                    <th className="px-4 py-3 whitespace-nowrap text-left font-semibold text-slate-600">ເລກທີ / ວັນທີ</th>
+                    <th className="px-4 py-3 whitespace-nowrap text-left font-semibold text-slate-600">ຈົບການສົ່ງ</th>
+                    <th className="px-4 py-3 whitespace-nowrap text-left font-semibold text-slate-600">ລົດ / ຄົນຂັບ</th>
+                    <th className="px-4 py-3 whitespace-nowrap text-left font-semibold text-slate-600">ຜົນການສົ່ງ</th>
+                    <th className="px-4 py-3 whitespace-nowrap text-left font-semibold text-slate-600">% ທີ່ຂົນ</th>
+                    <th className="px-4 py-3 whitespace-nowrap text-left font-semibold text-slate-600">ສະຖານະການປິດ</th>
+                    <th className="px-4 py-3 whitespace-nowrap text-left font-semibold text-slate-600">ສ້າງ / ອະນຸມັດ</th>
+                    <th className="px-4 py-3 whitespace-nowrap text-center font-semibold text-slate-600">ລົບ</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -552,7 +558,7 @@ export default function BillCompleteClient({
                     return (
                       <Fragment key={job.doc_no}>
                         <tr className="border-b border-slate-200/20 dark:border-white/5 hover:bg-white/30 dark:hover:bg-white/5 transition-colors">
-                          <td className="px-4 py-3">
+                          <td className="px-4 py-3 whitespace-nowrap">
                             <button
                               onClick={() => void toggleDetails(job.doc_no)}
                               className="flex items-center gap-2 text-left"
@@ -566,19 +572,19 @@ export default function BillCompleteClient({
                               </span>
                             </button>
                           </td>
-                          <td className="px-4 py-3 text-slate-600">
+                          <td className="px-4 py-3 text-slate-600 whitespace-nowrap">
                             <div className="space-y-1">
                               <p className="font-medium text-emerald-700">{job.finished_at}</p>
                               <p className="text-[11px] text-slate-400">ວັນຈັດສົ່ງ {job.date_logistic}</p>
                             </div>
                           </td>
-                          <td className="px-4 py-3 text-slate-700">
+                          <td className="px-4 py-3 text-slate-700 whitespace-nowrap">
                             <div className="space-y-1">
                               <p className="font-medium">{job.car}</p>
                               <p className="text-[11px] text-slate-500">{job.driver}</p>
                             </div>
                           </td>
-                          <td className="px-4 py-3">
+                          <td className="px-4 py-3 whitespace-nowrap">
                             <div className="flex flex-wrap gap-1.5">
                               <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-lg bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 text-[10px] font-semibold">
                                 <FaCheckCircle size={9} />
@@ -592,7 +598,10 @@ export default function BillCompleteClient({
                               )}
                             </div>
                           </td>
-                          <td className="px-4 py-3">
+                          <td className="px-4 py-3 whitespace-nowrap">
+                            <TripLoadCell v={volumes[job.doc_no]} failed={volumesFailed} />
+                          </td>
+                          <td className="px-4 py-3 whitespace-nowrap">
                             <div className="space-y-1">
                               <span className={`inline-flex items-center gap-1.5 px-2 py-1 rounded-full text-[10px] font-semibold ${closeState.className}`}>
                                 <FaUserCheck size={9} />
@@ -606,14 +615,14 @@ export default function BillCompleteClient({
                               )}
                             </div>
                           </td>
-                          <td className="px-4 py-3 text-slate-600">
+                          <td className="px-4 py-3 text-slate-600 whitespace-nowrap">
                             <div className="space-y-1">
                               <p className="text-[11px]">ສ້າງ: <span className="font-medium text-slate-700">{job.user_created}</span></p>
                               <p className="text-[11px]">ອະນຸມັດ: <span className="font-medium text-slate-700">{job.approve_user}</span></p>
                               <p className="text-[11px] text-slate-400">ເພີ່ມຖ້ຽວ {job.created_at}</p>
                             </div>
                           </td>
-                          <td className="px-4 py-3 text-center">
+                          <td className="px-4 py-3 text-center whitespace-nowrap">
                             <div className="inline-flex items-center justify-center gap-1">
                               <a
                                 href={`/jobs/print/${encodeURIComponent(job.doc_no)}`}
@@ -642,7 +651,10 @@ export default function BillCompleteClient({
 
                         {isExpanded && (
                           <tr>
-                            <td colSpan={7} className="px-0 py-0 bg-slate-50/60">
+                            <td colSpan={8} className="px-0 py-0 bg-slate-50/60">
+                              <div className="px-4 pt-3">
+                                <TripLoadPanel docNo={job.doc_no} />
+                              </div>
                               <div className="m-3 rounded-lg glass overflow-hidden">
                                 <div className="px-4 py-3 bg-white/30 dark:bg-white/5 border-b border-slate-200/30 dark:border-white/5 flex items-center justify-between">
                                   <div>
