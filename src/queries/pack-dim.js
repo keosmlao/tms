@@ -67,19 +67,24 @@ async function ensurePackDimSchemaInternal(db) {
   `);
 }
 
+// ເພີ່ມຄໍລັມແລ້ວຕ້ອງຂຶ້ນເລກນີ້ — memo ຢູ່ globalThis ຄ້າງຂ້າມ HMR
+// ຈຶ່ງເຮັດໃຫ້ ALTER ໃໝ່ບໍ່ແລ່ນ ແລ້ວ SELECT ຫາຄໍລັມທີ່ຍັງບໍ່ມີ
+const PACK_DIM_SCHEMA_VERSION = "v2_source_brand";
+
 async function ensurePackDimSchema() {
-  if (packCache.__tmsPackDimSchemaReady) return;
-  if (!packCache.__tmsPackDimSchemaPromise) {
-    packCache.__tmsPackDimSchemaPromise = ensurePackDimSchemaInternal(pool)
+  const key = `__tmsPackDimSchema_${PACK_DIM_SCHEMA_VERSION}`;
+  if (packCache[key]) return;
+  if (!packCache[`${key}_p`]) {
+    packCache[`${key}_p`] = ensurePackDimSchemaInternal(pool)
       .then(() => {
-        packCache.__tmsPackDimSchemaReady = true;
+        packCache[key] = true;
       })
       .catch((err) => {
-        packCache.__tmsPackDimSchemaPromise = null;
+        packCache[`${key}_p`] = null;
         throw err;
       });
   }
-  await packCache.__tmsPackDimSchemaPromise;
+  await packCache[`${key}_p`];
 }
 
 async function listPackDims() {

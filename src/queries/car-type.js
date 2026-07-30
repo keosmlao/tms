@@ -133,19 +133,24 @@ async function ensureCarTypeSchemaInternal(db) {
   }
 }
 
+// ເພີ່ມຄໍລັມແລ້ວຕ້ອງຂຶ້ນເລກນີ້ — memo ຢູ່ globalThis ຄ້າງຂ້າມ HMR
+// ຈຶ່ງເຮັດໃຫ້ ALTER ໃໝ່ບໍ່ແລ່ນ ແລ້ວ SELECT ຫາຄໍລັມທີ່ຍັງບໍ່ມີ
+const CAR_TYPE_SCHEMA_VERSION = "v2_capacity";
+
 async function ensureCarTypeSchema() {
-  if (ctCache.__tmsCarTypeSchemaReady) return;
-  if (!ctCache.__tmsCarTypeSchemaPromise) {
-    ctCache.__tmsCarTypeSchemaPromise = ensureCarTypeSchemaInternal(pool)
+  const key = `__tmsCarTypeSchema_${CAR_TYPE_SCHEMA_VERSION}`;
+  if (ctCache[key]) return;
+  if (!ctCache[`${key}_p`]) {
+    ctCache[`${key}_p`] = ensureCarTypeSchemaInternal(pool)
       .then(() => {
-        ctCache.__tmsCarTypeSchemaReady = true;
+        ctCache[key] = true;
       })
       .catch((err) => {
-        ctCache.__tmsCarTypeSchemaPromise = null;
+        ctCache[`${key}_p`] = null;
         throw err;
       });
   }
-  await ctCache.__tmsCarTypeSchemaPromise;
+  await ctCache[`${key}_p`];
 }
 
 async function listCarTypes({ activeOnly = false } = {}) {

@@ -99,19 +99,24 @@ async function ensurePipeDimSchemaInternal(db) {
   }
 }
 
+// ເພີ່ມຄໍລັມແລ້ວຕ້ອງຂຶ້ນເລກນີ້ — memo ຢູ່ globalThis ຄ້າງຂ້າມ HMR
+// ຈຶ່ງເຮັດໃຫ້ ALTER ໃໝ່ບໍ່ແລ່ນ ແລ້ວ SELECT ຫາຄໍລັມທີ່ຍັງບໍ່ມີ
+const PIPE_DIM_SCHEMA_VERSION = "v2_weight";
+
 async function ensurePipeDimSchema() {
-  if (pdCache.__tmsPipeDimSchemaReady) return;
-  if (!pdCache.__tmsPipeDimSchemaPromise) {
-    pdCache.__tmsPipeDimSchemaPromise = ensurePipeDimSchemaInternal(pool)
+  const key = `__tmsPipeDimSchema_${PIPE_DIM_SCHEMA_VERSION}`;
+  if (pdCache[key]) return;
+  if (!pdCache[`${key}_p`]) {
+    pdCache[`${key}_p`] = ensurePipeDimSchemaInternal(pool)
       .then(() => {
-        pdCache.__tmsPipeDimSchemaReady = true;
+        pdCache[key] = true;
       })
       .catch((err) => {
-        pdCache.__tmsPipeDimSchemaPromise = null;
+        pdCache[`${key}_p`] = null;
         throw err;
       });
   }
-  await pdCache.__tmsPipeDimSchemaPromise;
+  await pdCache[`${key}_p`];
 }
 
 async function listPipeDims() {
