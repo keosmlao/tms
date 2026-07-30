@@ -20,7 +20,11 @@ import {
 } from "react-icons/fa";
 import { Actions } from "@/lib/api";
 import { BillItemsModal, BillVolumeTag, useBillVolumes } from "@/components/bill-volume";
-import { TripLoadStrip, type TripVolumeInfo } from "@/components/trip-load-strip";
+import {
+  TripLoadInline,
+  TripLoadStrip,
+  type TripVolumeInfo,
+} from "@/components/trip-load-strip";
 import { FIXED_YEAR_END, FIXED_YEAR_START, getFixedTodayDate } from "@/lib/fixed-year";
 import { useConfirm } from "@/components/confirm-dialog";
 import { useSession } from "@/providers/session-provider";
@@ -506,14 +510,6 @@ export default function TripDraftsPage() {
   // Same ວັນ+ຮອບ+ສາຍ can legitimately need more than one truck. Show the line
   // once and number the trips inside it (ຖ້ຽວ 1, ຖ້ຽວ 2) instead of repeating
   // an identical-looking card.
-  const byRoute = (list: Draft[]) => {
-    const map = new Map<string, Draft[]>();
-    for (const d of list) {
-      const key = d.delivery_route_code || d.delivery_route_name || "-";
-      map.set(key, [...(map.get(key) ?? []), d]);
-    }
-    return [...map.values()];
-  };
 
   // Only ONE thing decides which queue a bill belongs to here: did the
   // salesperson give a delivery date?
@@ -722,30 +718,22 @@ export default function TripDraftsPage() {
                   </span>
                 </div>
                 {[...rounds.entries()].map(([roundLabel, list]) => (
-              <div key={roundLabel} className="space-y-2 pl-1">
-                <p className="flex items-center gap-1.5 text-[11px] font-bold uppercase tracking-wider text-slate-400">
-                  <FaClock size={10} /> {roundLabel}
+              <div key={roundLabel} className="space-y-1">
+                <p className="flex items-center gap-1.5 px-1 text-[10px] font-bold uppercase tracking-wider text-slate-400">
+                  <FaClock size={9} /> {roundLabel}
                 </p>
-                {byRoute(list).map((routeTrips) => (
-                  <div
-                    key={routeTrips[0].draft_id}
-                    className={
-                      routeTrips.length > 1
-                        ? "space-y-1.5 rounded-lg border border-dashed border-slate-300 p-1.5 dark:border-slate-700"
-                        : "space-y-1.5"
-                    }
-                  >
-                    {routeTrips.length > 1 && (
-                      <p className="px-1 text-[10px] font-bold text-slate-500 dark:text-slate-400">
-                        {routeTrips[0].delivery_route_name || routeTrips[0].delivery_route_code} ·{" "}
-                        {routeTrips.length} ຖ້ຽວ
-                      </p>
-                    )}
-                    {routeTrips.map((d, tripIndex) => {
+                {list.map((d) => {
                   const isActive = activeDraft === d.draft_id;
                   const isOpen = expanded.has(d.draft_id);
                   const bills = billsByDraft[d.draft_id] ?? [];
                   const ready = !!d.car && !!d.driver && d.bill_count > 0;
+                  const routeName = d.delivery_route_name || d.delivery_route_code;
+                  // ສາຍດຽວກັນມີຫຼາຍຖ້ຽວ → ຕິດເລກລຳດັບ ແທນທີ່ຈະຫຸ້ມກ່ອງອີກຊັ້ນ
+                  const sameRoute = list.filter(
+                    (x) => (x.delivery_route_name || x.delivery_route_code) === routeName
+                  );
+                  const tripNo =
+                    sameRoute.length > 1 ? sameRoute.findIndex((x) => x.draft_id === d.draft_id) + 1 : 0;
                   return (
                     <div
                       key={d.draft_id}
@@ -771,37 +759,38 @@ export default function TripDraftsPage() {
                           : "border-transparent"
                       }`}
                     >
+                      {/* ແຖວດຽວຕໍ່ຖ້ຽວ: ສາຍ · ລົດ · ເຕັມປານໃດ · ວ່າງເທົ່າໃດ · ຈຳນວນບິນ */}
                       <button
                         type="button"
                         onClick={() => void toggleDraft(d.draft_id)}
-                        className="flex w-full cursor-pointer items-center gap-2.5 px-3 py-2.5 text-left hover:bg-white/40 dark:hover:bg-white/5"
+                        className="flex w-full cursor-pointer items-center gap-2 px-2.5 py-2 text-left hover:bg-white/40 dark:hover:bg-white/5"
                       >
                         {isOpen ? (
-                          <FaChevronDown size={11} className="text-slate-400" />
+                          <FaChevronDown size={10} className="shrink-0 text-slate-400" />
                         ) : (
-                          <FaChevronRight size={11} className="text-slate-400" />
+                          <FaChevronRight size={10} className="shrink-0 text-slate-400" />
                         )}
-                        <div className="min-w-0 flex-1">
-                          <p className="truncate text-sm font-bold text-slate-800 dark:text-white">
-                            {routeTrips.length > 1 && (
-                              <span className="mr-1.5 rounded bg-slate-200 px-1.5 py-0.5 text-[10px] font-bold text-slate-600 dark:bg-slate-700 dark:text-slate-200">
-                                ຖ້ຽວ {tripIndex + 1}
-                              </span>
-                            )}
-                            {d.delivery_route_name || d.delivery_route_code}
-                          </p>
-                          <p className="truncate text-[11px] text-slate-500 dark:text-slate-400">
-                            {d.origin_transport_name || "ບໍ່ກຳນົດສາຂາ"}
+                        <span className="min-w-0 flex-1 truncate">
+                          {tripNo > 0 && (
+                            <span className="mr-1 rounded bg-slate-200 px-1 py-0.5 text-[9px] font-bold text-slate-600 dark:bg-slate-700 dark:text-slate-200">
+                              {tripNo}
+                            </span>
+                          )}
+                          <span className="text-[13px] font-bold text-slate-800 dark:text-white">
+                            {routeName}
+                          </span>
+                          <span className="ml-1.5 text-[10px] text-slate-400">
+                            {d.car_name || "ຍັງບໍ່ເລືອກລົດ"}
                             {d.driver_name ? ` · ${d.driver_name}` : ""}
-                            {d.car_name ? ` · ${d.car_name}` : ""}
-                          </p>
-                        </div>
-                        <span className="shrink-0 rounded bg-slate-100 px-2 py-0.5 text-[10px] font-bold text-slate-600 dark:bg-slate-800 dark:text-slate-300">
-                          {d.bill_count} ບິນ
+                          </span>
+                        </span>
+                        <TripLoadInline v={volumeByDraft[d.draft_id]} />
+                        <span className="shrink-0 rounded bg-slate-100 px-1.5 py-0.5 text-[10px] font-bold text-slate-600 dark:bg-slate-800 dark:text-slate-300">
+                          {d.bill_count}
                         </span>
                         {isActive && (
-                          <span className="shrink-0 rounded bg-teal-600 px-2 py-0.5 text-[10px] font-bold text-white">
-                            ກຳລັງເລືອກ
+                          <span className="shrink-0 rounded bg-teal-600 px-1.5 py-0.5 text-[10px] font-bold text-white">
+                            ເລືອກຢູ່
                           </span>
                         )}
                       </button>
@@ -1074,8 +1063,6 @@ export default function TripDraftsPage() {
                     </div>
                   );
                 })}
-                  </div>
-                ))}
               </div>
                 ))}
               </div>
@@ -1204,33 +1191,31 @@ export default function TripDraftsPage() {
                 ເພີ່ມບິນໂອນ (72)
               </a>
             </div>
-            <p className="text-[10px] text-slate-400">
-              {isBranchStaff
-                ? "ບິນ pending ຂອງສາຂາທ່ານ · ບໍ່ກອງວັນຈັດສົ່ງ, ບໍ່ກອງຮອບ/ສາຍ"
-                : "ບິນ pending ທັງໝົດ · ບໍ່ກອງວັນຈັດສົ່ງ, ບໍ່ກອງຮອບ/ສາຍ"}
+            {/* ຂໍ້ມູນທີ່ຕ້ອງຮູ້ກ່ອນເລີ່ມຈັດ ລວມເປັນແຖວດຽວ */}
+            <p className="flex flex-wrap items-baseline gap-x-2 text-[10px] text-slate-400">
+              {poolTotal.m3 > 0 && (
+                <>
+                  <span className="font-bold text-teal-700 dark:text-teal-400">
+                    ລວມ {poolTotal.m3.toFixed(1)} m³
+                  </span>
+                  {poolTotal.trucksNeeded !== null && (
+                    <span className="text-slate-500">≈ {poolTotal.trucksNeeded} ຄັນ</span>
+                  )}
+                  {poolTotal.unknownBills > 0 && (
+                    <span
+                      className="text-amber-600 dark:text-amber-400"
+                      title="ບິນທີ່ຍັງບໍ່ຮູ້ຂະໜາດສິນຄ້າ — ຍອດຈິງຫຼາຍກວ່ານີ້"
+                    >
+                      +{poolTotal.unknownBills} ຍັງບໍ່ຮູ້
+                    </span>
+                  )}
+                  <span className="text-slate-300">·</span>
+                </>
+              )}
+              <span title="ບໍ່ກອງວັນຈັດສົ່ງ, ບໍ່ກອງຮອບ/ສາຍ">
+                {isBranchStaff ? "pending ສາຂາທ່ານ" : "pending ທັງໝົດ"}
+              </span>
             </p>
-
-            {/* ຍອດລວມ — ໃຫ້ຮູ້ຕັ້ງແຕ່ຕົ້ນວ່າມື້ນີ້ຕ້ອງໃຊ້ຈັກຄັນ ກ່ອນເລີ່ມຈັດ */}
-            {poolTotal.m3 > 0 && (
-              <p className="mt-1 flex flex-wrap items-baseline gap-x-2 text-[10px]">
-                <span className="font-bold text-teal-700 dark:text-teal-400">
-                  ລວມ {poolTotal.m3.toFixed(1)} m³
-                </span>
-                {poolTotal.trucksNeeded !== null && (
-                  <span className="text-slate-500">
-                    ≈ {poolTotal.trucksNeeded} ຄັນ (ລົດ 6 ລໍ້)
-                  </span>
-                )}
-                {poolTotal.unknownBills > 0 && (
-                  <span
-                    className="text-amber-600 dark:text-amber-400"
-                    title="ບິນທີ່ຍັງບໍ່ຮູ້ຂະໜາດສິນຄ້າ — ຍອດຈິງຫຼາຍກວ່ານີ້"
-                  >
-                    +{poolTotal.unknownBills} ບິນຍັງບໍ່ຮູ້
-                  </span>
-                )}
-              </p>
-            )}
             {activeBranch && !isBranchStaff && (
               <label className="mt-1.5 flex cursor-pointer select-none items-center gap-1.5 text-[10px] font-semibold text-slate-500 dark:text-slate-400">
                 <input

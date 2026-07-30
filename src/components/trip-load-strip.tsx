@@ -301,3 +301,70 @@ export function TripLoadPanel({ docNo }: { docNo: string }) {
   }
   return v ? <TripLoadStrip v={v} /> : null;
 }
+
+/**
+ * ພື້ນທີ່ບັນທຸກແບບຢູ່ໃນແຖວດຽວ — ສຳລັບຫົວແຖວຖ້ຽວທີ່ຍັງບໍ່ຂະຫຍາຍ.
+ *
+ * ບອກ 3 ຢ່າງທີ່ຕັດສິນໃຈໄດ້ທັນທີ: ເຕັມປານໃດ · ວ່າງເທົ່າໃດ · ເຊື່ອຖືໄດ້ບໍ.
+ * ລາຍລະອຽດທີ່ເຫຼືອລໍໃຫ້ກົດຂະຫຍາຍ.
+ */
+export function TripLoadInline({ v }: { v?: TripVolumeInfo | { __error: string } | null }) {
+  if (!v) return <span className="shrink-0 text-[10px] text-slate-300">…</span>;
+  if ("__error" in v) {
+    return (
+      <span className="shrink-0 text-[10px] text-rose-500" title={v.__error}>
+        ຄິດບໍ່ໄດ້
+      </span>
+    );
+  }
+
+  const pct = v.utilizationPct;
+  if (pct === null) {
+    return (
+      <span
+        className="shrink-0 whitespace-nowrap text-[10px] text-slate-400"
+        title={
+          !v.car
+            ? "ຍັງບໍ່ເລືອກລົດ"
+            : v.usableM3 === null
+              ? "ລົດຄັນນີ້ຍັງບໍ່ໄດ້ວັດຕູ້"
+              : `ຮູ້ຂະໜາດພຽງ ${v.coveragePct.toFixed(0)}% ຂອງລາຍການ`
+        }
+      >
+        {v.m3.toFixed(1)} m³ · ຂໍ້ມູນບໍ່ພໍ
+      </span>
+    );
+  }
+
+  const tone =
+    pct > 100 ? "bg-rose-500" : pct > 85 ? "bg-amber-500" : "bg-emerald-500";
+  const text =
+    pct > 100
+      ? "text-rose-600 dark:text-rose-400"
+      : pct > 85
+        ? "text-amber-600 dark:text-amber-400"
+        : "text-emerald-600 dark:text-emerald-400";
+
+  return (
+    <span className="flex shrink-0 items-center gap-1.5 whitespace-nowrap">
+      <span className="h-1.5 w-16 overflow-hidden rounded-full bg-slate-500/15">
+        <span className={`block h-full ${tone}`} style={{ width: `${Math.min(pct, 100)}%` }} />
+      </span>
+      <span className={`text-[11px] font-bold tabular-nums ${text}`}>{pct.toFixed(0)}%</span>
+      {v.freeM3 !== null && (
+        <span
+          className={`text-[10px] tabular-nums ${
+            v.freeM3 < 1 ? "font-bold text-rose-600 dark:text-rose-400" : "text-slate-400"
+          }`}
+        >
+          ວ່າງ {v.freeM3.toFixed(1)}
+        </span>
+      )}
+      {!v.lengthFits && (
+        <span title="ຂອງຍາວກວ່າຕູ້ລົດ" className="text-[10px] text-rose-500">
+          ⚠
+        </span>
+      )}
+    </span>
+  );
+}
