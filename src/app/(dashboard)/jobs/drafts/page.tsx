@@ -19,6 +19,7 @@ import {
   FaSearch,
 } from "react-icons/fa";
 import { Actions } from "@/lib/api";
+import { BillItemsModal, BillVolumeTag, useBillVolumes } from "@/components/bill-volume";
 import { FIXED_YEAR_END, FIXED_YEAR_START, getFixedTodayDate } from "@/lib/fixed-year";
 import { useConfirm } from "@/components/confirm-dialog";
 import { useSession } from "@/providers/session-provider";
@@ -50,6 +51,249 @@ interface Draft {
   created_by_name: string;
   created_at: string;
   bill_count: number;
+}
+
+/** ຕາຕະລາງແຈກແຈງພື້ນທີ່ — ໃຊ້ຮ່ວມກັນລະຫວ່າງ "ຕາມບິນ" ແລະ "ຕາມໝວດ" */
+function VolumeSlices({
+  title,
+  slices,
+  hasTruck,
+}: {
+  title: string;
+  slices: VolumeSlice[];
+  hasTruck: boolean;
+}) {
+  if (!slices?.length) return null;
+  const max = Math.max(...slices.map((s) => s.pctOfTrip), 1);
+  return (
+    <div>
+      <p className="mb-0.5 text-[9px] font-semibold uppercase tracking-wider text-slate-400">
+        {title}
+      </p>
+      <table className="w-full text-[10px]">
+        <tbody>
+          {slices.slice(0, 12).map((s) => (
+            <tr key={s.key}>
+              <td className="w-11 py-0.5 pr-1 text-right font-bold tabular-nums text-slate-700 dark:text-slate-200">
+                {hasTruck ? `${(s.pctOfTruck ?? 0).toFixed(1)}%` : `${s.pctOfTrip.toFixed(0)}%`}
+              </td>
+              <td className="w-14 py-0.5 pr-1.5">
+                {/* ແທ່ງທຽບກັນເອງ ບອກໄວວ່າອັນໃດກິນທີ່ຫຼາຍສຸດ */}
+                <div className="h-1.5 w-full rounded-full bg-slate-500/10">
+                  <div
+                    className="h-full rounded-full bg-teal-500/70"
+                    style={{ width: `${(s.pctOfTrip / max) * 100}%` }}
+                  />
+                </div>
+              </td>
+              <td className="w-12 py-0.5 pr-1.5 text-right tabular-nums text-slate-400">
+                {s.m3.toFixed(2)}
+              </td>
+              <td className="truncate py-0.5 text-slate-600 dark:text-slate-300" title={s.label}>
+                {s.label}
+                {s.linesUnknown > 0 && (
+                  <span
+                    className="ml-1 text-amber-600 dark:text-amber-400"
+                    title={`${s.linesUnknown} ລາຍການບໍ່ຮູ້ຂະໜາດ — ຄ່ານີ້ຕໍ່າກວ່າຄວາມຈິງ`}
+                  >
+                    −{s.linesUnknown}
+                  </span>
+                )}
+              </td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+      {slices.length > 12 && (
+        <p className="text-[9px] text-slate-400">ແລະ ອີກ {slices.length - 12} ລາຍການ</p>
+      )}
+    </div>
+  );
+}
+
+/**
+ * ແຖບພື້ນທີ່ບັນທຸກ.
+ *
+ * ສະແດງ m³ ສະເໝີ (ໃຊ້ທຽບຖ້ຽວຕໍ່ຖ້ຽວໄດ້ເລີຍ) ແຕ່ສະແດງ % ຈຸລົດ ແລະ ຄຳເຕືອນ
+ * ບັນທຸກເກີນ ສະເພາະເມື່ອຂໍ້ມູນພໍ — ບອກ "ຂໍ້ມູນບໍ່ພໍ" ດີກວ່າໃຫ້ຄົນເຫັນລົດຫວ່າງ
+ * ແລ້ວບັນທຸກເພີ່ມຍ້ອນລາຍການທີ່ບໍ່ຮູ້ຂະໜາດ.
+ */
+function LoadStrip({ v }: { v: TripVolumeInfo }) {
+  const pct = v.utilizationPct;
+  const barPct = pct === null ? 0 : Math.min(pct, 100);
+  const tone =
+    pct === null
+      ? "bg-slate-400"
+      : pct > 100
+        ? "bg-rose-500"
+        : pct > 85
+          ? "bg-amber-500"
+          : "bg-emerald-500";
+
+  return (
+    <div className="rounded border border-slate-200 bg-white px-2.5 py-2 dark:border-slate-800 dark:bg-slate-900">
+      <div className="flex flex-wrap items-baseline gap-x-3 gap-y-1">
+        <span className="text-[11px] font-bold text-slate-800 dark:text-slate-100">
+          {v.estimatedM3 > 0
+            ? `${v.m3Low.toFixed(1)}–${v.m3High.toFixed(1)} m³`
+            : `${v.m3.toFixed(2)} m³`}
+        </span>
+        {v.kg !== null && v.kg > 0 && (
+          <span className="text-[10px] text-slate-500">{Math.round(v.kg).toLocaleString()} kg</span>
+        )}
+        {v.usableM3 !== null && v.usableM3 > 0 && (
+          <span className="text-[10px] text-slate-400">/ ຈຸ {v.usableM3.toFixed(1)} m³</span>
+        )}
+        {/* ພື້ນທີ່ວ່າງ — ຕົວເລກທີ່ຕ້ອງການແທ້ຕອນຕັດສິນວ່າຈະໃສ່ບິນຕື່ມ ຫຼື ເປີດຖ້ຽວໃໝ່ */}
+        {v.freeM3 !== null && (
+          <span
+            className={`rounded px-1.5 py-0.5 text-[10px] font-bold ${
+              v.freeM3 < 1
+                ? "bg-rose-500/10 text-rose-600 dark:text-rose-400"
+                : v.freeM3 < 3
+                  ? "bg-amber-500/10 text-amber-600 dark:text-amber-400"
+                  : "bg-emerald-500/10 text-emerald-600 dark:text-emerald-400"
+            }`}
+          >
+            ວ່າງ {v.freeM3.toFixed(1)} m³
+            {v.freeM3 < 1 && " — ເກືອບເຕັມ"}
+          </span>
+        )}
+        <span className="ml-auto text-[11px] font-bold tabular-nums">
+          {pct === null ? (
+            <span
+              className={!v.car ? "text-amber-600 dark:text-amber-400" : "text-slate-400"}
+              title={
+                !v.car
+                  ? "ເລືອກລົດຢູ່ຂ້າງລຸ່ມ ຈຶ່ງຈະຮູ້ວ່າເຕັມຫຼືຍັງ — ບໍ່ຈຳເປັນຕອນນີ້ ແຕ່ຕ້ອງມີກ່ອນກົດ ພ້ອມອອກ"
+                  : v.usableM3
+                    ? "ຮູ້ຂະໜາດສິນຄ້າບໍ່ພໍ"
+                    : "ລົດຄັນນີ້ຍັງບໍ່ໄດ້ວັດຕູ້"
+              }
+            >
+              {!v.car
+                ? "ເລືອກລົດເພື່ອເຫັນ %"
+                : v.usableM3
+                  ? "ຂໍ້ມູນບໍ່ພໍ"
+                  : "ລົດຍັງບໍ່ມີຄວາມຈຸ"}
+            </span>
+          ) : (
+            <span
+              className={
+                pct > 100
+                  ? "text-rose-600 dark:text-rose-400"
+                  : pct > 85
+                    ? "text-amber-600 dark:text-amber-400"
+                    : "text-emerald-600 dark:text-emerald-400"
+              }
+            >
+              {pct.toFixed(0)}% ຂອງລົດ
+            </span>
+          )}
+        </span>
+      </div>
+
+      {pct !== null && (
+        <div className="mt-1.5 h-1.5 w-full overflow-hidden rounded-full bg-slate-500/10">
+          <div className={`h-full ${tone}`} style={{ width: `${barPct}%` }} />
+        </div>
+      )}
+
+      <p className="mt-1.5 text-[9px] leading-relaxed text-slate-400">
+        ຄິດຈາກ {v.linesKnown + v.linesEstimated}/{v.lines} ລາຍການ
+        {v.linesEstimated > 0 && ` · ຄາດຄະເນ ${v.linesEstimated}`}
+        {v.linesUnknown > 0 && (
+          <span className="text-amber-600 dark:text-amber-400">
+            {" "}
+            · ບໍ່ຮູ້ຂະໜາດ {v.linesUnknown}
+          </span>
+        )}
+        {v.capacitySource === "default" && " · ຄວາມຈຸລົດເປັນຄ່າຄາດຄະເນ"}
+      </p>
+
+      {v.overloaded && (
+        <p className="mt-1 rounded bg-rose-500/10 px-2 py-1 text-[10px] font-bold text-rose-600 dark:text-rose-400">
+          ⚠️ ເກີນຄວາມຈຸລົດ {(v.utilizationPct! - 100).toFixed(0)}% — ຄວນແຍກຖ້ຽວ
+        </p>
+      )}
+
+      {!v.lengthFits && (
+        <p className="mt-1 rounded bg-rose-500/10 px-2 py-1 text-[10px] font-bold text-rose-600 dark:text-rose-400">
+          ⚠️ ຂອງຍາວ {v.longestItemM} m ແຕ່ຕູ້ຍາວ {v.cargoLengthM} m — ໃສ່ບໍ່ເຂົ້າ
+        </p>
+      )}
+
+      {(v.byBill?.length ?? 0) > 0 && (
+        <details className="mt-1.5">
+          <summary className="cursor-pointer text-[10px] font-semibold text-slate-500">
+            ແຈກແຈງຕາມບິນ / ໝວດສິນຄ້າ
+          </summary>
+          <div className="mt-1.5 space-y-2">
+            <VolumeSlices title="ຕາມບິນ" slices={v.byBill} hasTruck={v.usableM3 !== null} />
+            <VolumeSlices title="ຕາມໝວດສິນຄ້າ" slices={v.byCategory} hasTruck={v.usableM3 !== null} />
+          </div>
+        </details>
+      )}
+
+      {v.linesUnknown > 0 && v.unknownItems.length > 0 && (
+        <details className="mt-1">
+          <summary className="cursor-pointer text-[9px] text-slate-400">
+            ເບິ່ງລາຍການທີ່ຍັງບໍ່ຮູ້ຂະໜາດ
+          </summary>
+          <ul className="mt-1 space-y-0.5">
+            {v.unknownItems.slice(0, 8).map((u) => (
+              <li key={u.itemCode} className="truncate text-[9px] text-slate-500">
+                <span className="tabular-nums text-slate-400">{u.qty}</span> {u.itemName}
+              </li>
+            ))}
+            {v.unknownItems.length > 8 && (
+              <li className="text-[9px] text-slate-400">
+                ແລະ ອີກ {v.unknownItems.length - 8} ລາຍການ
+              </li>
+            )}
+          </ul>
+        </details>
+      )}
+    </div>
+  );
+}
+
+interface VolumeSlice {
+  key: string;
+  label: string;
+  m3: number;
+  pctOfTruck: number | null;
+  pctOfTrip: number;
+  lines: number;
+  linesUnknown: number;
+}
+
+interface TripVolumeInfo {
+  car: string;
+  freeM3: number | null;
+  byBill: VolumeSlice[];
+  byCategory: VolumeSlice[];
+  m3: number;
+  m3Low: number;
+  m3High: number;
+  estimatedM3: number;
+  kg: number | null;
+  lines: number;
+  linesKnown: number;
+  linesEstimated: number;
+  linesUnknown: number;
+  coveragePct: number;
+  capacityM3: number | null;
+  usableM3: number | null;
+  utilizationPct: number | null;
+  weightPct: number | null;
+  overloaded: boolean;
+  dataSufficient: boolean;
+  capacitySource: string;
+  longestItemM: number | null;
+  cargoLengthM: number | null;
+  lengthFits: boolean;
+  unknownItems: Array<{ itemCode: string; itemName: string; unitCode: string; qty: number }>;
 }
 
 interface DraftBill {
@@ -160,6 +404,8 @@ export default function TripDraftsPage() {
   // the dispatcher still has to SEE what is being loaded.
   const [productsByBill, setProductsByBill] = useState<Record<string, Product[]>>({});
   const [expanded, setExpanded] = useState<Set<number>>(new Set());
+  const [volumeByDraft, setVolumeByDraft] = useState<Record<number, TripVolumeInfo | null>>({});
+  const [detailBill, setDetailBill] = useState<{ billNo: string; custName: string } | null>(null);
   const [activeDraft, setActiveDraft] = useState<number | null>(null);
   // Bill currently being dragged out of the pool, and the draft it is hovering
   // over — the highlight is what tells the dispatcher the drop will land.
@@ -176,6 +422,9 @@ export default function TripDraftsPage() {
 
   const [newRound, setNewRound] = useState("");
   const [newRoute, setNewRoute] = useState("");
+  const [newCar, setNewCar] = useState("");
+  // ຄວາມຈຸຂອງແຕ່ລະຄັນ — ສະແດງໃນ dropdown ໃຫ້ເລືອກລົດໃຫ້ພໍກັບຂອງ
+  const [carCapacityM3, setCarCapacityM3] = useState<Record<string, number | null>>({});
   const [search, setSearch] = useState("");
   // Two queues: orders the salesperson dated, and orders they left undated —
   // the second group needs a decision before it can be planned at all.
@@ -247,6 +496,17 @@ export default function TripDraftsPage() {
     void Actions.getCars()
       .then((r) => setCars((r ?? []) as Option[]))
       .catch(() => setCars([]));
+    // ຄວາມຈຸຕໍ່ຄັນ — ໃສ່ຄຽງຊື່ລົດໃນ dropdown ເພື່ອເລືອກຄັນໃຫ້ພໍກັບຂອງ
+    void Actions.getCarProfiles()
+      .then((r) => {
+        const caps: Record<string, number | null> = {};
+        for (const c of (r ?? []) as Array<Record<string, unknown>>) {
+          const usable = Number(c.usable_m3);
+          caps[String(c.code)] = Number.isFinite(usable) && usable > 0 ? usable : null;
+        }
+        setCarCapacityM3(caps);
+      })
+      .catch(() => setCarCapacityM3({}));
     void Actions.getDispatchDrivers()
       .then((r) => setDrivers((r ?? []) as Option[]))
       .catch(() => setDrivers([]));
@@ -268,6 +528,32 @@ export default function TripDraftsPage() {
       setBusy(false);
     }
   };
+
+  // ພື້ນທີ່ບັນທຸກຂອງແຕ່ລະຮ່າງ — ໂຫຼດຄືນທຸກຄັ້ງທີ່ບິນ ຫຼື ລົດຂອງຮ່າງທີ່ເປີດຢູ່
+  // ປ່ຽນ ເພື່ອບໍ່ໃຫ້ dispatcher ເຫັນຕົວເລກເກົ່າຫຼັງຍ້າຍບິນ
+  useEffect(() => {
+    let cancelled = false;
+    const open = [...expanded];
+    if (open.length === 0) return;
+    void (async () => {
+      const loaded = await Promise.all(
+        open.map(async (draftId) => {
+          try {
+            return [draftId, (await Actions.getTripDraftVolume(draftId)) as TripVolumeInfo] as const;
+          } catch {
+            return [draftId, null] as const;
+          }
+        })
+      );
+      if (cancelled) return;
+      setVolumeByDraft((prev) => ({ ...prev, ...Object.fromEntries(loaded) }));
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [expanded, drafts, billsByDraft]);
+
+
 
   const loadDraftBills = async (draftId: number) => {
     const rows = ((await Actions.getTripDraftBills(draftId)) ?? []) as DraftBill[];
@@ -316,8 +602,10 @@ export default function TripDraftsPage() {
         originTransportCode: branch,
         deliveryRouteCode: newRoute,
         deliveryRoundCode: newRound,
+        car: newCar,
       });
       setNewRoute("");
+      setNewCar("");
     });
 
   // Dropping a bill opens the item picker — the dispatcher decides which lines
@@ -508,6 +796,30 @@ export default function TripDraftsPage() {
     );
   }, [candidatesForDraft, search, poolTab, isSalesPending, draftedBills]);
 
+  const billVolumes = useBillVolumes(filteredCandidates.map((c) => c.doc_no));
+
+  // ຍອດລວມຂອງບິນທີ່ຍັງລໍຈັດ — ນັບສະເພາະບິນທີ່ຍັງບໍ່ຢູ່ໃນຮ່າງໃດ
+  const poolTotal = useMemo(() => {
+    let m3 = 0;
+    let unknownBills = 0;
+    for (const c of candidatesForDraft) {
+      if (draftedBills.has(c.doc_no)) continue;
+      const v = billVolumes[c.doc_no];
+      if (!v || v.m3 <= 0) { unknownBills += 1; continue; }
+      m3 += v.m3;
+    }
+    // ປະມານຈຳນວນຄັນຈາກລົດ 6 ລໍ້ (17.6 m³ ໃຊ້ໄດ້ຈິງ) ເຊິ່ງເປັນ 23 ໃນ 27 ຄັນ
+    const SIX_WHEEL_USABLE = 17.64;
+    return {
+      m3,
+      unknownBills,
+      trucksNeeded: m3 > 0 ? Math.ceil(m3 / SIX_WHEEL_USABLE) : null,
+    };
+  }, [candidatesForDraft, draftedBills, billVolumes]);
+
+  // ທີ່ວ່າງຂອງຮ່າງທີ່ເລືອກຢູ່ — ໃຊ້ເຕືອນວ່າບິນໃບໃດໃສ່ບໍ່ພໍ
+  const activeFreeM3 = activeDraft ? (volumeByDraft[activeDraft]?.freeM3 ?? null) : null;
+
   return (
     <div className="space-y-4">
       {/* Header */}
@@ -582,54 +894,6 @@ export default function TripDraftsPage() {
                 ))}
             </select>
           </div>
-          <div className="min-w-[140px] flex-1">
-            <label className="mb-1.5 block text-xs font-medium text-slate-600 dark:text-slate-300">
-              <FaCalendar className="mr-1.5 inline text-slate-400" size={11} /> ວັນຂອງຮ່າງ
-            </label>
-            <input
-              type="date"
-              value={workDay}
-              min={FIXED_YEAR_START}
-              max={FIXED_YEAR_END}
-              onChange={(e) => setWorkDay(e.target.value)}
-              className={`${CONTROL} w-full`}
-            />
-          </div>
-          <div className="min-w-[130px] flex-1">
-            <label className="mb-1.5 block text-xs font-medium text-slate-600 dark:text-slate-300">
-              <FaClock className="mr-1.5 inline text-slate-400" size={11} /> ຮອບ
-            </label>
-            <select
-              value={newRound}
-              onChange={(e) => setNewRound(e.target.value)}
-              className={`${CONTROL} w-full`}
-            >
-              <option value="">- ເລືອກຮອບ -</option>
-              {rounds.map((r) => (
-                <option key={r.code} value={r.code}>
-                  {r.name}
-                  {r.time_label ? ` · ${r.time_label}` : ""}
-                </option>
-              ))}
-            </select>
-          </div>
-          <div className="min-w-[150px] flex-1">
-            <label className="mb-1.5 block text-xs font-medium text-slate-600 dark:text-slate-300">
-              <FaRoute className="mr-1.5 inline text-slate-400" size={11} /> ສາຍ
-            </label>
-            <select
-              value={newRoute}
-              onChange={(e) => setNewRoute(e.target.value)}
-              className={`${CONTROL} w-full`}
-            >
-              <option value="">- ເລືອກສາຍ -</option>
-              {routes.map((r) => (
-                <option key={r.code} value={r.code}>
-                  {r.name}
-                </option>
-              ))}
-            </select>
-          </div>
           <label className="flex cursor-pointer select-none items-center gap-2 pb-2 text-xs font-medium text-slate-600 dark:text-slate-300">
             <input
               type="checkbox"
@@ -639,16 +903,6 @@ export default function TripDraftsPage() {
             />
             ຮ່າງຄ້າງທັງໝົດ
           </label>
-          <button
-            type="button"
-            onClick={createDraft}
-            disabled={busy || !newRound || !newRoute || !branch}
-            title={!branch ? "ເລືອກສາຂາຂົນສົ່ງກ່ອນ ຈຶ່ງສ້າງຮ່າງໄດ້" : ""}
-            className="inline-flex shrink-0 cursor-pointer items-center gap-1.5 rounded-lg bg-teal-600 px-4 py-2 text-xs font-bold text-white transition-colors hover:bg-teal-700 disabled:opacity-40"
-          >
-            {busy ? <FaSpinner className="animate-spin" size={11} /> : <FaPlus size={11} />}
-            ສ້າງຮ່າງ
-          </button>
         </div>
         {error && (
           <p className="rounded-lg border border-rose-500/30 px-3 py-2 text-xs text-rose-600 dark:text-rose-400">
@@ -670,7 +924,7 @@ export default function TripDraftsPage() {
               <p className="text-sm font-medium text-slate-600 dark:text-slate-300">
                 ຍັງບໍ່ມີຮ່າງຖ້ຽວຂອງມື້ນີ້
               </p>
-              <p className="mt-1 text-xs text-slate-400">ເລືອກ ຮອບ + ສາຍ ຂ້າງເທິງ ແລ້ວກົດ "ສ້າງຮ່າງ"</p>
+              <p className="mt-1 text-xs text-slate-400">ເລືອກ ຮອບ + ສາຍ + ລົດ ຂ້າງເທິງ ແລ້ວກົດ "ສ້າງຮ່າງ"</p>
             </div>
           ) : (
             groupedByDay.map(([day, { display, rounds }]) => (
@@ -785,6 +1039,11 @@ export default function TripDraftsPage() {
 
                       {isOpen && (
                         <div className="space-y-3 border-t border-slate-200/50 px-3 py-3 dark:border-white/5">
+                          {/* ພື້ນທີ່ບັນທຸກ — ຢູ່ເທິງສຸດເພື່ອໃຫ້ເຫັນກ່ອນຕັດສິນໃຈໃສ່ບິນເພີ່ມ */}
+                          {volumeByDraft[d.draft_id] && bills.length > 0 && (
+                            <LoadStrip v={volumeByDraft[d.draft_id]!} />
+                          )}
+
                           {/* Bills first: what goes on the trip is decided before who drives it */}
                           {bills.length === 0 ? (
                             <p className="rounded border border-dashed border-slate-300 py-3 text-center text-[11px] text-slate-400 dark:border-slate-700">
@@ -1037,6 +1296,103 @@ export default function TripDraftsPage() {
               </div>
             ))
           )}
+
+          {/* ສ້າງຮ່າງໃໝ່ — ຢູ່ຖັນຊ້າຍເພາະມັນຄືການເພີ່ມລາຍການ ບໍ່ແມ່ນຕົວກອງ.
+              ວາງໄວ້ນີ້ຈຶ່ງບໍ່ຕ້ອງມີຊ່ອງວັນທີ 3 ອັນຢູ່ຫົວໜ້າ ແລະ ຄົນເຫັນ
+              ຮອບ/ສາຍ/ລົດ ຕິດກັບປຸ່ມ ຈຶ່ງຮູ້ທັນທີວ່າຂາດຫຍັງ. */}
+          <div className="glass rounded-lg border border-dashed border-slate-300 p-3 dark:border-slate-700">
+            <p className="mb-2 text-xs font-bold text-slate-700 dark:text-slate-200">ສ້າງຮ່າງໃໝ່</p>
+            <div className="flex flex-wrap items-end gap-2">
+          <div className="min-w-[140px] flex-1">
+            <label className="mb-1.5 block text-xs font-medium text-slate-600 dark:text-slate-300">
+              <FaCalendar className="mr-1.5 inline text-slate-400" size={11} /> ວັນຂອງຮ່າງ
+            </label>
+            <input
+              type="date"
+              value={workDay}
+              min={FIXED_YEAR_START}
+              max={FIXED_YEAR_END}
+              onChange={(e) => setWorkDay(e.target.value)}
+              className={`${CONTROL} w-full`}
+            />
+          </div>
+          <div className="min-w-[130px] flex-1">
+            <label className="mb-1.5 block text-xs font-medium text-slate-600 dark:text-slate-300">
+              <FaClock className="mr-1.5 inline text-slate-400" size={11} /> ຮອບ
+            </label>
+            <select
+              value={newRound}
+              onChange={(e) => setNewRound(e.target.value)}
+              className={`${CONTROL} w-full`}
+            >
+              <option value="">- ເລືອກຮອບ -</option>
+              {rounds.map((r) => (
+                <option key={r.code} value={r.code}>
+                  {r.name}
+                  {r.time_label ? ` · ${r.time_label}` : ""}
+                </option>
+              ))}
+            </select>
+          </div>
+          <div className="min-w-[150px] flex-1">
+            <label className="mb-1.5 block text-xs font-medium text-slate-600 dark:text-slate-300">
+              <FaRoute className="mr-1.5 inline text-slate-400" size={11} /> ສາຍ
+            </label>
+            <select
+              value={newRoute}
+              onChange={(e) => setNewRoute(e.target.value)}
+              className={`${CONTROL} w-full`}
+            >
+              <option value="">- ເລືອກສາຍ -</option>
+              {routes.map((r) => (
+                <option key={r.code} value={r.code}>
+                  {r.name}
+                </option>
+              ))}
+            </select>
+          </div>
+          {/* ລົດຕ້ອງເລືອກແຕ່ຕົ້ນ — ບໍ່ມີລົດ = ບອກບໍ່ໄດ້ວ່າຖ້ຽວເຕັມຫຼືຍັງ */}
+          <div className="min-w-[160px] flex-1">
+            <label className="mb-1.5 block text-xs font-medium text-slate-600 dark:text-slate-300">
+              <FaTruck className="mr-1.5 inline text-slate-400" size={11} /> ລົດ{" "}
+              <span className="text-rose-500">*</span>
+            </label>
+            <select
+              value={newCar}
+              onChange={(e) => setNewCar(e.target.value)}
+              className={`${CONTROL} w-full`}
+            >
+              <option value="">- ເລືອກລົດ -</option>
+              {cars.map((c) => (
+                <option key={c.code} value={c.code}>
+                  {c.name_1 || c.code}
+                  {carCapacityM3[c.code] ? ` · ${carCapacityM3[c.code]!.toFixed(1)} m³` : ""}
+                </option>
+              ))}
+            </select>
+          </div>
+          <button
+            type="button"
+            onClick={createDraft}
+            disabled={busy || !newRound || !newRoute || !branch || !newCar}
+            title={
+              !branch
+                ? "ເລືອກສາຂາຂົນສົ່ງກ່ອນ ຈຶ່ງສ້າງຮ່າງໄດ້"
+                : !newRound
+                  ? "ເລືອກຮອບກ່ອນ"
+                  : !newRoute
+                    ? "ເລືອກສາຍກ່ອນ"
+                    : !newCar
+                      ? "ເລືອກລົດກ່ອນ — ຕ້ອງມີຈຶ່ງຮູ້ວ່າຖ້ຽວເຕັມຫຼືຍັງ"
+                      : ""
+            }
+            className="inline-flex shrink-0 cursor-pointer items-center gap-1.5 rounded-lg bg-teal-600 px-4 py-2 text-xs font-bold text-white transition-colors hover:bg-teal-700 disabled:opacity-40"
+          >
+            {busy ? <FaSpinner className="animate-spin" size={11} /> : <FaPlus size={11} />}
+            ສ້າງຮ່າງ
+          </button>
+            </div>
+          </div>
         </div>
 
         {/* Bill pool for the day */}
@@ -1068,6 +1424,28 @@ export default function TripDraftsPage() {
                 ? "ບິນ pending ຂອງສາຂາທ່ານ · ບໍ່ກອງວັນຈັດສົ່ງ, ບໍ່ກອງຮອບ/ສາຍ"
                 : "ບິນ pending ທັງໝົດ · ບໍ່ກອງວັນຈັດສົ່ງ, ບໍ່ກອງຮອບ/ສາຍ"}
             </p>
+
+            {/* ຍອດລວມ — ໃຫ້ຮູ້ຕັ້ງແຕ່ຕົ້ນວ່າມື້ນີ້ຕ້ອງໃຊ້ຈັກຄັນ ກ່ອນເລີ່ມຈັດ */}
+            {poolTotal.m3 > 0 && (
+              <p className="mt-1 flex flex-wrap items-baseline gap-x-2 text-[10px]">
+                <span className="font-bold text-teal-700 dark:text-teal-400">
+                  ລວມ {poolTotal.m3.toFixed(1)} m³
+                </span>
+                {poolTotal.trucksNeeded !== null && (
+                  <span className="text-slate-500">
+                    ≈ {poolTotal.trucksNeeded} ຄັນ (ລົດ 6 ລໍ້)
+                  </span>
+                )}
+                {poolTotal.unknownBills > 0 && (
+                  <span
+                    className="text-amber-600 dark:text-amber-400"
+                    title="ບິນທີ່ຍັງບໍ່ຮູ້ຂະໜາດສິນຄ້າ — ຍອດຈິງຫຼາຍກວ່ານີ້"
+                  >
+                    +{poolTotal.unknownBills} ບິນຍັງບໍ່ຮູ້
+                  </span>
+                )}
+              </p>
+            )}
             {activeBranch && !isBranchStaff && (
               <label className="mt-1.5 flex cursor-pointer select-none items-center gap-1.5 text-[10px] font-semibold text-slate-500 dark:text-slate-400">
                 <input
@@ -1166,11 +1544,18 @@ export default function TripDraftsPage() {
                     }`}
                   >
                     <div className="min-w-0 flex-1">
-                      <p className="truncate text-xs font-bold text-slate-800 dark:text-slate-100">
-                        {c.doc_no}
-                        <span className="ml-1.5 text-[10px] font-medium text-slate-400">
+                      <p className="flex items-baseline gap-1.5 truncate text-xs font-bold text-slate-800 dark:text-slate-100">
+                        <span className="truncate">{c.doc_no}</span>
+                        <span className="shrink-0 text-[10px] font-medium text-slate-400">
                           {c.remaining_count ?? c.count_item ?? 0} ລາຍການ
                         </span>
+                        <BillVolumeTag
+                          v={billVolumes[c.doc_no]}
+                          freeM3={activeFreeM3}
+                          onClick={() =>
+                            setDetailBill({ billNo: c.doc_no, custName: c.cust_name ?? "" })
+                          }
+                        />
                       </p>
                       <p className="truncate text-[10px] text-slate-500">
                         {c.transport_name || c.cust_name}
@@ -1214,6 +1599,14 @@ export default function TripDraftsPage() {
           custName={pendingAdd.custName}
           onCancel={() => setPendingAdd(null)}
           onConfirm={commitAdd}
+        />
+      )}
+
+      {detailBill && (
+        <BillItemsModal
+          billNo={detailBill.billNo}
+          custName={detailBill.custName}
+          onClose={() => setDetailBill(null)}
         />
       )}
     </div>

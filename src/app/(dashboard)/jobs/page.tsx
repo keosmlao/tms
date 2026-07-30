@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState, useTransition } from "react";
+import { TripLoadCell, useTripVolumes, type TripVolume } from "@/components/trip-load-cell";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import {
@@ -183,6 +184,8 @@ function JobRow({
   billDetails,
   loadingBills,
   now,
+  volume,
+  volumeFailed,
 }: {
   job: Job;
   expanded: boolean;
@@ -196,6 +199,8 @@ function JobRow({
   billDetails: BillDetail[] | undefined;
   loadingBills: boolean;
   now: number;
+  volume?: TripVolume;
+  volumeFailed?: boolean;
 }) {
   const canMoveBills = job.job_status === 0;
   const status = getStatusConfig(job.approve_status, job.job_status);
@@ -291,6 +296,9 @@ function JobRow({
           </div>
         </td>
         <td className="px-3 py-3">
+          <TripLoadCell v={volume} failed={volumeFailed} />
+        </td>
+        <td className="px-3 py-3">
           <div className="flex items-center gap-1 flex-wrap">
             <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-semibold ${status.bg} ${status.text}`}>
               <span className={`w-1.5 h-1.5 rounded-full ${status.dot}`} />
@@ -364,7 +372,7 @@ function JobRow({
 
       {expanded && (
         <tr className="bg-white/20 dark:bg-white/5">
-          <td colSpan={9} className="px-4 pb-4 pt-2 border-t border-slate-200/30 dark:border-white/5">
+          <td colSpan={10} className="px-4 pb-4 pt-2 border-t border-slate-200/30 dark:border-white/5">
             {loadingBills ? (
               <div className="flex items-center justify-center gap-2 py-5">
                 <FaSpinner className="animate-spin text-teal-500" size={13} />
@@ -676,6 +684,11 @@ export default function JobsClient({ initialJobs = [] as Job[] }: { initialJobs?
     });
   }, [jobs, searchText, filter]);
 
+  // % ພື້ນທີ່ບັນທຸກ — ໜ້ານີ້ບໍ່ແບ່ງໜ້າ ຈຶ່ງດຶງຕາມລາຍການທີ່ຖືກກອງແລ້ວ
+  const { volumes, failed: volumesFailed } = useTripVolumes(
+    filteredJobs.map((j) => j.doc_no)
+  );
+
   return (
     <div className="space-y-5">
       <StatusPageHeader
@@ -803,6 +816,7 @@ export default function JobsClient({ initialJobs = [] as Job[] }: { initialJobs?
                   <th className="px-4 py-3 text-left">ຄົນຂັບ</th>
                   <th className="px-4 py-3 text-left">ກຳມະກອນ</th>
                   <th className="px-4 py-3 text-left">ບິນ / ລະຫັດບິນ</th>
+                  <th className="px-4 py-3 text-left">% ທີ່ຂົນ</th>
                   <th className="px-4 py-3 text-left">ສະຖານະ</th>
                   <th className="px-4 py-3 text-right">ຈັດການ</th>
                 </tr>
@@ -812,6 +826,8 @@ export default function JobsClient({ initialJobs = [] as Job[] }: { initialJobs?
                   <JobRow
                     key={job.doc_no}
                     job={job}
+                    volume={volumes[job.doc_no]}
+                    volumeFailed={volumesFailed}
                     expanded={expandedDoc === job.doc_no}
                     onToggle={() => void toggleBillDetails(job.doc_no)}
                     onEdit={() => router.push(`/jobs/edit?id=${job.doc_no}`)}

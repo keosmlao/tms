@@ -31,6 +31,7 @@ import {
 } from "react-icons/fa";
 import { FIXED_YEAR_END, FIXED_YEAR_START, getFixedTodayDate } from "@/lib/fixed-year";
 import { Actions } from "@/lib/api";
+import { BillItemsModal, BillVolumeTag, useBillVolumes } from "@/components/bill-volume";
 import {
   PendingBillScheduleDialog,
   type PendingScheduleDefaults,
@@ -719,6 +720,10 @@ export default function BillsPendingClient() {
       b.cancelled_delivery_at,
     ].filter(Boolean).join(" ").toLowerCase().includes(kw);
   });
+
+  // ບໍລິມາດຂອງບິນທີ່ເຫັນຢູ່ໜ້ານີ້ — ດຶງເປັນກ້ອນດຽວ
+  const billVolumes = useBillVolumes(filtered.map((b) => b.doc_no));
+  const [detailBill, setDetailBill] = useState<{ billNo: string; custName: string } | null>(null);
 
   // Sort by delivery date (scheduled_date — overridden value or send_date
   // fallback). Bills missing a date sink to the end.
@@ -1603,6 +1608,21 @@ export default function BillsPendingClient() {
                                     {fmtQty(bill.remaining_qty_total)}
                                   </span>
                                   <span className="block text-[9px] text-slate-400">ເຫຼືອ · {bill.remaining_count} ລາຍການ</span>
+                                  {/* ບໍລິມາດ — ກົດເບິ່ງລາຍລະອຽດຕໍ່ລາຍການ */}
+                                  <span
+                                    className="mt-0.5 block"
+                                    onClick={(e) => e.stopPropagation()}
+                                  >
+                                    <BillVolumeTag
+                                      v={billVolumes[bill.doc_no]}
+                                      onClick={() =>
+                                        setDetailBill({
+                                          billNo: bill.doc_no,
+                                          custName: bill.cust_name ?? "",
+                                        })
+                                      }
+                                    />
+                                  </span>
                                   {bill.partial_delivery && (bill.total_qty_total ?? 0) > 0 && (
                                     <div className="mt-0.5 border-t border-slate-200/60 dark:border-white/5 pt-0.5 text-[9px] leading-tight text-slate-400 tabular-nums">
                                       <div>ທັງໝົດ <span className="font-semibold text-slate-500 dark:text-slate-300">{fmtQty(bill.total_qty_total ?? 0)}</span></div>
@@ -2717,6 +2737,13 @@ export default function BillsPendingClient() {
         </div>
       )}
 
+      {detailBill && (
+        <BillItemsModal
+          billNo={detailBill.billNo}
+          custName={detailBill.custName}
+          onClose={() => setDetailBill(null)}
+        />
+      )}
     </div>
   );
 }

@@ -42,6 +42,8 @@ import {
   FaPlug,
   FaTruckLoading,
   FaBook,
+  FaRulerCombined,
+  FaBoxOpen,
 } from "react-icons/fa";
 
 interface NavItem {
@@ -108,6 +110,7 @@ const navSections: NavSection[] = [
     key: "report",
     items: [
       { label: "ການຈັດສົ່ງປະຈຳວັນ", href: "/reports/daily", icon: <FaCalendarDay size={13} /> },
+      { label: "ອັດຕາໃຊ້ພື້ນທີ່ລົດ", href: "/reports/truck-utilization", icon: <FaTruckLoading size={13} /> },
       { label: "ເຄື່ອນໄຫວ/ວັນ (ບິນ)", href: "/reports/daily-activity-bills", icon: <FaFileInvoice size={13} /> },
       { label: "ເຄື່ອນໄຫວ/ວັນ (ສິນຄ້າ)", href: "/reports/daily-activity-products", icon: <FaBox size={13} /> },
       { label: "ປະຈຳວັນ/ພະແນກ", href: "/reports/daily-department", icon: <FaBuilding size={13} /> },
@@ -147,6 +150,8 @@ const navSections: NavSection[] = [
     items: [
       { label: "ຂໍ້ມູນລົດ", href: "/manage/cars", icon: <FaTruck size={13} /> },
       { label: "ປະເພດລົດ", href: "/manage/car-types", icon: <FaTruck size={13} /> },
+      { label: "ຂະໜາດທໍ່", href: "/manage/pipe-sizes", icon: <FaRulerCombined size={13} /> },
+      { label: "ຂະໜາດຫີບ", href: "/manage/pack-sizes", icon: <FaBoxOpen size={13} /> },
       // { label: "ຄົນຂັບລົດ", href: "/manage/drivers", icon: <FaUserTie size={13} /> },
       { label: "ພະນັກງານຂົນສົ່ງ", href: "/manage/warehouse-workers", icon: <FaTruck size={13} /> },
       { label: "ເສັ້ນທາງຂົນສົ່ງ", href: "/manage/delivery-routes", icon: <FaRoute size={13} /> },

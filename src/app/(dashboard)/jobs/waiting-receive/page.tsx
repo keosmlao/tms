@@ -1,6 +1,7 @@
 "use client";
 
 import { Fragment, useEffect, useMemo, useState } from "react";
+import { TripLoadCell, useTripVolumes } from "@/components/trip-load-cell";
 import Link from "next/link";
 import {
   FaBroadcastTower,
@@ -137,6 +138,9 @@ export default function JobsWaitingReceivePage() {
   const totalPages = Math.max(1, Math.ceil(filteredJobs.length / perPage));
   const pagedJobs = filteredJobs.slice((currentPage - 1) * perPage, currentPage * perPage);
 
+  // % ພື້ນທີ່ຂອງແຖວທີ່ເຫັນຢູ່ໜ້ານີ້ — ດຶງເປັນກ້ອນດຽວ ບໍ່ແມ່ນຕໍ່ແຖວ
+  const { volumes, failed: volumesFailed } = useTripVolumes(pagedJobs.map((j) => j.doc_no));
+
   return (
     <div className="space-y-5">
       <StatusPageHeader
@@ -231,6 +235,7 @@ export default function JobsWaitingReceivePage() {
                     <th className="px-4 py-3 text-left font-semibold text-slate-600 dark:text-slate-300">ລົດ / ຄົນຂັບ</th>
                     <th className="px-4 py-3 text-center font-semibold text-slate-600 dark:text-slate-300">ບິນ</th>
                     <th className="px-4 py-3 text-left font-semibold text-slate-600 dark:text-slate-300">ສ້າງ / ອະນຸມັດ</th>
+                    <th className="px-4 py-3 text-left font-semibold text-slate-600 dark:text-slate-300">% ທີ່ຂົນ</th>
                     <th className="px-4 py-3 text-left font-semibold text-slate-600 dark:text-slate-300">ສະຖານະ</th>
                     <th className="px-4 py-3 text-center font-semibold text-slate-600 dark:text-slate-300">ຈັດການ</th>
                   </tr>
@@ -278,6 +283,9 @@ export default function JobsWaitingReceivePage() {
                             </div>
                           </td>
                           <td className="px-4 py-3">
+                            <TripLoadCell v={volumes[job.doc_no]} failed={volumesFailed} />
+                          </td>
+                          <td className="px-4 py-3">
                             <StatusBadge tone="amber" label="ລໍຖ້າຮັບຖ້ຽວ" />
                           </td>
                           <td className="px-4 py-3 text-center">
@@ -313,7 +321,7 @@ export default function JobsWaitingReceivePage() {
                         </tr>
                         {isExpanded && (
                           <tr>
-                            <td colSpan={7} className="px-0 py-0 bg-slate-50/60 dark:bg-black/20">
+                            <td colSpan={8} className="px-0 py-0 bg-slate-50/60 dark:bg-black/20">
                               <JobBillsAccordion
                                 docNo={job.doc_no}
                                 createdAt={job.created_at}

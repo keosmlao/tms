@@ -1,6 +1,7 @@
 "use client";
 
 import { Fragment, useEffect, useMemo, useState } from "react";
+import { TripLoadCell, useTripVolumes } from "@/components/trip-load-cell";
 import Link from "next/link";
 import {
   FaBroadcastTower,
@@ -157,6 +158,9 @@ export default function JobsClosedByDriverPage() {
   const totalPages = Math.max(1, Math.ceil(filteredJobs.length / perPage));
   const pagedJobs = filteredJobs.slice((currentPage - 1) * perPage, currentPage * perPage);
 
+  // % ພື້ນທີ່ຂອງແຖວທີ່ເຫັນຢູ່ໜ້ານີ້ — ດຶງເປັນກ້ອນດຽວ ບໍ່ແມ່ນຕໍ່ແຖວ
+  const { volumes, failed: volumesFailed } = useTripVolumes(pagedJobs.map((j) => j.doc_no));
+
   return (
     <div className="space-y-5">
       <StatusPageHeader
@@ -253,6 +257,7 @@ export default function JobsClosedByDriverPage() {
                     <th className="px-4 py-3 text-left font-semibold text-slate-600 dark:text-slate-300">ລົດ / ຄົນຂັບ</th>
                     <th className="px-4 py-3 text-left font-semibold text-slate-600 dark:text-slate-300">ຄວາມຄືບໜ້າບິນ</th>
                     <th className="px-4 py-3 text-left font-semibold text-slate-600 dark:text-slate-300">ໄມລ</th>
+                    <th className="px-4 py-3 text-left font-semibold text-slate-600 dark:text-slate-300">% ທີ່ຂົນ</th>
                     <th className="px-4 py-3 text-left font-semibold text-slate-600 dark:text-slate-300">ສະຖານະ</th>
                     <th className="px-4 py-3 text-center font-semibold text-slate-600 dark:text-slate-300">ຈັດການ</th>
                   </tr>
@@ -304,6 +309,9 @@ export default function JobsClosedByDriverPage() {
                             {job.miles_start || "-"} → {job.miles_end || "-"}
                           </td>
                           <td className="px-4 py-3">
+                            <TripLoadCell v={volumes[job.doc_no]} failed={volumesFailed} />
+                          </td>
+                          <td className="px-4 py-3">
                             <StatusBadge tone="sky" label="ຄົນຂັບປິດງານ" />
                           </td>
                           <td className="px-4 py-3 text-center">
@@ -340,7 +348,7 @@ export default function JobsClosedByDriverPage() {
                         </tr>
                         {isExpanded && (
                           <tr>
-                            <td colSpan={7} className="px-0 py-0 bg-slate-50/60 dark:bg-black/20">
+                            <td colSpan={8} className="px-0 py-0 bg-slate-50/60 dark:bg-black/20">
                               <JobBillsAccordion
                                 docNo={job.doc_no}
                                 createdAt={job.driver_closed_at ?? job.created_at}
