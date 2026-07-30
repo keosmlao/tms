@@ -21,14 +21,26 @@ async function getTripLoad(docNo) {
     [doc]
   );
   const items = await query(
-    `SELECT bill_no, item_code,
-            MAX(item_name) AS item_name,
-            MAX(unit_code) AS unit_code,
-            SUM(COALESCE(selected_qty, 0))::numeric AS qty
-       FROM public.odg_tms_detail_item
-      WHERE doc_no = $1
-      GROUP BY bill_no, item_code
-     HAVING SUM(COALESCE(selected_qty, 0)) > 0`,
+    `SELECT i.bill_no, i.item_code,
+            MAX(i.item_name) AS item_name,
+            MAX(i.unit_code) AS unit_code,
+            SUM(COALESCE(i.selected_qty, 0))::numeric AS qty,
+              -- ຍັງຢູ່ເທິງລົດ: ບິນທີ່ປິດແລ້ວ (ສົ່ງ/ຍົກເລີກ) ຖືວ່າລົງລົດໝົດ;
+              -- ບິນທີ່ຍັງເຄື່ອນໄຫວ ຫັກສ່ວນທີ່ສົ່ງ/ຄືນສາງໄປແລ້ວ
+              SUM(
+                CASE WHEN COALESCE(d.status, 0) IN (1, 2) THEN 0
+                     ELSE GREATEST(
+                       COALESCE(i.selected_qty, 0)
+                         - COALESCE(i.delivered_qty, 0)
+                         - COALESCE(i.returned_qty, 0), 0)
+                END
+              )::numeric AS qty_remaining
+       FROM public.odg_tms_detail_item i
+       JOIN public.odg_tms_detail d
+         ON d.doc_no = i.doc_no AND d.bill_no = i.bill_no
+      WHERE i.doc_no = $1
+      GROUP BY i.bill_no, i.item_code
+     HAVING SUM(COALESCE(i.selected_qty, 0)) > 0`,
     [doc]
   );
   return { car: head?.car ?? "", items };
@@ -53,14 +65,26 @@ async function getTripLoadsBulk(docNos) {
       [docs]
     ),
     query(
-      `SELECT doc_no, bill_no, item_code,
-              MAX(item_name) AS item_name,
-              MAX(unit_code) AS unit_code,
-              SUM(COALESCE(selected_qty, 0))::numeric AS qty
-         FROM public.odg_tms_detail_item
-        WHERE doc_no = ANY($1::varchar[])
-        GROUP BY doc_no, bill_no, item_code
-       HAVING SUM(COALESCE(selected_qty, 0)) > 0`,
+      `SELECT i.doc_no, i.bill_no, i.item_code,
+              MAX(i.item_name) AS item_name,
+              MAX(i.unit_code) AS unit_code,
+              SUM(COALESCE(i.selected_qty, 0))::numeric AS qty,
+              -- ຍັງຢູ່ເທິງລົດ: ບິນທີ່ປິດແລ້ວ (ສົ່ງ/ຍົກເລີກ) ຖືວ່າລົງລົດໝົດ;
+              -- ບິນທີ່ຍັງເຄື່ອນໄຫວ ຫັກສ່ວນທີ່ສົ່ງ/ຄືນສາງໄປແລ້ວ
+              SUM(
+                CASE WHEN COALESCE(d.status, 0) IN (1, 2) THEN 0
+                     ELSE GREATEST(
+                       COALESCE(i.selected_qty, 0)
+                         - COALESCE(i.delivered_qty, 0)
+                         - COALESCE(i.returned_qty, 0), 0)
+                END
+              )::numeric AS qty_remaining
+         FROM public.odg_tms_detail_item i
+         JOIN public.odg_tms_detail d
+           ON d.doc_no = i.doc_no AND d.bill_no = i.bill_no
+        WHERE i.doc_no = ANY($1::varchar[])
+        GROUP BY i.doc_no, i.bill_no, i.item_code
+       HAVING SUM(COALESCE(i.selected_qty, 0)) > 0`,
       [docs]
     ),
   ]);

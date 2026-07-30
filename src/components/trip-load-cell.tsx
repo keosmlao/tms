@@ -5,6 +5,9 @@ import { Actions } from "@/lib/api";
 
 export interface TripVolume {
   m3: number;
+  m3Remaining: number;
+  remainingPct: number | null;
+  deliveredPct: number | null;
   usableM3: number | null;
   utilizationPct: number | null;
   freeM3: number | null;
@@ -67,7 +70,7 @@ export function TripLoadCell({ v, failed }: { v?: TripVolume; failed?: boolean }
   if (v.utilizationPct === null) {
     return (
       <span
-        className="text-[10px] text-slate-400"
+        className="whitespace-nowrap text-[10px] text-slate-400"
         title={
           v.usableM3 === null
             ? "ລົດຄັນນີ້ຍັງບໍ່ໄດ້ວັດຕູ້ — ໄປໃສ່ທີ່ ຈັດການ → ຂໍ້ມູນລົດ"
@@ -90,8 +93,9 @@ export function TripLoadCell({ v, failed }: { v?: TripVolume; failed?: boolean }
           ? "text-sky-600 dark:text-sky-400"
           : "text-emerald-600 dark:text-emerald-400";
 
+  const left = v.remainingPct;
   return (
-    <div className="min-w-[74px]">
+    <div className="min-w-[86px] whitespace-nowrap">
       <div className="flex items-baseline gap-1">
         <span className={`text-xs font-bold tabular-nums ${tone}`}>{pct.toFixed(0)}%</span>
         {pct > 100 && (
@@ -108,7 +112,21 @@ export function TripLoadCell({ v, failed }: { v?: TripVolume; failed?: boolean }
           style={{ width: `${Math.min(pct, 100)}%` }}
         />
       </div>
-      <span className="text-[9px] tabular-nums text-slate-400">
+      {left !== null && (
+        <span
+          className={`block text-[10px] font-bold tabular-nums ${
+            left <= 0
+              ? "text-slate-400"
+              : left > 50
+                ? "text-sky-600 dark:text-sky-400"
+                : "text-slate-500"
+          }`}
+          title={`ຍັງຢູ່ເທິງລົດ ${v.m3Remaining.toFixed(2)} m³`}
+        >
+          {left <= 0 ? "ລົງໝົດແລ້ວ" : `ເຫຼືອ ${left.toFixed(0)}%`}
+        </span>
+      )}
+      <span className="block text-[9px] tabular-nums text-slate-400">
         {v.m3.toFixed(1)}/{v.usableM3?.toFixed(1)} m³
         {v.linesUnknown > 0 && (
           <span

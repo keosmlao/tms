@@ -489,3 +489,66 @@ describe("weight", () => {
     expect(trip.overloaded).toBe(true);
   });
 });
+
+describe("ຍັງຢູ່ເທິງລົດ (remaining)", () => {
+  const vols = new Map<string, ItemVolume>([
+    ["A", { m3: 1, kg: null, source: "master", confidence: 3 }],
+  ]);
+  const cap = { usable_m3: 10 };
+
+  it("counts everything as still loaded when qty_remaining is absent (drafts)", () => {
+    const out = computeTripVolume([{ item_code: "A", qty: 4 }], vols, cap);
+    expect(out.m3).toBeCloseTo(4, 9);
+    expect(out.m3Remaining).toBeCloseTo(4, 9);
+    expect(out.remainingPct).toBeCloseTo(40, 6);
+    expect(out.deliveredPct).toBeCloseTo(0, 6);
+  });
+
+  it("subtracts what has already come off the truck", () => {
+    const out = computeTripVolume(
+      [{ item_code: "A", qty: 10, qty_remaining: 3 }],
+      vols,
+      cap
+    );
+    expect(out.m3).toBeCloseTo(10, 9);
+    expect(out.m3Remaining).toBeCloseTo(3, 9);
+    expect(out.remainingPct).toBeCloseTo(30, 6);
+    expect(out.deliveredPct).toBeCloseTo(70, 6);
+  });
+
+  it("reports an empty truck when every bill is delivered", () => {
+    const out = computeTripVolume(
+      [{ item_code: "A", qty: 8, qty_remaining: 0 }],
+      vols,
+      cap
+    );
+    expect(out.m3Remaining).toBe(0);
+    expect(out.remainingPct).toBe(0);
+    expect(out.deliveredPct).toBeCloseTo(100, 6);
+  });
+
+  it("treats qty_remaining as a string from Postgres", () => {
+    const out = computeTripVolume(
+      [{ item_code: "A", qty: "10", qty_remaining: "2.5" }],
+      vols,
+      cap
+    );
+    expect(out.m3Remaining).toBeCloseTo(2.5, 9);
+  });
+
+  it("withholds remainingPct when the data is not sufficient", () => {
+    const out = computeTripVolume(
+      [
+        { item_code: "A", qty: 1, qty_remaining: 1 },
+        { item_code: "?1", qty: 1 },
+        { item_code: "?2", qty: 1 },
+      ],
+      vols,
+      cap
+    );
+    expect(out.dataSufficient).toBe(false);
+    expect(out.remainingPct).toBeNull();
+    // ແຕ່ m³ ດິບຍັງຄືນມາ
+    expect(out.m3Remaining).toBeCloseTo(1, 9);
+  });
+});

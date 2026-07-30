@@ -45,7 +45,10 @@ export interface TripItem {
   item_code: string;
   item_name?: string | null;
   unit_code?: string | null;
+  /** ຈຳນວນທີ່ຂຶ້ນລົດຕອນອອກ */
   qty: number | string;
+  /** ຈຳນວນທີ່ຍັງຢູ່ເທິງລົດດຽວນີ້ — ບໍ່ມີ = ຖືວ່າຍັງຢູ່ໝົດ (ຮ່າງຖ້ຽວ) */
+  qty_remaining?: number | string | null;
   bill_no?: string | null;
 }
 
@@ -167,6 +170,12 @@ export interface TripVolume {
   m3: number;
   /** ສ່ວນທີ່ມາຈາກຄ່າຄາດຄະເນ — ນັບຢູ່ໃນ m3 ແລ້ວ */
   estimatedM3: number;
+  /** ຍັງຢູ່ເທິງລົດດຽວນີ້ (ຫັກສ່ວນທີ່ສົ່ງ/ຍົກເລີກແລ້ວ) */
+  m3Remaining: number;
+  /** % ຂອງລົດ ທີ່ຍັງມີຂອງຢູ່ — null ເມື່ອບໍ່ຮູ້ຄວາມຈຸ ຫຼື ຂໍ້ມູນບໍ່ພໍ */
+  remainingPct: number | null;
+  /** % ຂອງທີ່ຂຶ້ນລົດ ທີ່ສົ່ງລົງແລ້ວ */
+  deliveredPct: number | null;
   kg: number | null;
   lines: number;
   linesKnown: number;
@@ -217,6 +226,7 @@ export function computeTripVolume(
   capacity?: CarCapacity | null
 ): TripVolume {
   let m3 = 0;
+  let m3Remaining = 0;
   let estimatedM3 = 0;
   let kg = 0;
   let sawWeight = false;
@@ -241,6 +251,9 @@ export function computeTripVolume(
     }
 
     m3 += hit.m3 * qty;
+    // ບໍ່ໄດ້ບອກ qty_remaining (ຮ່າງຖ້ຽວ) = ຍັງບໍ່ໄດ້ອອກ ຈຶ່ງຍັງຢູ່ເທິງລົດໝົດ
+    const qtyLeft = toNum(item?.qty_remaining);
+    m3Remaining += hit.m3 * (qtyLeft === null ? qty : qtyLeft);
     if (hit.confidence === 2) {
       estimatedM3 += hit.m3 * qty;
       linesEstimated += 1;
@@ -275,9 +288,15 @@ export function computeTripVolume(
       ? null
       : Math.max(volumePct ?? 0, weightPct ?? 0);
 
+  const remainingPct =
+    dataSufficient && usableM3 && usableM3 > 0 ? (m3Remaining / usableM3) * 100 : null;
+
   return {
     m3,
     estimatedM3,
+    m3Remaining,
+    remainingPct,
+    deliveredPct: m3 > 0 ? ((m3 - m3Remaining) / m3) * 100 : null,
     kg: sawWeight ? kg : null,
     lines,
     linesKnown,

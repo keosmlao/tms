@@ -809,16 +809,16 @@ export default function JobsClient({ initialJobs = [] as Job[] }: { initialJobs?
             <table className="w-full text-xs">
               <thead>
                 <tr className="bg-white/30 dark:bg-white/5 border-b border-slate-200/30 dark:border-white/5 font-semibold text-slate-600 dark:text-slate-300">
-                  <th className="px-4 py-3 w-8" aria-label="ຂະຫຍາຍ" />
-                  <th className="px-4 py-3 text-left">ເລກທີ / ວັນທີ</th>
-                  <th className="px-4 py-3 text-left">ວັນຈັດສົ່ງ</th>
-                  <th className="px-4 py-3 text-left">ລົດ</th>
-                  <th className="px-4 py-3 text-left">ຄົນຂັບ</th>
-                  <th className="px-4 py-3 text-left">ກຳມະກອນ</th>
-                  <th className="px-4 py-3 text-left">ບິນ / ລະຫັດບິນ</th>
-                  <th className="px-4 py-3 text-left">% ທີ່ຂົນ</th>
-                  <th className="px-4 py-3 text-left">ສະຖານະ</th>
-                  <th className="px-4 py-3 text-right">ຈັດການ</th>
+                  <th className="px-4 py-3 whitespace-nowrap w-8" aria-label="ຂະຫຍາຍ" />
+                  <th className="px-4 py-3 whitespace-nowrap text-left">ເລກທີ / ວັນທີ</th>
+                  <th className="px-4 py-3 whitespace-nowrap text-left">ວັນຈັດສົ່ງ</th>
+                  <th className="px-4 py-3 whitespace-nowrap text-left">ລົດ</th>
+                  <th className="px-4 py-3 whitespace-nowrap text-left">ຄົນຂັບ</th>
+                  <th className="px-4 py-3 whitespace-nowrap text-left">ກຳມະກອນ</th>
+                  <th className="px-4 py-3 whitespace-nowrap text-left">ບິນ / ລະຫັດບິນ</th>
+                  <th className="px-4 py-3 whitespace-nowrap text-left">% ທີ່ຂົນ</th>
+                  <th className="px-4 py-3 whitespace-nowrap text-left">ສະຖານະ</th>
+                  <th className="px-4 py-3 whitespace-nowrap text-right">ຈັດການ</th>
                 </tr>
               </thead>
               <tbody>

@@ -620,16 +620,16 @@ export default function BillsInProgressClient({
               <table className="w-full text-xs">
                 <thead>
                   <tr className="bg-white/30 dark:bg-white/5 border-b border-slate-200/30 dark:border-white/5">
-                    <th className="px-4 py-3 text-left font-semibold text-slate-600">ເລກທີ / ວັນທີ</th>
-                    <th className="px-4 py-3 text-left font-semibold text-slate-600">ເລີ່ມສົ່ງ</th>
-                    <th className="px-4 py-3 text-left font-semibold text-slate-600">ໄມລ / ເວລາ</th>
-                    <th className="px-4 py-3 text-left font-semibold text-slate-600">ຕຳແໜ່ງ</th>
-                    <th className="px-4 py-3 text-left font-semibold text-slate-600">ລົດ / ຄົນຂັບ</th>
-                    <th className="px-4 py-3 text-left font-semibold text-slate-600">ຄວາມຄືບໜ້າບິນ</th>
-                    <th className="px-4 py-3 text-left font-semibold text-slate-600">ສ້າງ / ອະນຸມັດ</th>
-                    <th className="px-4 py-3 text-left font-semibold text-slate-600">% ທີ່ຂົນ</th>
-                    <th className="px-4 py-3 text-left font-semibold text-slate-600">ສະຖານະ</th>
-                    <th className="px-4 py-3 text-center font-semibold text-slate-600">ຈັດການ</th>
+                    <th className="px-4 py-3 whitespace-nowrap text-left font-semibold text-slate-600">ເລກທີ / ວັນທີ</th>
+                    <th className="px-4 py-3 whitespace-nowrap text-left font-semibold text-slate-600">ເລີ່ມສົ່ງ</th>
+                    <th className="px-4 py-3 whitespace-nowrap text-left font-semibold text-slate-600">ໄມລ / ເວລາ</th>
+                    <th className="px-4 py-3 whitespace-nowrap text-left font-semibold text-slate-600">ຕຳແໜ່ງ</th>
+                    <th className="px-4 py-3 whitespace-nowrap text-left font-semibold text-slate-600">ລົດ / ຄົນຂັບ</th>
+                    <th className="px-4 py-3 whitespace-nowrap text-left font-semibold text-slate-600">ຄວາມຄືບໜ້າບິນ</th>
+                    <th className="px-4 py-3 whitespace-nowrap text-left font-semibold text-slate-600">ສ້າງ / ອະນຸມັດ</th>
+                    <th className="px-4 py-3 whitespace-nowrap text-left font-semibold text-slate-600">% ທີ່ຂົນ</th>
+                    <th className="px-4 py-3 whitespace-nowrap text-left font-semibold text-slate-600">ສະຖານະ</th>
+                    <th className="px-4 py-3 whitespace-nowrap text-center font-semibold text-slate-600">ຈັດການ</th>
                   </tr>
                 </thead>
                 <tbody>

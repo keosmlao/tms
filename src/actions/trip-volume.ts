@@ -109,6 +109,9 @@ export async function getTripVolume(docNo: string) {
 
 export interface TripVolumeSummary {
   m3: number;
+  m3Remaining: number;
+  remainingPct: number | null;
+  deliveredPct: number | null;
   usableM3: number | null;
   utilizationPct: number | null;
   freeM3: number | null;
@@ -166,6 +169,9 @@ export async function getTripVolumesBulk(docNos: string[]) {
     out[doc] = {
       car,
       m3: trip.m3,
+      m3Remaining: trip.m3Remaining,
+      remainingPct: trip.remainingPct,
+      deliveredPct: trip.deliveredPct,
       usableM3: trip.usableM3,
       utilizationPct: trip.utilizationPct,
       freeM3:

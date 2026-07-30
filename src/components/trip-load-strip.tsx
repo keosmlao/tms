@@ -18,6 +18,9 @@ export interface VolumeSlice {
 
 export interface TripVolumeInfo {
   car: string;
+  m3Remaining: number;
+  remainingPct: number | null;
+  deliveredPct: number | null;
   freeM3: number | null;
   byBill: VolumeSlice[];
   m3: number;
@@ -182,6 +185,18 @@ export function TripLoadStrip({ v }: { v: TripVolumeInfo }) {
         <div className="mt-1.5 h-1.5 w-full overflow-hidden rounded-full bg-slate-500/10">
           <div className={`h-full ${tone}`} style={{ width: `${barPct}%` }} />
         </div>
+      )}
+
+      {v.remainingPct !== null && v.deliveredPct !== null && v.deliveredPct > 0 && (
+        <p className="mt-1 flex flex-wrap items-baseline gap-x-2 whitespace-nowrap text-[10px]">
+          <span className="font-bold text-sky-700 dark:text-sky-400">
+            ຍັງຢູ່ເທິງລົດ {v.remainingPct.toFixed(0)}%
+          </span>
+          <span className="tabular-nums text-slate-400">{v.m3Remaining.toFixed(2)} m³</span>
+          <span className="text-emerald-600 dark:text-emerald-400">
+            ສົ່ງລົງແລ້ວ {v.deliveredPct.toFixed(0)}%
+          </span>
+        </p>
       )}
 
       <p className="mt-1.5 text-[9px] leading-relaxed text-slate-400">

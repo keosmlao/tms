@@ -241,14 +241,14 @@ export default function JobsClosedPage() {
               <table className="w-full text-xs">
                 <thead>
                   <tr className="bg-white/30 dark:bg-white/5 border-b border-slate-200/30 dark:border-white/5">
-                    <th className="px-4 py-3 text-left font-semibold text-slate-600 dark:text-slate-300">ເລກທີ / ວັນທີ</th>
-                    <th className="px-4 py-3 text-left font-semibold text-slate-600 dark:text-slate-300">ວັນຈັດສົ່ງ / ປິດເມື່ອ</th>
-                    <th className="px-4 py-3 text-left font-semibold text-slate-600 dark:text-slate-300">Admin / ລົດ / ຄົນຂັບ</th>
-                    <th className="px-4 py-3 text-left font-semibold text-slate-600 dark:text-slate-300">ຄວາມຄືບໜ້າບິນ</th>
-                    <th className="px-4 py-3 text-left font-semibold text-slate-600 dark:text-slate-300">% ທີ່ຂົນ</th>
-                    <th className="px-4 py-3 text-left font-semibold text-slate-600 dark:text-slate-300">ໄມລ</th>
-                    <th className="px-4 py-3 text-left font-semibold text-slate-600 dark:text-slate-300">ສະຖານະ</th>
-                    <th className="px-4 py-3 text-center font-semibold text-slate-600 dark:text-slate-300">ຈັດການ</th>
+                    <th className="px-4 py-3 whitespace-nowrap text-left font-semibold text-slate-600 dark:text-slate-300">ເລກທີ / ວັນທີ</th>
+                    <th className="px-4 py-3 whitespace-nowrap text-left font-semibold text-slate-600 dark:text-slate-300">ວັນຈັດສົ່ງ / ປິດເມື່ອ</th>
+                    <th className="px-4 py-3 whitespace-nowrap text-left font-semibold text-slate-600 dark:text-slate-300">Admin / ລົດ / ຄົນຂັບ</th>
+                    <th className="px-4 py-3 whitespace-nowrap text-left font-semibold text-slate-600 dark:text-slate-300">ຄວາມຄືບໜ້າບິນ</th>
+                    <th className="px-4 py-3 whitespace-nowrap text-left font-semibold text-slate-600 dark:text-slate-300">% ທີ່ຂົນ</th>
+                    <th className="px-4 py-3 whitespace-nowrap text-left font-semibold text-slate-600 dark:text-slate-300">ໄມລ</th>
+                    <th className="px-4 py-3 whitespace-nowrap text-left font-semibold text-slate-600 dark:text-slate-300">ສະຖານະ</th>
+                    <th className="px-4 py-3 whitespace-nowrap text-center font-semibold text-slate-600 dark:text-slate-300">ຈັດການ</th>
                   </tr>
                 </thead>
                 <tbody>
