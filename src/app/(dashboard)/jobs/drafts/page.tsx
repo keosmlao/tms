@@ -404,7 +404,9 @@ export default function TripDraftsPage() {
   // the dispatcher still has to SEE what is being loaded.
   const [productsByBill, setProductsByBill] = useState<Record<string, Product[]>>({});
   const [expanded, setExpanded] = useState<Set<number>>(new Set());
-  const [volumeByDraft, setVolumeByDraft] = useState<Record<number, TripVolumeInfo | null>>({});
+  const [volumeByDraft, setVolumeByDraft] = useState<
+    Record<number, TripVolumeInfo | { __error: string } | null>
+  >({});
   const [detailBill, setDetailBill] = useState<{ billNo: string; custName: string } | null>(null);
   const [activeDraft, setActiveDraft] = useState<number | null>(null);
   // Bill currently being dragged out of the pool, and the draft it is hovering
@@ -540,13 +542,18 @@ export default function TripDraftsPage() {
         open.map(async (draftId) => {
           try {
             return [draftId, (await Actions.getTripDraftVolume(draftId)) as TripVolumeInfo] as const;
-          } catch {
-            return [draftId, null] as const;
+          } catch (e) {
+            // ຢ່າກືນຄວາມຜິດພາດ — ບໍ່ດັ່ງນັ້ນແຖບພື້ນທີ່ຫາຍໄປງຽບໆ ແລະ
+            // ຄົນໃຊ້ບໍ່ຮູ້ວ່າມັນລົ້ມ ຫຼື ບໍ່ມີຂໍ້ມູນ
+            console.error("getTripDraftVolume", draftId, e);
+            return [draftId, { __error: String((e as Error)?.message ?? e) }] as const;
           }
         })
       );
       if (cancelled) return;
-      setVolumeByDraft((prev) => ({ ...prev, ...Object.fromEntries(loaded) }));
+      setVolumeByDraft(
+        (prev) => ({ ...prev, ...Object.fromEntries(loaded) }) as typeof prev
+      );
     })();
     return () => {
       cancelled = true;
@@ -818,7 +825,9 @@ export default function TripDraftsPage() {
   }, [candidatesForDraft, draftedBills, billVolumes]);
 
   // ທີ່ວ່າງຂອງຮ່າງທີ່ເລືອກຢູ່ — ໃຊ້ເຕືອນວ່າບິນໃບໃດໃສ່ບໍ່ພໍ
-  const activeFreeM3 = activeDraft ? (volumeByDraft[activeDraft]?.freeM3 ?? null) : null;
+  const activeVolume = activeDraft ? volumeByDraft[activeDraft] : null;
+  const activeFreeM3 =
+    activeVolume && !("__error" in activeVolume) ? (activeVolume.freeM3 ?? null) : null;
 
   return (
     <div className="space-y-4">
@@ -1040,9 +1049,25 @@ export default function TripDraftsPage() {
                       {isOpen && (
                         <div className="space-y-3 border-t border-slate-200/50 px-3 py-3 dark:border-white/5">
                           {/* ພື້ນທີ່ບັນທຸກ — ຢູ່ເທິງສຸດເພື່ອໃຫ້ເຫັນກ່ອນຕັດສິນໃຈໃສ່ບິນເພີ່ມ */}
-                          {volumeByDraft[d.draft_id] && bills.length > 0 && (
-                            <LoadStrip v={volumeByDraft[d.draft_id]!} />
-                          )}
+                          {bills.length > 0 &&
+                            (() => {
+                              const v = volumeByDraft[d.draft_id];
+                              if (!v) {
+                                return (
+                                  <p className="rounded border border-slate-200 px-2.5 py-2 text-[10px] text-slate-400 dark:border-slate-800">
+                                    ກຳລັງຄິດພື້ນທີ່ບັນທຸກ...
+                                  </p>
+                                );
+                              }
+                              if ("__error" in v) {
+                                return (
+                                  <p className="rounded border border-rose-300 bg-rose-500/5 px-2.5 py-2 text-[10px] text-rose-600 dark:border-rose-800 dark:text-rose-400">
+                                    ຄິດພື້ນທີ່ບັນທຸກບໍ່ໄດ້: {v.__error}
+                                  </p>
+                                );
+                              }
+                              return <LoadStrip v={v} />;
+                            })()}
 
                           {/* Bills first: what goes on the trip is decided before who drives it */}
                           {bills.length === 0 ? (
