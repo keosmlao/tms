@@ -10,6 +10,7 @@ const { ensurePendingBillSchema } = require("./pending-bill");
 const { ensureDeliveryRouteSchema } = require("./delivery-route");
 const { ensureDeliveryRoundSchema } = require("./delivery-round");
 const { ensureDeliveryWorkflowSchema } = require("./delivery");
+const gpsOpenApi = require("./gps-openapi");
 
 const trackingCache = globalThis;
 const REALTIME_PROVIDER_MIN_GAP_MS = Math.max(
@@ -1577,38 +1578,90 @@ async function getGpsRealtime(imei) {
     "SELECT code, name_1 FROM public.odg_tms_car WHERE imei=$1 LIMIT 1",
     [cleanImei]
   );
+  if (gpsOpenApi.isOpenApiConfigured()) {
+    try {
+      const row = await gpsOpenApi.fetchPosition(cleanImei);
+      if (row) {
+        const merged = { ...row, car_code: car?.code ?? "", car_name: car?.name_1 ?? "" };
+        if (merged.lat && merged.lng) getRealtimeCacheMap().set(cleanImei, merged);
+        return merged;
+      }
+    } catch (error) {
+      console.warn(
+        `[gps-realtime] openapi imei=${cleanImei} failed (${error?.code ?? ""}); ໃຊ້ provider ເກົ່າແທນ`
+      );
+    }
+  }
   return fetchGpsForImei(cleanImei, car?.code ?? "", car?.name_1 ?? "", getGpsTrackerConfig());
 }
 
+/**
+ * ຕຳແໜ່ງລ່າສຸດຂອງທຸກຄັນ.
+ *
+ * ເສັ້ນທາງທຳອິດຄື Lao GPS Open API: GET /positions = 1 request ໄດ້ທຸກຄັນ.
+ * ຂອງເກົ່າຕ້ອງຍິງ 1 request ຕໍ່ 1 IMEI (23 ຄັນ = 23 request ຕໍ່ຮອບ) ຈຶ່ງຕິດ
+ * HTTP 429 ເປັນປະຈຳ ແລ້ວຕົກໄປໃຊ້ຕຳແໜ່ງເກົ່າໃນ cache.
+ * ຖ້າ Open API ຍັງບໍ່ໄດ້ຕັ້ງຄ່າ ຫຼື ລົ້ມ ໃຫ້ຕົກກັບໄປໃຊ້ຂອງເກົ່າ ເພື່ອບໍ່ໃຫ້
+ * ແຜນທີ່ຫາຍໄປທັງໜ້າ.
+ */
 async function getGpsRealtimeAll() {
   const cars = await query(
     `SELECT code, name_1, imei FROM public.odg_tms_car
      WHERE imei IS NOT NULL AND btrim(imei) <> ''
      ORDER BY name_1 ASC, code ASC`
   );
-  console.log(`[gps-realtime] getGpsRealtimeAll cars=${cars.length} env_user=${process.env.GPS_TRACKER_USER ? "set" : "MISSING"} env_pass=${process.env.GPS_TRACKER_PASS ? "set" : "MISSING"}`);
   if (cars.length === 0) return [];
+
+  const blank = (car) => ({
+    imei: car.imei,
+    lat: "",
+    lng: "",
+    speed: "",
+    heading: "",
+    recorded_at: "",
+    address: "",
+    car_code: car.code,
+    car_name: car.name_1,
+  });
+
+  if (gpsOpenApi.isOpenApiConfigured()) {
+    const started = Date.now();
+    try {
+      const byImei = await gpsOpenApi.fetchAllPositions();
+      const result = cars.map((car) => {
+        const hit = byImei.get(String(car.imei).trim());
+        if (!hit) return blank(car);
+        const row = { ...hit, car_code: car.code, car_name: car.name_1 };
+        if (row.lat && row.lng) getRealtimeCacheMap().set(row.imei, row);
+        return row;
+      });
+      const withCoords = result.filter((r) => r.lat && r.lng).length;
+      console.log(
+        `[gps-realtime] openapi cars=${cars.length} with_coords=${withCoords} elapsed=${Date.now() - started}ms`
+      );
+      return result;
+    } catch (error) {
+      console.warn(
+        `[gps-realtime] openapi failed (${error?.code ?? ""} ${error?.message ?? error}); ໃຊ້ provider ເກົ່າແທນ`
+      );
+    }
+  }
+
+  console.log(
+    `[gps-realtime] legacy provider cars=${cars.length} env_user=${process.env.GPS_TRACKER_USER ? "set" : "MISSING"} env_pass=${process.env.GPS_TRACKER_PASS ? "set" : "MISSING"}`
+  );
   const config = getGpsTrackerConfig();
   const started = Date.now();
   const result = await Promise.all(
     cars.map(async (car) => {
       const gps = await fetchGpsForImei(car.imei, car.code, car.name_1, config);
-      return gps ?? {
-        imei: car.imei,
-        lat: "",
-        lng: "",
-        speed: "",
-        heading: "",
-        recorded_at: "",
-        address: "",
-        car_code: car.code,
-        car_name: car.name_1,
-      };
+      return gps ?? blank(car);
     })
   );
   const withCoords = result.filter((r) => r.lat && r.lng).length;
-  const elapsed = Date.now() - started;
-  console.log(`[gps-realtime] getGpsRealtimeAll done cars=${cars.length} with_coords=${withCoords} elapsed=${elapsed}ms`);
+  console.log(
+    `[gps-realtime] legacy done cars=${cars.length} with_coords=${withCoords} elapsed=${Date.now() - started}ms`
+  );
   return result;
 }
 
