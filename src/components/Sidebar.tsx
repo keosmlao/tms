@@ -111,6 +111,7 @@ const navSections: NavSection[] = [
     items: [
       { label: "ການຈັດສົ່ງປະຈຳວັນ", href: "/reports/daily", icon: <FaCalendarDay size={13} /> },
       { label: "ອັດຕາໃຊ້ພື້ນທີ່ລົດ", href: "/reports/truck-utilization", icon: <FaTruckLoading size={13} /> },
+      { label: "ຈຸດປິດບິນ vs ຈຸດລູກຄ້າ", href: "/reports/delivery-location", icon: <FaMapMarkerAlt size={13} /> },
       { label: "ເຄື່ອນໄຫວ/ວັນ (ບິນ)", href: "/reports/daily-activity-bills", icon: <FaFileInvoice size={13} /> },
       { label: "ເຄື່ອນໄຫວ/ວັນ (ສິນຄ້າ)", href: "/reports/daily-activity-products", icon: <FaBox size={13} /> },
       { label: "ປະຈຳວັນ/ພະແນກ", href: "/reports/daily-department", icon: <FaBuilding size={13} /> },

@@ -13,6 +13,7 @@ import * as fuel from "@/actions/fuel";
 import * as geofence from "@/actions/geofence";
 import * as gps from "@/actions/gps";
 import * as jobs from "@/actions/jobs";
+import * as deliveryAudit from "@/actions/delivery-audit";
 import * as masterData from "@/actions/master-data";
 import * as notifications from "@/actions/notifications";
 import * as pickupVariance from "@/actions/pickup-variance";
@@ -86,6 +87,7 @@ export const Actions = {
   getJobBillsWithProducts: jobs.getJobBillsWithProducts,
   getJobPrintData: jobs.getJobPrintData,
   getTripRoutePlan: jobs.getTripRoutePlan,
+  getDeliveryLocationReport: deliveryAudit.getDeliveryLocationReport,
   addBillToDraft: jobs.addBillToDraft,
   removeBillFromDraft: jobs.removeBillFromDraft,
   searchBills: jobs.searchBills,
