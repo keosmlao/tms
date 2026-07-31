@@ -1,5 +1,9 @@
 const { query, queryOne, queryB } = require("../lib/db");
 const {
+  getLastDeliveredPoints,
+  attachDeliveryPoint,
+} = require("./customer-point");
+const {
   coerceDateToFixedYear,
   getFixedTodayDate,
   getFixedYearSqlFilter,
@@ -581,7 +585,10 @@ async function getAvailableBills(session, scheduledDate) {
   ]);
   const shipmentDocNos = new Set(shipmentBills.map((bill) => bill.doc_no));
   const bills = [...shipmentBills, ...manualBills.filter((bill) => !shipmentDocNos.has(bill.doc_no))];
-  return (await applyRemainingCounts(bills)).filter((bill) => bill.count_item > 0);
+  const counted = (await applyRemainingCounts(bills)).filter((bill) => bill.count_item > 0);
+  // ບິນທີ່ຍັງບໍ່ໄດ້ປັກໝຸດ ໃຫ້ໃຊ້ຈຸດສົ່ງຄັ້ງກ່ອນຂອງລູກຄ້າຄົນນັ້ນເປັນຄ່າຕັ້ງຕົ້ນ
+  const lastPoints = await getLastDeliveredPoints(counted.map((bill) => bill.cust_code));
+  return counted.map((bill) => attachDeliveryPoint(bill, lastPoints.get(String(bill.cust_code ?? "").trim())));
 }
 
 async function getAvailableBillProducts(docNo) {
@@ -1432,7 +1439,13 @@ async function getBillsPending(session, fromDate, toDate, transportCode) {
     .filter((bill) => bill.source_type === SERVICE_SOURCE_TYPE || bill.remaining_count > 0)
     .map((bill, index) => ({ ...bill, row_num: index + 1 }));
 
-  return { trans, listtrans };
+  // ຈຸດສົ່ງຄັ້ງກ່ອນ: ບິນເປີດໃໝ່ຂອງລູກຄ້າເກົ່າຈຶ່ງມີໝຸດຕັ້ງແຕ່ຕົ້ນ ບໍ່ຕ້ອງປັກຄືນ
+  const lastPoints = await getLastDeliveredPoints(trans.map((bill) => bill.cust_code));
+  const transWithPoint = trans.map((bill) =>
+    attachDeliveryPoint(bill, lastPoints.get(String(bill.cust_code ?? "").trim()))
+  );
+
+  return { trans: transWithPoint, listtrans };
 }
 
 async function updateBillTransport(docNo, transportCode) {

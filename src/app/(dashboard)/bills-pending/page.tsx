@@ -100,6 +100,13 @@ export interface Bill {
   todo_earliest_deadline_display?: string | null;
   planned_lat?: string | null;
   planned_lng?: string | null;
+  // "planned" = ຄົນປັກໝຸດເອງ · "last_delivery" = ເອົາຈາກຄັ້ງທີ່ສົ່ງຫຼ້າສຸດ
+  // ຂອງລູກຄ້າຄົນນີ້ · "customer" = ພິກັດໃນທະບຽນລູກຄ້າ
+  location_source?: string;
+  last_lat?: string | null;
+  last_lng?: string | null;
+  last_delivery_bill?: string;
+  last_delivery_at_display?: string;
   cust_code?: string | null;
   cust_name?: string | null;
   cust_phone?: string | null;
@@ -273,15 +280,28 @@ function BillLocationActions({
   variant: "icon" | "label" | "drawer";
   onEdit: (bill: Bill) => void;
 }) {
-  const planned = Boolean(
+  const hasPlannedCoords = Boolean(
     (bill.planned_lat ?? "").toString().trim() && (bill.planned_lng ?? "").toString().trim()
   );
-  const custLoc = Boolean(
-    (bill.cust_lat ?? "").toString().trim() && (bill.cust_lng ?? "").toString().trim()
-  );
-  const hasAnyLoc = planned || custLoc;
+  // ພິກັດໃນທະບຽນລູກຄ້າສ່ວນຫຼາຍເປັນ 0 — ຢ່ານັບວ່າ "ມີຈຸດ" ບໍ່ດັ່ງນັ້ນ QR
+  // ຈະພາຄົນຂັບໄປຈຸດ 0,0 ກາງມະຫາສະໝຸດ
+  const isUsableCoord = (v: unknown) => {
+    const t = (v ?? "").toString().trim();
+    return t !== "" && !["0", "0.0", "0.000000"].includes(t) && Number(t) !== 0;
+  };
+  const custLoc = isUsableCoord(bill.cust_lat) && isUsableCoord(bill.cust_lng);
+  // ໝຸດຈາກຄັ້ງກ່ອນຖືກຕື່ມໃສ່ planned_* ໃຫ້ແລ້ວຈາກຝັ່ງ server ຈຶ່ງໃຊ້ງານໄດ້ເລີຍ
+  // ແຕ່ຕ້ອງສະແດງໃຫ້ຕ່າງກັບໝຸດທີ່ຄົນປັກເອງ — ຄົນຈັດຖ້ຽວຄວນຮູ້ວ່າອັນໃດຍັງບໍ່ທັນຢືນຢັນ
+  const inherited = bill.location_source === "last_delivery";
+  const planned = hasPlannedCoords && !inherited;
+  const hasAnyLoc = hasPlannedCoords || custLoc;
+  const inheritedFrom = [bill.last_delivery_bill, bill.last_delivery_at_display]
+    .filter(Boolean)
+    .join(" · ");
   const editTitle = planned
     ? "ແກ້ຈຸດຈັດສົ່ງ"
+    : inherited
+    ? `ຈຸດສົ່ງຄັ້ງກ່ອນ${inheritedFrom ? ` (${inheritedFrom})` : ""} — ກົດເພື່ອຢືນຢັນ ຫຼື ແກ້`
     : custLoc
     ? "ໃຊ້/ປ່ຽນຈຸດທີ່ບັນທຶກໄວ້ໃນຂໍ້ມູນລູກຄ້າ"
     : "ກຳນົດຈຸດຈັດສົ່ງ";
@@ -292,8 +312,8 @@ function BillLocationActions({
   };
   const handlePrint = (e: ReactMouseEvent) => {
     e.stopPropagation();
-    const lat = (planned ? bill.planned_lat : bill.cust_lat) ?? "";
-    const lng = (planned ? bill.planned_lng : bill.cust_lng) ?? "";
+    const lat = (hasPlannedCoords ? bill.planned_lat : bill.cust_lat) ?? "";
+    const lng = (hasPlannedCoords ? bill.planned_lng : bill.cust_lng) ?? "";
     void printBillLocationQr({
       billNo: bill.doc_no,
       custName: bill.cust_name ?? null,
@@ -310,6 +330,8 @@ function BillLocationActions({
           className={`w-6 h-6 rounded flex items-center justify-center transition-colors cursor-pointer ${
             planned
               ? "text-emerald-600 bg-emerald-100/80 hover:bg-emerald-200 dark:bg-emerald-900/30"
+              : inherited
+              ? "text-amber-600 bg-amber-100/80 hover:bg-amber-200 dark:bg-amber-900/30"
               : custLoc
               ? "text-sky-600 bg-sky-100/80 hover:bg-sky-200 dark:bg-sky-900/30"
               : "text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800"
@@ -339,12 +361,15 @@ function BillLocationActions({
           className={`px-2 py-1 rounded border text-[9px] font-semibold cursor-pointer ${
             planned
               ? "border-emerald-500/30 bg-emerald-50 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-400"
+              : inherited
+              ? "border-amber-500/30 bg-amber-50 text-amber-700 dark:bg-amber-900/30 dark:text-amber-400"
               : custLoc
               ? "border-sky-500/30 bg-sky-50 text-sky-700 dark:bg-sky-900/30 dark:text-sky-400"
               : "border-slate-200 dark:border-white/10 bg-white dark:bg-slate-800 text-slate-600 dark:text-slate-300"
           }`}
         >
-          <FaMapMarkerAlt size={8} className="inline mr-0.5" /> {planned ? "ຈຸດສົ່ງ" : custLoc ? "ຈຸດລູກຄ້າ" : "ຈຸດສົ່ງ"}
+          <FaMapMarkerAlt size={8} className="inline mr-0.5" />{" "}
+          {planned ? "ຈຸດສົ່ງ" : inherited ? "ຄັ້ງກ່ອນ" : custLoc ? "ຈຸດລູກຄ້າ" : "ຈຸດສົ່ງ"}
         </button>
         {hasAnyLoc && (
           <button

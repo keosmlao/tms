@@ -10,6 +10,10 @@ const {
   saveDeliveryImages,
 } = require("./delivery");
 const {
+  getLastDeliveredPoints,
+  saveCustomerPoint,
+} = require("./customer-point");
+const {
   coerceDateToFixedYear,
   getFixedTodayDate,
   getFixedYearSqlFilter,
@@ -1455,6 +1459,26 @@ async function mobileJobAction(body) {
 
         await saveDeliveryImages(billNo, deliveryImages, client);
 
+        // ຈື່ຈຸດສົ່ງຂອງລູກຄ້າຄົນນີ້ໄວ້ ເພື່ອໃຫ້ບິນຄັ້ງໜ້າມີໝຸດຕັ້ງແຕ່ເປີດບິນ.
+        // ຂຽນສະເພາະຕອນປິດບິນຄົບ — ບິນທະຍອຍສົ່ງທີ່ຍັງບໍ່ຈົບ ຍັງບໍ່ແມ່ນຈຸດສຸດທ້າຍ.
+        if (fullyDelivered && latEnd && lngEnd) {
+          const custCodeRow = await client.query(
+            `SELECT cust_code, COALESCE(NULLIF(TRIM(forward_transport_code), ''), '') AS fwd
+               FROM public.odg_tms_detail
+              WHERE bill_no = $1 AND doc_no = $2 AND ${getFixedYearSqlFilter("doc_date")}
+              LIMIT 1`,
+            [billNo, currentDocNo]
+          );
+          const custCode = custCodeRow.rows?.[0]?.cust_code ?? "";
+          // ບິນ "ສົ່ງສາຂາ" ພິກັດເປັນສາງສາຂາ ບໍ່ແມ່ນຮ້ານລູກຄ້າ — ຢ່າຈື່
+          if (custCode && !custCodeRow.rows?.[0]?.fwd) {
+            await saveCustomerPoint(
+              { custCode, lat: latEnd, lng: lngEnd, billNo },
+              client
+            );
+          }
+        }
+
         await client.query(
           `UPDATE odg_tms
            SET job_status = CASE WHEN COALESCE(job_status, 0) < 2 THEN 2 ELSE job_status END,
@@ -2263,7 +2287,24 @@ async function mobileBills({ docNo, billNo, type, driverId, isSupervisor }) {
       [docNo]
     );
 
-    return data.map((row) => {
+    // ຈຸດສົ່ງຄັ້ງກ່ອນ: ບິນທີ່ຍັງບໍ່ມີໝຸດ ໃຫ້ຄົນຂັບເຫັນບ່ອນທີ່ເຄີຍໄປສົ່ງລູກຄ້າ
+    // ຄົນນີ້ຄັ້ງຫຼ້າສຸດ ແທນທີ່ຈະບໍ່ມີພິກັດຫຍັງເລີຍແລ້ວຕ້ອງໂທຖາມ
+    const lastPointsByCust = await getLastDeliveredPoints(
+      data.map((row) => row.cust_code)
+    );
+
+    return data.map((rawRow) => {
+      const lastPoint = lastPointsByCust.get(String(rawRow.cust_code ?? "").trim());
+      const useLast = Boolean(lastPoint) && !String(rawRow.planned_lat ?? "").trim();
+      const row = useLast
+        ? {
+            ...rawRow,
+            planned_lat: lastPoint.lat,
+            planned_lng: lastPoint.lng,
+            planned_from_last_delivery: true,
+            last_delivery_at: lastPoint.at_display,
+          }
+        : { ...rawRow, planned_from_last_delivery: false, last_delivery_at: "" };
       // Fallback for bills with no odg_tms_detail_item rows (custom/service
       // bills have no ic_trans_detail to seed from). count_item is a LINE
       // count, not a quantity — never use it as a qty total.
