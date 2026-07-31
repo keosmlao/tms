@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react";
 import Link from "next/link";
-import { FaLightbulb, FaSpinner, FaTruck, FaMapMarkerAlt } from "react-icons/fa";
+import { FaLightbulb, FaSpinner, FaTruck, FaMapMarkerAlt, FaPlus, FaCheck } from "react-icons/fa";
 import { Actions } from "@/lib/api";
 import { StatusPageHeader } from "@/components/status-page-shell";
 import { useSession } from "@/providers/session-provider";
@@ -40,6 +40,12 @@ interface Result {
   } | null;
 }
 
+interface Option {
+  code: string;
+  name: string;
+  time_label?: string;
+}
+
 export default function SuggestTripsPage() {
   const { session } = useSession();
   const [branch, setBranch] = useState("");
@@ -49,6 +55,25 @@ export default function SuggestTripsPage() {
   const [data, setData] = useState<Result | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  // ສ້າງຮ່າງຖ້ຽວຈາກຂໍ້ແນະນຳ — ຮ່າງຕ້ອງມີ ວັນທີ + ຮອບ + ສາຍ ທີ່ລະບົບເດົາບໍ່ໄດ້
+  const [routes, setRoutes] = useState<Option[]>([]);
+  const [rounds, setRounds] = useState<Option[]>([]);
+  const [formFor, setFormFor] = useState<number | null>(null);
+  const [draftDate, setDraftDate] = useState(today());
+  const [draftRound, setDraftRound] = useState("");
+  const [draftRoute, setDraftRoute] = useState("");
+  const [creating, setCreating] = useState(false);
+  const [createdFor, setCreatedFor] = useState<Record<number, number>>({});
+
+  useEffect(() => {
+    void Actions.listDeliveryRoutes(true)
+      .then((r) => setRoutes((r ?? []) as Option[]))
+      .catch(() => setRoutes([]));
+    void Actions.listDeliveryRounds(true)
+      .then((r) => setRounds((r ?? []) as Option[]))
+      .catch(() => setRounds([]));
+  }, []);
 
   useEffect(() => {
     void Actions.getSalesTransportBranches()
@@ -78,6 +103,34 @@ export default function SuggestTripsPage() {
       setError(e instanceof Error ? e.message : "ຄິດບໍ່ສຳເລັດ");
     } finally {
       setLoading(false);
+    }
+  };
+
+  const createDraft = async (trip: Trip, index: number) => {
+    setCreating(true);
+    setError(null);
+    try {
+      const res = (await Actions.createTripDraft({
+        dateLogistic: draftDate,
+        originTransportCode: branch,
+        deliveryRouteCode: draftRoute,
+        deliveryRoundCode: draftRound,
+        car: trip.vehicle.code,
+      })) as { draft_id: number };
+      const draftId = Number(res?.draft_id);
+      if (!draftId) throw new Error("ສ້າງຮ່າງບໍ່ສຳເລັດ");
+      // ໃສ່ບິນຕາມລຳດັບເສັ້ນທາງທີ່ແນະນຳ
+      await Actions.addBillsToTripDraft(
+        draftId,
+        trip.bills.map((bill) => bill.bill_no)
+      );
+      setCreatedFor((prev) => ({ ...prev, [index]: draftId }));
+      setFormFor(null);
+    } catch (e) {
+      console.error(e);
+      setError(e instanceof Error ? e.message : "ສ້າງຮ່າງບໍ່ສຳເລັດ");
+    } finally {
+      setCreating(false);
     }
   };
 
