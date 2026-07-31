@@ -638,6 +638,34 @@ async function getTripDraftLoad(draftId) {
  * ສິນຄ້າ + ລົດ ຂອງຫຼາຍຮ່າງພ້ອມກັນ — ໃຫ້ໜ້າຮ່າງຖ້ຽວໄດ້ພື້ນທີ່ບັນທຸກມາພ້ອມ
  * ລາຍການຮ່າງ ໂດຍບໍ່ຕ້ອງຍິງ action ຮອບສອງ (ບໍ່ມີສະຖານະ "ກຳລັງໂຫຼດ").
  */
+/**
+ * ຊື່ລູກຄ້າຕໍ່ບິນ ຂອງຫຼາຍຮ່າງພ້ອມກັນ — ໃຫ້ການແຈກແຈງ "ຕາມບິນ" ຕິດປ້າຍຊື່ໄດ້
+ * ໂດຍບໍ່ຍິງ query ຕໍ່ຮ່າງ (N+1).
+ */
+async function getTripDraftBillNamesBulk(draftIds) {
+  await ensureTripDraftSchema();
+  const ids = Array.from(
+    new Set((draftIds ?? []).map((n) => Number(n)).filter(Number.isFinite))
+  );
+  if (ids.length === 0) return new Map();
+  const rows = await query(
+    `SELECT b.draft_id, b.bill_no,
+            COALESCE(NULLIF(TRIM(c.name_1), ''), a.cust_code, '') AS cust_name
+       FROM public.odg_tms_trip_draft_bill b
+       LEFT JOIN ic_trans_shipment a ON a.doc_no = b.bill_no
+       LEFT JOIN ar_customer c ON c.code = a.cust_code
+      WHERE b.draft_id = ANY($1::bigint[])`,
+    [ids]
+  );
+  const byDraft = new Map();
+  for (const row of rows) {
+    const id = Number(row.draft_id);
+    if (!byDraft.has(id)) byDraft.set(id, new Map());
+    byDraft.get(id).set(String(row.bill_no), String(row.cust_name ?? ""));
+  }
+  return byDraft;
+}
+
 async function getTripDraftLoadsBulk(draftIds) {
   await ensureTripDraftSchema();
   const ids = Array.from(
@@ -714,6 +742,7 @@ module.exports = {
   getTripDraftBills,
   getTripDraftLoad,
   getTripDraftLoadsBulk,
+  getTripDraftBillNamesBulk,
   getTripDraftCandidates,
   createTripDraft,
   updateTripDraft,

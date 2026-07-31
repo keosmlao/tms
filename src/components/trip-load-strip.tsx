@@ -43,7 +43,7 @@ export interface TripVolumeInfo {
   longestItemM: number | null;
   cargoLengthM: number | null;
   lengthFits: boolean;
-  unknownItems: Array<{ itemCode: string; itemName: string; unitCode: string; qty: number }>;
+  unknownItems?: Array<{ itemCode: string; itemName: string; unitCode: string; qty: number }>;
 }
 
 /** ຕາຕະລາງແຈກແຈງພື້ນທີ່ — ໃຊ້ຮ່ວມກັນລະຫວ່າງ "ຕາມບິນ" ແລະ "ຕາມໝວດ" */
@@ -235,20 +235,22 @@ export function TripLoadStrip({ v }: { v: TripVolumeInfo }) {
         </details>
       )}
 
-      {v.linesUnknown > 0 && v.unknownItems.length > 0 && (
+      {/* ຂໍ້ມູນອາດມາຈາກຫຼາຍ action — ຢ່າຖືວ່າຊ່ອງນີ້ມີສະເໝີ ບໍ່ດັ່ງນັ້ນ
+          ໜ້າທັງໜ້າລົ້ມ (ເຄີຍລົ້ມມາແລ້ວ: unknownItems ເປັນ undefined) */}
+      {v.linesUnknown > 0 && (v.unknownItems?.length ?? 0) > 0 && (
         <details className="mt-1">
           <summary className="cursor-pointer text-[9px] text-slate-400">
             ເບິ່ງລາຍການທີ່ຍັງບໍ່ຮູ້ຂະໜາດ
           </summary>
           <ul className="mt-1 space-y-0.5">
-            {v.unknownItems.slice(0, 8).map((u) => (
+            {(v.unknownItems ?? []).slice(0, 8).map((u) => (
               <li key={u.itemCode} className="truncate text-[9px] text-slate-500">
                 <span className="tabular-nums text-slate-400">{u.qty}</span> {u.itemName}
               </li>
             ))}
-            {v.unknownItems.length > 8 && (
+            {(v.unknownItems?.length ?? 0) > 8 && (
               <li className="text-[9px] text-slate-400">
-                ແລະ ອີກ {v.unknownItems.length - 8} ລາຍການ
+                ແລະ ອີກ {(v.unknownItems?.length ?? 0) - 8} ລາຍການ
               </li>
             )}
           </ul>

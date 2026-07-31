@@ -4,6 +4,7 @@ import { requireSession } from "./_helpers";
 import {
   getTripDraftLoad,
   getTripDraftLoadsBulk,
+  getTripDraftBillNamesBulk,
   getTripDraftBills,
   listTripDrafts,
 } from "@/queries/trip-draft.js";
@@ -124,14 +125,18 @@ export async function listTripDraftsWithVolume(dateFrom?: string, dateTo?: strin
   const drafts = (await listTripDrafts(session, dateFrom, dateTo)) as Array<
     Record<string, unknown>
   >;
-  if (drafts.length === 0) return { drafts, volumes: {} as Record<number, TripVolumeSummary> };
+  if (drafts.length === 0) return { drafts, volumes: {} };
 
   const ids = drafts.map((d) => Number(d.draft_id));
-  const { cars, itemsByDraft } = (await getTripDraftLoadsBulk(ids)) as {
-    cars: Map<number, string>;
-    itemsByDraft: Map<number, TripItem[]>;
-  };
+  const [{ cars, itemsByDraft }, namesByDraft] = (await Promise.all([
+    getTripDraftLoadsBulk(ids),
+    getTripDraftBillNamesBulk(ids),
+  ])) as [
+    { cars: Map<number, string>; itemsByDraft: Map<number, TripItem[]> },
+    Map<number, Map<string, string>>,
+  ];
 
+  // ຂະໜາດສິນຄ້າ ແລະ ຄວາມຈຸລົດ ດຶງເທື່ອດຽວໃຫ້ທຸກຮ່າງ ແລ້ວຄິດຢູ່ໜ່ວຍຄວາມຈຳ
   const allItems = [...itemsByDraft.values()].flat();
   const itemCodes = Array.from(
     new Set(allItems.map((i) => String(i.item_code ?? "").trim()).filter(Boolean))
@@ -154,10 +159,13 @@ export async function listTripDraftsWithVolume(dateFrom?: string, dateTo?: strin
   const volumes = resolveItemVolumes(allItems, { masterDims, pipeDims, packDims });
   const pipeMap = buildPipeDimMap(pipeDims);
 
-  const out: Record<number, TripVolumeSummary & { lengthFits: boolean }> = {};
-  for (const id of ids) {
-    const items = itemsByDraft.get(id) ?? [];
-    const car = cars.get(id) ?? "";
+  // ⚠️ ຮູບຮ່າງຕ້ອງຄືກັບ computeLoad() ທຸກຊ່ອງ — TripLoadStrip ອ່ານ
+  // unknownItems, byBill, capacitySource ນຳ. ຖ້າຂາດຊ່ອງໃດ ໜ້າຈະລົ້ມ
+  // (ເຄີຍລົ້ມມາແລ້ວທີ່ v.unknownItems.length).
+  const out: Record<number, ReturnType<typeof buildDraftVolume>> = {};
+  function buildDraftVolume(draftId: number) {
+    const items = itemsByDraft.get(draftId) ?? [];
+    const car = cars.get(draftId) ?? "";
     const capacity = capByCar.get(car) ?? null;
     const trip = computeTripVolume(items, volumes, capacity);
 
@@ -167,25 +175,24 @@ export async function listTripDraftsWithVolume(dateFrom?: string, dateTo?: strin
       const hit = pipeHits.get(String(item.item_code ?? ""));
       if (hit && (longestM === null || hit.lengthM > longestM)) longestM = hit.lengthM;
     }
+    const length = checkLengthFits(longestM, capacity);
 
-    out[id] = {
+    return {
       car,
-      m3: trip.m3,
-      m3Remaining: trip.m3Remaining,
-      remainingPct: trip.remainingPct,
-      deliveredPct: trip.deliveredPct,
-      usableM3: trip.usableM3,
-      utilizationPct: trip.utilizationPct,
+      capacitySource: String(capacity?.capacity_source ?? "none"),
+      ...trip,
       freeM3:
         trip.usableM3 !== null && trip.dataSufficient
           ? Math.max(trip.usableM3 - trip.m3, 0)
           : null,
-      coveragePct: trip.coveragePct,
-      linesUnknown: trip.linesUnknown,
-      dataSufficient: trip.dataSufficient,
-      lengthFits: checkLengthFits(longestM, capacity).fits,
+      byBill: sliceByBill(items, volumes, trip, namesByDraft.get(draftId) ?? new Map()),
+      longestItemM: longestM,
+      cargoLengthM: length.cargoLengthM,
+      lengthFits: length.fits,
     };
   }
+
+  for (const id of ids) out[id] = buildDraftVolume(id);
   return { drafts, volumes: out };
 }
 
