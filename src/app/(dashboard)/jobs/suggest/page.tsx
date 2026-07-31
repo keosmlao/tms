@@ -46,6 +46,8 @@ interface Option {
   time_label?: string;
 }
 
+const today = () => new Date().toISOString().slice(0, 10);
+
 export default function SuggestTripsPage() {
   const { session } = useSession();
   const [branch, setBranch] = useState("");
@@ -308,6 +310,77 @@ export default function SuggestTripsPage() {
                 ມີບິນທີ່ຍັງບໍ່ຮູ້ຂະໜາດຄົບ — % ນີ້ຕໍ່າກວ່າຄວາມຈິງ
               </p>
             )}
+            {/* ສ້າງຮ່າງຖ້ຽວ — ວັນທີ/ຮອບ/ສາຍ ລະບົບເດົາບໍ່ໄດ້ ຈຶ່ງຖາມກ່ອນ */}
+            {createdFor[index] ? (
+              <p className="mt-2 flex items-center gap-1.5 text-[11px] font-semibold text-emerald-600 dark:text-emerald-400">
+                <FaCheck size={10} /> ສ້າງຮ່າງແລ້ວ ·{" "}
+                <Link href="/jobs/drafts" className="underline">
+                  ເປີດໜ້າຮ່າງຖ້ຽວ
+                </Link>
+              </p>
+            ) : formFor === index ? (
+              <div className="mt-2 space-y-2 rounded-lg border border-slate-200/70 p-2 dark:border-slate-700">
+                <div className="flex flex-wrap gap-2">
+                  <input
+                    type="date"
+                    value={draftDate}
+                    onChange={(e) => setDraftDate(e.target.value)}
+                    className="glass-input h-8 rounded-lg px-2 text-[11px]"
+                  />
+                  <select
+                    value={draftRound}
+                    onChange={(e) => setDraftRound(e.target.value)}
+                    className="glass-input h-8 rounded-lg px-2 text-[11px]"
+                  >
+                    <option value="">- ຮອບ -</option>
+                    {rounds.map((r) => (
+                      <option key={r.code} value={r.code}>
+                        {r.name}
+                        {r.time_label ? ` · ${r.time_label}` : ""}
+                      </option>
+                    ))}
+                  </select>
+                  <select
+                    value={draftRoute}
+                    onChange={(e) => setDraftRoute(e.target.value)}
+                    className="glass-input h-8 rounded-lg px-2 text-[11px]"
+                  >
+                    <option value="">- ສາຍ -</option>
+                    {routes.map((r) => (
+                      <option key={r.code} value={r.code}>
+                        {r.name}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+                <div className="flex gap-2">
+                  <button
+                    type="button"
+                    disabled={creating || !draftRound || !draftRoute}
+                    onClick={() => void createDraft(trip, index)}
+                    className="h-8 rounded-lg bg-emerald-600 px-3 text-[11px] font-semibold text-white hover:bg-emerald-700 disabled:opacity-50"
+                  >
+                    {creating ? <FaSpinner className="animate-spin" /> : "ຢືນຢັນສ້າງ"}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setFormFor(null)}
+                    className="h-8 rounded-lg px-3 text-[11px] text-slate-500 hover:text-slate-700"
+                  >
+                    ຍົກເລີກ
+                  </button>
+                </div>
+              </div>
+            ) : (
+              <button
+                type="button"
+                onClick={() => setFormFor(index)}
+                className="mt-2 flex items-center gap-1.5 rounded-lg border border-slate-300 px-3 py-1.5 text-[11px] font-semibold text-slate-600 hover:bg-slate-50 dark:border-slate-600 dark:text-slate-300 dark:hover:bg-slate-800"
+              >
+                <FaPlus size={9} /> ສ້າງຮ່າງຖ້ຽວ ({trip.bills.length} ບິນ)
+              </button>
+            )}
+
             <ol className="mt-2 space-y-1">
               {trip.bills.map((bill) => (
                 <li
