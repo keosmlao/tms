@@ -52,6 +52,7 @@ export const Actions = {
   dispatchTripDraft: tripDraft.dispatchTripDraft,
   // ພື້ນທີ່ບັນທຸກ ທຽບຄວາມຈຸລົດ — ຮ່າງຖ້ຽວ, ຖ້ຽວຈິງ ແລະ ລາຍງານຍ້ອນຫຼັງ
   getTripDraftVolume: tripVolume.getTripDraftVolume,
+  listTripDraftsWithVolume: tripVolume.listTripDraftsWithVolume,
   getTripVolume: tripVolume.getTripVolume,
   getTripVolumesBulk: tripVolume.getTripVolumesBulk,
   getPendingBillVolumes: tripVolume.getPendingBillVolumes,

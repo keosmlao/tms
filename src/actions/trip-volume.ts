@@ -1,7 +1,12 @@
 "use server";
 
 import { requireSession } from "./_helpers";
-import { getTripDraftLoad, getTripDraftBills } from "@/queries/trip-draft.js";
+import {
+  getTripDraftLoad,
+  getTripDraftLoadsBulk,
+  getTripDraftBills,
+  listTripDrafts,
+} from "@/queries/trip-draft.js";
 import {
   getTripLoad,
   getTripLoadsBulk,
@@ -105,6 +110,83 @@ export async function getTripVolume(docNo: string) {
     (billRows ?? []).map((b) => [String(b.bill_no), String(b.cust_name ?? "")])
   );
   return computeLoad(load.car, load.items ?? [], names);
+}
+
+/**
+ * ລາຍການຮ່າງຖ້ຽວ ພ້ອມພື້ນທີ່ບັນທຸກມາໃນຄຳຕອບດຽວ.
+ *
+ * ເປັນຫຍັງລວມ: ຖ້າແຍກເປັນ 2 action ໜ້າຈະ render ຮອບໜຶ່ງດ້ວຍ "…" ກ່ອນ
+ * ແລ້ວຄ່ອຍເຕັມ — ຄົນຈັດຖ້ຽວເຫັນເປັນຄວາມຊັກຊ້າ. ດຶງພ້ອມກັນຈຶ່ງບໍ່ມີ
+ * ສະຖານະກຳລັງໂຫຼດ.
+ */
+export async function listTripDraftsWithVolume(dateFrom?: string, dateTo?: string) {
+  const session = await requireSession();
+  const drafts = (await listTripDrafts(session, dateFrom, dateTo)) as Array<
+    Record<string, unknown>
+  >;
+  if (drafts.length === 0) return { drafts, volumes: {} as Record<number, TripVolumeSummary> };
+
+  const ids = drafts.map((d) => Number(d.draft_id));
+  const { cars, itemsByDraft } = (await getTripDraftLoadsBulk(ids)) as {
+    cars: Map<number, string>;
+    itemsByDraft: Map<number, TripItem[]>;
+  };
+
+  const allItems = [...itemsByDraft.values()].flat();
+  const itemCodes = Array.from(
+    new Set(allItems.map((i) => String(i.item_code ?? "").trim()).filter(Boolean))
+  );
+  const [masterDims, pipeDims, packDims, carRows] = await Promise.all([
+    getMasterItemDims(itemCodes) as Promise<MasterDimRow[]>,
+    listPipeDims() as Promise<PipeDimRow[]>,
+    listPackDims() as Promise<PackDimRow[]>,
+    query(
+      `SELECT code, payload_kg, cargo_length_cm AS length_cm,
+              ROUND((cargo_width_cm / 100) * (cargo_length_cm / 100) * (cargo_height_cm / 100)
+                    * COALESCE(stowage_pct, 80) / 100, 3) AS usable_m3,
+              CASE WHEN capacity_verified THEN 'measured' ELSE 'estimated' END AS capacity_source
+         FROM public.odg_tms_car
+        WHERE cargo_width_cm > 0 AND cargo_length_cm > 0 AND cargo_height_cm > 0`
+    ) as Promise<Array<Record<string, unknown>>>,
+  ]);
+
+  const capByCar = new Map(carRows.map((c) => [String(c.code), c as CarCapacity]));
+  const volumes = resolveItemVolumes(allItems, { masterDims, pipeDims, packDims });
+  const pipeMap = buildPipeDimMap(pipeDims);
+
+  const out: Record<number, TripVolumeSummary & { lengthFits: boolean }> = {};
+  for (const id of ids) {
+    const items = itemsByDraft.get(id) ?? [];
+    const car = cars.get(id) ?? "";
+    const capacity = capByCar.get(car) ?? null;
+    const trip = computeTripVolume(items, volumes, capacity);
+
+    const pipeHits = resolvePipeVolumes(items, pipeMap);
+    let longestM: number | null = null;
+    for (const item of items) {
+      const hit = pipeHits.get(String(item.item_code ?? ""));
+      if (hit && (longestM === null || hit.lengthM > longestM)) longestM = hit.lengthM;
+    }
+
+    out[id] = {
+      car,
+      m3: trip.m3,
+      m3Remaining: trip.m3Remaining,
+      remainingPct: trip.remainingPct,
+      deliveredPct: trip.deliveredPct,
+      usableM3: trip.usableM3,
+      utilizationPct: trip.utilizationPct,
+      freeM3:
+        trip.usableM3 !== null && trip.dataSufficient
+          ? Math.max(trip.usableM3 - trip.m3, 0)
+          : null,
+      coveragePct: trip.coveragePct,
+      linesUnknown: trip.linesUnknown,
+      dataSufficient: trip.dataSufficient,
+      lengthFits: checkLengthFits(longestM, capacity).fits,
+    };
+  }
+  return { drafts, volumes: out };
 }
 
 export interface TripVolumeSummary {

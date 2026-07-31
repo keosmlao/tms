@@ -216,9 +216,12 @@ describe("computeTripVolume", () => {
     expect(out.unknownItems[0].qty).toBe(7);
   });
 
-  it("handles an empty trip", () => {
+  it("treats an empty trip as fully known and 0% full", () => {
+    // ຮ່າງທີ່ຫາກໍ່ສ້າງ (ຍັງບໍ່ມີບິນ) ຕ້ອງບອກໄດ້ວ່າຫວ່າງໝົດຄັນ
+    // ບໍ່ແມ່ນ "ຂໍ້ມູນບໍ່ພໍ" — ບໍ່ດັ່ງນັ້ນວາງແຜນຖ້ຽວໃໝ່ບໍ່ໄດ້
     const out = computeTripVolume([], vols, cap);
-    expect(out).toMatchObject({ m3: 0, lines: 0, dataSufficient: false, utilizationPct: null });
+    expect(out).toMatchObject({ m3: 0, lines: 0, dataSufficient: true, utilizationPct: 0 });
+    expect(out.coveragePct).toBe(100);
   });
 
   it("reports null weight when no item has a weight", () => {

@@ -212,7 +212,9 @@ export default function TripDraftsPage() {
     setError("");
     try {
       const [d, pendingData, drafted] = await Promise.all([
-        showAll ? Actions.listTripDrafts() : Actions.listTripDrafts(dateFrom, dateTo),
+        showAll
+          ? Actions.listTripDraftsWithVolume()
+          : Actions.listTripDraftsWithVolume(dateFrom, dateTo),
         // Identical call to the ລໍຖ້າຈັດຖ້ຽວ page: whole fixed year, same
         // branch filter. Anything else and the two screens disagree.
         // "all" is this API's word for every branch — passing "" made it look
@@ -224,7 +226,13 @@ export default function TripDraftsPage() {
         ),
         Actions.listDraftedBillNos(),
       ]);
-      setDrafts((d ?? []) as Draft[]);
+      // ພື້ນທີ່ບັນທຸກມາພ້ອມລາຍການຮ່າງ — ບໍ່ມີ round-trip ທີ 2 ຈຶ່ງບໍ່ມີ "…"
+      const payload = (d ?? {}) as unknown as {
+        drafts?: Draft[];
+        volumes?: Record<number, TripVolumeInfo>;
+      };
+      setDrafts(payload.drafts ?? []);
+      setVolumeByDraft(payload.volumes ?? {});
       // Keep the FULL pending list so this header always matches the
       // ລໍຖ້າຈັດຖ້ຽວ page; bills already placed in a draft are marked, not
       // dropped, so the two totals can never disagree.
@@ -295,36 +303,7 @@ export default function TripDraftsPage() {
     }
   };
 
-  // ພື້ນທີ່ບັນທຸກຂອງແຕ່ລະຮ່າງ — ໂຫຼດຄືນທຸກຄັ້ງທີ່ບິນ ຫຼື ລົດຂອງຮ່າງທີ່ເປີດຢູ່
-  // ປ່ຽນ ເພື່ອບໍ່ໃຫ້ dispatcher ເຫັນຕົວເລກເກົ່າຫຼັງຍ້າຍບິນ
-  useEffect(() => {
-    let cancelled = false;
-    // ດຶງໃຫ້ "ທຸກຮ່າງທີ່ເຫັນ" ບໍ່ແມ່ນສະເພາະທີ່ຂະຫຍາຍ — ແຖບພື້ນທີ່ຢູ່ແຖວທີ່
-    // ຫຍໍ້ນຳ ຖ້າດຶງແຕ່ອັນທີ່ເປີດ ແຖວອື່ນຈະຄ້າງເປັນ "…" ຕະຫຼອດ
-    const open = drafts.map((d) => d.draft_id);
-    if (open.length === 0) return;
-    void (async () => {
-      const loaded = await Promise.all(
-        open.map(async (draftId) => {
-          try {
-            return [draftId, (await Actions.getTripDraftVolume(draftId)) as TripVolumeInfo] as const;
-          } catch (e) {
-            // ຢ່າກືນຄວາມຜິດພາດ — ບໍ່ດັ່ງນັ້ນແຖບພື້ນທີ່ຫາຍໄປງຽບໆ ແລະ
-            // ຄົນໃຊ້ບໍ່ຮູ້ວ່າມັນລົ້ມ ຫຼື ບໍ່ມີຂໍ້ມູນ
-            console.error("getTripDraftVolume", draftId, e);
-            return [draftId, { __error: String((e as Error)?.message ?? e) }] as const;
-          }
-        })
-      );
-      if (cancelled) return;
-      setVolumeByDraft(
-        (prev) => ({ ...prev, ...Object.fromEntries(loaded) }) as typeof prev
-      );
-    })();
-    return () => {
-      cancelled = true;
-    };
-  }, [drafts, billsByDraft]);
+
 
 
 

@@ -268,8 +268,11 @@ export function computeTripVolume(
 
   const lines = rows.length;
   const linesUnknown = lines - linesKnown - linesEstimated;
-  const coveragePct = lines > 0 ? ((linesKnown + linesEstimated) / lines) * 100 : 0;
-  const dataSufficient = lines > 0 && linesUnknown / lines <= UNKNOWN_LINE_LIMIT;
+  // ຮ່າງທີ່ຍັງບໍ່ໄດ້ໃສ່ບິນ = ຫວ່າງ 100% ບໍ່ແມ່ນ "ຂໍ້ມູນບໍ່ພໍ" — ບໍ່ມີລາຍການ
+  // ຈຶ່ງບໍ່ມີຫຍັງທີ່ບໍ່ຮູ້ຂະໜາດ. ນີ້ຄືກໍລະນີທີ່ຄົນຈັດຖ້ຽວຢາກເຫັນທີ່ສຸດ:
+  // ລົດຄັນນີ້ຍັງໃສ່ໄດ້ອີກຈັກ m³.
+  const coveragePct = lines > 0 ? ((linesKnown + linesEstimated) / lines) * 100 : 100;
+  const dataSufficient = lines === 0 || linesUnknown / lines <= UNKNOWN_LINE_LIMIT;
 
   const capacityM3 = toNum(capacity?.capacity_m3 ?? null);
   const usableM3 = toNum(capacity?.usable_m3 ?? null);

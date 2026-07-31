@@ -634,12 +634,86 @@ async function getTripDraftLoad(draftId) {
   return { car: draft?.car ?? "", items };
 }
 
+/**
+ * ສິນຄ້າ + ລົດ ຂອງຫຼາຍຮ່າງພ້ອມກັນ — ໃຫ້ໜ້າຮ່າງຖ້ຽວໄດ້ພື້ນທີ່ບັນທຸກມາພ້ອມ
+ * ລາຍການຮ່າງ ໂດຍບໍ່ຕ້ອງຍິງ action ຮອບສອງ (ບໍ່ມີສະຖານະ "ກຳລັງໂຫຼດ").
+ */
+async function getTripDraftLoadsBulk(draftIds) {
+  await ensureTripDraftSchema();
+  const ids = Array.from(
+    new Set((draftIds ?? []).map((n) => Number(n)).filter(Number.isFinite))
+  );
+  if (ids.length === 0) return { cars: new Map(), itemsByDraft: new Map() };
+
+  const [heads, billRows] = await Promise.all([
+    query(
+      `SELECT draft_id, COALESCE(car, '') AS car
+         FROM public.odg_tms_trip_draft WHERE draft_id = ANY($1::bigint[])`,
+      [ids]
+    ),
+    query(
+      `SELECT draft_id, bill_no, COALESCE(items, '[]'::jsonb) AS items
+         FROM public.odg_tms_trip_draft_bill
+        WHERE draft_id = ANY($1::bigint[])
+        ORDER BY added_at, bill_no`,
+      [ids]
+    ),
+  ]);
+
+  const itemsByDraft = new Map(ids.map((id) => [id, []]));
+  const wholeBills = [];
+  const wholeOwner = new Map(); // bill_no → draft_id
+
+  for (const row of billRows) {
+    const draftId = Number(row.draft_id);
+    const picked = Array.isArray(row.items) ? row.items : [];
+    if (picked.length === 0) {
+      wholeBills.push(row.bill_no);
+      wholeOwner.set(row.bill_no, draftId);
+      continue;
+    }
+    for (const line of picked) {
+      itemsByDraft.get(draftId)?.push({
+        bill_no: row.bill_no,
+        item_code: String(line?.item_code ?? ""),
+        item_name: line?.item_name ?? null,
+        unit_code: line?.unit_code ?? null,
+        qty: Number(line?.qty ?? 0),
+      });
+    }
+  }
+
+  // "ທັງບິນ" ຂອງທຸກຮ່າງ ດຶງເທື່ອດຽວ ບໍ່ແມ່ນຕໍ່ຮ່າງ
+  if (wholeBills.length > 0) {
+    const remaining = await getRemainingBillProductsMap(wholeBills);
+    for (const [billNo, lines] of remaining) {
+      const draftId = wholeOwner.get(billNo);
+      if (draftId === undefined) continue;
+      for (const line of lines ?? []) {
+        itemsByDraft.get(draftId)?.push({
+          bill_no: billNo,
+          item_code: String(line?.item_code ?? ""),
+          item_name: line?.item_name ?? null,
+          unit_code: line?.unit_code ?? null,
+          qty: Number(line?.qty ?? 0),
+        });
+      }
+    }
+  }
+
+  return {
+    cars: new Map(heads.map((h) => [Number(h.draft_id), String(h.car ?? "")])),
+    itemsByDraft,
+  };
+}
+
 module.exports = {
   ensureTripDraftSchema,
   listDraftedBillNos,
   listTripDrafts,
   getTripDraftBills,
   getTripDraftLoad,
+  getTripDraftLoadsBulk,
   getTripDraftCandidates,
   createTripDraft,
   updateTripDraft,
