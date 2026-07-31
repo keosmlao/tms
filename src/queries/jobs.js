@@ -17,6 +17,7 @@ const {
   getRemainingBillProductsMap,
   getBillsWithErpDetail,
   getRemainingSummaryMap,
+  customerAreaSql,
 } = require("./helpers");
 const { pushToDriver } = require("./push");
 const { notifyJobCreated, notifyJobCreatedToSales, notifyBillForwardedToBranch } = require("./notifications");
@@ -1321,10 +1322,22 @@ async function getJobPrintData(docNo) {
        d.cust_code,
        COALESCE(NULLIF(TRIM(c.name_1), ''), NULLIF(TRIM(cb.cust_name), ''), d.cust_code, '-') as cust_name,
        COALESCE(NULLIF(TRIM(d.telephone), ''), NULLIF(TRIM(c.telephone), ''), NULLIF(TRIM(cb.telephone), ''), '') as telephone,
+       -- ປາຍທາງ: ໃບພິມແບບ "ສະເພາະບິນ" ບໍ່ມີລາຍການສິນຄ້າໃຫ້ອ່ານ ຈຶ່ງຕ້ອງມີ
+       -- ບ່ອນສົ່ງໃຫ້ຄົນຂັບແທນ. ໃຊ້ ບ້ານ · ເມືອງ · ແຂວງ ຂອງລູກຄ້າ ບໍ່ແມ່ນ
+       -- ic_trans_shipment.destination — ວັດແລ້ວຄໍລຳນັ້ນຫວ່າງທັງໝົດ
+       -- (5,135/5,135 ບິນເດືອນຫຼ້າສຸດ)
+       ${customerAreaSql("d.cust_code")} as destination,
+       COALESCE(cnt.n, 0)::int as item_count,
+       COALESCE(cnt.qty, 0)::numeric as total_qty,
        d.roworder
      FROM public.odg_tms_detail d
      LEFT JOIN ar_customer c ON c.code = d.cust_code
      LEFT JOIN public.odg_tms_custom_bill cb ON cb.bill_no = d.bill_no
+     LEFT JOIN LATERAL (
+       SELECT count(*)::int as n, SUM(COALESCE(i.selected_qty, 0)) as qty
+         FROM public.odg_tms_detail_item i
+        WHERE i.doc_no = d.doc_no AND i.bill_no = d.bill_no
+     ) cnt ON true
      WHERE d.doc_no = $1 AND ${getFixedYearSqlFilter("d.doc_date")}
      ORDER BY d.roworder`,
     [docNo]
@@ -1359,6 +1372,9 @@ async function getJobPrintData(docNo) {
       cust_code: b.cust_code,
       cust_name: b.cust_name,
       telephone: b.telephone,
+      destination: b.destination ?? "",
+      item_count: Number(b.item_count ?? 0),
+      total_qty: Number(b.total_qty ?? 0),
       items: itemsByBill.get(b.bill_no) ?? [],
     })),
   };

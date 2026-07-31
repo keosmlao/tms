@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { useParams } from "next/navigation";
+import { useParams, useSearchParams, useRouter } from "next/navigation";
 import { FaPrint, FaArrowLeft, FaSpinner, FaExclamationTriangle } from "react-icons/fa";
 import Link from "next/link";
 import { Actions } from "@/lib/api";
@@ -20,6 +20,9 @@ interface PrintBill {
   cust_code: string;
   cust_name: string;
   telephone: string;
+  destination: string;
+  item_count: number;
+  total_qty: number;
   items: PrintItem[];
 }
 
@@ -52,6 +55,11 @@ const fmtQty = (v: number) => {
 
 export default function JobPrintPage() {
   const params = useParams<{ docNo: string }>();
+  const searchParams = useSearchParams();
+  const router = useRouter();
+  // ໃບພິມ 2 ແບບ: "ລາຍລະອຽດ" (ມີລາຍການສິນຄ້າ) ແລະ "ສະເພາະບິນ" (ລາຍການບິນ
+  // ຢ່າງດຽວ ພໍດີໜ້າດຽວ ໃຫ້ຄົນຂັບໃຊ້ເຊັນຮັບຕາມບິນ)
+  const billsOnly = searchParams.get("mode") === "bills";
   const docNo = decodeURIComponent(params.docNo ?? "");
   const [data, setData] = useState<PrintData | null>(null);
   const [loading, setLoading] = useState(true);
@@ -134,13 +142,36 @@ export default function JobPrintPage() {
         >
           <FaArrowLeft size={12} /> ກັບ
         </Link>
-        <button
-          type="button"
-          onClick={() => window.print()}
-          className="inline-flex items-center gap-2 px-4 py-2 rounded-md bg-slate-800 text-white text-sm font-semibold hover:bg-slate-900"
-        >
-          <FaPrint size={13} /> ພິມ
-        </button>
+        <div className="flex items-center gap-2">
+          {/* ເລືອກແບບໃບພິມ — ຢູ່ໃນ URL ຈຶ່ງແຊຣ໌ລິ້ງ ຫຼື ບຸກມາກແບບທີ່ມັກໄດ້ */}
+          <div className="flex rounded-md border border-slate-300 overflow-hidden text-xs font-semibold">
+            <button
+              type="button"
+              onClick={() => router.replace(`?mode=full`)}
+              className={`px-3 py-2 ${
+                billsOnly ? "bg-white text-slate-600" : "bg-slate-800 text-white"
+              }`}
+            >
+              ລາຍລະອຽດສິນຄ້າ
+            </button>
+            <button
+              type="button"
+              onClick={() => router.replace(`?mode=bills`)}
+              className={`px-3 py-2 border-l border-slate-300 ${
+                billsOnly ? "bg-slate-800 text-white" : "bg-white text-slate-600"
+              }`}
+            >
+              ສະເພາະບິນ
+            </button>
+          </div>
+          <button
+            type="button"
+            onClick={() => window.print()}
+            className="inline-flex items-center gap-2 px-4 py-2 rounded-md bg-slate-800 text-white text-sm font-semibold hover:bg-slate-900"
+          >
+            <FaPrint size={13} /> ພິມ
+          </button>
+        </div>
       </div>
 
       {/* Printable content */}
@@ -148,7 +179,9 @@ export default function JobPrintPage() {
         {/* Title */}
         <div className="text-center border-b-2 border-slate-800 pb-2 mb-4">
           <h1 className="text-xl font-bold tracking-wide">ໃບລາຍການຈັດຖ້ຽວສິນຄ້າ</h1>
-          <p className="text-xs text-slate-500 mt-0.5">DELIVERY DISPATCH SHEET</p>
+          <p className="text-xs text-slate-500 mt-0.5">
+            DELIVERY DISPATCH SHEET{billsOnly ? " · ສະເພາະບິນ" : ""}
+          </p>
         </div>
 
         {/* Header */}
@@ -189,6 +222,46 @@ export default function JobPrintPage() {
           <p className="text-center text-slate-500 py-6 text-sm">
             ບໍ່ມີບິນໃນຖ້ຽວນີ້
           </p>
+        ) : billsOnly ? (
+          <table className="w-full text-[11px] border border-slate-300">
+            <thead>
+              <tr className="bg-slate-100 border-b border-slate-300">
+                <th className="px-2 py-1 text-left w-7">#</th>
+                <th className="px-2 py-1 text-left">ເລກບິນ</th>
+                <th className="px-2 py-1 text-left w-20">ວັນທີ</th>
+                <th className="px-2 py-1 text-left">ລູກຄ້າ</th>
+                <th className="px-2 py-1 text-left">ປາຍທາງ</th>
+                <th className="px-2 py-1 text-right w-14">ລາຍການ</th>
+                <th className="px-2 py-1 text-right w-16">ຈຳນວນ</th>
+                <th className="px-2 py-1 text-left w-24">ເຊັນຮັບ</th>
+              </tr>
+            </thead>
+            <tbody>
+              {bills.map((bill, idx) => (
+                <tr
+                  key={bill.bill_no}
+                  className="border-b border-slate-200 last:border-0 break-inside-avoid"
+                >
+                  <td className="px-2 py-1 text-slate-500">{idx + 1}</td>
+                  <td className="px-2 py-1 font-mono font-semibold">{bill.bill_no}</td>
+                  <td className="px-2 py-1 text-slate-600">{bill.bill_date}</td>
+                  <td className="px-2 py-1">
+                    <div className="font-semibold">{bill.cust_name}</div>
+                    {bill.telephone && (
+                      <div className="text-[10px] text-slate-500">☎ {bill.telephone}</div>
+                    )}
+                  </td>
+                  <td className="px-2 py-1 text-slate-600">{bill.destination || "-"}</td>
+                  <td className="px-2 py-1 text-right">{bill.item_count}</td>
+                  <td className="px-2 py-1 text-right font-semibold">
+                    {fmtQty(bill.total_qty)}
+                  </td>
+                  {/* ຊ່ອງຫວ່າງໃຫ້ລູກຄ້າເຊັນຕອນຮັບເຄື່ອງ */}
+                  <td className="px-2 py-3 border-l border-slate-200" />
+                </tr>
+              ))}
+            </tbody>
+          </table>
         ) : (
           <div className="space-y-3">
             {bills.map((bill, idx) => (
