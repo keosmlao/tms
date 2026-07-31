@@ -27,7 +27,12 @@ export default function RootLayout({
 }>) {
   return (
     <html lang="lo" className={`${notoLao.variable} h-full antialiased`}>
-      <body className="min-h-full flex flex-col">
+      {/* suppressHydrationWarning: ສ່ວນຂະຫຍາຍຂອງ browser (ຕົວແປພາສາ,
+          ຕົວຈຳລະຫັດຜ່ານ ແລະ ອື່ນໆ) ຕື່ມ attribute ໃສ່ <body> ກ່ອນ React
+          hydrate ເຊັ່ນ __processed_<uuid>__ ແລ້ວເກີດ hydration mismatch
+          ທີ່ບໍ່ແມ່ນຄວາມຜິດຂອງລະບົບ ແລະ ແກ້ຈາກຝັ່ງເຮົາບໍ່ໄດ້. ປິດສະເພາະ
+          <body> ຊັ້ນນີ້ຊັ້ນດຽວ — ຂ້າງໃນຍັງກວດ hydration ຕາມປົກກະຕິ. */}
+      <body className="min-h-full flex flex-col" suppressHydrationWarning>
         <SessionProvider>
           {children}
           <Toaster position="top-right" />
