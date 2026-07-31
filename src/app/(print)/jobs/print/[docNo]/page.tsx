@@ -46,6 +46,23 @@ interface PrintData {
   bills: PrintBill[];
 }
 
+interface RouteStop {
+  bill_no: string;
+  cust_name: string;
+  point_source: string;
+  legKm: number;
+  cumulativeKm: number;
+  order: number;
+}
+
+interface RoutePlan {
+  hasOrigin: boolean;
+  ordered: RouteStop[];
+  unlocated: Array<{ bill_no: string; cust_name: string; item_count: number }>;
+  suggestedKm: number;
+  currentKm: number;
+}
+
 const fmtQty = (v: number) => {
   if (!Number.isFinite(v)) return "0";
   return Math.abs(v % 1) < 0.000001
@@ -60,6 +77,9 @@ export default function JobPrintPage() {
   // ໃບພິມ 2 ແບບ: "ລາຍລະອຽດ" (ມີລາຍການສິນຄ້າ) ແລະ "ສະເພາະບິນ" (ລາຍການບິນ
   // ຢ່າງດຽວ ພໍດີໜ້າດຽວ ໃຫ້ຄົນຂັບໃຊ້ເຊັນຮັບຕາມບິນ)
   const billsOnly = searchParams.get("mode") === "bills";
+  // ຮຽງຕາມເສັ້ນທາງແນະນຳ (ຈາກສາງອອກໄປ) ແທນລຳດັບທີ່ຄົນຈັດໄວ້
+  const byRoute = searchParams.get("sort") === "route";
+  const [route, setRoute] = useState<RoutePlan | null>(null);
   const docNo = decodeURIComponent(params.docNo ?? "");
   const [data, setData] = useState<PrintData | null>(null);
   const [loading, setLoading] = useState(true);
@@ -84,6 +104,14 @@ export default function JobPrintPage() {
       })
       .finally(() => {
         if (active) setLoading(false);
+      });
+    // ເສັ້ນທາງແນະນຳດຶງແຍກ ແລະ ລົ້ມໄດ້ໂດຍບໍ່ກະທົບໃບພິມ — ໃບພິມສຳຄັນກວ່າ
+    Actions.getTripRoutePlan(docNo)
+      .then((res) => {
+        if (active) setRoute(res as RoutePlan);
+      })
+      .catch(() => {
+        if (active) setRoute(null);
       });
     return () => {
       active = false;
@@ -113,6 +141,25 @@ export default function JobPrintPage() {
   }
 
   const { header, bills } = data;
+
+  // ເສັ້ນທາງແນະນຳ: ໃຊ້ໄດ້ຕໍ່ເມື່ອຮູ້ຈຸດສາງ ແລະ ຈັດລຳດັບໄດ້ຢ່າງນ້ອຍ 2 ຈຸດ
+  const routeReady = Boolean(route?.hasOrigin && (route?.ordered.length ?? 0) > 1);
+  const orderByBill = new Map(
+    (route?.ordered ?? []).map((stop) => [stop.bill_no, stop.order])
+  );
+  const legKmByBill = new Map(
+    (route?.ordered ?? []).map((stop) => [stop.bill_no, stop.legKm.toFixed(1)])
+  );
+  // ບິນທີ່ບໍ່ມີພິກັດຈະບໍ່ຢູ່ໃນເສັ້ນທາງ — ວາງໄວ້ທ້າຍສຸດ ບໍ່ແມ່ນຖິ້ມ
+  const printBills =
+    byRoute && routeReady
+      ? [...bills].sort(
+          (a, b) =>
+            (orderByBill.get(a.bill_no) ?? Number.MAX_SAFE_INTEGER) -
+            (orderByBill.get(b.bill_no) ?? Number.MAX_SAFE_INTEGER)
+        )
+      : bills;
+
   const totalBills = bills.length;
   const totalItems = bills.reduce((acc, b) => acc + b.items.length, 0);
   const totalQty = bills.reduce(
@@ -164,6 +211,20 @@ export default function JobPrintPage() {
               ສະເພາະບິນ
             </button>
           </div>
+          {billsOnly && routeReady && (
+            <button
+              type="button"
+              onClick={() => router.replace(byRoute ? "?mode=bills" : "?mode=bills&sort=route")}
+              className={`px-3 py-2 rounded-md border text-xs font-semibold ${
+                byRoute
+                  ? "bg-emerald-600 text-white border-emerald-600"
+                  : "bg-white text-slate-600 border-slate-300"
+              }`}
+              title={`ເສັ້ນທາງແນະນຳ ${route?.suggestedKm.toFixed(1)} ກມ. ທຽບກັບລຳດັບເດີມ ${route?.currentKm.toFixed(1)} ກມ.`}
+            >
+              ຮຽງຕາມເສັ້ນທາງ
+            </button>
+          )}
           <button
             type="button"
             onClick={() => window.print()}
@@ -233,16 +294,24 @@ export default function JobPrintPage() {
                 <th className="px-2 py-1 text-left">ປາຍທາງ</th>
                 <th className="px-2 py-1 text-right w-14">ລາຍການ</th>
                 <th className="px-2 py-1 text-right w-16">ຈຳນວນ</th>
+                {routeReady && <th className="px-2 py-1 text-right w-14">ກມ.</th>}
                 <th className="px-2 py-1 text-left w-24">ເຊັນຮັບ</th>
               </tr>
             </thead>
             <tbody>
-              {bills.map((bill, idx) => (
+              {printBills.map((bill, idx) => (
                 <tr
                   key={bill.bill_no}
                   className="border-b border-slate-200 last:border-0 break-inside-avoid"
                 >
-                  <td className="px-2 py-1 text-slate-500">{idx + 1}</td>
+                  <td className="px-2 py-1 text-slate-500">
+                    {idx + 1}
+                    {byRoute && routeReady && !orderByBill.has(bill.bill_no) && (
+                      <span className="ml-0.5 text-amber-600" title="ບໍ່ມີຈຸດສົ່ງ">
+                        !
+                      </span>
+                    )}
+                  </td>
                   <td className="px-2 py-1 font-mono font-semibold">{bill.bill_no}</td>
                   <td className="px-2 py-1 text-slate-600">{bill.bill_date}</td>
                   <td className="px-2 py-1">
@@ -256,6 +325,11 @@ export default function JobPrintPage() {
                   <td className="px-2 py-1 text-right font-semibold">
                     {fmtQty(bill.total_qty)}
                   </td>
+                  {routeReady && (
+                    <td className="px-2 py-1 text-right tabular-nums text-slate-600">
+                      {legKmByBill.get(bill.bill_no) ?? "—"}
+                    </td>
+                  )}
                   {/* ຊ່ອງຫວ່າງໃຫ້ລູກຄ້າເຊັນຕອນຮັບເຄື່ອງ */}
                   <td className="px-2 py-3 border-l border-slate-200" />
                 </tr>
@@ -321,6 +395,27 @@ export default function JobPrintPage() {
                 </table>
               </div>
             ))}
+          </div>
+        )}
+
+        {/* ສະຫຼຸບເສັ້ນທາງ — ພິມອອກນຳ ເພື່ອໃຫ້ຄົນຂັບເຫັນໄລຍະລວມ */}
+        {billsOnly && routeReady && (
+          <div className="mt-3 text-[11px] text-slate-600">
+            ເສັ້ນທາງແນະນຳ (ຈາກສາງ):{" "}
+            <span className="font-semibold tabular-nums">
+              {route?.suggestedKm.toFixed(1)} ກມ.
+            </span>{" "}
+            · ລຳດັບເດີມ{" "}
+            <span className="tabular-nums">{route?.currentKm.toFixed(1)} ກມ.</span>
+            {(route?.unlocated.length ?? 0) > 0 && (
+              <span className="text-amber-700">
+                {" "}
+                · {route?.unlocated.length} ບິນບໍ່ມີຈຸດສົ່ງ (ຢູ່ທ້າຍລາຍການ)
+              </span>
+            )}
+            <span className="block text-[10px] text-slate-400">
+              ໄລຍະເສັ້ນຊື່ ບໍ່ແມ່ນທາງຈິງ — ເປັນຂໍ້ແນະນຳ ບໍ່ໄດ້ຄິດເວລານັດ ຫຼື ທາງປິດ
+            </span>
           </div>
         )}
 

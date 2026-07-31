@@ -85,6 +85,7 @@ export const Actions = {
   getJobAddPageData: jobs.getJobAddPageData,
   getJobBillsWithProducts: jobs.getJobBillsWithProducts,
   getJobPrintData: jobs.getJobPrintData,
+  getTripRoutePlan: jobs.getTripRoutePlan,
   addBillToDraft: jobs.addBillToDraft,
   removeBillFromDraft: jobs.removeBillFromDraft,
   searchBills: jobs.searchBills,

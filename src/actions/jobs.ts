@@ -162,3 +162,106 @@ export async function reclassifyDeliveredBillToBranch(
   const s = await requireDispatchAccess();
   return svcReclassifyDeliveredBillToBranch(s, docNo, billNo, forwardTransportCode);
 }
+
+// ── ເສັ້ນທາງແນະນຳຂອງຖ້ຽວ ────────────────────────────────────────────────
+
+export interface TripRouteStop {
+  bill_no: string;
+  cust_code: string;
+  cust_name: string;
+  lat: string;
+  lng: string;
+  /** planned = ຄົນປັກໝຸດເອງ · last = ຈຸດສົ່ງຄັ້ງກ່ອນ · customer = ທະບຽນລູກຄ້າ */
+  point_source: string;
+  roworder: number;
+  item_count: number;
+  legKm: number;
+  cumulativeKm: number;
+  order: number;
+}
+
+export interface TripRoutePlan {
+  /** ຮູ້ຈຸດສາງບໍ — ບໍ່ຮູ້ກໍ່ຈັດລຳດັບບໍ່ໄດ້ */
+  hasOrigin: boolean;
+  originSamples: number;
+  ordered: TripRouteStop[];
+  /** ບິນທີ່ບໍ່ມີພິກັດເລີຍ — ຕ້ອງບອກອອກມາ ບໍ່ແມ່ນເຊື່ອງ */
+  unlocated: Array<{ bill_no: string; cust_name: string; item_count: number }>;
+  suggestedKm: number;
+  /** ໄລຍະຕາມລຳດັບທີ່ຄົນຈັດໄວ້ — ໃຫ້ທຽບເຫັນວ່າແນະນຳນີ້ດີກວ່າຫຼືບໍ່ */
+  currentKm: number;
+}
+
+/**
+ * ຈັດລຳດັບຈຸດສົ່ງຂອງຖ້ຽວ ຈາກສາງອອກໄປ.
+ *
+ * ເປັນ "ຂໍ້ແນະນຳ" ເທົ່ານັ້ນ: ໃຊ້ໄລຍະເສັ້ນຊື່ ບໍ່ແມ່ນທາງຈິງ ແລະ ບໍ່ຮູ້ເລື່ອງ
+ * ເວລານັດ, ທາງປິດ ຫຼື ລຳດັບທີ່ລູກຄ້າຕົກລົງກັນໄວ້.
+ */
+export async function getTripRoutePlan(docNo: string): Promise<TripRoutePlan> {
+  await requireSession();
+  const { getTripStops } = await import("@/queries/trip-route.js");
+  const { getBranchOrigins } = await import("@/queries/branch-origin.js");
+  const { toPoint, orderStops, haversineKm } = await import("@/lib/geo.js");
+
+  const trip = (await getTripStops(docNo)) as {
+    origin_transport_code: string;
+    stops: Array<Omit<TripRouteStop, "legKm" | "cumulativeKm" | "order">>;
+  };
+  const origins = (await getBranchOrigins()) as Map<
+    string,
+    { lat: number; lng: number; samples: number }
+  >;
+  const origin = origins.get(trip.origin_transport_code) ?? null;
+
+  const located = trip.stops
+    .map((stop) => ({ stop, point: toPoint(stop.lat, stop.lng) }))
+    .filter((row): row is { stop: (typeof trip.stops)[number]; point: { lat: number; lng: number } } =>
+      row.point !== null
+    );
+  const unlocated = trip.stops
+    .filter((stop) => !toPoint(stop.lat, stop.lng))
+    .map((stop) => ({
+      bill_no: stop.bill_no,
+      cust_name: stop.cust_name,
+      item_count: stop.item_count,
+    }));
+
+  if (!origin || located.length === 0) {
+    return {
+      hasOrigin: Boolean(origin),
+      originSamples: origin?.samples ?? 0,
+      ordered: [],
+      unlocated,
+      suggestedKm: 0,
+      currentKm: 0,
+    };
+  }
+
+  const ordered = orderStops(
+    origin,
+    located.map((row) => ({ point: row.point, data: row.stop }))
+  );
+
+  // ໄລຍະຕາມລຳດັບປັດຈຸບັນ (roworder) ໄວ້ທຽບ
+  let currentKm = 0;
+  let prev: { lat: number; lng: number } = origin;
+  for (const row of located) {
+    currentKm += haversineKm(prev, row.point);
+    prev = row.point;
+  }
+
+  return {
+    hasOrigin: true,
+    originSamples: origin.samples,
+    ordered: ordered.map((row, index) => ({
+      ...row.data,
+      legKm: row.legKm,
+      cumulativeKm: row.cumulativeKm,
+      order: index + 1,
+    })),
+    unlocated,
+    suggestedKm: ordered[ordered.length - 1]?.cumulativeKm ?? 0,
+    currentKm: Math.round(currentKm * 100) / 100,
+  };
+}
