@@ -1,4 +1,7 @@
 const { pool, query, queryOne } = require("../lib/db");
+// ນັດວັນສົ່ງ / ປັກໝຸດ / ປ່ຽນສະຖານະ ເຮັດໃຫ້ "ບິນລໍຈັດຖ້ຽວ" ປ່ຽນທັນທີ ຈຶ່ງຕ້ອງ
+// ລ້າງລາຍການລວມທີ່ເກັບໄວ້ ບໍ່ດັ່ງນັ້ນຄົນນັດແລ້ວຈະບໍ່ເຫັນບິນຈົນກວ່າ cache ໝົດອາຍຸ
+const { invalidatePendingList } = require("./helpers");
 
 const pendingBillCache = globalThis;
 
@@ -323,6 +326,7 @@ async function upsertPendingBillSchedule({
   } catch (err) {
     console.error("pending_bill history insert failed:", err);
   }
+  invalidatePendingList();
   return { success: true };
 }
 
@@ -402,6 +406,7 @@ async function bulkUpdatePendingBills(input) {
       [codes]
     );
     await client.query("COMMIT");
+    invalidatePendingList();
     return { success: true, updated: result.rowCount ?? codes.length };
   } catch (err) {
     await client.query("ROLLBACK");
@@ -493,6 +498,7 @@ async function upsertPendingBillLocation({ billNo, lat, lng, userCode }) {
   } catch (err) {
     console.error("pending_bill location history insert failed:", err);
   }
+  invalidatePendingList();
   return { success: true };
 }
 

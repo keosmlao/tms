@@ -400,7 +400,35 @@ async function getRemainingBillProductsMap(billNos) {
 const REMAINING_CACHE_TTL_MS = 30_000;
 const remainingCache = new Map(); // bill_no -> { at, value }
 
+// ຜົນລວມຂອງໜ້າ "ບິນລໍຈັດຖ້ຽວ" — ໜັກ (ວັດໄດ້ ~3.7 ວິ ຕອນເປີດຄັ້ງທຳອິດ) ແລະ
+// ຖືກເປີດຊ້ຳໆຈາກ 2 ໜ້າ. ເກັບໄວ້ສັ້ນໆ ແລ້ວລ້າງພ້ອມ remainingCache — ຄຳຕອບ
+// ປ່ຽນເມື່ອບິນຖືກຈັດຖ້ຽວ/ສົ່ງ/ຍົກເລີກ ເຊິ່ງເປັນຈຸດດຽວກັນທີ່ເອີ້ນ
+// invalidateRemainingSummary() ຢູ່ແລ້ວ ຈຶ່ງບໍ່ມີທາງລືມລ້າງອັນໃດອັນໜຶ່ງ.
+const PENDING_LIST_CACHE_TTL_MS = 45_000;
+const pendingListCache = new Map(); // key -> { at, value }
+
+/** ລ້າງລາຍການລວມທັນທີ — ໃຊ້ຕອນນັດວັນສົ່ງ/ປັກໝຸດ ທີ່ບໍ່ໄດ້ແຕະຈຳນວນຄົງເຫຼືອ */
+function invalidatePendingList() {
+  pendingListCache.clear();
+}
+
+function readPendingListCache(key) {
+  const hit = pendingListCache.get(key);
+  if (!hit) return null;
+  if (Date.now() - hit.at > PENDING_LIST_CACHE_TTL_MS) {
+    pendingListCache.delete(key);
+    return null;
+  }
+  return hit.value;
+}
+
+function writePendingListCache(key, value) {
+  pendingListCache.set(key, { at: Date.now(), value });
+}
+
 function invalidateRemainingSummary(billNos) {
+  // ບິນໃດປ່ຽນ ລາຍການລວມກໍ່ປ່ຽນ — ລ້າງທັງກ້ອນ ບໍ່ພະຍາຍາມລ້າງເປັນລາຍການ
+  pendingListCache.clear();
   if (!billNos) {
     remainingCache.clear();
     return;
@@ -784,6 +812,9 @@ function customerAreaFields() {
 
 module.exports = {
   invalidateRemainingSummary,
+  invalidatePendingList,
+  readPendingListCache,
+  writePendingListCache,
   customerAreaJoins,
   customerAreaFields,
   customerAreaSql,

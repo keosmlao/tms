@@ -22,6 +22,8 @@ const {
   getRemainingSummaryMap,
   getBillItemsByWarehouse,
   getBillRemainingItemsByWarehouse,
+  readPendingListCache,
+  writePendingListCache,
 } = require("./helpers");
 
 // Only surface bills that the department head has scheduled — i.e. both
@@ -1120,6 +1122,17 @@ async function getBillsPending(session, fromDate, toDate, transportCode) {
   await ensureTmsDetailItemTable();
   await ensurePendingBillSchema();
   const scope = getBranchScope(session);
+  // ໜ້ານີ້ຖືກເປີດຊ້ຳໆ (ໜ້າລໍຖ້າຈັດຖ້ຽວ + ໜ້າຮ່າງຖ້ຽວ) ດ້ວຍພາລາມິເຕີດຽວກັນ.
+  // ກະແຈຕ້ອງມີສາຂາທີ່ຜູ້ໃຊ້ເຫັນໄດ້ນຳ ບໍ່ດັ່ງນັ້ນຄົນສາຂາໜຶ່ງຈະໄດ້ຜົນຂອງອີກ
+  // ສາຂາໜຶ່ງ.
+  const cacheKey = JSON.stringify([
+    scope.scoped ? scope.branchListSql : "*",
+    fromDate,
+    toDate,
+    transportCode ?? "",
+  ]);
+  const cached = readPendingListCache(cacheKey);
+  if (cached) return cached;
   // A branch-scoped user sees only their assigned branch SET; an unscoped user
   // honours the UI's transportCode filter ("all" → the three delivery branches,
   // else a single chosen branch). Match on the effective transport (pending
@@ -1242,7 +1255,9 @@ async function getBillsPending(session, fromDate, toDate, transportCode) {
         ? query(`SELECT code, name_1 FROM transport_type WHERE code IN (${scope.branchListSql}) ORDER BY code ASC`)
         : query(`SELECT code, name_1 FROM transport_type WHERE code IN (${deliveryBranchListSql()}) ORDER BY code ASC`),
     ]);
-    return { trans: [], listtrans: emptyList };
+    const emptyResult = { trans: [], listtrans: emptyList };
+    writePendingListCache(cacheKey, emptyResult);
+    return emptyResult;
   }
 
   const [shipmentRaw, manualRaw, listtrans] = await Promise.all([
@@ -1264,7 +1279,11 @@ async function getBillsPending(session, fromDate, toDate, transportCode) {
 
   const shipmentDocNos = new Set(shipmentRaw.map((bill) => bill.doc_no));
   const transRaw = [...shipmentRaw, ...manualRaw.filter((bill) => !shipmentDocNos.has(bill.doc_no))];
-  if (transRaw.length === 0) return { trans: [], listtrans };
+  if (transRaw.length === 0) {
+    const emptyResult = { trans: [], listtrans };
+    writePendingListCache(cacheKey, emptyResult);
+    return emptyResult;
+  }
 
   const billNos = transRaw.map((bill) => bill.doc_no);
   // Service bills (tb_product) are "re-deliverable for repeat servicing", so the
@@ -1542,7 +1561,9 @@ async function getBillsPending(session, fromDate, toDate, transportCode) {
     attachDeliveryPoint(bill, lastPoints.get(String(bill.cust_code ?? "").trim()))
   );
 
-  return { trans: transWithPoint, listtrans };
+  const result = { trans: transWithPoint, listtrans };
+  writePendingListCache(cacheKey, result);
+  return result;
 }
 
 async function updateBillTransport(docNo, transportCode) {
