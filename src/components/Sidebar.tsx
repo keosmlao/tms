@@ -7,6 +7,7 @@ import { useTheme } from "@/hooks/use-theme";
 import { useSession } from "@/providers/session-provider";
 import { isSalesLogin } from "@/lib/sales-role";
 import {
+  FaLightbulb,
   FaTachometerAlt,
   FaClipboardCheck,
   FaShippingFast,
@@ -92,6 +93,7 @@ const navSections: NavSection[] = [
       { label: "ລໍຖ້າຈັດຖ້ຽວ", href: "/bills-pending", icon: <FaBox size={13} /> },
       { label: "ບິນລໍຕາມເສັ້ນທາງ", href: "/bills-waiting-routes", icon: <FaRoute size={13} /> },
       { label: "ຮ່າງຖ້ຽວ (ວັນ/ຮອບ/ສາຍ)", href: "/jobs/drafts", icon: <FaRoute size={13} /> },
+      { label: "ແນະນຳການຈັດຖ້ຽວ", href: "/jobs/suggest", icon: <FaLightbulb size={13} /> },
       { label: "ໃບງານ/ລໍຖ້າອະນຸມັດ", href: "/jobs", icon: <FaClipboardCheck size={13} /> },
       { label: "ລໍຖ້າຮັບຖ້ຽວ", href: "/jobs/waiting-receive", icon: <FaClock size={13} /> },
       { label: "ລໍຖ້າເບີກເຄື່ອງ", href: "/jobs/waiting-pickup", icon: <FaBox size={13} /> },

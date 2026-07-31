@@ -14,6 +14,7 @@ import * as geofence from "@/actions/geofence";
 import * as gps from "@/actions/gps";
 import * as jobs from "@/actions/jobs";
 import * as deliveryAudit from "@/actions/delivery-audit";
+import * as tripSuggest from "@/actions/trip-suggest";
 import * as masterData from "@/actions/master-data";
 import * as notifications from "@/actions/notifications";
 import * as pickupVariance from "@/actions/pickup-variance";
@@ -88,6 +89,7 @@ export const Actions = {
   getJobPrintData: jobs.getJobPrintData,
   getTripRoutePlan: jobs.getTripRoutePlan,
   getDeliveryLocationReport: deliveryAudit.getDeliveryLocationReport,
+  getSuggestedTrips: tripSuggest.getSuggestedTrips,
   addBillToDraft: jobs.addBillToDraft,
   removeBillFromDraft: jobs.removeBillFromDraft,
   searchBills: jobs.searchBills,
