@@ -1219,32 +1219,23 @@ async function getBillsPending(session, fromDate, toDate, transportCode) {
   // schedule map and the todo map all depend only on transRaw/billNos and are
   // independent of each other — run them concurrently so the lighter lookups
   // overlap with applyRemainingCounts instead of stacking after it.
-  const [countedRows, cancelledRows, scheduleMap, rescheduleCountMap, todoMap, activeDispatchRows, forwardedAwayRows, deliveredServiceRows, sentRoundRows] = await Promise.all([
+  // ⚡ ສອງຈັງຫວະ ບໍ່ແມ່ນຈັງຫວະດຽວ:
+  //
+  // ວັດແລ້ວ ຄຳຂໍນີ້ດຶງບິນດິບ 7,418 ໃບ ແຕ່ຄືນອອກໄປພຽງ 83 ໃບ. ຖ້າຄິດຂໍ້ມູນ
+  // ປະກອບ (ຕາຕະລາງນັດ, todo, ຮອບທີ່ເຄີຍສົ່ງ, ການປ່ຽນວັນ) ໃຫ້ຄົບ 7,418 ໃບ
+  // ກ່ອນຄັດ ຈະເສຍ ~7 ວິນາທີໄປກັບແຖວທີ່ຖືກຖິ້ມ.
+  //
+  // ຈັງຫວະ 1 = ສະເພາະສິ່ງທີ່ໃຊ້ "ຕັດສິນວ່າຈະຄັດອອກບໍ"
+  // ຈັງຫວະ 2 = ຂໍ້ມູນປະກອບ ສະເພາະບິນທີ່ຜ່ານການຄັດແລ້ວ
+  // ⚠️ ບັກເກົ່າທີ່ແກ້ຢູ່ນີ້ນຳ: ຂອງເດີມ Promise.all ມີ 9 ລາຍການ ແຕ່ຊື່ທີ່ຮັບ
+  // ຢູ່ຕຳແໜ່ງ 8 ແລະ 9 ສະຫຼັບກັນ — deliveredServiceRows ໄປຮັບຜົນຂອງຄຳຂໍ
+  // "ຮອບທີ່ເຄີຍສົ່ງ" ແທນ. ຜົນຄື (1) ບິນທະຍອຍສົ່ງທີ່ຍັງເຫຼືອຈຳນວນ ຖືກຖິ້ມ
+  // ອອກຈາກຄິວລໍຈັດຖ້ຽວທັງໆທີ່ຍັງສົ່ງບໍ່ຄົບ ແລະ (2) ຕົວຊີ້ວັດ "ເຄີຍສົ່ງມາແລ້ວ
+  // n ຮອບ" ບໍ່ເຄີຍຂຶ້ນເລີຍ. ການແຍກເປັນ 2 ຈັງຫວະຂ້າງລຸ່ມເຮັດໃຫ້ຊື່ກັບຄຳຂໍ
+  // ຈັບຄູ່ກັນຊັດເຈນ ຈຶ່ງບໍ່ເກີດຊ້ຳໄດ້ອີກ.
+  const [countedRows, activeDispatchRows, forwardedAwayRows, deliveredServiceRows] =
+    await Promise.all([
     applyRemainingCounts(transRaw),
-    query(
-      `SELECT DISTINCT ON (d.bill_no)
-          d.bill_no,
-          d.doc_no as cancelled_delivery_job,
-          COALESCE(d.remark, '') as cancelled_delivery_remark,
-          COALESCE(NULLIF(TRIM(drv.name_1), ''), a.driver, '') as cancelled_delivery_driver,
-          COALESCE(NULLIF(TRIM(car.name_1), ''), a.car, '') as cancelled_delivery_car,
-          to_char(COALESCE(d.sent_end, d.create_date_time_now), 'DD-MM-YYYY HH24:MI') as cancelled_delivery_at,
-          GREATEST(FLOOR(EXTRACT(EPOCH FROM (now() - COALESCE(d.sent_end, d.create_date_time_now)))), 0)::bigint as cancelled_secs_ago
-        FROM public.odg_tms_detail d
-        LEFT JOIN public.odg_tms a ON a.doc_no = d.doc_no
-        LEFT JOIN public.odg_tms_driver drv ON drv.code = a.driver
-        LEFT JOIN public.odg_tms_car car ON car.code = a.car
-        WHERE d.bill_no = ANY($1::varchar[])
-          AND COALESCE(d.status, 0) = 2
-        ORDER BY d.bill_no, COALESCE(d.sent_end, d.create_date_time_now) DESC`,
-      [billNos]
-    ),
-    // Schedule + remark stamps for bills the admin has flagged as overdue.
-    getPendingBillScheduleMap(billNos),
-    // How many times the delivery date was changed (for the over-reschedule flag).
-    getPendingBillRescheduleCountMap(billNos),
-    // Aggregated todo counts/earliest deadline for the row indicator.
-    getBillTodoSummaryMap(billNos),
     // Bills already sitting on an OPEN trip (status NULL/0/3 — not delivered=1,
     // not cancelled=2) must not show in this triage queue. The shipment path
     // already drops them via check_status=1, but manual/transfer bills (flag 72)
@@ -1275,16 +1266,6 @@ async function getBillsPending(session, fromDate, toDate, transportCode) {
           AND NULLIF(TRIM(d.forward_transport_code), '') IS NOT NULL
           AND COALESCE(NULLIF(TRIM(pb.transport_code), ''), s.transport_code) <> s.transport_code
           AND ${getFixedYearSqlFilter("d.doc_date")}`,
-      [billNos]
-    ),
-    // ບິນທີ່ເຄີຍສົ່ງມາແລ້ວ — ບິນທະຍອຍສົ່ງຢືນຢູ່ໃນຄິວນີ້ຄືກັບບິນໃໝ່ທຸກປະການ
-    // ຈົນຄົນຈັດຖ້ຽວແຍກບໍ່ອອກວ່າອັນໃດຍັງບໍ່ເຄີຍແຕະ ອັນໃດສົ່ງມາແລ້ວ 5 ຮອບ.
-    query(
-      `SELECT bill_no, COUNT(*)::int AS rounds,
-              to_char(MAX(sent_end), 'DD/MM/YYYY') AS last_sent
-       FROM public.odg_tms_detail
-       WHERE bill_no = ANY($1::varchar[]) AND COALESCE(status, 0) = 1
-       GROUP BY bill_no`,
       [billNos]
     ),
     // Service bills whose CURRENT scheduled cycle has been delivered. A service
@@ -1322,6 +1303,58 @@ async function getBillsPending(session, fromDate, toDate, transportCode) {
       },
     ])
   );
+
+  // ຄັດອອກກ່ອນ ແລ້ວຄ່ອຍຄິດຂໍ້ມູນປະກອບ (ເບິ່ງເຫດຜົນຢູ່ຈັງຫວະ 1).
+  // ເງື່ອນໄຂຄັດຢູ່ນີ້ຕ້ອງກົງກັບ .filter() ຂ້າງລຸ່ມແປະໆ ບໍ່ດັ່ງນັ້ນບິນຈະຫາຍ.
+  const keptRaw = transRaw.filter(
+    (bill) =>
+      !activeDispatchSet.has(bill.doc_no) &&
+      !forwardedAwaySet.has(bill.doc_no) &&
+      !deliveredServiceSet.has(bill.doc_no) &&
+      (bill.source_type === SERVICE_SOURCE_TYPE ||
+        Number(summaries.get(bill.doc_no)?.remaining_count ?? 0) > 0)
+  );
+  const keptBillNos = keptRaw.map((bill) => bill.doc_no);
+
+  // ຈັງຫວະ 2 — ຂໍ້ມູນປະກອບ ສະເພາະບິນທີ່ຜ່ານການຄັດ
+  const [cancelledRows, scheduleMap, rescheduleCountMap, todoMap, sentRoundRows] =
+    await Promise.all([
+    query(
+      `SELECT DISTINCT ON (d.bill_no)
+          d.bill_no,
+          d.doc_no as cancelled_delivery_job,
+          COALESCE(d.remark, '') as cancelled_delivery_remark,
+          COALESCE(NULLIF(TRIM(drv.name_1), ''), a.driver, '') as cancelled_delivery_driver,
+          COALESCE(NULLIF(TRIM(car.name_1), ''), a.car, '') as cancelled_delivery_car,
+          to_char(COALESCE(d.sent_end, d.create_date_time_now), 'DD-MM-YYYY HH24:MI') as cancelled_delivery_at,
+          GREATEST(FLOOR(EXTRACT(EPOCH FROM (now() - COALESCE(d.sent_end, d.create_date_time_now)))), 0)::bigint as cancelled_secs_ago
+        FROM public.odg_tms_detail d
+        LEFT JOIN public.odg_tms a ON a.doc_no = d.doc_no
+        LEFT JOIN public.odg_tms_driver drv ON drv.code = a.driver
+        LEFT JOIN public.odg_tms_car car ON car.code = a.car
+        WHERE d.bill_no = ANY($1::varchar[])
+          AND COALESCE(d.status, 0) = 2
+        ORDER BY d.bill_no, COALESCE(d.sent_end, d.create_date_time_now) DESC`,
+      [keptBillNos]
+    ),
+    // Schedule + remark stamps for bills the admin has flagged as overdue.
+    getPendingBillScheduleMap(keptBillNos),
+    // How many times the delivery date was changed (for the over-reschedule flag).
+    getPendingBillRescheduleCountMap(keptBillNos),
+    // Aggregated todo counts/earliest deadline for the row indicator.
+    getBillTodoSummaryMap(keptBillNos),
+    // ບິນທີ່ເຄີຍສົ່ງມາແລ້ວ — ບິນທະຍອຍສົ່ງຢືນຢູ່ໃນຄິວນີ້ຄືກັບບິນໃໝ່ທຸກປະການ
+    // ຈົນຄົນຈັດຖ້ຽວແຍກບໍ່ອອກວ່າອັນໃດຍັງບໍ່ເຄີຍແຕະ ອັນໃດສົ່ງມາແລ້ວ 5 ຮອບ.
+    query(
+      `SELECT bill_no, COUNT(*)::int AS rounds,
+              to_char(MAX(sent_end), 'DD/MM/YYYY') AS last_sent
+       FROM public.odg_tms_detail
+       WHERE bill_no = ANY($1::varchar[]) AND COALESCE(status, 0) = 1
+       GROUP BY bill_no`,
+      [keptBillNos]
+    )
+  ]);
+
   const sentRoundMap = new Map(
     sentRoundRows.map((row) => [
       row.bill_no,
@@ -1330,7 +1363,7 @@ async function getBillsPending(session, fromDate, toDate, transportCode) {
   );
   const cancelledMap = new Map(cancelledRows.map((row) => [row.bill_no, row]));
 
-  const trans = transRaw
+  const trans = keptRaw
     .map((bill) => {
       const summary = summaries.get(bill.doc_no) ?? {
         remaining_count: 0,

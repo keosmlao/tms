@@ -204,44 +204,55 @@ export default function TripDraftsPage() {
   // filter that hides bills by default is what kept this panel looking empty.
   const [lockToDraftBranch, setLockToDraftBranch] = useState(false);
   const [loading, setLoading] = useState(true);
+  // ບິນລໍຈັດຖ້ຽວໂຫຼດຊ້າກວ່າສ່ວນອື່ນຫຼາຍ ຈຶ່ງມີສະຖານະຂອງມັນເອງ
+  const [candidatesLoading, setCandidatesLoading] = useState(true);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
 
   const load = useCallback(async () => {
     setLoading(true);
     setError("");
+    // ⚠️ ຢ່າລວມ getBillsPending ເຂົ້າ Promise.all ນຳລາຍການຮ່າງ:
+    // ວັດແລ້ວມັນໃຊ້ 12.2 ວິນາທີ ສ່ວນລາຍການຮ່າງ + ບິນທີ່ຈັດແລ້ວ ລວມກັນ
+    // ບໍ່ເຖິງ 0.7 ວິ. ຖ້າລໍພ້ອມກັນ ໜ້າຈະຄ້າງ "ກຳລັງໂຫຼດ..." 12 ວິທັງໆທີ່
+    // ສ່ວນຫຼັກພ້ອມແລ້ວ. ຈຶ່ງແຍກ: ຮ່າງຂຶ້ນກ່ອນ ບິນລໍຈັດຕາມມາ.
     try {
-      const [d, pendingData, drafted] = await Promise.all([
+      const [d, drafted] = await Promise.all([
         showAll
           ? Actions.listTripDraftsWithVolume()
           : Actions.listTripDraftsWithVolume(dateFrom, dateTo),
-        // Identical call to the ລໍຖ້າຈັດຖ້ຽວ page: whole fixed year, same
-        // branch filter. Anything else and the two screens disagree.
-        // "all" is this API's word for every branch — passing "" made it look
-        // for a branch whose code is the empty string, which matches nothing.
-        Actions.getBillsPending(
-          FIXED_YEAR_START,
-          FIXED_YEAR_END,
-          (lockToDraftBranch ? activeBranch : "") || branch || "all"
-        ),
         Actions.listDraftedBillNos(),
       ]);
-      // ພື້ນທີ່ບັນທຸກມາພ້ອມລາຍການຮ່າງ — ບໍ່ມີ round-trip ທີ 2 ຈຶ່ງບໍ່ມີ "…"
       const payload = (d ?? {}) as unknown as {
         drafts?: Draft[];
         volumes?: Record<number, TripVolumeInfo>;
       };
       setDrafts(payload.drafts ?? []);
       setVolumeByDraft(payload.volumes ?? {});
-      // Keep the FULL pending list so this header always matches the
-      // ລໍຖ້າຈັດຖ້ຽວ page; bills already placed in a draft are marked, not
-      // dropped, so the two totals can never disagree.
       setDraftedBills(new Set((drafted ?? []) as string[]));
-      setCandidates((pendingData?.trans ?? []) as Candidate[]);
     } catch (e) {
       setError(String((e as Error)?.message ?? e));
     } finally {
       setLoading(false);
+    }
+
+    // ບິນລໍຈັດຖ້ຽວ — ດຶງຕໍ່ຫຼັງຈາກໜ້າຂຶ້ນແລ້ວ.
+    // Identical call to the ລໍຖ້າຈັດຖ້ຽວ page: whole fixed year, same branch
+    // filter. Anything else and the two screens disagree. "all" is this API's
+    // word for every branch — passing "" made it look for a branch whose code
+    // is the empty string, which matches nothing.
+    setCandidatesLoading(true);
+    try {
+      const pendingData = await Actions.getBillsPending(
+        FIXED_YEAR_START,
+        FIXED_YEAR_END,
+        (lockToDraftBranch ? activeBranch : "") || branch || "all"
+      );
+      setCandidates((pendingData?.trans ?? []) as Candidate[]);
+    } catch (e) {
+      console.error("getBillsPending", e);
+    } finally {
+      setCandidatesLoading(false);
     }
   }, [dateFrom, dateTo, branch, showAll, activeBranch, lockToDraftBranch]);
 
@@ -1153,7 +1164,7 @@ export default function TripDraftsPage() {
           <div className="border-b border-slate-200/50 px-3 py-2.5 dark:border-white/5">
             <div className="flex items-start justify-between gap-2">
               <p className="text-xs font-bold text-slate-700 dark:text-slate-200">
-                ບິນລໍຈັດຖ້ຽວ ({candidatesForDraft.length})
+                ບິນລໍຈັດຖ້ຽວ ({candidatesLoading ? "…" : candidatesForDraft.length})
                 {draftedBills.size > 0 && (
                   <span className="ml-1.5 text-[10px] font-medium text-slate-400">
                     · ຢູ່ໃນຮ່າງແລ້ວ{" "}
@@ -1260,7 +1271,9 @@ export default function TripDraftsPage() {
             {filteredCandidates.length === 0 ? (
               <div className="py-8 text-center">
                 <p className="text-xs text-slate-400">
-                  {candidates.length === 0
+                  {candidatesLoading
+                    ? "ກຳລັງໂຫຼດບິນລໍຈັດຖ້ຽວ..."
+                    : candidates.length === 0
                     ? "ບໍ່ມີບິນລໍຈັດຖ້ຽວ"
                     : poolTab === "dated"
                     ? "ບິນທັງໝົດຢູ່ໃນ tab ‘ພະນັກຂາຍຍັງບໍ່ບອກວັນສົ່ງ’"
