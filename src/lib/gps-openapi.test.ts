@@ -112,3 +112,46 @@ describe("isOpenApiConfigured", () => {
     }
   });
 });
+
+const { mapHistoryPoint } = require("../queries/gps-openapi.js") as {
+  mapHistoryPoint: (p: unknown) => {
+    recordedAt: string;
+    date: string;
+    lat: number;
+    lng: number;
+    speed: number;
+    heading: number;
+  } | null;
+};
+
+describe("mapHistoryPoint", () => {
+  const point = {
+    time: "2026-07-24T17:00:53.000Z",
+    latitude: 18.064628,
+    longitude: 102.669808,
+    speed_kmh: 37,
+    direction: "90",
+  };
+
+  it("ແປງເປັນຮູບແບບຈຸດທີ່ gps-usage ໃຊ້", () => {
+    expect(mapHistoryPoint(point)).toEqual({
+      recordedAt: "2026-07-25 00:00:53",
+      date: "2026-07-25",
+      lat: 18.064628,
+      lng: 102.669808,
+      speed: 37,
+      heading: 90,
+    });
+  });
+
+  it("date ຕ້ອງມາຈາກເວລາລາວ ບໍ່ແມ່ນ UTC", () => {
+    // 17:00Z ຂອງວັນທີ 24 = 00:00 ຂອງວັນທີ 25 ຢູ່ລາວ — ຖ້າໃຊ້ UTC
+    // ຈຸດຈະຖືກນັບເຂົ້າມື້ຜິດ ແລ້ວໄລຍະທາງລາຍວັນຈະຜິດຕາມ
+    expect(mapHistoryPoint(point)?.date).toBe("2026-07-25");
+  });
+
+  it("ບໍ່ມີພິກັດ ຫຼື ບໍ່ມີເວລາ ໃຫ້ຖິ້ມ", () => {
+    expect(mapHistoryPoint({ ...point, latitude: null })).toBeNull();
+    expect(mapHistoryPoint({ ...point, time: "" })).toBeNull();
+  });
+});

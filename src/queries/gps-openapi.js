@@ -333,6 +333,67 @@ async function fetchVehicleHistory(
   return data ? { ...data, meta } : null;
 }
 
+/**
+ * ຈຸດເສັ້ນທາງ 1 ວັນ ໃນຮູບແບບທີ່ gps-usage.js ໃຊ້ຢູ່ແລ້ວ
+ * ({recordedAt, date, lat, lng, speed, heading}).
+ *
+ * ຂອງເກົ່າຕ້ອງແບ່ງໜ້າເອງ (page/limit) ແລະ ຍິງຫຼາຍຮອບຕໍ່ 1 ຄັນ/1 ວັນ.
+ * Open API ໃຫ້ເຖິງ 20000 ຈຸດຕໍ່ຄຳຂໍ ແລະ ຖ້າເກີນຈະບອກ meta.next_from
+ * ໃຫ້ຖາມຕໍ່ — ບໍ່ຕັດຖິ້ມງຽບໆ.
+ */
+function mapHistoryPoint(point) {
+  const num = (v) => (v === null || v === undefined || v === "" ? Number.NaN : Number(v));
+  const lat = num(point?.latitude);
+  const lng = num(point?.longitude);
+  if (!Number.isFinite(lat) || !Number.isFinite(lng)) return null;
+  const recordedAt = utcIsoToLaoStamp(point?.time);
+  if (!recordedAt) return null;
+  return {
+    recordedAt,
+    date: recordedAt.slice(0, 10),
+    lat,
+    lng,
+    speed: Number(point?.speed_kmh) || 0,
+    heading: Number(point?.direction) || 0,
+  };
+}
+
+async function fetchHistoryPoints(vehicleIdOrImei, dayYmd, { maxRequests = 5 } = {}) {
+  const id = str(vehicleIdOrImei).trim();
+  const day = str(dayYmd).trim();
+  if (!id || !day) return { points: [], raw: 0, truncated: false };
+
+  const points = [];
+  let raw = 0;
+  let from = day;
+  let truncated = false;
+  for (let i = 0; i < maxRequests; i++) {
+    const { data, meta } = await apiGet(`/vehicles/${encodeURIComponent(id)}/history`, {
+      from,
+      to: day,
+      include_points: true,
+      limit: 20000,
+    });
+    const rows = Array.isArray(data?.points) ? data.points : [];
+    raw += rows.length;
+    for (const row of rows) {
+      const mapped = mapHistoryPoint(row);
+      // ຮັກສາສະເພາະຈຸດຂອງມື້ທີ່ຂໍ — ຕອນຖາມຕໍ່ດ້ວຍ next_from ອາດຄາບກ່ຽວ
+      if (mapped && mapped.date === day) points.push(mapped);
+    }
+    if (!meta?.truncated || !meta?.next_from) break;
+    from = meta.next_from;
+    truncated = true;
+    if (i === maxRequests - 1) {
+      console.warn(
+        `[gps-openapi] history imei=${id} ${day} ຈຸດຫຼາຍເກີນ ${maxRequests} ຮອບ — ອາດບໍ່ຄົບ`
+      );
+    }
+  }
+  points.sort((a, b) => a.recordedAt.localeCompare(b.recordedAt));
+  return { points, raw, truncated };
+}
+
 module.exports = {
   DEFAULT_BASE_URL,
   isOpenApiConfigured,
@@ -347,4 +408,6 @@ module.exports = {
   fetchFleetFuel,
   fetchVehicleFuel,
   fetchVehicleHistory,
+  mapHistoryPoint,
+  fetchHistoryPoints,
 };

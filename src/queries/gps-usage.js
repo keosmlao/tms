@@ -298,6 +298,8 @@ async function insertRealtimeLogRowsFromUsage(rows) {
 
 // ==================== Provider config ====================
 
+const gpsOpenApi = require("./gps-openapi");
+
 function getGpsTrackerConfig() {
   const baseUrl = process.env.GPS_TRACKER_API_URL || "https://apis.thaigpstracker.co.th";
   const user = process.env.GPS_TRACKER_USER || "";
@@ -610,6 +612,19 @@ async function fetchWithRetry(url, imei, label) {
 }
 
 async function fetchGpsHistoryOneDay(imei, dateStr) {
+  // Open API ກ່ອນ: 1 ຄຳຂໍໄດ້ເຖິງ 20000 ຈຸດ ແລະ ບອກເມື່ອຕັດ (next_from)
+  // ຂອງເກົ່າຕ້ອງແບ່ງໜ້າເອງເທື່ອລະ 2000 ຈຶ່ງຍິງຫຼາຍຮອບຕໍ່ 1 ຄັນ/1 ວັນ
+  // ແລ້ວເປັນຕົ້ນເຫດຫຼັກຂອງ HTTP 429 ຕອນ sync ຍ້ອນຫຼັງ.
+  if (gpsOpenApi.isOpenApiConfigured()) {
+    try {
+      const { points, raw } = await gpsOpenApi.fetchHistoryPoints(imei, dateStr);
+      return { raw, points };
+    } catch (error) {
+      console.warn(
+        `[gps-usage] openapi history imei=${imei} ${dateStr} ລົ້ມ (${error?.code ?? ""}) — ໃຊ້ provider ເກົ່າແທນ`
+      );
+    }
+  }
   const config = getGpsTrackerConfig();
   const cleanImei = String(imei).trim();
   const baseUrl = `${config.baseUrl}/exporter/log/getHistory/${encodeURIComponent(cleanImei)}/${toYmd(dateStr)}`;
