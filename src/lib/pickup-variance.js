@@ -5,52 +5,19 @@
 // on the trip (odg_tms_detail_item.selected_qty) is a variance: the trip is
 // corrected down to the real figure and the dispatcher is notified.
 //
+// ⚠️ CommonJS (.js) ໂດຍເຈດຕະນາ — src/queries/mobile.js require ໄຟລ໌ນີ້ ແລະ
+// require() ໂຫຼດ .ts ໄດ້ສະເພາະໃນ bundler ຂອງ Next. type ຢູ່ .d.ts ຄູ່ກັນ.
+//
 // Pure so it can be unit-tested; the DB writes live in mobileJobAction
 // ("pickup_bill") in src/queries/mobile.js.
 
-export interface PlannedPickupItem {
-  item_code: string;
-  item_name?: string | null;
-  unit_code?: string | null;
-  /** What the dispatcher loaded onto this trip for this bill. */
-  selected_qty: number;
-}
+"use strict";
 
-export interface ReportedPickupItem {
-  item_code: string;
-  qty: number;
-}
-
-export interface PickupVarianceLine {
-  item_code: string;
-  item_name: string;
-  unit_code: string;
-  planned_qty: number;
-  /** Raw figure the driver reported, before clamping. */
-  reported_qty: number;
-  /** What actually gets written to selected_qty. */
-  actual_qty: number;
-  /** actual − planned; always ≤ 0 because a pickup can only come up short. */
-  diff_qty: number;
-  /**
-   * Driver reported MORE than the trip planned. The extra is NOT applied — the
-   * surplus may be reserved for another trip, so only the dispatcher can hand
-   * it over — but it is still logged so they can act on it.
-   */
-  over_reported: boolean;
-}
-
-export interface PickupVarianceResult {
-  /** Only the lines whose reported qty differs from the planned qty. */
-  lines: PickupVarianceLine[];
-  plannedTotal: number;
-  actualTotal: number;
-  hasVariance: boolean;
-  /** Every line came back as zero — nothing was actually picked up. */
-  emptyPickup: boolean;
-}
-
-function toQty(value: unknown): number {
+/**
+ * @param {unknown} value
+ * @returns {number}
+ */
+function toQty(value) {
   const n = Number(value ?? 0);
   if (!Number.isFinite(n) || n < 0) return 0;
   // Warehouse quantities are counted in whole/decimal units; guard against a
@@ -58,7 +25,11 @@ function toQty(value: unknown): number {
   return Math.round(n * 1000) / 1000;
 }
 
-function toText(value: unknown): string {
+/**
+ * @param {unknown} value
+ * @returns {string}
+ */
+function toText(value) {
   return String(value ?? "").trim();
 }
 
@@ -70,11 +41,14 @@ function toText(value: unknown): string {
  * clamped to [0, planned]: a short pickup corrects the trip, a surplus is
  * flagged for the dispatcher but never silently grabs stock held elsewhere.
  */
-export function computePickupVariance(
-  planned: PlannedPickupItem[],
-  reported: ReportedPickupItem[]
-): PickupVarianceResult {
-  const reportedByCode = new Map<string, number>();
+/**
+ * @param {import("./pickup-variance").PlannedPickupItem[]} planned
+ * @param {import("./pickup-variance").ReportedPickupItem[]} reported
+ * @returns {import("./pickup-variance").PickupVarianceResult}
+ */
+function computePickupVariance(planned, reported) {
+  /** @type {Map<string, number>} */
+  const reportedByCode = new Map();
   for (const item of reported ?? []) {
     const code = toText(item?.item_code);
     if (!code) continue;
@@ -82,7 +56,8 @@ export function computePickupVariance(
     reportedByCode.set(code, (reportedByCode.get(code) ?? 0) + toQty(item?.qty));
   }
 
-  const lines: PickupVarianceLine[] = [];
+  /** @type {import("./pickup-variance").PickupVarianceLine[]} */
+  const lines = [];
   let plannedTotal = 0;
   let actualTotal = 0;
 
@@ -125,10 +100,15 @@ export function computePickupVariance(
 }
 
 /** One-line Lao summary used in the notification body. */
-export function describePickupVariance(result: PickupVarianceResult): string {
+/**
+ * @param {import("./pickup-variance").PickupVarianceResult} result
+ * @returns {string}
+ */
+function describePickupVariance(result) {
   const short = result.lines.filter((l) => l.diff_qty < 0);
   const over = result.lines.filter((l) => l.over_reported);
-  const parts: string[] = [];
+  /** @type {string[]} */
+  const parts = [];
   if (short.length > 0) {
     const missing = short.reduce((sum, l) => sum + Math.abs(l.diff_qty), 0);
     parts.push(`ຂາດ ${missing} ໜ່ວຍ (${short.length} ລາຍການ)`);
@@ -138,3 +118,5 @@ export function describePickupVariance(result: PickupVarianceResult): string {
   }
   return parts.join(" · ");
 }
+
+module.exports = { computePickupVariance, describePickupVariance };

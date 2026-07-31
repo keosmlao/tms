@@ -1,3 +1,5 @@
+// ⚠️ CommonJS (.js) ໂດຍເຈດຕະນາ — src/queries/*.js require ໄຟລ໌ນີ້ ແລະ
+// require() ໂຫຼດ .ts ໄດ້ສະເພາະໃນ bundler ຂອງ Next. type ຢູ່ .d.ts ຄູ່ກັນ.
 // Pure warehouse→branch mapping + grouping helpers for the "ຈັດຖ້ຽວທີ່ເຫຼືອຕາມ
 // ສາຂາ" split tool. Kept free of any DB/IO so it is unit-testable and can be
 // required from the CommonJS query layer (src/queries/helpers.js).
@@ -12,55 +14,34 @@
 //   03 ດອນຕິ້ວ     → 02-0002 ຂົນສົ່ງດອນຕິ້ວ
 //   02 ໂພນສະອາດ  → 02-0007 ຂົນສົ່ງໂພນສະອາດ
 //   04 ປາກເຊ      → 02-0003 ຂົນສົ່ງປາກເຊ
-export const BRANCH_STOCK_TO_TRANSPORT: Record<string, string> = {
+"use strict";
+
+/** @type {Record<string, string>} */
+const BRANCH_STOCK_TO_TRANSPORT = {
   "01": "02-0001",
   "02": "02-0007",
   "03": "02-0002",
   "04": "02-0003",
 };
 
-export function suggestTransportForBranchStock(branchStock: unknown): string {
+/**
+ * @param {unknown} branchStock
+ * @returns {string}
+ */
+function suggestTransportForBranchStock(branchStock) {
   const key = String(branchStock ?? "").trim();
   return BRANCH_STOCK_TO_TRANSPORT[key] ?? "";
-}
-
-export interface RemainingWarehouseRow {
-  wh_code: string;
-  wh_name: string;
-  branch_stock: string;
-  item_code: string;
-  item_name: string;
-  unit_code: string;
-  erp_qty: number | string;
-  placed_qty: number | string;
-  remaining_qty: number | string;
-}
-
-export interface RemainingWarehouseItem {
-  item_code: string;
-  item_name: string;
-  unit_code: string;
-  erp_qty: number;
-  placed_qty: number;
-  remaining_qty: number;
-}
-
-export interface RemainingWarehouseGroup {
-  wh_code: string;
-  wh_name: string;
-  branch_stock: string;
-  suggested_transport_code: string;
-  items: RemainingWarehouseItem[];
-  remaining_qty_total: number;
 }
 
 // Fold flat (warehouse, item) rows into one entry per warehouse, attaching the
 // suggested delivery branch and a remaining-qty subtotal. Order of warehouses
 // follows first appearance in the input.
-export function groupRemainingItemsByWarehouse(
-  rows: RemainingWarehouseRow[]
-): RemainingWarehouseGroup[] {
-  const byWarehouse = new Map<string, RemainingWarehouseGroup>();
+/**
+ * @param {import("./warehouse-branch").RemainingWarehouseRow[]} rows
+ * @returns {import("./warehouse-branch").RemainingWarehouseGroup[]}
+ */
+function groupRemainingItemsByWarehouse(rows) {
+  const byWarehouse = new Map();
   for (const row of rows) {
     const whCode = String(row.wh_code ?? "");
     if (!byWarehouse.has(whCode)) {
@@ -74,7 +55,7 @@ export function groupRemainingItemsByWarehouse(
         remaining_qty_total: 0,
       });
     }
-    const group = byWarehouse.get(whCode)!;
+    const group = byWarehouse.get(whCode);
     const remaining = Number(row.remaining_qty ?? 0);
     group.items.push({
       item_code: row.item_code,
@@ -88,3 +69,9 @@ export function groupRemainingItemsByWarehouse(
   }
   return Array.from(byWarehouse.values());
 }
+
+module.exports = {
+  BRANCH_STOCK_TO_TRANSPORT,
+  suggestTransportForBranchStock,
+  groupRemainingItemsByWarehouse,
+};
