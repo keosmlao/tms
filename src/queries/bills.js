@@ -949,7 +949,17 @@ const {
 } = require("./pending-bill");
 const { getBillTodoSummaryMap } = require("./bill-todo");
 
-async function getManualPendingRowsForPending(fromDate, toDate, transportCode = "all", branchListSql = null) {
+async function getManualPendingRowsForPending(
+  fromDate,
+  toDate,
+  transportCode = "all",
+  branchListSql = null,
+  { idsOnly = false, docNos = null } = {}
+) {
+  // idsOnly = ສົ່ງກັບແຕ່ (doc_no, source_type) ພໍໃຫ້ຄິດວ່າໃບໃດຍັງເຫຼືອຂອງ.
+  // ປ່ຽນສະເພາະ "ລາຍການຄໍລຳ" ເທົ່ານັ້ນ — FROM ແລະ WHERE ຄືເກົ່າແປະໆ ຈຶ່ງບໍ່ມີ
+  // ທາງທີ່ຜົນຈະຕ່າງກັນ. ເບິ່ງເຫດຜົນຢູ່ getBillsPending (DB ຢູ່ໄກ ການສົ່ງແຖວ
+  // ເຕັມແພງກວ່າ SQL ເອງ).
   // branchListSql (a pre-quoted, controlled set from getBranchScope) restricts a
   // branch-scoped user to their assigned branches. Otherwise the unscoped UI
   // filter applies: a single chosen branch, else the three delivery branches.
@@ -961,9 +971,12 @@ async function getManualPendingRowsForPending(fromDate, toDate, transportCode = 
     : filterByTransport
       ? "AND pb.transport_code = $3"
       : `AND COALESCE(NULLIF(TRIM(pb.transport_code), ''), '') IN (${deliveryBranchListSql()})`;
+  // ຮອບດຶງເຕັມຈະສົ່ງລາຍການເລກບິນທີ່ຜ່ານການຄັດແລ້ວມາ ຈຶ່ງດຶງແຕ່ເທົ່ານັ້ນ
+  const icDocFilter = docNos ? `AND a.doc_no = ANY($${params.length + 1}::varchar[])` : "";
+  const icParams = docNos ? [...params, docNos] : params;
   const icRows = await query(
     `SELECT
-      a.doc_no,
+      ${idsOnly ? "a.doc_no, 'ic_trans' as source_type" : `a.doc_no,
       to_char(a.doc_date,'DD-MM-YYYY') as doc_date,
       a.cust_code,
       COALESCE(NULLIF(TRIM(cust.name_1), ''), a.cust_code, '') as cust_name,
@@ -986,7 +999,7 @@ async function getManualPendingRowsForPending(fromDate, toDate, transportCode = 
       now() - COALESCE(a.create_date_time_now, pb.updated_at) as time_use,
       true as manual_pending_bill,
       a.trans_flag as source_trans_flag,
-      'ic_trans' as source_type
+      'ic_trans' as source_type`}
     FROM ic_trans a
     INNER JOIN public.odg_tms_pending_bill pb
       ON pb.bill_no = a.doc_no
@@ -1000,8 +1013,9 @@ async function getManualPendingRowsForPending(fromDate, toDate, transportCode = 
     WHERE a.trans_flag IN (${manualFlagListSql()})
       AND pb.scheduled_date::date BETWEEN $1::date AND $2::date
       ${transportWhere}
+      ${icDocFilter}
     ORDER BY pb.scheduled_date ASC, a.doc_date ASC`,
-    params
+    icParams
   );
   const readySchedules = await query(
     `SELECT pb.bill_no,
@@ -1022,9 +1036,11 @@ async function getManualPendingRowsForPending(fromDate, toDate, transportCode = 
     params
   );
   const existingIc = new Set(icRows.map((row) => row.doc_no));
+  const keptSet = docNos ? new Set(docNos) : null;
   const nonIcDocNos = readySchedules
     .map((row) => row.bill_no)
-    .filter((docNo) => !existingIc.has(docNo));
+    .filter((docNo) => !existingIc.has(docNo))
+    .filter((docNo) => !keptSet || keptSet.has(docNo));
   const [serviceBaseRows, customBaseRows] = nonIcDocNos.length === 0
     ? [[], []]
     : await Promise.all([
@@ -1119,10 +1135,9 @@ async function getBillsPending(session, fromDate, toDate, transportCode) {
     where = `COALESCE(NULLIF(TRIM(pbov.transport_code), ''), a.transport_code)=$3`;
     params = [fromDate, toDate, transportCode];
   }
-  const [shipmentRaw, manualRaw, listtrans] = await Promise.all([
-    query(
-      `SELECT
-        a.doc_no, to_char(b.doc_date,'DD-MM-YYYY') as doc_date, a.transport_name,
+  // ຄໍລຳເຕັມ ແລະ FROM/WHERE ຂອງຄຳຂໍບິນຈາກ shipment — ນິຍາມບ່ອນດຽວ ໃຊ້ທັງ
+  // ຮອບຄັດ (ເອົາແຕ່ເລກບິນ) ແລະ ຮອບດຶງເຕັມ
+  const SHIPMENT_FULL_COLUMNS = `        a.doc_no, to_char(b.doc_date,'DD-MM-YYYY') as doc_date, a.transport_name,
         COALESCE(NULLIF(TRIM(pbov.transport_code), ''), a.transport_code) as transport_code,
         a.cust_code,
         COALESCE(NULLIF(TRIM(cust.name_1), ''), a.cust_code, '') as cust_name,
@@ -1149,8 +1164,8 @@ async function getBillsPending(session, fromDate, toDate, transportCode) {
         CASE WHEN fwd.bill_no IS NULL THEN false ELSE true END as incoming_forwarded,
         COALESCE(fwd.origin_transport_code, '') as forward_from_transport_code,
         COALESCE(fwd.origin_transport_name, '') as forward_from_transport_name,
-        COALESCE(fwd.forwarded_at, '') as forwarded_at
-      FROM ic_trans_shipment a
+        COALESCE(fwd.forwarded_at, '') as forwarded_at`;
+  const SHIPMENT_FROM_WHERE = `      FROM ic_trans_shipment a
       LEFT JOIN ic_trans b ON b.doc_no=a.doc_no
       LEFT JOIN ar_customer cust ON cust.code = a.cust_code${customerAreaJoins('cust')}
       LEFT JOIN ar_customer_detail acd ON acd.ar_code = a.cust_code
@@ -1183,15 +1198,64 @@ async function getBillsPending(session, fromDate, toDate, transportCode) {
       -- so the receiving branch sees them regardless of the original sale date.
       WHERE a.trans_flag=44 AND check_status=0
         AND (COALESCE(b.send_date::date, b.doc_date::date) BETWEEN $1::date AND $2::date OR fwd.bill_no IS NOT NULL)
-        AND ${where}
-      ORDER BY COALESCE(b.send_date, b.doc_date) ASC, b.doc_date ASC`,
-      params
-    ),
+        AND ${where}`;
+
+  // ⚡ DB ຢູ່ໄກ (ping ~90ms): ວັດແລ້ວ 5,000 ແຖວ x 700 bytes ໃຊ້ 1.3 ວິນາທີ
+  // ພຽງແຕ່ສົ່ງຂໍ້ມູນ. ຄຳຂໍນີ້ເຄີຍສົ່ງແຖວເຕັມ 7,418 ແຖວ (~6 MB) ມາເພື່ອຄັດ
+  // ເຫຼືອ ~86 ແຖວ ຈຶ່ງເສຍເວລາໄປກັບການສົ່ງ ~6 ວິນາທີ.
+  //
+  // ຮອບທີ 1 ຢູ່ນີ້ດຶງແຕ່ (doc_no, source_type) — ພຽງພໍໃຫ້ຄິດວ່າໃບໃດຍັງເຫຼືອ
+  // ຂອງ. ຮອບທີ 2 (ຂ້າງລຸ່ມ) ຄ່ອຍດຶງລາຍລະອຽດເຕັມສະເພາະໃບທີ່ຜ່ານ.
+  // ທັງສອງຮອບໃຊ້ FROM/WHERE ດຽວກັນ ຕ່າງກັນແຕ່ລາຍການຄໍລຳ.
+  const buildShipmentSql = (idsOnly, docFilter) => `SELECT
+        ${idsOnly ? "a.doc_no, 'ic_trans' as source_type" : SHIPMENT_FULL_COLUMNS}
+      ${SHIPMENT_FROM_WHERE}
+        ${docFilter}
+      ORDER BY COALESCE(b.send_date, b.doc_date) ASC, b.doc_date ASC`;
+
+  const [shipmentIdRows, manualIdRows] = await Promise.all([
+    query(buildShipmentSql(true, ""), params),
     getManualPendingRowsForPending(
       fromDate,
       toDate,
       scope.scoped ? null : transportCode,
-      scope.scoped ? scope.branchListSql : null
+      scope.scoped ? scope.branchListSql : null,
+      { idsOnly: true }
+    ),
+  ]);
+  const idShipmentDocNos = new Set(shipmentIdRows.map((row) => row.doc_no));
+  const idRows = [
+    ...shipmentIdRows,
+    ...manualIdRows.filter((row) => !idShipmentDocNos.has(row.doc_no)),
+  ];
+  // ໃບໃດຍັງເຫຼືອຂອງ — ບິນບໍລິການເອົາໄວ້ໝົດ (ສົ່ງຊ້ຳໄດ້ ຈຶ່ງ remaining ບອກບໍ່ໄດ້)
+  const countedIdRows = await applyRemainingCounts(idRows);
+  const keptDocNos = countedIdRows
+    .filter(
+      (row) =>
+        row.source_type === SERVICE_SOURCE_TYPE || Number(row.count_item ?? 0) > 0
+    )
+    .map((row) => row.doc_no);
+  if (keptDocNos.length === 0) {
+    const [emptyList] = await Promise.all([
+      scope.scoped
+        ? query(`SELECT code, name_1 FROM transport_type WHERE code IN (${scope.branchListSql}) ORDER BY code ASC`)
+        : query(`SELECT code, name_1 FROM transport_type WHERE code IN (${deliveryBranchListSql()}) ORDER BY code ASC`),
+    ]);
+    return { trans: [], listtrans: emptyList };
+  }
+
+  const [shipmentRaw, manualRaw, listtrans] = await Promise.all([
+    query(buildShipmentSql(false, `AND a.doc_no = ANY($${params.length + 1}::varchar[])`), [
+      ...params,
+      keptDocNos,
+    ]),
+    getManualPendingRowsForPending(
+      fromDate,
+      toDate,
+      scope.scoped ? null : transportCode,
+      scope.scoped ? scope.branchListSql : null,
+      { docNos: keptDocNos }
     ),
     scope.scoped
       ? query(`SELECT code, name_1 FROM transport_type WHERE code IN (${scope.branchListSql}) ORDER BY code ASC`)
