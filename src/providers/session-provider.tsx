@@ -56,8 +56,19 @@ export function SessionProvider({ children }: { children: ReactNode }) {
     if (!session) return;
     let active = true;
     const beat = () => {
-      void Auth.heartbeat().catch(() => {
+      void Auth.heartbeat().catch(async () => {
         if (!active) return;
+        // heartbeat ລົ້ມ ສ່ວນຫຼາຍແມ່ນ token ໝົດອາຍຸ. ຢ່າປ່ອຍໄວ້ — ຖ້າບໍ່ລ້າງ
+        // session ຝັ່ງ client, ທຸກ poller (heartbeat, ກ່ອງຂໍ້ຄວາມ ...) ຈະຍິງ
+        // ຕໍ່ໄປເລື້ອຍໆ ແລ້ວໄດ້ 500 Unauthorized ທຸກຮອບຈົນກວ່າຈະ reload.
+        // ໃຊ້ me() ກວດຄືນເພາະມັນຄືນ null (ບໍ່ throw) ຈຶ່ງແຍກ "ໝົດອາຍຸ" ອອກ
+        // ຈາກ "ເນັດຂາດ" ໄດ້ ໂດຍບໍ່ຕ້ອງອ່ານຂໍ້ຄວາມ error (production ປິດບັງໄວ້).
+        try {
+          const me = await Auth.me();
+          if (active && !me) setSession(null);
+        } catch {
+          /* ຕິດຕໍ່ server ບໍ່ໄດ້ — ຮອບໜ້າຄ່ອຍລອງໃໝ່ */
+        }
       });
     };
     beat();

@@ -75,11 +75,14 @@ export default function ChatWidget() {
     }
   }, []);
 
+  // ບໍ່ມີ session (ໜ້າ login ຫຼື token ໝົດອາຍຸ) ຢ່າຍິງເລີຍ — ບໍ່ດັ່ງນັ້ນ
+  // poller ນີ້ຈະຍິງທຸກ 20 ວິ ແລ້ວໄດ້ 500 Unauthorized ຕໍ່ເນື່ອງ
   useEffect(() => {
+    if (!myCode) return;
     void loadPeople();
     const id = window.setInterval(() => void loadPeople(), 20000);
     return () => window.clearInterval(id);
-  }, [loadPeople]);
+  }, [loadPeople, myCode]);
 
   useEffect(() => {
     if (!active) return;

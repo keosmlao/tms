@@ -119,13 +119,15 @@ export default function Topbar() {
       setNotifications([]);
       return;
     }
+    // ບໍ່ມີ session ຢ່າຍິງ — ຕອນ token ໝົດອາຍຸ poller ນີ້ຈະໄດ້ 500 ທຸກນາທີ
+    if (!session) return;
     void loadNotifications();
     // 60s, not 30s: this query is the most expensive thing that runs on every
     // page (measured ~720 ms average in the dev log), and nothing in the feed
     // is urgent enough to justify polling it twice a minute.
     const timer = window.setInterval(() => void loadNotifications(), 60000);
     return () => window.clearInterval(timer);
-  }, [isSaleLogin, loadNotifications]);
+  }, [isSaleLogin, loadNotifications, session]);
 
   const unreadCount = useMemo(
     () => notifications.filter((item) => !item.read).length,
