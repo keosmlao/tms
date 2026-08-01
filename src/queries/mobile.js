@@ -12,6 +12,7 @@ const {
 const {
   getLastDeliveredPoints,
   saveCustomerPoint,
+  saveCustomerMasterPoint,
 } = require("./customer-point");
 const {
   coerceDateToFixedYear,
@@ -793,43 +794,12 @@ async function mobileJobAction(body) {
         );
 
         // Backfill the customer's stored location when it's missing — same
-        // guarded update as checkin_bill (only fills NULL/empty/zero).
-        if (currentBill.cust_code && lat && lng) {
-          const updated = await client.query(
-            `UPDATE public.ar_customer_detail
-             SET latitude = $2, longitude = $3
-             WHERE ar_code = $1
-               AND (
-                 latitude IS NULL
-                 OR longitude IS NULL
-                 OR TRIM(latitude::text) = ''
-                 OR TRIM(longitude::text) = ''
-                 OR TRIM(latitude::text) ~ '^-?0+\\.?0*$'
-                 OR TRIM(longitude::text) ~ '^-?0+\\.?0*$'
-               )
-             RETURNING ar_code`,
-            [currentBill.cust_code, lat, lng]
-          );
-          if ((updated.rowCount ?? 0) === 0) {
-            await client.query(
-              `INSERT INTO public.ar_customer_detail (ar_code, latitude, longitude)
-               VALUES ($1, $2, $3)
-               ON CONFLICT (ar_code) DO UPDATE
-                 SET latitude = EXCLUDED.latitude,
-                     longitude = EXCLUDED.longitude
-                 WHERE
-                   public.ar_customer_detail.latitude IS NULL
-                   OR public.ar_customer_detail.longitude IS NULL
-                   OR TRIM(public.ar_customer_detail.latitude::text) = ''
-                   OR TRIM(public.ar_customer_detail.longitude::text) = ''
-                   OR TRIM(public.ar_customer_detail.latitude::text) ~ '^-?0+\\.?0*$'
-                   OR TRIM(public.ar_customer_detail.longitude::text) ~ '^-?0+\\.?0*$'`,
-              [currentBill.cust_code, lat, lng]
-            ).catch((err) => {
-              console.warn('[receive_customer_bill] ar_customer_detail insert skipped:', err?.message);
-            });
-          }
-        }
+        // guarded write as checkin_bill (only fills empty/zero). Not an
+        // overwrite: complete_bill owns that, using the shop-front fix.
+        await saveCustomerMasterPoint(
+          { custCode: currentBill.cust_code, lat, lng },
+          client
+        );
 
         await client.query("COMMIT");
         void notifyBillStatus(billNo, "📦 ຮັບສິນຄ້າຈາກລານລູກຄ້າແລ້ວ");
@@ -1060,48 +1030,14 @@ async function mobileJobAction(body) {
           );
         }
 
-        // Backfill the customer's location if it's missing. Only updates when
-        // the existing latitude/longitude is NULL/empty/zero so we don't
-        // overwrite a known-good location with a delivery checkin point.
-        // Accepts any zero variant ("0", "0.0", "0.000000", "-0.0", whitespace).
-        if (currentBill.cust_code && lat && lng) {
-          const updated = await client.query(
-            `UPDATE public.ar_customer_detail
-             SET latitude = $2, longitude = $3
-             WHERE ar_code = $1
-               AND (
-                 latitude IS NULL
-                 OR longitude IS NULL
-                 OR TRIM(latitude::text) = ''
-                 OR TRIM(longitude::text) = ''
-                 OR TRIM(latitude::text) ~ '^-?0+\\.?0*$'
-                 OR TRIM(longitude::text) ~ '^-?0+\\.?0*$'
-               )
-             RETURNING ar_code`,
-            [currentBill.cust_code, lat, lng]
-          );
-          // If no row matched (e.g. customer not in ar_customer_detail), insert.
-          if ((updated.rowCount ?? 0) === 0) {
-            await client.query(
-              `INSERT INTO public.ar_customer_detail (ar_code, latitude, longitude)
-               VALUES ($1, $2, $3)
-               ON CONFLICT (ar_code) DO UPDATE
-                 SET latitude = EXCLUDED.latitude,
-                     longitude = EXCLUDED.longitude
-                 WHERE
-                   public.ar_customer_detail.latitude IS NULL
-                   OR public.ar_customer_detail.longitude IS NULL
-                   OR TRIM(public.ar_customer_detail.latitude::text) = ''
-                   OR TRIM(public.ar_customer_detail.longitude::text) = ''
-                   OR TRIM(public.ar_customer_detail.latitude::text) ~ '^-?0+\\.?0*$'
-                   OR TRIM(public.ar_customer_detail.longitude::text) ~ '^-?0+\\.?0*$'`,
-              [currentBill.cust_code, lat, lng]
-            ).catch((err) => {
-              // ar_customer_detail might not have ar_code as primary key; skip on conflict.
-              console.warn('[checkin] ar_customer_detail insert skipped:', err?.message);
-            });
-          }
-        }
+        // Backfill the customer's location if it's missing. Only fills when the
+        // existing latitude/longitude is empty/zero — the driver may check in
+        // from the road, so this must not overwrite a better fix. complete_bill
+        // is where the shop-front coordinate overwrites unconditionally.
+        await saveCustomerMasterPoint(
+          { custCode: currentBill.cust_code, lat, lng },
+          client
+        );
 
         await client.query("COMMIT");
         if (dispatchAutoStarted) void notifyJobDispatchStarted(currentDocNo);
@@ -1474,6 +1410,13 @@ async function mobileJobAction(body) {
           if (custCode && !custCodeRow.rows?.[0]?.fwd) {
             await saveCustomerPoint(
               { custCode, lat: latEnd, lng: lngEnd, billNo },
+              client
+            );
+            // ອັບເດດທະບຽນລູກຄ້ານຳທຸກຄັ້ງທີ່ປິດບິນ — ທັບຂອງເກົ່າສະເໝີ. ໃຊ້
+            // lat_end/lng_end ບໍ່ແມ່ນ lat/lng ຕອນ check-in ເພາະພິກັດຕອນປິດບິນ
+            // ຄືຢູ່ໜ້າຮ້ານຈິງ ຈຶ່ງໃໝ່ກວ່າ ແລະ ຖືກກວ່າຂອງທີ່ມີຢູ່.
+            await saveCustomerMasterPoint(
+              { custCode, lat: latEnd, lng: lngEnd, overwrite: true },
               client
             );
           }

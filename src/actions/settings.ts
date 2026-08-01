@@ -33,6 +33,11 @@ const NOTIFY_KEYS = [
   // user/group. Empty = disabled.
   "kpi.alert_enabled",
   "kpi.alert_line_to",
+  // ແຈ້ງເຕືອນລົດ (fleet-alert.js): ລົດຈອດດົນ / ອອກຈາກສາງແຕ່ບໍ່ກົດເລີ່ມຈັດສົ່ງ.
+  // ສົ່ງ LINE ຫາພະນັກງານສາຂາທີ່ມີ line_id ຈຶ່ງບໍ່ຕ້ອງຕັ້ງລາຍຊື່ຜູ້ຮັບຢູ່ນີ້.
+  "fleet.alert_enabled",
+  "fleet.parked_minutes",
+  "fleet.left_base_metres",
   "tv.pages",
   "tv.secs",
 ] as const;
@@ -55,6 +60,9 @@ export interface NotifySettings {
   "kpi.target_avg_close_minutes": string;
   "kpi.alert_enabled": string;
   "kpi.alert_line_to": string;
+  "fleet.alert_enabled": string;
+  "fleet.parked_minutes": string;
+  "fleet.left_base_metres": string;
   "tv.pages": string;
   "tv.secs": string;
 }

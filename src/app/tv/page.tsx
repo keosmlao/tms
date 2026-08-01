@@ -139,6 +139,23 @@ type Workload = {
   delivered: number;
 };
 
+type OpenCutoff = {
+  cutoff: string;
+  total: number;
+  before: number;
+  after: number;
+  percent: number;
+  minutes_left: number;
+};
+
+type QueueJump = {
+  bill_no: string;
+  cust_name: string;
+  opened_display: string;
+  skipped: number;
+  oldest_waiting: string;
+};
+
 type Trail = {
   car_code: string;
   car_name: string;
@@ -189,9 +206,11 @@ type TvData = {
   todo: TodoRow[];
   late_bills: LateBill[];
   workload: Workload;
+  open_cutoff: OpenCutoff;
+  queue_jumped: QueueJump[];
 };
 
-const PAGES = ["ພາບລວມມື້ນີ້", "ຕ້ອງແກ້ດຽວນີ້", "ບິນທີ່ຊ້າ"];
+const PAGES = ["ພາບລວມມື້ນີ້", "ຕ້ອງແກ້ດຽວນີ້", "ບິນທີ່ຊ້າ", "ບິນລັດຄິວ"];
 
 /**
  * ລັອກໜ້າ: /tv?page=1 ສະແດງແຕ່ "ພາບລວມມື້ນີ້" ບໍ່ໝຸນ.
@@ -380,6 +399,9 @@ export default function TvPage() {
         <Page active={page === 2}>
           <LateBills rows={data.late_bills} drift={drift} />
         </Page>
+        <Page active={page === 3}>
+          <QueueJumped rows={data.queue_jumped} />
+        </Page>
       </section>
 
       <Ticker rows={data.feed} />
@@ -442,6 +464,7 @@ function Overview({
           onTime={work.on_time}
           late={work.late}
           kpiHours={work.kpi_hours}
+          open={data.open_cutoff}
         />
 
           <TodoBand rows={data.todo} />
@@ -554,6 +577,7 @@ function FlowBand({
   onTime,
   late,
   kpiHours,
+  open,
 }: {
   delivered: number;
   onTruck: number;
@@ -563,6 +587,7 @@ function FlowBand({
   onTime: number;
   late: number;
   kpiHours: number;
+  open: OpenCutoff;
 }) {
   const total = delivered + onTruck + unscheduled;
   const steps = [
@@ -610,6 +635,54 @@ function FlowBand({
           <em>{late} ບິນ</em>
         </span>
       </div>
+
+      <CutoffRow open={open} />
+    </div>
+  );
+}
+
+/**
+ * ເປີດບິນສົ່ງທັນກຳນົດ 15:00 ບໍ.
+ *
+ * ຈຸດປະສົງແມ່ນໃຫ້ຫ້ອງຂາຍເຫັນວ່າຍັງເຫຼືອເວລາເທົ່າໃດ ກ່ອນບິນທີ່ເປີດຈະຈັດລົງ
+ * ຖ້ຽວມື້ນັ້ນບໍ່ທັນ — ຈຶ່ງເອົາເວລາທີ່ເຫຼືອໄວ້ຂວາສຸດເປັນປ້າຍສີ.
+ * ພໍເລີຍ 15:00 ແລ້ວ ໂຕນັບຖອຍຫຼັງປ່ຽນເປັນ "ໝົດເວລາແລ້ວ".
+ *
+ * ຢູ່ໃນກາດ "ບິນທັງໝົດມື້ນີ້" ບໍ່ແມ່ນກາດຂອງຕົນເອງ — ຈໍຫ້ອງຈັດສົ່ງບາງໜ່ວຍສູງ
+ * ພຽງ 919px ແລະ ກາດເພີ່ມອີກໜຶ່ງໜ່ວຍ (ຂອບ+ຊ່ອງ ~40px) ດັນໃຫ້ບັດຖ້ຽວລົ້ນຈໍ.
+ *
+ * ນັບທົ່ວບໍລິສັດ ບໍ່ແຍກສາຂາ — ເບິ່ງເຫດຜົນໃນ tv-dashboard.js
+ */
+function CutoffRow({ open }: { open: OpenCutoff }) {
+  const late = open.after > 0;
+  const tone = open.percent >= 90 ? "ok" : open.percent >= 75 ? "warn" : "bad";
+  const left = open.minutes_left;
+  const leftLabel =
+    left > 0
+      ? `ຍັງເຫຼືອ ${Math.floor(left / 60)} ຊມ ${String(left % 60).padStart(2, "0")} ນທ`
+      : "ໝົດເວລາແລ້ວ";
+  return (
+    <div className="tv-cutoff">
+      <span className="tv-cutoff-head">
+        ເປີດບິນສົ່ງ
+        <b>{open.total.toLocaleString()}</b>
+      </span>
+
+      <span className="tv-cutoff-part">
+        ກ່ອນ {open.cutoff}
+        <b className={`tv-tone-${tone}`}>{open.percent}%</b>
+        <em>{open.before.toLocaleString()} ບິນ</em>
+      </span>
+
+      <span className="tv-cutoff-part">
+        ຫຼັງ {open.cutoff}
+        <b className={late ? "tv-tone-bad" : "tv-tone-ok"}>{open.after.toLocaleString()}</b>
+        <em>ບິນ</em>
+      </span>
+
+      <span className={`tv-cutoff-left${left > 0 ? "" : " tv-cutoff-left-done"}`}>
+        {leftLabel}
+      </span>
     </div>
   );
 }
@@ -829,6 +902,56 @@ function AlertPanel({
  * ໜ້າສະຫຼຸບບອກແຕ່ "31 ບິນ" ແລະ "ຊ້າ 22 ວັນ" ແຕ່ບໍ່ບອກວ່າແມ່ນບິນໃດ
  * ລູກຄ້າໃດ — ຄົນເບິ່ງຈຶ່ງຍັງຕ້ອງໄປເປີດຄອມຫາຕໍ່. ໜ້ານີ້ບອກໃຫ້ຄົບ.
  */
+/**
+ * ບິນລັດຄິວ — ເປີດຫຼັງ ແຕ່ຖືກຈັດເຂົ້າຖ້ຽວກ່ອນ ຂະນະທີ່ບິນເກົ່າກວ່າຍັງຄ້າງ.
+ *
+ * ທຽບສະເພາະບິນທີ່ນັດສົ່ງວັນດຽວກັນ ແລະ ສາຂາດຽວກັນ — ເບິ່ງເຫດຜົນໃນ
+ * tv-dashboard.js. ສະແດງເວລາຂອງບິນເກົ່າສຸດທີ່ຖືກແຊງນຳ ເພາະ "ແຊງ 2 ໃບ"
+ * ຢ່າງດຽວບໍ່ບອກວ່າຄວນໄປແກ້ບິນໃດ.
+ */
+function QueueJumped({ rows }: { rows: QueueJump[] }) {
+  if (rows.length === 0) {
+    return <Empty text="ບໍ່ມີບິນລັດຄິວ — ຈັດຕາມລຳດັບການເປີດບິນ" />;
+  }
+  // ຈໍບໍ່ເລື່ອນ — 2 ຖັນ × 6 ແຖວ ຄືທີ່ຈໍເຕ້ຍ (ວັດແລ້ວ 919px) ຮັບໄດ້ພໍດີ
+  const shown = rows.slice(0, 12);
+  const half = Math.ceil(shown.length / 2);
+  const columns = [shown.slice(0, half), shown.slice(half)];
+  return (
+    <div className="tv-late">
+      <div className="tv-late-head">
+        <span>ບິນລັດຄິວ · ເປີດຫຼັງ ແຕ່ຈັດຖ້ຽວກ່ອນ</span>
+        <span className="tv-late-total">{rows.length.toLocaleString()} ບິນ</span>
+      </div>
+      <div className="tv-late-cols">
+        {columns.map((column, columnIndex) => (
+          <div className="tv-late-col" key={columnIndex}>
+            {column.map((row) => (
+              <div className="tv-late-row tv-late-row-jump tv-late-warn" key={row.bill_no}>
+                <span className="tv-late-days">ແຊງ {row.skipped}</span>
+                <span className="tv-late-main">
+                  <span className="tv-late-cust">{row.cust_name}</span>
+                  <span className="tv-late-meta">
+                    {row.bill_no} · ເປີດ {row.opened_display}
+                  </span>
+                </span>
+                <span className="tv-late-due tv-late-due-since">
+                  {row.oldest_waiting ? `ຄ້າງແຕ່ ${row.oldest_waiting}` : ""}
+                </span>
+              </div>
+            ))}
+          </div>
+        ))}
+      </div>
+      {rows.length > shown.length && (
+        <div className="tv-late-rest">
+          ແລະ ອີກ {rows.length - shown.length} ບິນ
+        </div>
+      )}
+    </div>
+  );
+}
+
 function LateBills({ rows, drift }: { rows: LateBill[]; drift: number }) {
   if (rows.length === 0) {
     return <Empty text="ບໍ່ມີບິນທີ່ເລີຍກຳນົດ" />;
@@ -900,13 +1023,17 @@ function Ticker({ rows }: { rows: FeedRow[] }) {
   return (
     <footer className="tv-ticker">
       <span className="tv-ticker-tag">ສຳເລັດລ່າສຸດ</span>
-      <div className="tv-ticker-track">
-        {stream.map((row, index) => (
-          <span className="tv-ticker-item" key={`${row.bill_no}-${index}`}>
-            <b>{row.at ?? ""}</b> {row.cust_name}
-            <em>{row.driver}</em>
-          </span>
-        ))}
+      {/* ຕ້ອງມີກ່ອງນີ້ຫຸ້ມ: track ຖືກ translateX ທັງກ່ອງ ຖ້າບໍ່ຕັດຢູ່ນີ້
+          ໜັງສືຈະແລ່ນອອກນອກກ່ອງໄປທັບປ້າຍ "ສຳເລັດລ່າສຸດ" ເບື້ອງຊ້າຍ */}
+      <div className="tv-ticker-viewport">
+        <div className="tv-ticker-track">
+          {stream.map((row, index) => (
+            <span className="tv-ticker-item" key={`${row.bill_no}-${index}`}>
+              <b>{row.at ?? ""}</b> {row.cust_name}
+              <em>{row.driver}</em>
+            </span>
+          ))}
+        </div>
       </div>
     </footer>
   );

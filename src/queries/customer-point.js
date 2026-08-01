@@ -108,6 +108,63 @@ async function saveCustomerPoint(
 }
 
 /**
+ * ຂຽນພິກັດຮ້ານລົງທະບຽນລູກຄ້າ public.ar_customer_detail.
+ *
+ * ມີ 2 ໂໝດ ຕາມວ່າພິກັດມາຈາກໃສ:
+ *  - overwrite: true  — ທັບຂອງເກົ່າສະເໝີ. ໃຊ້ຕອນ "ປິດບິນສຳເລັດ" ເທົ່ານັ້ນ
+ *    ເພາະ lat_end/lng_end ຄືພິກັດທີ່ຄົນຂັບຢືນຢູ່ໜ້າຮ້ານຈິງ. ລູກຄ້າຍ້າຍຮ້ານ ຫຼື
+ *    ຄັ້ງກ່ອນປັກຜິດ ຄັ້ງໃໝ່ຕ້ອງແກ້ໄດ້ — ກົດດຽວກັບ odg_tms_customer_point.
+ *  - overwrite: false — ຕື່ມສະເພາະທີ່ຍັງວ່າງ. ໃຊ້ຕອນ check-in / ຮັບຈາກລານ
+ *    ລູກຄ້າ ເພາະຄົນຂັບອາດກົດແຕ່ໄກຮ້ານ ຈຶ່ງບໍ່ຄວນທັບພິກັດທີ່ດີກວ່າ.
+ *
+ * ວັດຈາກຖານຂໍ້ມູນຈິງ (2026-08-01): latitude/longitude ເປັນ numeric DEFAULT 0.0
+ * (ບໍ່ແມ່ນ NULL) ຈຶ່ງນັບ 0 ວ່າ "ວ່າງ"; ar_code ເປັນ PK ຈຶ່ງ ON CONFLICT ໄດ້.
+ *
+ * ຮັບ client ໄດ້ ເພື່ອຢູ່ transaction ດຽວກັບການປິດບິນ. ໃຊ້ SAVEPOINT ເພາະການ
+ * ຂຽນພິກັດເປັນເລື່ອງເສີມ — ຖ້າລົ້ມ ຕ້ອງບໍ່ພາໃຫ້ການ check-in/ປິດບິນລົ້ມນຳ.
+ */
+async function saveCustomerMasterPoint(
+  { custCode, lat, lng, overwrite = false },
+  client = null
+) {
+  const code = String(custCode ?? "").trim();
+  const latNum = Number(String(lat ?? "").trim());
+  const lngNum = Number(String(lng ?? "").trim());
+  if (!code || !Number.isFinite(latNum) || !Number.isFinite(lngNum)) return;
+  if (latNum === 0 || lngNum === 0) return;
+
+  const sql = `
+    INSERT INTO public.ar_customer_detail (ar_code, latitude, longitude)
+    VALUES ($1, $2, $3)
+    ON CONFLICT (ar_code) DO UPDATE
+      SET latitude = EXCLUDED.latitude,
+          longitude = EXCLUDED.longitude
+    ${
+      overwrite
+        ? ""
+        : `WHERE COALESCE(public.ar_customer_detail.latitude, 0) = 0
+         OR COALESCE(public.ar_customer_detail.longitude, 0) = 0`
+    }`;
+  const params = [code, latNum, lngNum];
+
+  if (!client) {
+    await query(sql, params).catch((err) => {
+      console.warn("[customer-point] ຂຽນພິກັດລົງ ar_customer_detail ບໍ່ໄດ້:", err?.message);
+    });
+    return;
+  }
+
+  await client.query("SAVEPOINT save_cust_master_point");
+  try {
+    await client.query(sql, params);
+    await client.query("RELEASE SAVEPOINT save_cust_master_point");
+  } catch (err) {
+    await client.query("ROLLBACK TO SAVEPOINT save_cust_master_point");
+    console.warn("[customer-point] ຂຽນພິກັດລົງ ar_customer_detail ບໍ່ໄດ້:", err?.message);
+  }
+}
+
+/**
  * ຈຸດສົ່ງຫຼ້າສຸດຂອງລູກຄ້າຫຼາຍລາຍພ້ອມກັນ (ອ່ານດ້ວຍ PK ຈຶ່ງໄວ).
  *
  * @param {string[]} custCodes
@@ -191,6 +248,7 @@ module.exports = {
   CUSTOMER_POINT_SCHEMA_VERSION,
   ensureCustomerPointSchema,
   saveCustomerPoint,
+  saveCustomerMasterPoint,
   getLastDeliveredPoints,
   attachDeliveryPoint,
 };

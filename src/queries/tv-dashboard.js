@@ -5,7 +5,7 @@ const {
   FIXED_YEAR_START,
   FIXED_YEAR_END,
 } = require("../lib/fixed-year");
-const { getBillsPending } = require("./bills");
+const { getBillsPending, MANUAL_IC_TRANS_FLAGS } = require("./bills");
 const { getDistanceMap } = require("./trip-distance");
 
 // A wall-mounted screen polls every ~15s and several screens may hang in
@@ -38,6 +38,9 @@ const CHASE_DAYS = 7;
 
 // KPI: ບິນຕ້ອງຮອດມືລູກຄ້າພາຍໃນ 24 ຊົ່ວໂມງນັບແຕ່ວັນທີ່ຄວນສົ່ງ.
 const KPI_HOURS = 24;
+
+// ກຳນົດເປີດບິນສົ່ງປະຈຳວັນ — ເປີດຫຼັງເວລານີ້ ຫ້ອງຈັດຖ້ຽວຈັດລົງຖ້ຽວມື້ນັ້ນບໍ່ທັນ.
+const OPEN_CUTOFF = "15:00";
 
 // ຈໍນີ້ຕິດຢູ່ຫ້ອງຈັດສົ່ງດອນຕິ້ວ ຈຶ່ງເບິ່ງສາຂາດຽວ. ຢາກເບິ່ງສາຂາອື່ນໃສ່
 // ?branch=02-0001 (ໂອດ່ຽນ) ຫຼື ?branch=02-0003 (ປາກເຊ).
@@ -420,6 +423,77 @@ async function getTvDashboard({ date = "", branch = "" } = {}) {
     }
   }
 
+  // ບິນລັດຄິວ — ເປີດຫຼັງ ແຕ່ຖືກຈັດເຂົ້າຖ້ຽວກ່ອນ ຂະນະທີ່ບິນເກົ່າກວ່າຍັງຄ້າງ.
+  //
+  // ທຽບສະເພາະ "ວັນສົ່ງດຽວກັນ + ສາຂາດຽວກັນ" ເທົ່ານັ້ນ ເພາະນັ້ນຄືການແຂ່ງຄິວຈິງ.
+  // ວັດຈາກຖານຂໍ້ມູນຈິງ (2026-08-01): ຖ້າທຽບຂ້າມວັນສົ່ງຈະໄດ້ 845 ໃບ (ແຊງເຖິງ 7)
+  // ເພາະບິນທີ່ນັດສົ່ງວັນຫຼັງຖືກນັບວ່າ "ແຊງ" ບິນທີ່ສົ່ງໄປແລ້ວ — ບໍ່ມີຄວາມໝາຍ.
+  // ຈຳກັດວັນສົ່ງດຽວກັນເຫຼືອ 181 ໃບ (3.6%) ຈຶ່ງເປັນສັນຍານທີ່ໃຊ້ໄດ້.
+  //
+  // ຂອບເຂດຄິວຕາມ bills.js: ຕ້ອງມີ scheduled_date + delivery_round_code ແລະ
+  // ຢູ່ 3 ສາຂາທີ່ TMS ຈັດສົ່ງເອງ. ບໍ່ດັ່ງນັ້ນບິນຮ້ານມາຮັບເອງ (02-0004) ທີ່ຄ້າງ
+  // ແຕ່ເດືອນ 4 ຈະເຮັດໃຫ້ບິນທຸກໃບຫຼັງຈາກນັ້ນກາຍເປັນ "ລັດຄິວ" ໝົດ.
+  const queueJumped = await query(
+    `WITH q AS (
+       SELECT a.doc_no,
+              (a.doc_date + COALESCE(NULLIF(TRIM(a.doc_time), '')::time, '00:00'::time))
+                AS opened_at,
+              pb.scheduled_date::date AS sched_date,
+              COALESCE(NULLIF(TRIM(cust.name_1), ''), a.cust_code, '') AS cust_name,
+              EXISTS (
+                SELECT 1 FROM public.odg_tms_detail d WHERE d.bill_no = a.doc_no
+              ) AS scheduled
+         FROM ic_trans a
+         JOIN public.odg_tms_pending_bill pb ON pb.bill_no = a.doc_no
+         LEFT JOIN ar_customer cust ON cust.code = a.cust_code
+        WHERE a.trans_flag IN (${MANUAL_IC_TRANS_FLAGS.join(",")})
+          AND a.doc_time ~ '^[0-9]{1,2}:[0-9]{2}'
+          AND TRIM(pb.transport_code) = ${branchList}
+          AND pb.scheduled_date IS NOT NULL
+          AND NULLIF(TRIM(pb.delivery_round_code), '') IS NOT NULL
+          AND pb.scheduled_date::date = $1::date
+     )
+     SELECT s.doc_no AS bill_no, s.cust_name,
+            to_char(s.opened_at, 'DD/MM HH24:MI') AS opened_display,
+            (SELECT count(*) FROM q p
+              WHERE NOT p.scheduled AND p.opened_at < s.opened_at)::int AS skipped,
+            (SELECT to_char(min(p.opened_at), 'DD/MM HH24:MI') FROM q p
+              WHERE NOT p.scheduled AND p.opened_at < s.opened_at) AS oldest_waiting
+       FROM q s
+      WHERE s.scheduled
+        AND (SELECT count(*) FROM q p
+              WHERE NOT p.scheduled AND p.opened_at < s.opened_at) > 0
+      ORDER BY skipped DESC, s.opened_at DESC
+      -- ສົ່ງເກີນທີ່ຈໍສະແດງ ເພື່ອໃຫ້ຫົວຂໍ້ບອກຈຳນວນຈິງໄດ້ — ໜ້າຈໍຕັດເອງ.
+      -- 200 ສູງກວ່າບິນທີ່ຈັດຕໍ່ວັນຕໍ່ສາຂາຫຼາຍເທົ່າ (ວັດແລ້ວ ~56 ໃບ/ວັນ)
+      -- ຈຶ່ງບໍ່ຕິດເພດານ ແລະ ຈຳນວນທີ່ຫົວຂໍ້ບອກເປັນຈຳນວນຈິງ
+      LIMIT 200`,
+    [day]
+  ).catch(() => []);
+
+  // ເປີດບິນສົ່ງທັນກຳນົດ 15:00 ບໍ.
+  //
+  // ນັບທົ່ວບໍລິສັດ ບໍ່ແຍກສາຂາຂົນສົ່ງຄືສ່ວນອື່ນຂອງຈໍ — ຕອນເປີດບິນຍັງບໍ່ທັນຮູ້
+  // ວ່າຈະຈັດໃຫ້ສາຂາໃດ. ວັດຈາກຖານຂໍ້ມູນຈິງ (2026-08-01): ບິນທີ່ເປີດຫຼັງ 15:00
+  // ໃນ 14 ວັນ ມີ 604 ໃບ ແຕ່ 399 ໃບ (66%) ຍັງບໍ່ມີສາຂາ — ຖ້າແຍກສາຂາຈະນັບຂາດ
+  // ເກືອບເຄິ່ງ ແລ້ວຕົວເລກຈະບອກວ່າ "ດີ" ທັງທີ່ບໍ່ດີ.
+  //
+  // ໃຊ້ doc_date + doc_time ເປັນເວລາເປີດ ຄືກັບ openedAt ຂ້າງເທິງ ເພາະເປັນ
+  // ເວລາລາວ ແລະ ມີຄົບ 100%; create_date_time_now ເປັນ UTC (ຊ້າ 7 ຊົ່ວໂມງ).
+  const openCutoff = await queryOne(
+    `SELECT count(*)::int AS total,
+            count(*) FILTER (WHERE doc_time::time < $2::time)::int AS before_cutoff,
+            GREATEST(
+              0,
+              FLOOR(EXTRACT(EPOCH FROM (($1::date + $2::time) - LOCALTIMESTAMP)) / 60)
+            )::int AS minutes_left
+       FROM ic_trans
+      WHERE trans_flag IN (${MANUAL_IC_TRANS_FLAGS.join(",")})
+        AND doc_date = $1::date
+        AND doc_time ~ '^[0-9]{1,2}:[0-9]{2}'`,
+    [day, OPEN_CUTOFF]
+  ).catch(() => null);
+
   // ຕັ້ງຄ່າຈໍ — ເກັບຮ່ວມກັບຄ່າຕັ້ງອື່ນຂອງລະບົບ
   const [tvPages, tvSecs] = await Promise.all([
     queryOne(
@@ -775,6 +849,25 @@ async function getTvDashboard({ date = "", branch = "" } = {}) {
         stale: age !== null && age >= GPS_STALE_MINUTES,
       };
     }),
+    open_cutoff: (() => {
+      const total = Number(openCutoff?.total ?? 0);
+      const before = Number(openCutoff?.before_cutoff ?? 0);
+      return {
+        cutoff: OPEN_CUTOFF,
+        total,
+        before,
+        after: Math.max(0, total - before),
+        percent: total > 0 ? Math.round((before / total) * 100) : 0,
+        minutes_left: Number(openCutoff?.minutes_left ?? 0),
+      };
+    })(),
+    queue_jumped: queueJumped.map((row) => ({
+      bill_no: String(row.bill_no ?? ""),
+      cust_name: String(row.cust_name || "-"),
+      opened_display: String(row.opened_display ?? ""),
+      skipped: Number(row.skipped ?? 0),
+      oldest_waiting: String(row.oldest_waiting ?? ""),
+    })),
   };
 
   tvCache.set(cacheKey, { at: Date.now(), value: payload });

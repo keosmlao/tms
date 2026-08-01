@@ -16,12 +16,15 @@ export interface NotifySettings {
   "kpi.target_avg_close_minutes": string;
   "kpi.alert_enabled": string;
   "kpi.alert_line_to": string;
+  "fleet.alert_enabled": string;
+  "fleet.parked_minutes": string;
+  "fleet.left_base_metres": string;
   "tv.pages": string;
   "tv.secs": string;
 }
 
 export const EMPTY_SETTINGS: NotifySettings = {
-  "tv.pages": "1,2,3",
+  "tv.pages": "1,2,3,4",
   "tv.secs": "20",
   "line.test_enabled": "",
   "line.test_to": "",
@@ -40,6 +43,9 @@ export const EMPTY_SETTINGS: NotifySettings = {
   "kpi.target_avg_close_minutes": "30",
   "kpi.alert_enabled": "0",
   "kpi.alert_line_to": "",
+  "fleet.alert_enabled": "0",
+  "fleet.parked_minutes": "30",
+  "fleet.left_base_metres": "500",
 };
 
 export const SETTING_TOPICS = [
@@ -77,6 +83,13 @@ export const SETTING_TOPICS = [
     subtitle: "ກຳນົດເປົ້າໝາຍສຳເລັດທັນເວລາ, ເວລາສົ່ງ ແລະ ເວລາປິດຖ້ຽວ",
     icon: "chart",
     tone: "teal",
+  },
+  {
+    key: "fleet",
+    title: "ແຈ້ງເຕືອນລົດ",
+    subtitle: "ເຕືອນເມື່ອລົດຈອດດົນ ຫຼື ອອກຈາກສາງແຕ່ຍັງບໍ່ກົດເລີ່ມຈັດສົ່ງ",
+    icon: "map",
+    tone: "amber",
   },
   {
     key: "line-sales",

@@ -2119,6 +2119,7 @@ async function getBillDeliveryHistory(billNo) {
 }
 
 module.exports = {
+  MANUAL_IC_TRANS_FLAGS,
   getBillDeliveryHistory,
   applyRemainingCounts,
   sendBillContactLine,

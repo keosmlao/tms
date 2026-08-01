@@ -18,6 +18,7 @@ const TV_PAGES = [
   { no: 1, label: "ພາບລວມມື້ນີ້", hint: "ຄວາມຄືບໜ້າ · ວຽກຄ້າງ · ຖ້ຽວກຳລັງແລ່ນ" },
   { no: 2, label: "ຕ້ອງແກ້ດຽວນີ້", hint: "ຍັງບໍ່ອອກ · ຄ້າງປິດຖ້ຽວ · ບິນຍົກເລີກ" },
   { no: 3, label: "ບິນທີ່ຊ້າ", hint: "ລາຍບິນທີ່ເລີຍກຳນົດ ພ້ອມຊື່ລູກຄ້າ" },
+  { no: 4, label: "ບິນລັດຄິວ", hint: "ບິນທີ່ເປີດຫຼັງ ແຕ່ຖືກຈັດຖ້ຽວກ່ອນບິນເກົ່າ" },
 ];
 
 export default function TvSettingsPage() {
@@ -57,7 +58,8 @@ export default function TvSettingsPage() {
     setError(null);
     try {
       // ບໍ່ເລືອກຈັກໜ້າ = ຈໍຫວ່າງເປົ່າ ຈຶ່ງກັບໄປໃຊ້ທຸກໜ້າແທນ
-      const pages = selected.length > 0 ? selected.join(",") : "1,2,3";
+      const pages =
+        selected.length > 0 ? selected.join(",") : TV_PAGES.map((p) => p.no).join(",");
       const secs = Number(data["tv.secs"] || "20");
       await Actions.saveNotifySettings({
         "tv.pages": pages,

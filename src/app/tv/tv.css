@@ -81,26 +81,30 @@ html,
         font-size: 40px;
         color: var(--tv-text-3);
       }
+      /* ຫົວຈໍເປັນປ້າຍບອກບໍລິບົດ ບໍ່ແມ່ນຂໍ້ມູນທີ່ຄົນຢືນເບິ່ງ — ຢູ່ເຕ້ຍໆໄດ້ ເພື່ອ
+         ຄືນຄວາມສູງໃຫ້ບັດຖ້ຽວລຸ່ມສຸດ ທີ່ຈໍເຕ້ຍ (919px) ຕັດຫາຍໄປເກືອບໝົດ.
+         line-height ຕ້ອງບີບເປັນ 1.25 ນຳ ບໍ່ດັ່ງນັ້ນ 1.7 ຂອງ tv-root ຈະດັນສູງ */
       .tv-head {
         background: var(--tv-card);
         display: flex;
         align-items: center;
         justify-content: space-between;
-        padding: 18px 34px 12px;
+        padding: 8px 34px 7px;
+        line-height: 1.25;
         border-bottom: 2px solid var(--tv-line);
       }
       .tv-head-left {
         display: flex;
         align-items: baseline;
-        gap: 18px;
+        gap: 15px;
       }
       .tv-title {
-        font-size: 34px;
+        font-size: 26px;
         font-weight: 700;
         color: var(--tv-text);
       }
       .tv-date {
-        font-size: 26px;
+        font-size: 20px;
         color: var(--tv-text-2);
       }
       .tv-tabs {
@@ -110,8 +114,8 @@ html,
         justify-content: center;
       }
       .tv-tab {
-        font-size: 18px;
-        padding: 5px 13px;
+        font-size: 16px;
+        padding: 3px 12px;
         border-radius: 999px;
         color: var(--tv-text-3);
         background: var(--tv-track);
@@ -127,12 +131,12 @@ html,
         gap: 16px;
       }
       .tv-clock {
-        font-size: 40px;
+        font-size: 30px;
         font-weight: 700;
         font-variant-numeric: tabular-nums;
       }
       .tv-stale {
-        font-size: 20px;
+        font-size: 17px;
         color: var(--tv-text-4);
       }
       .tv-stale-warn {
@@ -335,6 +339,69 @@ html,
         font-style: normal;
         font-size: 18px;
         color: var(--tv-text-3);
+      }
+
+      /* ແຖວກຳນົດເປີດບິນ 15:00 — ຢູ່ໃນກາດ tv-flow ຕໍ່ຈາກ tv-flow-kpi ຈຶ່ງໃຊ້
+         ເສັ້ນຄັ່ນແບບດຽວກັນ ແລະ ບໍ່ມີຂອບກາດຂອງຕົນເອງ (ປະຢັດຄວາມສູງ) */
+      .tv-cutoff {
+        display: flex;
+        align-items: baseline;
+        gap: 24px;
+        border-top: 1px solid var(--tv-line);
+        padding-top: 10px;
+        font-size: 19px;
+        color: var(--tv-text-2);
+      }
+      .tv-cutoff-head {
+        display: flex;
+        align-items: baseline;
+        gap: 9px;
+        font-weight: 700;
+        color: var(--tv-text);
+      }
+      .tv-cutoff-head b {
+        font-size: 30px;
+        font-weight: 800;
+        font-variant-numeric: tabular-nums;
+      }
+      .tv-cutoff-part {
+        display: flex;
+        align-items: baseline;
+        gap: 8px;
+      }
+      .tv-cutoff-part b {
+        font-size: 30px;
+        font-weight: 800;
+        font-variant-numeric: tabular-nums;
+      }
+      .tv-cutoff-part b.tv-tone-ok {
+        color: var(--tv-ok);
+      }
+      .tv-cutoff-part b.tv-tone-warn {
+        color: var(--tv-warn);
+      }
+      .tv-cutoff-part b.tv-tone-bad {
+        color: var(--tv-bad);
+      }
+      .tv-cutoff-part em {
+        font-style: normal;
+        font-size: 18px;
+        color: var(--tv-text-3);
+      }
+      /* ໂຕນັບຖອຍຫຼັງດັນໄປຂວາສຸດ — ເປັນສິ່ງທີ່ຄົນຂາຍຕ້ອງເຫັນກ່ອນຢູ່ໄກໆ */
+      .tv-cutoff-left {
+        margin-left: auto;
+        font-size: 22px;
+        font-weight: 800;
+        color: var(--tv-warn);
+        background: var(--tv-warn-bg);
+        padding: 2px 15px;
+        border-radius: 999px;
+        white-space: nowrap;
+      }
+      .tv-cutoff-left-done {
+        color: var(--tv-text-3);
+        background: var(--tv-track);
       }
 
       /* ແຖບ 2 — ວຽກທີ່ຕ້ອງຈັດ */
@@ -719,10 +786,20 @@ html,
         font-size: 20px;
         color: var(--tv-text-4);
       }
+      /* ກ່ອງຕັດຂອງແຖບແລ່ນ — ຕັດຢູ່ຂວາປ້າຍ ບໍ່ແມ່ນຂອບຈໍ ໜັງສືຈຶ່ງບໍ່ແລ່ນທັບປ້າຍ.
+         min-width: 0 ຈຳເປັນ ບໍ່ດັ່ງນັ້ນ flex item ຈະບໍ່ຍອມແຄບກວ່າເນື້ອໃນ */
+      .tv-ticker-viewport {
+        flex: 1;
+        min-width: 0;
+        overflow: hidden;
+      }
       .tv-ticker-track {
         display: flex;
         gap: 44px;
         white-space: nowrap;
+        /* ຕ້ອງກວ້າງເທົ່າເນື້ອໃນ ບໍ່ແມ່ນເທົ່າກ່ອງຫຸ້ມ — translateX(-50%) ຂ້າງລຸ່ມ
+           ຄິດຈາກຄວາມກວ້າງຕົນເອງ ຖ້າເທົ່າກ່ອງຫຸ້ມ ຮອບການແລ່ນຈະຜິດ */
+        width: max-content;
         animation: tv-marquee 48s linear infinite;
       }
       .tv-ticker-item {
@@ -979,6 +1056,9 @@ html,
   grid-template-columns: repeat(auto-fit, minmax(215px, 1fr));
   grid-auto-rows: 1fr;
   gap: 12px;
+  /* ຈໍເຕ້ຍ (ວັດແລ້ວ 1909×919) ບັດຖ້ຽວສູງກວ່າຊ່ອງທີ່ເຫຼືອ — ຖ້າບໍ່ຕັດຢູ່ນີ້
+     ບັດຈະລົ້ນອອກນອກກາດໄປໃຫ້ຂອບຈໍຕັດເອົາ ເຫັນເປັນບັດຂາດເຄິ່ງທັບແຖບແລ່ນ */
+  overflow: hidden;
 }
 .tv-strip-empty {
   display: block;
@@ -992,8 +1072,13 @@ html,
   border-left-width: 7px;
   border-left-color: var(--tv-info);
   border-radius: 14px;
-  padding: 8px 14px;
+  padding: 7px 14px;
   min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+  /* tv-root ຕັ້ງ 1.7 ໄວ້ສຳລັບຂໍ້ຄວາມຍາວ — ໃນບັດນີ້ມີແຕ່ບັນທັດສັ້ນ 5 ແຖວ
+     ຊ້ອນກັນ 1.7 ຈຶ່ງກິນສູງເກີນຄວາມຈຳເປັນ ແລ້ວແຖວລຸ່ມຖືກຕັດຢູ່ຈໍເຕ້ຍ */
+  line-height: 1.32;
 }
 .tv-scard-stalled {
   border-left-color: var(--tv-bad);
@@ -1301,6 +1386,16 @@ html,
   color: var(--tv-text-2);
   text-align: right;
   font-variant-numeric: tabular-nums;
+}
+/* ໜ້າບິນລັດຄິວໃສ່ວັນ+ເວລາ ຍາວກວ່າ due_label ຂອງໜ້າບິນຊ້າ — ຖັນ 66px ບໍ່ພໍ
+   ຈຶ່ງຕ້ອງຂະຫຍາຍຖັນຂວາ ບໍ່ດັ່ງນັ້ນຂໍ້ຄວາມຈະລົ້ນອອກນອກແຖວ */
+.tv-late-row-jump {
+  grid-template-columns: 104px 1fr 152px;
+}
+.tv-late-due-since {
+  white-space: nowrap;
+  font-size: 17px;
+  color: var(--tv-text-3);
 }
 .tv-late-rest {
   font-size: 19px;
