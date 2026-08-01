@@ -467,7 +467,7 @@ function Overview({
           open={data.open_cutoff}
         />
 
-          <TodoBand rows={data.todo} />
+          <TodoBand rows={data.todo} jumped={data.queue_jumped.length} />
         </div>
       </div>
 
@@ -693,12 +693,18 @@ function CutoffRow({ open }: { open: OpenCutoff }) {
  * ແຖບຍາວກິນຄວາມກວ້າງເຄິ່ງຈໍເພື່ອບອກສິ່ງທີ່ໂຕເລກຂ້າງມັນບອກຢູ່ແລ້ວ.
  * ແຜ່ນນ້ອຍວາງໄດ້ຫຼາຍກ້ອນຕໍ່ແຖວ ຈຶ່ງເຫັນທຸກວັນພ້ອມກັນ.
  */
-function TodoBand({ rows }: { rows: TodoRow[] }) {
+function TodoBand({ rows, jumped }: { rows: TodoRow[]; jumped: number }) {
   const total = rows.reduce((sum, row) => sum + row.bills, 0);
   return (
     <div className="tv-todo">
       <div className="tv-todo-head">
         <span>ຕ້ອງຈັດເຂົ້າຖ້ຽວ</span>
+        {/* ຢູ່ໃນຫົວແຖບເກົ່າ ບໍ່ແມ່ນແຖວໃໝ່ — ຈໍຫ້ອງຈັດສົ່ງສູງພຽງ 919px
+            ການເພີ່ມແຖວຈະດັນບັດຖ້ຽວລຸ່ມສຸດຕົກຈໍ. ວາງຄູ່ກັບ "ຕ້ອງຈັດເຂົ້າຖ້ຽວ"
+            ເພາະເປັນເລື່ອງລຳດັບການຈັດຄືກັນ */}
+        {jumped > 0 && (
+          <span className="tv-todo-jump">ລັດຄິວ {jumped.toLocaleString()}</span>
+        )}
         <span className="tv-todo-total">{total.toLocaleString()} ບິນ</span>
       </div>
       {rows.length === 0 ? (
@@ -920,7 +926,7 @@ function QueueJumped({ rows }: { rows: QueueJump[] }) {
   return (
     <div className="tv-late">
       <div className="tv-late-head">
-        <span>ບິນລັດຄິວ · ເປີດຫຼັງ ແຕ່ຈັດຖ້ຽວກ່ອນ</span>
+        <span>ບິນລັດຄິວ · ບິນລຸ່ມນີ້ຈັດຖ້ຽວແລ້ວ ແຕ່ບິນທີ່ເປີດກ່ອນມັນຍັງບໍ່ໄດ້ຈັດ</span>
         <span className="tv-late-total">{rows.length.toLocaleString()} ບິນ</span>
       </div>
       <div className="tv-late-cols">
@@ -928,16 +934,23 @@ function QueueJumped({ rows }: { rows: QueueJump[] }) {
           <div className="tv-late-col" key={columnIndex}>
             {column.map((row) => (
               <div className="tv-late-row tv-late-row-jump tv-late-warn" key={row.bill_no}>
-                <span className="tv-late-days">ແຊງ {row.skipped}</span>
+                <span className="tv-late-days">
+                  ແຊງ {row.skipped} ໃບ
+                </span>
                 <span className="tv-late-main">
                   <span className="tv-late-cust">{row.cust_name}</span>
                   <span className="tv-late-meta">
-                    {row.bill_no} · ເປີດ {row.opened_display}
+                    {row.bill_no} · ເປີດ {row.opened_display} · ຈັດຖ້ຽວແລ້ວ
                   </span>
                 </span>
-                <span className="tv-late-due tv-late-due-since">
-                  {row.oldest_waiting ? `ຄ້າງແຕ່ ${row.oldest_waiting}` : ""}
-                </span>
+                {/* ເວລານີ້ເປັນຂອງ "ບິນອື່ນ" ບໍ່ແມ່ນບິນໃນແຖວນີ້ — ຕ້ອງຂຽນປ້າຍ
+                    ໃຫ້ຊັດ ບໍ່ດັ່ງນັ້ນຄົນອ່ານຄິດວ່າເປັນເວລາຂອງບິນດຽວກັນ */}
+                {row.oldest_waiting && (
+                  <span className="tv-late-due tv-late-due-since">
+                    <em>ບິນເກົ່າສຸດທີ່ຍັງຄອຍ</em>
+                    <b>{row.oldest_waiting}</b>
+                  </span>
+                )}
               </div>
             ))}
           </div>

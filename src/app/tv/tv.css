@@ -419,6 +419,20 @@ html,
         color: var(--tv-text-2);
         padding-bottom: 6px;
       }
+      /* ຈຳນວນບິນລັດຄິວ — ຢູ່ຫົວແຖບ "ຕ້ອງຈັດເຂົ້າຖ້ຽວ" ຈຶ່ງບໍ່ກິນຄວາມສູງເພີ່ມ.
+         ດັນໄປຂວາຕິດກັບຍອດລວມ ແລ້ວແຍກດ້ວຍພື້ນສີ ບໍ່ໃຫ້ອ່ານປົນກັນ */
+      .tv-todo-jump {
+        margin-left: auto;
+        margin-right: 14px;
+        font-size: 18px;
+        font-weight: 800;
+        color: var(--tv-bad);
+        background: var(--tv-bad-bg);
+        padding: 2px 12px;
+        border-radius: 999px;
+        white-space: nowrap;
+        font-variant-numeric: tabular-nums;
+      }
       .tv-todo-total {
         font-size: 24px;
         font-weight: 800;
@@ -1387,15 +1401,28 @@ html,
   text-align: right;
   font-variant-numeric: tabular-nums;
 }
-/* ໜ້າບິນລັດຄິວໃສ່ວັນ+ເວລາ ຍາວກວ່າ due_label ຂອງໜ້າບິນຊ້າ — ຖັນ 66px ບໍ່ພໍ
-   ຈຶ່ງຕ້ອງຂະຫຍາຍຖັນຂວາ ບໍ່ດັ່ງນັ້ນຂໍ້ຄວາມຈະລົ້ນອອກນອກແຖວ */
+/* ໜ້າບິນລັດຄິວໃສ່ວັນ+ເວລາ ພ້ອມປ້າຍກຳກັບ ຍາວກວ່າ due_label ຂອງໜ້າບິນຊ້າ
+   ຫຼາຍ — ຖັນ 66px ບໍ່ພໍ ຈຶ່ງຕ້ອງຂະຫຍາຍຖັນຂວາ ແລະ ຖັນຊ້າຍ ("ແຊງ N ໃບ") */
 .tv-late-row-jump {
-  grid-template-columns: 104px 1fr 152px;
+  grid-template-columns: 124px 1fr 178px;
 }
+/* ວາງເປັນ 2 ບັນທັດ: ປ້າຍບອກວ່າເວລານີ້ເປັນຂອງບິນອື່ນ ແລ້ວຄ່ອຍໃສ່ເວລາ */
 .tv-late-due-since {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  line-height: 1.25;
   white-space: nowrap;
-  font-size: 17px;
-  color: var(--tv-text-3);
+}
+.tv-late-due-since em {
+  font-style: normal;
+  font-size: 14px;
+  color: var(--tv-text-4);
+}
+.tv-late-due-since b {
+  font-size: 19px;
+  font-weight: 800;
+  color: var(--tv-bad);
 }
 .tv-late-rest {
   font-size: 19px;
