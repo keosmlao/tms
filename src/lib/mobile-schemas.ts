@@ -20,6 +20,21 @@ export const JobsListQuerySchema = z.object({
   scope: OptionalString,
   driver_id: OptionalString,
   status: OptionalString,
+  // Window (in days around today) for closed trips. Open trips are always
+  // returned in full; without this the list carries every closed trip of the
+  // fixed year — megabytes by year-end, polled every minute by the app.
+  days: z.coerce.number().int().min(1).max(366).optional(),
+});
+
+// Per-user push history (the app's ແຈ້ງເຕືອນ screen).
+export const NotificationsListQuerySchema = z.object({
+  limit: z.coerce.number().int().min(1).max(100).optional(),
+});
+
+export const NotificationsMarkReadSchema = z.object({
+  action: z.literal("mark_read"),
+  // Omitted/empty = mark everything read.
+  ids: z.array(z.coerce.number().int().positive()).max(200).optional(),
 });
 
 // Manager dashboard filters. Both optional: no date = today, no branch = all.

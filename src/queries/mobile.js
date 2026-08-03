@@ -157,6 +157,19 @@ async function mobileLogin(body) {
   throw err;
 }
 
+// ±days window around the fixed "today" for pruning closed trips. Open trips
+// (job_status < 3) always pass the filter — only the ever-growing tail of
+// closed trips gets cut, so overdue unfinished work never disappears.
+function closedTripWindow(days) {
+  const base = new Date(`${getFixedTodayDate()}T00:00:00Z`);
+  const shift = (delta) => {
+    const d = new Date(base);
+    d.setUTCDate(d.getUTCDate() + delta);
+    return d.toISOString().slice(0, 10);
+  };
+  return { from: shift(-days), to: shift(days) };
+}
+
 async function mobileJobsList(driverId, date, options = {}) {
   await Promise.all([
     ensureTmsWorkerTable(),
@@ -278,6 +291,15 @@ async function mobileJobsList(driverId, date, options = {}) {
     return await query(sql, [driverId, fixedDate]);
   }
 
+  if (options.windowDays) {
+    const win = closedTripWindow(options.windowDays);
+    sql += ` WHERE a.driver=$1 AND a.job_status != 4
+      AND ${getFixedYearSqlFilter("a.doc_date")}
+      AND (a.job_status < 3 OR COALESCE(a.date_logistic, a.doc_date) BETWEEN $2 AND $3)
+      ORDER BY a.doc_no`;
+    return await query(sql, [driverId, win.from, win.to]);
+  }
+
   sql += ` WHERE a.driver=$1 AND a.job_status != 4 AND ${getFixedYearSqlFilter("a.doc_date")} ORDER BY a.doc_no`;
   return await query(sql, [driverId]);
 }
@@ -288,7 +310,12 @@ function normalizeSupervisorStatus(value) {
   return "";
 }
 
-async function mobileJobsListAll({ date = "", driverId = "", status = "" } = {}) {
+async function mobileJobsListAll({
+  date = "",
+  driverId = "",
+  status = "",
+  windowDays = 0,
+} = {}) {
   const fixedDate = date ? coerceDateToFixedYear(date) : null;
   const normalizedStatus = normalizeSupervisorStatus(status);
   const where = ["a.job_status != 4", getFixedYearSqlFilter("a.doc_date")];
@@ -297,6 +324,14 @@ async function mobileJobsListAll({ date = "", driverId = "", status = "" } = {})
   if (fixedDate) {
     params.push(fixedDate);
     where.push(`a.doc_date=$${params.length}`);
+  } else if (windowDays) {
+    // Same pruning as the driver list: open trips always included, closed
+    // trips only within the window around today.
+    const win = closedTripWindow(windowDays);
+    params.push(win.from, win.to);
+    where.push(
+      `(a.job_status < 3 OR COALESCE(a.date_logistic, a.doc_date) BETWEEN $${params.length - 1} AND $${params.length})`
+    );
   }
   if (asText(driverId)) {
     params.push(asText(driverId));
@@ -2635,6 +2670,36 @@ async function mobileManagerDashboard({ date = "", branch = "" } = {}) {
     ),
   ]);
 
+  // ── ຕົ້ນທຶນ fleet ເດືອນນີ້: ນ້ຳມັນ + ໄລຍະທາງຈາກເລກໄມ ──────────────────
+  // ເລກໄມເປັນ text ຈາກມືຄົນຂັບ — ກັ່ນສະເພາະຄູ່ທີ່ເປັນຕົວເລກ, end > start,
+  // ແລະ ຕໍ່ຖ້ຽວບໍ່ເກີນ 2,000 ກມ (ກັນພິມຫຼົງຫຼັກດຽວແລ້ວດຶງຄ່າສະເລ່ຍເພ)
+  const milesNum = (col) =>
+    `NULLIF(regexp_replace(TRIM(${col}), '[^0-9.]', '', 'g'), '')::numeric`;
+  const [fuelRow, kmRow] = await Promise.all([
+    queryOne(
+      `SELECT COALESCE(SUM(liters), 0)::numeric AS liters,
+              COALESCE(SUM(amount), 0)::numeric AS amount,
+              COUNT(*)::int AS refills
+       FROM public.odg_tms_fuel_log
+       WHERE fuel_date BETWEEN $1::date AND $2::date
+         ${branchCode ? `AND COALESCE(NULLIF(TRIM(transport_code), ''), '') = '${branchCode.replace(/'/g, "''")}'` : ""}`,
+      [monthStart, day]
+    ),
+    queryOne(
+      `SELECT COALESCE(SUM(${milesNum("t.miles_end")} - ${milesNum("t.miles_start")}), 0)::numeric AS km,
+              COUNT(*)::int AS trips
+       FROM odg_tms t
+       WHERE COALESCE(t.job_status,0) >= 3
+         AND t.date_logistic::date BETWEEN $1::date AND $2::date
+         AND ${getFixedYearSqlFilter("t.doc_date")}
+         ${branchClause}
+         AND ${milesNum("t.miles_end")} IS NOT NULL
+         AND ${milesNum("t.miles_start")} IS NOT NULL
+         AND (${milesNum("t.miles_end")} - ${milesNum("t.miles_start")}) BETWEEN 0 AND 2000`,
+      [monthStart, day]
+    ),
+  ]);
+
   const num = (row, key) => Number(row?.[key] ?? 0);
   const shape = (row) => ({
     trips: num(row, "trips"),
@@ -2695,6 +2760,14 @@ async function mobileManagerDashboard({ date = "", branch = "" } = {}) {
     delivery_proof: {
       with_gps: Number(deliveredOnSite?.with_gps ?? 0),
       without_gps: Number(deliveredOnSite?.without_gps ?? 0),
+    },
+    // ຕົ້ນທຶນ fleet ເດືອນນີ້ — ແອັບຄິດອັດຕາເອງ (ກີບ/ກມ, ລິດ/100ກມ)
+    fleet_cost: {
+      month_km: Number(kmRow?.km ?? 0),
+      km_trips: Number(kmRow?.trips ?? 0),
+      fuel_liters: Number(fuelRow?.liters ?? 0),
+      fuel_amount: Number(fuelRow?.amount ?? 0),
+      refills: Number(fuelRow?.refills ?? 0),
     },
   };
 }

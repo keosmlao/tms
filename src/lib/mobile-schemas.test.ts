@@ -6,6 +6,8 @@ import {
   PublicTrackSchema,
   FuelListQuerySchema,
   JobsListQuerySchema,
+  NotificationsListQuerySchema,
+  NotificationsMarkReadSchema,
 } from "./mobile-schemas";
 
 describe("LoginSchema", () => {
@@ -207,6 +209,62 @@ describe("JobsListQuerySchema", () => {
         from: "01-07-2026",
         to: "2026-07-27",
       })
+    ).toThrow();
+  });
+
+  it("coerces days from a query-string number", () => {
+    expect(JobsListQuerySchema.parse({ days: "7" })).toMatchObject({
+      days: 7,
+    });
+  });
+
+  it("leaves days undefined when omitted", () => {
+    expect(JobsListQuerySchema.parse({}).days).toBeUndefined();
+  });
+
+  it("rejects non-positive or fractional days", () => {
+    expect(() => JobsListQuerySchema.parse({ days: "0" })).toThrow();
+    expect(() => JobsListQuerySchema.parse({ days: "-3" })).toThrow();
+    expect(() => JobsListQuerySchema.parse({ days: "2.5" })).toThrow();
+    expect(() => JobsListQuerySchema.parse({ days: "400" })).toThrow();
+  });
+});
+
+describe("NotificationsListQuerySchema", () => {
+  it("coerces limit and allows omission", () => {
+    expect(NotificationsListQuerySchema.parse({ limit: "20" })).toMatchObject({
+      limit: 20,
+    });
+    expect(NotificationsListQuerySchema.parse({}).limit).toBeUndefined();
+  });
+
+  it("rejects out-of-range limits", () => {
+    expect(() => NotificationsListQuerySchema.parse({ limit: "0" })).toThrow();
+    expect(() =>
+      NotificationsListQuerySchema.parse({ limit: "500" })
+    ).toThrow();
+  });
+});
+
+describe("NotificationsMarkReadSchema", () => {
+  it("accepts mark_read with ids", () => {
+    expect(
+      NotificationsMarkReadSchema.parse({ action: "mark_read", ids: [1, "2"] })
+    ).toMatchObject({ action: "mark_read", ids: [1, 2] });
+  });
+
+  it("accepts mark_read without ids (mark all)", () => {
+    expect(
+      NotificationsMarkReadSchema.parse({ action: "mark_read" }).ids
+    ).toBeUndefined();
+  });
+
+  it("rejects unknown actions and bad ids", () => {
+    expect(() =>
+      NotificationsMarkReadSchema.parse({ action: "delete" })
+    ).toThrow();
+    expect(() =>
+      NotificationsMarkReadSchema.parse({ action: "mark_read", ids: [0] })
     ).toThrow();
   });
 });

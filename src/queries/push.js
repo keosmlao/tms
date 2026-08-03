@@ -112,10 +112,102 @@ async function getTokensFor(userCode) {
   return rows.map((r) => r.token).filter(Boolean);
 }
 
+// ── Per-user push history ────────────────────────────────────────────────
+// Every push is journaled here before FCM delivery, so the app's ແຈ້ງເຕືອນ
+// screen can show history that survives reinstalls and device changes — and
+// even records sends that FCM failed to deliver.
+let pushLogReady = false;
+async function ensurePushLogSchema() {
+  if (pushLogReady) return;
+  await query(`
+    CREATE TABLE IF NOT EXISTS public.odg_tms_push_log (
+      id bigserial PRIMARY KEY,
+      user_code character varying NOT NULL,
+      title text NOT NULL DEFAULT '',
+      body text NOT NULL DEFAULT '',
+      type character varying NOT NULL DEFAULT '',
+      doc_no character varying NOT NULL DEFAULT '',
+      sent_at timestamp without time zone DEFAULT LOCALTIMESTAMP(0),
+      read_at timestamp without time zone
+    )
+  `);
+  await query(`
+    CREATE INDEX IF NOT EXISTS idx_odg_tms_push_log_user
+    ON public.odg_tms_push_log (user_code, id DESC)
+  `);
+  pushLogReady = true;
+}
+
+// Journal one push. Repeats of the same (user, type, doc, title) within an
+// hour are skipped — cron nudges re-push every 5 minutes and replace each
+// other in the tray via `tag`, so the history must collapse them the same way.
+async function logPush(userCode, title, body, data = {}) {
+  try {
+    await ensurePushLogSchema();
+    await query(
+      `INSERT INTO public.odg_tms_push_log (user_code, title, body, type, doc_no)
+       SELECT $1, $2, $3, $4, $5
+       WHERE NOT EXISTS (
+         SELECT 1 FROM public.odg_tms_push_log
+         WHERE user_code = $1 AND title = $2 AND type = $4 AND doc_no = $5
+           AND sent_at >= LOCALTIMESTAMP - interval '60 minutes'
+       )`,
+      [
+        userCode,
+        String(title ?? ""),
+        String(body ?? ""),
+        String(data.type ?? ""),
+        String(data.doc_no ?? ""),
+      ]
+    );
+  } catch (err) {
+    // History being unavailable must never block the actual push.
+    console.warn("[push] log failed:", err?.message ?? err);
+  }
+}
+
+async function pushHistory(userCode, limit = 50) {
+  await ensurePushLogSchema();
+  if (!userCode) return [];
+  const max = Math.min(Math.max(Number(limit) || 50, 1), 100);
+  return query(
+    `SELECT id::text AS id, title, body, type, doc_no,
+       to_char(sent_at, 'YYYY-MM-DD"T"HH24:MI:SS') AS sent_at,
+       (read_at IS NOT NULL) AS read
+     FROM public.odg_tms_push_log
+     WHERE user_code = $1
+     ORDER BY id DESC
+     LIMIT $2`,
+    [userCode, max]
+  );
+}
+
+// Empty ids = mark everything read (the screen's "ອ່ານທັງໝົດ" button).
+async function pushHistoryMarkRead(userCode, ids = []) {
+  await ensurePushLogSchema();
+  if (!userCode) return { success: false };
+  if (Array.isArray(ids) && ids.length > 0) {
+    await query(
+      `UPDATE public.odg_tms_push_log SET read_at = LOCALTIMESTAMP(0)
+       WHERE user_code = $1 AND read_at IS NULL AND id = ANY($2::bigint[])`,
+      [userCode, ids.map((n) => Number(n))]
+    );
+  } else {
+    await query(
+      `UPDATE public.odg_tms_push_log SET read_at = LOCALTIMESTAMP(0)
+       WHERE user_code = $1 AND read_at IS NULL`,
+      [userCode]
+    );
+  }
+  return { success: true };
+}
+
 // Core send — multi-device per user. Silently no-ops when Firebase is not
 // configured so job actions never crash because of notifications.
 async function pushToDriver(driverCode, title, body, data = {}) {
   if (!driverCode) return;
+  // Journal before delivery — history exists even when FCM is down/unset.
+  await logPush(driverCode, title, body, data);
   if (!initFirebaseIfNeeded()) return;
 
   try {
@@ -351,5 +443,7 @@ module.exports = {
   deleteToken,
   pushToDriver,
   pushToEmployees,
+  pushHistory,
+  pushHistoryMarkRead,
   remindUnstartedDispatches,
 };

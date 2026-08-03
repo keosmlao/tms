@@ -100,6 +100,14 @@ paths:
         - in: query
           name: status
           schema: { type: string, enum: [pending, active, done, issue] }
+        - in: query
+          name: days
+          description: |
+            Window (in days around today) for closed trips. Open trips are
+            always returned in full; only closed trips outside the window are
+            pruned. Applies to the default driver scope and scope=all (ignored
+            when a specific date is given).
+          schema: { type: integer, minimum: 1, maximum: 366 }
       responses:
         '200':
           description: Jobs list
@@ -211,6 +219,12 @@ paths:
                 type: object
                 properties:
                   qr_scan_verify_enabled: { type: boolean }
+                  tv_url:
+                    type: string
+                    description: |
+                      Wall-board (TV mode) URL with its access key baked in.
+                      Present only for supervisor/manager sessions; empty for
+                      drivers so the fleet-wide TV key never reaches them.
         '401': { $ref: '#/components/responses/Unauthorized' }
 
   /api/mobile/fcm-token:
@@ -248,6 +262,59 @@ paths:
                 token: { type: string }
       responses:
         '200': { description: Token removed }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+
+  /api/mobile/notifications:
+    get:
+      tags: [notifications]
+      summary: Per-user push history.
+      description: |
+        Every push sent to the authenticated user is journaled server-side, so
+        the in-app notification screen shows the same history on any device.
+        Identical (type, doc_no, title) pushes within an hour are collapsed
+        into one entry (cron reminders re-push every few minutes).
+      parameters:
+        - in: query
+          name: limit
+          schema: { type: integer, minimum: 1, maximum: 100, default: 50 }
+      responses:
+        '200':
+          description: Newest-first list of pushes sent to this user.
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  type: object
+                  properties:
+                    id: { type: string }
+                    title: { type: string }
+                    body: { type: string }
+                    type: { type: string }
+                    doc_no: { type: string }
+                    sent_at: { type: string, format: date-time }
+                    read: { type: boolean }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+    post:
+      tags: [notifications]
+      summary: Mark push-history entries as read.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [action]
+              properties:
+                action: { type: string, enum: [mark_read] }
+                ids:
+                  type: array
+                  description: Omitted/empty = mark everything read.
+                  items: { type: integer }
+                  maxItems: 200
+      responses:
+        '200': { description: Marked read }
+        '400': { $ref: '#/components/responses/ValidationError' }
         '401': { $ref: '#/components/responses/Unauthorized' }
 
   /api/mobile/manager:
@@ -353,6 +420,20 @@ paths:
                     properties:
                       with_gps: { type: integer }
                       without_gps: { type: integer }
+                  fleet_cost:
+                    type: object
+                    description: |
+                      Month-to-date fleet cost inputs. `month_km` sums closed
+                      trips' odometer deltas (numeric pairs only, capped at
+                      2,000 km per trip to reject typos); fuel figures come
+                      from the driver-submitted refill log. Rates (ກີບ/ກມ,
+                      ລິດ/100ກມ) are computed client-side.
+                    properties:
+                      month_km: { type: number }
+                      km_trips: { type: integer, description: Closed trips with a usable odometer pair. }
+                      fuel_liters: { type: number }
+                      fuel_amount: { type: number }
+                      refills: { type: integer }
         "401": { $ref: '#/components/responses/Unauthorized' }
         "403": { $ref: '#/components/responses/Forbidden' }
   /api/mobile/location:

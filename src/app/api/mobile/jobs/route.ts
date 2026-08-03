@@ -38,7 +38,7 @@ function gpsAgeSeconds(value: unknown) {
 export async function GET(request: NextRequest) {
   try {
     const session = await requireMobileSession(request);
-    const { date, from, to, scope, driver_id, status } = parseSearchParams(
+    const { date, from, to, scope, driver_id, status, days } = parseSearchParams(
       request.nextUrl.searchParams,
       JobsListQuerySchema
     );
@@ -70,6 +70,7 @@ export async function GET(request: NextRequest) {
         date: date ?? "",
         driverId: driver_id ?? "",
         status: status ?? "",
+        windowDays: days ?? 0,
       });
       return Response.json(data);
     }
@@ -118,7 +119,9 @@ export async function GET(request: NextRequest) {
       const data = await mobileSupervisorKpi({ date: date ?? "" });
       return Response.json(data);
     }
-    const data = await mobileJobsList(session.driver_id, date ?? "");
+    const data = await mobileJobsList(session.driver_id, date ?? "", {
+      windowDays: days ?? 0,
+    });
     return Response.json(data);
   } catch (error) {
     return mobileErrorResponse(error);
