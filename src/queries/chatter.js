@@ -164,6 +164,7 @@ async function listChatterMessages(model, recordId) {
                       WHEN 'customer_postponed' THEN 'ລູກຄ້າເລື່ອນວັນຮັບ'
                       WHEN 'customer_cancelled' THEN 'ລູກຄ້າປະຕິເສດ/ຍົກເລີກ'
                       WHEN 'contacted_ready' THEN 'ພ້ອມຮັບ'
+                      WHEN 'delivery_scheduled' THEN 'ຕາຕະລາງການຈັດສົ່ງ'
                       ELSE h.action_status
                     END) END,
                   CASE WHEN h.scheduled_date IS NOT NULL THEN CONCAT('ວັນຮັບ: ', to_char(h.scheduled_date,'DD-MM-YYYY')) END,

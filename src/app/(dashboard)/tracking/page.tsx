@@ -331,6 +331,7 @@ const PRE_TRIP_CONTACT_LABELS: Record<string, string> = {
   contact_failed: "ຕິດຕໍ່ບໍ່ໄດ້",
   customer_postponed: "ລູກຄ້າເລື່ອນວັນຮັບ",
   customer_cancelled: "ລູກຄ້າປະຕິເສດ/ຍົກເລີກ",
+  delivery_scheduled: "ຕາຕະລາງການຈັດສົ່ງ",
 };
 
 function PreTripStatusCard({ result }: { result: TrackingResult }) {

@@ -115,6 +115,8 @@ function preTripContactLabel(status) {
       return "ລູກຄ້າເລື່ອນວັນຮັບ";
     case "customer_cancelled":
       return "ລູກຄ້າປະຕິເສດ/ຍົກເລີກ";
+    case "delivery_scheduled":
+      return "ຕາຕະລາງການຈັດສົ່ງ";
     default:
       return "";
   }

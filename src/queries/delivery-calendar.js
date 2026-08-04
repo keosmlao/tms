@@ -187,6 +187,7 @@ const ACTION_STATUS_LABELS = {
   customer_postponed: "ລູກຄ້າເລື່ອນ",
   customer_cancelled: "ລູກຄ້າຍົກເລີກ",
   contacted_ready: "ພ້ອມຮັບ",
+  delivery_scheduled: "ຕາຕະລາງຈັດສົ່ງ",
 };
 
 // Per-day drill-down: the individual planned + delivered bills for one date,

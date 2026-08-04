@@ -180,13 +180,18 @@ const RESCHEDULE_RED_THRESHOLD = 2;
 //     ├── ຕິດຕໍ່ບໍ່ໄດ້           (action_status = "contact_failed")
 //     ├── ລູກຄ້າເລື່ອນວັນຮັບ     (action_status = "customer_postponed")
 //     ├── ລູກຄ້າປະຕິເສດ/ຍົກເລີກ (action_status = "customer_cancelled")
-//     └── ພ້ອມຮັບ              (action_status = "contacted_ready")
+//     ├── ພ້ອມຮັບ              (action_status = "contacted_ready")
+//     └── ຕາຕະລາງການຈັດສົ່ງ    (action_status = "delivery_scheduled")
+// ຕາຕະລາງການຈັດສົ່ງ = ນັດວັນສົ່ງໄວ້ລ່ວງໜ້າ (ເຄື່ອງຕ່າງແຂວງ / ເຄື່ອງລູກຄ້າ ທີ່ນັດ
+// ສົ່ງມື້ຕໍ່ໄປ). ຕ້ອງການພຽງ "ວັນທີຈັດສົ່ງ" ເທົ່ານັ້ນ — ບໍ່ຕ້ອງເສັ້ນທາງ/ຮອບ ຈຶ່ງ
+// ຍັງບໍ່ນັບເປັນ dispatch-ready. ບິນຈະຢູ່ຂັ້ນ 2.2 "ຍັງບໍ່ຮອດວັນສົ່ງ" ຈົນຮອດວັນນັດ.
 const ACTION_STATUSES = [
   { key: "sales_not_notified", label: "ພະນັກງານຂາຍຍັງບໍ່ແຈ້ງ", color: "slate" },
   { key: "contact_failed", label: "ຕິດຕໍ່ບໍ່ໄດ້", color: "rose" },
   { key: "customer_postponed", label: "ລູກຄ້າເລື່ອນວັນຮັບ", color: "amber" },
   { key: "customer_cancelled", label: "ລູກຄ້າປະຕິເສດ/ຍົກເລີກ", color: "slate" },
   { key: "contacted_ready", label: "ພ້ອມຮັບ", color: "emerald" },
+  { key: "delivery_scheduled", label: "ຕາຕະລາງການຈັດສົ່ງ", color: "sky" },
 ] as const;
 
 const ACTION_STATUS_MAP: Record<string, { label: string; color: string }> = {
@@ -195,7 +200,20 @@ const ACTION_STATUS_MAP: Record<string, { label: string; color: string }> = {
   customer_postponed: { label: "ລູກຄ້າເລື່ອນວັນຮັບ", color: "amber" },
   customer_cancelled: { label: "ລູກຄ້າປະຕິເສດ/ຍົກເລີກ", color: "slate" },
   contacted_ready: { label: "ພ້ອມຮັບ", color: "emerald" },
+  delivery_scheduled: { label: "ຕາຕະລາງການຈັດສົ່ງ", color: "sky" },
 };
+
+// ບວກມື້ໃສ່ວັນທີ ໂດຍຄ້າງໄວ້ໃນປີທີ່ຕຶງ (FIXED_YEAR) — ໃຊ້ກັບປຸ່ມດ່ວນ "ມື້ອື່ນ"
+// ຂອງຕາຕະລາງການຈັດສົ່ງ ຈຶ່ງບໍ່ໄດ້ວັນທີທີ່ເກີນ min/max ຂອງ input.
+function addDaysInFixedYear(date: string, days: number): string {
+  const [y, m, d] = date.split("-").map(Number);
+  if (!y || !m || !d) return date;
+  const shifted = new Date(Date.UTC(y, m - 1, d + days));
+  const iso = shifted.toISOString().slice(0, 10);
+  if (iso < FIXED_YEAR_START) return FIXED_YEAR_START;
+  if (iso > FIXED_YEAR_END) return FIXED_YEAR_END;
+  return iso;
+}
 
 // Per-branch colour so each bill's delivery branch is scannable in the
 // "all branches" view. Falls back to neutral for unknown / extra codes.
@@ -1074,6 +1092,12 @@ export default function BillsPendingClient() {
       return "not_contacted";
     }
     if (b.action_status === "sales_not_notified") return "sales_pending";
+    // ນັດວັນສົ່ງໄວ້ລ່ວງໜ້າ — ລໍຖ້າຮອດວັນນັດ. ພໍຮອດວັນ (ຫຼືເລີຍວັນ) ຕົກລົງມາຂັ້ນ
+    // 2.1 ເພື່ອໃຫ້ຜູ້ຈັດຖ້ຽວຕື່ມເສັ້ນທາງ/ຮອບ ແລ້ວປ່ຽນເປັນ "ພ້ອມຮັບ".
+    if (b.action_status === "delivery_scheduled") {
+      if (b.scheduled_date && b.scheduled_date > today) return "scheduled_wait";
+      return "sales_pending";
+    }
     if (b.action_status === "contacted_ready") {
       const planComplete = !!b.scheduled_date_overridden && !!b.delivery_route_code?.trim() && !!b.delivery_round_code?.trim();
       if (!planComplete) return "sales_pending";
@@ -1558,6 +1582,8 @@ export default function BillsPendingClient() {
                                         ? "bg-rose-100 text-rose-700 hover:bg-rose-200 dark:bg-rose-900/40 dark:text-rose-400"
                                         : contactMeta?.color === "amber"
                                         ? "bg-amber-100 text-amber-700 hover:bg-amber-200 dark:bg-amber-900/40 dark:text-amber-400"
+                                        : contactMeta?.color === "sky"
+                                        ? "bg-sky-100 text-sky-700 hover:bg-sky-200 dark:bg-sky-900/40 dark:text-sky-400"
                                         : contactMeta
                                         ? "bg-slate-100 text-slate-600 hover:bg-slate-200 dark:bg-slate-800 dark:text-slate-300"
                                         : "bg-slate-100 text-slate-500 hover:bg-slate-200 dark:bg-slate-800 dark:text-slate-400"
@@ -1567,6 +1593,7 @@ export default function BillsPendingClient() {
                                       contactMeta?.color === "emerald" ? "bg-emerald-500" :
                                       contactMeta?.color === "rose" ? "bg-rose-500" :
                                       contactMeta?.color === "amber" ? "bg-amber-500" :
+                                      contactMeta?.color === "sky" ? "bg-sky-500" :
                                       "bg-slate-400"
                                     }`} />
                                     <span className="truncate max-w-[100px]">{contactMeta?.label ?? "ບໍ່ຕິດຕໍ່"}</span>
@@ -1729,6 +1756,7 @@ export default function BillsPendingClient() {
                                       contactMeta?.color === "emerald" ? "bg-emerald-100 text-emerald-700 dark:bg-emerald-900/40 dark:text-emerald-400" :
                                       contactMeta?.color === "rose" ? "bg-rose-100 text-rose-700 dark:bg-rose-900/40 dark:text-rose-400" :
                                       contactMeta?.color === "amber" ? "bg-amber-100 text-amber-700 dark:bg-amber-900/40 dark:text-amber-400" :
+                                      contactMeta?.color === "sky" ? "bg-sky-100 text-sky-700 dark:bg-sky-900/40 dark:text-sky-400" :
                                       "bg-slate-100 text-slate-500 dark:bg-slate-800 dark:text-slate-400"
                                     }`}
                                   >
@@ -2475,6 +2503,7 @@ export default function BillsPendingClient() {
                               drawerBill.action_status === "contacted_ready" ? "bg-emerald-500" :
                               drawerBill.action_status === "contact_failed" ? "bg-rose-500" :
                               drawerBill.action_status === "customer_postponed" ? "bg-amber-500" :
+                              drawerBill.action_status === "delivery_scheduled" ? "bg-sky-500" :
                               "bg-slate-400"
                             }`} />
                             {drawerBill.action_status ? ACTION_STATUS_MAP[drawerBill.action_status]?.label : "ຍັງບໍ່ໄດ້ຕິດຕໍ່"}
@@ -3082,6 +3111,9 @@ function StatusMenu({
   const [error, setError] = useState<string | null>(null);
   const open = billNo !== null && anchorEl !== null;
   const todayForPlan = getFixedTodayDate();
+  const tomorrowForPlan = addDaysInFixedYear(todayForPlan, 1);
+  // ປະຕິທິນຂອງ "ຕາຕະລາງການຈັດສົ່ງ" — ເປີດໃຫ້ອັດຕະໂນມັດພໍກົດເລືອກສະຖານະ
+  const scheduleDateRef = useRef<HTMLInputElement | null>(null);
 
   useEffect(() => {
     if (!open) return;
@@ -3098,6 +3130,21 @@ function StatusMenu({
     if (!open || pickedStatus !== "contacted_ready") return;
     setPickedDate((v) => v || todayForPlan);
   }, [open, pickedStatus, todayForPlan]);
+
+  // ຕາຕະລາງການຈັດສົ່ງ: ຄ່າເລີ່ມຕົ້ນ = ມື້ຕໍ່ໄປ (ເຄື່ອງຕ່າງແຂວງ / ເຄື່ອງລູກຄ້າ
+  // ນັດສົ່ງມື້ອື່ນ) ແລ້ວເດັ້ງປະຕິທິນຂຶ້ນມາໃຫ້ເລືອກທັນທີ.
+  useEffect(() => {
+    if (!open || pickedStatus !== "delivery_scheduled") return;
+    setPickedDate((v) => v || tomorrowForPlan);
+    const input = scheduleDateRef.current;
+    if (!input) return;
+    input.focus();
+    try {
+      input.showPicker?.();
+    } catch {
+      // showPicker() ຕ້ອງການ user activation — ຖ້າ browser ບໍ່ຍອມ ກໍກົດເອງໄດ້
+    }
+  }, [open, pickedStatus, tomorrowForPlan]);
 
   useEffect(() => {
     if (!open) return;
@@ -3129,13 +3176,21 @@ function StatusMenu({
         return;
       }
     }
+    // ຕາຕະລາງການຈັດສົ່ງ ຕ້ອງການພຽງວັນທີ — ເສັ້ນທາງ/ຮອບ ຄ່ອຍຕື່ມຕອນປ່ຽນເປັນ ພ້ອມຮັບ
+    if (!clear && pickedStatus === "delivery_scheduled" && !pickedDate) {
+      setError("ກະລຸນາເລືອກວັນທີຈັດສົ່ງ");
+      return;
+    }
     setSaving(true);
     setError(null);
     try {
       await Actions.upsertPendingBillSchedule({
         bill_no: billNo,
         action_status: clear ? null : pickedStatus || null,
-        scheduled_date: !clear && pickedStatus === "contacted_ready" ? pickedDate : undefined,
+        scheduled_date:
+          !clear && (pickedStatus === "contacted_ready" || pickedStatus === "delivery_scheduled")
+            ? pickedDate
+            : undefined,
         delivery_route_code: !clear && pickedStatus === "contacted_ready" ? pickedRoute : undefined,
         delivery_round_code: !clear && pickedStatus === "contacted_ready" ? pickedRound : undefined,
         transport_code: !clear && pickedStatus === "contacted_ready" ? (pickedTransport || null) : undefined,
@@ -3208,12 +3263,14 @@ function StatusMenu({
             amber: "bg-amber-500/15 text-amber-800 dark:text-amber-400 ring-1 ring-amber-500/40",
             slate: "bg-slate-500/15 text-slate-700 dark:text-slate-300 ring-1 ring-slate-500/40",
             emerald: "bg-emerald-500/15 text-emerald-700 dark:text-emerald-400 ring-1 ring-emerald-500/40",
+            sky: "bg-sky-500/15 text-sky-700 dark:text-sky-400 ring-1 ring-sky-500/40",
           };
           const dotClass: Record<string, string> = {
             rose: "bg-rose-500",
             amber: "bg-amber-500",
             slate: "bg-slate-500",
             emerald: "bg-emerald-500",
+            sky: "bg-sky-500",
           };
           return (
             <button
@@ -3236,6 +3293,60 @@ function StatusMenu({
       </div>
 
       <div className="px-4 pt-3 pb-3 border-t border-slate-200/60 dark:border-white/5">
+        {pickedStatus === "delivery_scheduled" && (
+          <div className="mb-2 rounded-lg border border-sky-500/20 bg-sky-500/10 p-2 space-y-2">
+            <p className="text-[10px] font-semibold text-sky-700 dark:text-sky-400">
+              ຕາຕະລາງການຈັດສົ່ງ · ນັດວັນສົ່ງລ່ວງໜ້າ (ເຄື່ອງຕ່າງແຂວງ / ເຄື່ອງລູກຄ້າ)
+            </p>
+            <label className="block">
+              <span className="block text-[10px] font-semibold text-slate-500 uppercase tracking-wider mb-1">
+                <FaCalendar className="inline mr-1" size={9} /> ວັນທີຈັດສົ່ງ
+              </span>
+              <input
+                ref={scheduleDateRef}
+                type="date"
+                value={pickedDate}
+                min={FIXED_YEAR_START}
+                max={FIXED_YEAR_END}
+                onChange={(e) => setPickedDate(e.target.value)}
+                onClick={(e) => {
+                  try {
+                    e.currentTarget.showPicker?.();
+                  } catch {
+                    // ບາງ browser ບໍ່ຮອງຮັບ showPicker — ກົດໄອຄອນປະຕິທິນເອງໄດ້
+                  }
+                }}
+                disabled={saving}
+                className="w-full glass-input rounded-md px-2 py-1.5 text-[11px] text-slate-700 dark:text-slate-200"
+              />
+            </label>
+            <div className="flex flex-wrap gap-1">
+              {[
+                { label: "ມື້ນີ້", value: todayForPlan },
+                { label: "ມື້ອື່ນ", value: tomorrowForPlan },
+                { label: "ມະຮືນ", value: addDaysInFixedYear(todayForPlan, 2) },
+              ].map((q) => (
+                <button
+                  key={q.value}
+                  type="button"
+                  disabled={saving}
+                  onClick={() => setPickedDate(q.value)}
+                  className={`rounded-full px-2 py-0.5 text-[10px] font-semibold transition-colors ${
+                    pickedDate === q.value
+                      ? "bg-sky-500 text-white"
+                      : "bg-white/60 text-sky-700 hover:bg-white dark:bg-white/10 dark:text-sky-300 dark:hover:bg-white/20"
+                  }`}
+                >
+                  {q.label}
+                </button>
+              ))}
+            </div>
+            <p className="text-[10px] text-slate-500 dark:text-slate-400">
+              ບັນທຶກແລ້ວບິນຈະໄປຢູ່ຂັ້ນ &quot;ຍັງບໍ່ຮອດວັນສົ່ງ&quot; ຈົນຮອດວັນນັດ — ພໍຮອດວັນ
+              ຄ່ອຍປ່ຽນເປັນ &quot;ພ້ອມຮັບ&quot; ເພື່ອຕື່ມເສັ້ນທາງ ແລະ ຮອບສົ່ງ.
+            </p>
+          </div>
+        )}
         {pickedStatus === "contacted_ready" && (
           <div className="mb-2 rounded-lg border border-emerald-500/20 bg-emerald-500/10 p-2 space-y-2">
             <p className="text-[10px] font-semibold text-emerald-700 dark:text-emerald-400">

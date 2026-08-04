@@ -51,6 +51,8 @@ function contactStatusLabel(status) {
       return "ລູກຄ້າເລື່ອນວັນຮັບ";
     case "customer_cancelled":
       return "ລູກຄ້າປະຕິເສດ/ຍົກເລີກ";
+    case "delivery_scheduled":
+      return "ຕາຕະລາງການຈັດສົ່ງ";
     default:
       return "";
   }
@@ -974,6 +976,8 @@ async function searchActiveDeliveryBills(session, q) {
            THEN 'ລໍຖ້າຈັດຖ້ຽວ'
          WHEN COALESCE(pb.action_status, '') = 'contacted_ready'
            THEN 'ພ້ອມຮັບ/ກຳລັງວາງແຜນ'
+         WHEN COALESCE(pb.action_status, '') = 'delivery_scheduled'
+           THEN 'ນັດວັນຈັດສົ່ງແລ້ວ'
          ELSE 'ຕ້ອງຕິດຕາມ'
        END as phase
      FROM public.odg_tms_pending_bill pb

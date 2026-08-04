@@ -1475,6 +1475,7 @@ async function getBillsPending(session, fromDate, toDate, transportCode) {
       //   customer_postponed   — ລູກຄ້າເລື່ອນວັນຮັບ
       //   customer_cancelled   — ລູກຄ້າປະຕິເສດ/ຍົກເລີກ
       //   contacted_ready      — ພ້ອມຮັບ
+      //   delivery_scheduled   — ຕາຕະລາງການຈັດສົ່ງ (ນັດວັນສົ່ງລ່ວງໜ້າ, ວັນທີຢ່າງດຽວ)
       // Anything else (legacy values like contacted_waiting/contacted_dispatched)
       // is cleared so the bill falls back to "ບໍ່ຕິດຕໍ່" until admin retags.
       const allowedStatuses = [
@@ -1483,6 +1484,7 @@ async function getBillsPending(session, fromDate, toDate, transportCode) {
         "customer_postponed",
         "customer_cancelled",
         "contacted_ready",
+        "delivery_scheduled",
       ];
       const rawStatus = sched?.action_status ?? "";
       const normalisedStatus = allowedStatuses.includes(rawStatus) ? rawStatus : "";
