@@ -2533,7 +2533,7 @@ export default function BillsPendingClient() {
           />
           <div className="absolute inset-y-0 right-0 pl-10 max-w-full flex sm:pl-16">
             <div className="w-screen max-w-xl">
-              <div className="h-full flex flex-col bg-white dark:bg-[#081017] shadow-2xl border-l border-slate-200/50 dark:border-white/5 animate-slideInRight">
+              <div className="h-full flex flex-col bg-white dark:bg-[#04182a] shadow-2xl border-l border-slate-200/50 dark:border-white/5 animate-slideInRight">
                 
                 {/* Header */}
                 <div className="px-6 py-5 bg-gradient-to-r from-teal-500/10 to-transparent border-b border-slate-200/50 dark:border-white/5">
@@ -3117,7 +3117,7 @@ function RowActionsMenu({
   return (
     <div
       ref={ref}
-      className="fixed z-[1300] w-[230px] overflow-hidden rounded-lg border border-slate-200/40 bg-white p-1.5 shadow-xl dark:border-white/10 dark:bg-[#0d1822]"
+      className="fixed z-[1300] w-[230px] overflow-hidden rounded-lg border border-slate-200/40 bg-white p-1.5 shadow-xl dark:border-white/10 dark:bg-[#062338]"
       style={{ top: pos.top, left: pos.left }}
     >
       <button
@@ -3215,7 +3215,7 @@ function RouteMenu({
   return (
     <div
       ref={ref}
-      className="fixed z-[1300] w-[min(340px,calc(100vw-16px))] overflow-hidden rounded-lg border border-slate-200/40 bg-white shadow-xl dark:border-white/10 dark:bg-[#0d1822]"
+      className="fixed z-[1300] w-[min(340px,calc(100vw-16px))] overflow-hidden rounded-lg border border-slate-200/40 bg-white shadow-xl dark:border-white/10 dark:bg-[#062338]"
       style={{ top: pos.top, left: pos.left }}
     >
       <div className="flex items-center justify-between border-b border-slate-200/30 bg-white/70 px-3 py-2 dark:border-white/5 dark:bg-white/5">
@@ -3561,7 +3561,7 @@ function StatusMenu({
         role="dialog"
         aria-modal="true"
         aria-labelledby="status-modal-title"
-        className="relative flex max-h-[90vh] w-full max-w-lg flex-col overflow-hidden rounded-lg border border-slate-200/60 bg-white shadow-2xl dark:border-white/10 dark:bg-[#0d1822]"
+        className="relative flex max-h-[90vh] w-full max-w-lg flex-col overflow-hidden rounded-lg border border-slate-200/60 bg-white shadow-2xl dark:border-white/10 dark:bg-[#062338]"
       >
       <div className="px-4 py-3 bg-white/80 dark:bg-white/5 border-b border-slate-200/60 dark:border-white/5 flex items-center justify-between">
         <div>

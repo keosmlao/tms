@@ -102,7 +102,7 @@ function ensureCarStyle() {
     .tms-car-body {
       position: absolute; inset: 4px;
       display: flex; align-items: center; justify-content: center;
-      border-radius: 50%; background: #0ea5e9; color: #fff; font-size: 18px;
+      border-radius: 50%; background: #24abdb; color: #fff; font-size: 18px;
       box-shadow: 0 0 0 3px rgba(255,255,255,0.85), 0 4px 10px rgba(0,0,0,0.3);
     }
   `;
@@ -227,7 +227,7 @@ export function TrackingLiveMap({
 
     if (start) {
       L.marker([start.lat, start.lng], {
-        icon: makeIcon(L, { color: "#3b82f6", emoji: "🏁" }),
+        icon: makeIcon(L, { color: "#2c6fb6", emoji: "🏁" }),
       })
         .addTo(map)
         .bindPopup("ຈຸດເລີ່ມຈັດສົ່ງ");

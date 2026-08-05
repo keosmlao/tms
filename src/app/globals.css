@@ -2,48 +2,122 @@
 
 @custom-variant dark (&:where(.dark, .dark *));
 
+/* ═══════════════════════════════════════════════════════════════════════
+   ODIEN Mall Brand — ສີຫຼັກຕາມ Brand Guideline ໜ້າ 16-17
+   ໝາຍເຫດ: ໜ້າ 16 ຂຽນ hex ໄວ້ 2 ຊຸດທີ່ບໍ່ຕົງກັນ (ແຖບເທິງ vs ຄຳອະທິບາຍ).
+   ເຮົາຍຶດຊຸດທີ່ຊ້ຳກັນ 2 ບ່ອນ (ຄຳອະທິບາຍ ໜ້າ 16 + Gradient Pallet ໜ້າ 17).
+   ═══════════════════════════════════════════════════════════════════════ */
+/* `static` = ບັງຄັບໃຫ້ອອກ CSS variable ສະເໝີ ເຖິງວ່າຍັງບໍ່ມີ utility ໃດໃຊ້ —
+   ຈຶ່ງເອີ້ນ var(--color-brand-navy) ໃນ inline style ໄດ້ ໂດຍບໍ່ຖືກ tree-shake. */
+@theme static {
+  --color-brand-sky: #4bc7ef;    /* Sky Blue    — ຄວາມສົດໃສ, ຄວາມເຊື່ອໝັ້ນ */
+  --color-brand-blue: #2c6fb6;   /* Deep Blue   — ສີຫຼັກຂອງ UI            */
+  --color-brand-navy: #003260;   /* Navy        — ຄວາມໜັກແໜ້ນ, ໝັ້ນຄົງ    */
+  --color-brand-orange: #f6921e; /* Orange      — ພະລັງງານ, ຄວາມກະຕືລືລົ້ນ */
+  --color-brand-yellow: #ffd071; /* Warm Yellow — ຄວາມອົບອຸ່ນ             */
+}
+
+@theme {
+  /* ── teal-* = ສີຫຼັກຂອງລະບົບ → map ໄປ Deep Blue → Navy ──
+     ຄົງຊື່ utility ເດີມໄວ້ ຈຶ່ງບໍ່ຕ້ອງແກ້ 115 ໄຟລ໌ .tsx */
+  --color-teal-50: #eff6fd;
+  --color-teal-100: #dbeafb;
+  --color-teal-200: #bfdcf7;
+  --color-teal-300: #92c6f0;
+  --color-teal-400: #5ea9e4;
+  --color-teal-500: #3b8ad2;
+  --color-teal-600: #2c6fb6;
+  --color-teal-700: #245a97;
+  --color-teal-800: #1c4878;
+  --color-teal-900: #003260;
+  --color-teal-950: #00223f;
+
+  /* ── sky-* = ສີຮອງ → map ໄປ Sky Blue ── */
+  --color-sky-50: #f0fafe;
+  --color-sky-100: #ddf3fd;
+  --color-sky-200: #bde8fb;
+  --color-sky-300: #8ad9f6;
+  --color-sky-400: #4bc7ef;
+  --color-sky-500: #24abdb;
+  --color-sky-600: #1489ba;
+  --color-sky-700: #146e96;
+  --color-sky-800: #175b7c;
+  --color-sky-900: #184c67;
+  --color-sky-950: #0d3145;
+
+  /* ── cyan-* ໃຊ້ປົນກັບ sky-* ຢູ່ 21 ບ່ອນ → ໃຫ້ເປັນສີດຽວກັນ ── */
+  --color-cyan-50: #f0fafe;
+  --color-cyan-100: #ddf3fd;
+  --color-cyan-200: #bde8fb;
+  --color-cyan-300: #8ad9f6;
+  --color-cyan-400: #4bc7ef;
+  --color-cyan-500: #24abdb;
+  --color-cyan-600: #1489ba;
+  --color-cyan-700: #146e96;
+  --color-cyan-800: #175b7c;
+  --color-cyan-900: #184c67;
+  --color-cyan-950: #0d3145;
+
+  /* ── amber-* = ສີເນັ້ນ/ລໍຖ້າ → map ໄປ Warm Yellow → Orange ── */
+  --color-amber-50: #fff9ec;
+  --color-amber-100: #fff1cf;
+  --color-amber-200: #ffe3a3;
+  --color-amber-300: #ffd071;
+  --color-amber-400: #fdb23f;
+  --color-amber-500: #f6921e;
+  --color-amber-600: #e07310;
+  --color-amber-700: #ba550f;
+  --color-amber-800: #974314;
+  --color-amber-900: #7c3813;
+  --color-amber-950: #471c06;
+
+  /* emerald-* (ສຳເລັດ) ແລະ rose-* (ຊ້າ/ຜິດພາດ) ຄົງໄວ້ຕາມເດີມ —
+     ເປັນສີບອກສະຖານະ ບໍ່ແມ່ນສີແບຣນ ຈຶ່ງບໍ່ຄວນປ່ຽນຕາມ guideline. */
+}
+
 :root {
-  --background: #f6f8f7;
-  --foreground: #13212c;
+  --background: #f5f9fd;
+  --foreground: #0b2338;
   /* --font-lao-sans is injected by next/font in layout.tsx; do not redefine */
   /* here or it would silently override the bundled Noto Sans Lao face.      */
   --font-geist-mono: "Geist Mono", ui-monospace, monospace;
 
   --glass-bg: rgba(255, 255, 255, 0.82);
   --glass-bg-heavy: rgba(255, 255, 255, 0.94);
-  --glass-border: rgba(19, 33, 44, 0.10);
-  --glass-border-subtle: rgba(19, 33, 44, 0.12);
-  --glass-shadow: 0 18px 50px rgba(15, 25, 33, 0.08);
-  --glass-shadow-lg: 0 24px 70px rgba(15, 25, 33, 0.10);
-  --glass-glow-primary: rgba(14, 124, 107, 0.14);
+  --glass-border: rgba(0, 50, 96, 0.10);
+  --glass-border-subtle: rgba(0, 50, 96, 0.12);
+  --glass-shadow: 0 18px 50px rgba(0, 50, 96, 0.08);
+  --glass-shadow-lg: 0 24px 70px rgba(0, 50, 96, 0.10);
+  --glass-glow-primary: rgba(44, 111, 182, 0.14);
   --glass-glow-success: rgba(16, 185, 129, 0.15);
-  --glass-glow-warning: rgba(245, 158, 11, 0.15);
+  --glass-glow-warning: rgba(246, 146, 30, 0.15);
   --glass-glow-danger: rgba(239, 68, 68, 0.15);
-  --mesh-gradient: linear-gradient(180deg, #f6f8f7 0%, #eef4f1 54%, #f8f5ef 100%);
+  /* ເຢັນ → ອຸ່ນ ຕາມ Gradient Pallet ໜ້າ 17 */
+  --mesh-gradient: linear-gradient(180deg, #f5f9fd 0%, #eaf3fb 54%, #fdf6ec 100%);
 }
 
 @theme inline {
   --color-background: var(--background);
   --color-foreground: var(--foreground);
-  --font-sans: var(--font-lao-sans);
+  --font-sans: var(--font-brand-sans), var(--font-lao-sans);
   --font-mono: var(--font-geist-mono);
 }
 
 .dark {
-  --background: #081017;
-  --foreground: #e2e8f0;
+  --background: #04182a;
+  --foreground: #e4eef7;
 
-  --glass-bg: rgba(13, 24, 34, 0.78);
-  --glass-bg-heavy: rgba(13, 24, 34, 0.94);
-  --glass-border: rgba(231, 239, 244, 0.10);
-  --glass-border-subtle: rgba(231, 239, 244, 0.12);
-  --glass-shadow: 0 18px 52px rgba(2, 6, 10, 0.36);
-  --glass-shadow-lg: 0 28px 80px rgba(2, 6, 10, 0.48);
-  --glass-glow-primary: rgba(45, 212, 191, 0.18);
+  --glass-bg: rgba(6, 35, 56, 0.78);
+  --glass-bg-heavy: rgba(6, 35, 56, 0.94);
+  --glass-border: rgba(224, 240, 250, 0.10);
+  --glass-border-subtle: rgba(224, 240, 250, 0.12);
+  --glass-shadow: 0 18px 52px rgba(0, 12, 24, 0.42);
+  --glass-shadow-lg: 0 28px 80px rgba(0, 12, 24, 0.54);
+  --glass-glow-primary: rgba(75, 199, 239, 0.18);
   --glass-glow-success: rgba(16, 185, 129, 0.20);
-  --glass-glow-warning: rgba(245, 158, 11, 0.20);
+  --glass-glow-warning: rgba(246, 146, 30, 0.20);
   --glass-glow-danger: rgba(239, 68, 68, 0.20);
-  --mesh-gradient: linear-gradient(180deg, #081017 0%, #0b171f 58%, #0e1515 100%);
+  --mesh-gradient: linear-gradient(180deg, #04182a 0%, #062338 58%, #072b45 100%);
 }
 
 body {
@@ -103,9 +177,28 @@ body {
 }
 
 .glass-input:focus {
-  border-color: rgba(14, 124, 107, 0.55);
-  box-shadow: 0 0 0 3px rgba(14, 124, 107, 0.12), 0 0 16px rgba(14, 124, 107, 0.08);
+  border-color: rgba(44, 111, 182, 0.55);
+  box-shadow: 0 0 0 3px rgba(44, 111, 182, 0.12), 0 0 16px rgba(44, 111, 182, 0.08);
   outline: none;
+}
+
+/* ─── Brand Gradients (Brand Guideline ໜ້າ 17) ─── */
+
+/* ເຢັນ: Sky → Deep Blue → Navy — ໃຊ້ກັບ header, hero, ແຖບນຳທາງ */
+.brand-gradient-cool {
+  background: linear-gradient(135deg, #4bc7ef 0%, #2c6fb6 52%, #003260 100%);
+}
+
+/* ອຸ່ນ: Sky → Warm Yellow → Orange — ໃຊ້ເປັນສີເນັ້ນ/ໂປຣໂມຊັ່ນ */
+.brand-gradient-warm {
+  background: linear-gradient(135deg, #4bc7ef 0%, #ffd071 55%, #f6921e 100%);
+}
+
+.brand-gradient-text {
+  background: linear-gradient(135deg, #4bc7ef 0%, #2c6fb6 100%);
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
 }
 
 /* ─── Gradient Mesh Background ─── */
@@ -121,8 +214,8 @@ body {
   inset: 0;
   pointer-events: none;
   background:
-    linear-gradient(rgba(19, 33, 44, 0.035) 1px, transparent 1px),
-    linear-gradient(90deg, rgba(19, 33, 44, 0.03) 1px, transparent 1px);
+    linear-gradient(rgba(0, 50, 96, 0.035) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(0, 50, 96, 0.03) 1px, transparent 1px);
   background-size: 72px 72px;
   mask-image: linear-gradient(180deg, black, transparent 86%);
   z-index: 0;
@@ -192,12 +285,12 @@ body {
 }
 
 ::-webkit-scrollbar-thumb {
-  background: rgba(14, 124, 107, 0.24);
+  background: rgba(44, 111, 182, 0.24);
   border-radius: 3px;
 }
 
 ::-webkit-scrollbar-thumb:hover {
-  background: rgba(14, 124, 107, 0.40);
+  background: rgba(44, 111, 182, 0.40);
 }
 
 /* ─── Print ─── */

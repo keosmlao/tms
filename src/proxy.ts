@@ -54,6 +54,12 @@ export async function proxy(request: NextRequest) {
     return NextResponse.next();
   }
 
+  // ໄຟລ໌ໂລໂກ້ ຖືກອ້າງອີງໂດຍໜ້າ /login ເອງ ຈຶ່ງຕ້ອງເອີ້ນໄດ້ໂດຍບໍ່ຕ້ອງມີ session —
+  // ຖ້າບໍ່ດັ່ງນັ້ນ redirect ຈະສົ່ງ HTML ຂອງໜ້າ login ມາແທນ PNG ແລ້ວໂລໂກ້ຈະບໍ່ຂຶ້ນ.
+  if (pathname.startsWith("/brand/") || pathname === "/odg.png") {
+    return NextResponse.next();
+  }
+
   if (!valid) {
     const url = request.nextUrl.clone();
     url.pathname = "/login";

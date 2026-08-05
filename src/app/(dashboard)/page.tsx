@@ -1036,7 +1036,7 @@ function DeliveryKpiCard({ kpi }: { kpi: DeliveryKpi }) {
             {formatKpiDuration(period.avg_delivery_seconds)}
           </p>
           <p className="text-[10px] text-slate-500 dark:text-slate-400 mt-0.5">ຮັບຖ້ຽວ → ສົ່ງສຳເລັດ</p>
-          <Sparkline values={avgDeliverySeries} color="#0284c7" label="ສະເລ່ຍສົ່ງ" targetLine={targets.avg_delivery_minutes} />
+          <Sparkline values={avgDeliverySeries} color="#1489ba" label="ສະເລ່ຍສົ່ງ" targetLine={targets.avg_delivery_minutes} />
         </div>
 
         <div className="rounded-lg bg-amber-50 dark:bg-amber-950/30 p-3">
@@ -1053,7 +1053,7 @@ function DeliveryKpiCard({ kpi }: { kpi: DeliveryKpi }) {
             {formatKpiDuration(period.avg_close_seconds)}
           </p>
           <p className="text-[10px] text-slate-500 dark:text-slate-400 mt-0.5">ສົ່ງສຳເລັດ → ປິດຖ້ຽວ</p>
-          <Sparkline values={avgCloseSeries} color="#d97706" label="ສະເລ່ຍປິດ" targetLine={targets.avg_close_minutes} />
+          <Sparkline values={avgCloseSeries} color="#e07310" label="ສະເລ່ຍປິດ" targetLine={targets.avg_close_minutes} />
         </div>
       </div>
 
@@ -1298,7 +1298,7 @@ export default function DashboardPage() {
   return (
     <div className="space-y-5">
       {/* ========== HERO ========== */}
-      <div className="relative overflow-hidden rounded-lg bg-[#0b1b18] p-5 shadow-xl sm:p-6">
+      <div className="relative overflow-hidden rounded-lg bg-[#003260] p-5 shadow-xl sm:p-6">
         <div
           className="absolute inset-0 opacity-30"
           style={{
@@ -1557,8 +1557,8 @@ export default function DashboardPage() {
               sublabel={ps?.current_date}
               complete={toNumber(ps?.today_complete)}
               pending={toNumber(ps?.today_pending)}
-              gradientFrom="#06b6d4"
-              gradientTo="#0e7c6b"
+              gradientFrom="#4bc7ef"
+              gradientTo="#2c6fb6"
               gradientId="grad-today"
             />
             <MiniDonut
@@ -1566,8 +1566,8 @@ export default function DashboardPage() {
               sublabel={ps?.current_month}
               complete={toNumber(ps?.month_complete)}
               pending={toNumber(ps?.month_pending)}
-              gradientFrom="#10b981"
-              gradientTo="#0e7c6b"
+              gradientFrom="#2c6fb6"
+              gradientTo="#003260"
               gradientId="grad-month"
             />
             <MiniDonut
@@ -1575,8 +1575,8 @@ export default function DashboardPage() {
               sublabel={String(currentYear)}
               complete={toNumber(ps?.year_complete)}
               pending={toNumber(ps?.year_pending)}
-              gradientFrom="#f59e0b"
-              gradientTo="#0e7c6b"
+              gradientFrom="#ffd071"
+              gradientTo="#f6921e"
               gradientId="grad-year"
             />
           </div>

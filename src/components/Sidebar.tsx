@@ -4,6 +4,7 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useTheme } from "@/hooks/use-theme";
+import { BrandLogo } from "@/components/brand-logo";
 import { useSession } from "@/providers/session-provider";
 import { isSalesLogin } from "@/lib/sales-role";
 import {
@@ -273,7 +274,7 @@ export default function Sidebar({
     <>
       {/* Mobile toggle */}
       <button
-        className="fixed left-4 top-4 z-[1110] rounded-lg bg-[#0b1b18] p-2.5 text-white shadow-xl transition-all active:scale-95 md:hidden print:hidden"
+        className="fixed left-4 top-4 z-[1110] rounded-lg bg-[#003260] p-2.5 text-white shadow-xl transition-all active:scale-95 md:hidden print:hidden"
         onClick={() => setMobileOpen(!mobileOpen)}
         aria-label="Toggle sidebar"
         aria-expanded={mobileOpen}
@@ -291,24 +292,26 @@ export default function Sidebar({
 
       {/* Sidebar */}
       <aside
-        className={`fixed top-0 z-[1100] flex h-dvh shrink-0 flex-col bg-[#0a1514] text-slate-100 shadow-[0_24px_70px_rgba(2,8,13,0.28)] transition-all duration-300 ease-in-out md:z-40 md:h-screen print:hidden ${sidebarWidth}
+        className={`fixed top-0 z-[1100] flex h-dvh shrink-0 flex-col bg-[#00223f] text-slate-100 shadow-[0_24px_70px_rgba(2,8,13,0.28)] transition-all duration-300 ease-in-out md:z-40 md:h-screen print:hidden ${sidebarWidth}
           border-r border-white/10
           ${mobileOpen ? "translate-x-0" : "-translate-x-full md:translate-x-0"}`}
       >
         {/* Logo */}
         <div className="relative flex items-center justify-between border-b border-white/10 px-4 py-4">
           <Link href={isSaleLogin ? "/tracking/sales" : "/"} className="flex items-center gap-3 overflow-hidden">
-            <div className="flex h-10 w-10 flex-shrink-0 items-center justify-center overflow-hidden rounded-lg bg-white shadow-lg shadow-teal-500/10">
-              <img
-                src="/odg.png"
-                alt="ODG"
-                className="h-full w-full object-contain"
-              />
-            </div>
-            {!showCollapsed && (
+            {showCollapsed ? (
+              <div className="flex h-10 w-10 flex-shrink-0 items-center justify-center overflow-hidden rounded-lg bg-white shadow-lg shadow-teal-500/10">
+                <img
+                  src="/odg.png"
+                  alt="ODG TMS"
+                  className="h-full w-full object-contain"
+                />
+              </div>
+            ) : (
+              // ພື້ນ sidebar ເປັນ navy ເຂັ້ມ → ໃຊ້ໂລໂກ້ຂາວລ້ວນຕາມກົດ (ໜ້າ 11)
               <div className="animate-fadeIn">
-                <p className="text-sm font-bold leading-tight text-white">ODIEN GROUP</p>
-                <p className="text-[10px] uppercase tracking-[0.18em] text-slate-400">TMS Console</p>
+                <BrandLogo variant="white" className="h-8" />
+                <p className="mt-1.5 text-[10px] uppercase tracking-[0.18em] text-slate-400">TMS Console</p>
               </div>
             )}
           </Link>
@@ -437,7 +440,7 @@ export default function Sidebar({
                   >
                     {section.icon}
                   </div>
-                  <div className="pointer-events-none invisible absolute left-full top-1/2 z-50 ml-3 -translate-y-1/2 whitespace-nowrap rounded-lg border border-white/10 bg-[#101b19] px-3 py-1.5 text-xs font-medium text-slate-100 opacity-0 shadow-xl transition-all duration-200 group-hover:visible group-hover:opacity-100">
+                  <div className="pointer-events-none invisible absolute left-full top-1/2 z-50 ml-3 -translate-y-1/2 whitespace-nowrap rounded-lg border border-white/10 bg-[#003260] px-3 py-1.5 text-xs font-medium text-slate-100 opacity-0 shadow-xl transition-all duration-200 group-hover:visible group-hover:opacity-100">
                     {section.title}
                   </div>
                 </div>

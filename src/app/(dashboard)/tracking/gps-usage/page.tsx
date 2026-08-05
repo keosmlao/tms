@@ -175,8 +175,8 @@ function isValidYmd(value: string) {
 function speedColor(speed: number): string {
   if (speed <= 3) return "#64748b"; // slate — stopped
   if (speed <= 20) return "#10b981"; // emerald — slow
-  if (speed <= 50) return "#3b82f6"; // sky — normal
-  if (speed <= 80) return "#f59e0b"; // amber — fast
+  if (speed <= 50) return "#2c6fb6"; // sky — normal
+  if (speed <= 80) return "#f6921e"; // amber — fast
   return "#ef4444"; // rose — very fast
 }
 
@@ -539,7 +539,7 @@ export default function GpsUsagePage() {
   return (
     <div className="space-y-5">
       {/* Header */}
-      <div className="relative overflow-hidden rounded-lg bg-[#0b1b18] p-5 shadow-xl">
+      <div className="relative overflow-hidden rounded-lg bg-[#003260] p-5 shadow-xl">
         <div className="relative flex flex-wrap items-start justify-between gap-3">
           <div className="flex items-start gap-3">
             <div className="w-11 h-11 rounded-lg bg-white/10 backdrop-blur flex items-center justify-center ring-1 ring-white/20">

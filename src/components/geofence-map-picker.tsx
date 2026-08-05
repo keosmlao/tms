@@ -160,7 +160,7 @@ export function GeofenceMapPicker({
       });
       layersRef.current.push(circle, marker);
     };
-    add(start, "#3b82f6", "🏁", "ຈຸດເລີ່ມ", "start");
+    add(start, "#2c6fb6", "🏁", "ຈຸດເລີ່ມ", "start");
     add(end, "#10b981", "📍", "ຈຸດສິ້ນສຸດ", "end");
   }
 

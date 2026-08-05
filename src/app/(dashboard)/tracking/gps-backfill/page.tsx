@@ -131,7 +131,7 @@ export default function GpsBackfillPage() {
   return (
     <div className="space-y-5">
       {/* Header */}
-      <div className="relative overflow-hidden rounded-lg bg-[#0b1b18] p-5 shadow-xl">
+      <div className="relative overflow-hidden rounded-lg bg-[#003260] p-5 shadow-xl">
         <div className="relative flex items-center gap-3">
           <div className="w-11 h-11 rounded-lg bg-white/10 backdrop-blur flex items-center justify-center ring-1 ring-white/20">
             <FaSyncAlt className="text-teal-300" size={18} />

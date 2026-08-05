@@ -141,17 +141,17 @@ export function PhoneTrailMap({
 
       if (coords.length === 0) return;
 
-      lineRef.current = L.polyline(coords, { color: "#0ea5e9", weight: 4, opacity: 0.85 }).addTo(map);
+      lineRef.current = L.polyline(coords, { color: "#24abdb", weight: 4, opacity: 0.85 }).addTo(map);
       dotsRef.current = L.layerGroup().addTo(map);
       redrawDots(L, dotsRef.current, points, coords);
 
       const first = coords[0];
       const last = coords[coords.length - 1];
-      L.marker(first, { icon: pinIcon(L, "#3b82f6", "🏁") })
+      L.marker(first, { icon: pinIcon(L, "#2c6fb6", "🏁") })
         .addTo(map)
         .bindPopup(`ເລີ່ມ: ${points[0].recorded_at}`);
       headRef.current = L.marker(last, {
-        icon: pinIcon(L, live ? "#10b981" : "#0ea5e9", live ? "🟢" : "📍", live),
+        icon: pinIcon(L, live ? "#10b981" : "#24abdb", live ? "🟢" : "📍", live),
       })
         .addTo(map)
         .bindPopup(`ລ່າສຸດ: ${points[points.length - 1].recorded_at}`);
@@ -201,9 +201,9 @@ function redrawDots(
     const p = points[i];
     L.circleMarker(coords[i], {
       radius: 3,
-      color: "#0284c7",
+      color: "#1489ba",
       weight: 1,
-      fillColor: "#38bdf8",
+      fillColor: "#4bc7ef",
       fillOpacity: 0.9,
     })
       .addTo(group)

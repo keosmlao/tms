@@ -215,7 +215,7 @@ type Filter = "all" | FleetStatus;
 
 const STATUS_COLORS: Record<FleetStatus, { solid: string; ring: string; text: string }> = {
   moving: { solid: "#10b981", ring: "#a7f3d0", text: "text-emerald-600" },
-  stopped: { solid: "#f59e0b", ring: "#fde68a", text: "text-amber-600" },
+  stopped: { solid: "#f6921e", ring: "#ffd071", text: "text-amber-600" },
   offline: { solid: "#94a3b8", ring: "#e2e8f0", text: "text-slate-500" },
 };
 
@@ -306,7 +306,7 @@ function SignalBars({ bars, total = 4, color }: { bars: number; total?: number; 
 function GpsBadge({ car }: { car: GpsRealtime }) {
   const q = gpsQuality(car.sat, car.hdop);
   if (q.bars === 0) return null;
-  const colors = ["#94a3b8", "#f59e0b", "#10b981", "#10b981"];
+  const colors = ["#94a3b8", "#f6921e", "#10b981", "#10b981"];
   const color = colors[q.level];
   return (
     <span
@@ -322,7 +322,7 @@ function GpsBadge({ car }: { car: GpsRealtime }) {
 function GsmBadge({ car }: { car: GpsRealtime }) {
   const bars = gsmBars(car.gsm);
   if (bars === 0) return null;
-  const color = bars >= 3 ? "#10b981" : bars === 2 ? "#f59e0b" : "#ef4444";
+  const color = bars >= 3 ? "#10b981" : bars === 2 ? "#f6921e" : "#ef4444";
   return (
     <span
       className="inline-flex items-center gap-1 text-[10px] text-slate-500 dark:text-slate-400"
@@ -984,7 +984,7 @@ function CarsMapInner() {
       {/* Fullscreen container: cancel layout padding, fill viewport minus topbar & footer */}
       <div className="-m-4 h-[calc(100vh-6.5rem)] flex flex-col bg-slate-950 overflow-hidden">
         {/* Compact top bar */}
-        <div className="shrink-0 bg-[#0b1b18] border-b border-white/10">
+        <div className="shrink-0 bg-[#003260] border-b border-white/10">
           <div className="flex flex-wrap items-center gap-3 px-4 py-2.5">
             <div className="flex items-center gap-2.5 shrink-0">
               <div className="w-9 h-9 rounded-lg bg-white/10 backdrop-blur flex items-center justify-center ring-1 ring-white/20">

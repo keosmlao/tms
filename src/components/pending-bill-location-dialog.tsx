@@ -58,7 +58,7 @@ function pinIcon(L: LeafletApi) {
   return L.divIcon({
     className: "tms-pending-pin",
     html: `<div style="
-      background:#0d9488;color:white;width:32px;height:32px;border-radius:50% 50% 50% 0;
+      background:#2c6fb6;color:white;width:32px;height:32px;border-radius:50% 50% 50% 0;
       transform:rotate(-45deg);box-shadow:0 4px 10px rgba(0,0,0,0.25);
       display:flex;align-items:center;justify-content:center;
     "><div style="transform:rotate(45deg);font-size:14px;">📍</div></div>`,

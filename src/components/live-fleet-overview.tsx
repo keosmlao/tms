@@ -15,7 +15,7 @@ const REFRESH_MS = 15_000;
 const DEFAULT_CENTER: [number, number] = [17.9757, 102.6331]; // Vientiane
 
 const COLOR_MOVING = "#10b981";
-const COLOR_STOPPED = "#f59e0b";
+const COLOR_STOPPED = "#f6921e";
 const COLOR_OFFLINE = "#94a3b8";
 
 interface CarRow {

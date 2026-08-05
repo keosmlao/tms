@@ -89,7 +89,7 @@ type Filter = "all" | "online" | FleetStatus;
 
 const STATUS_COLORS: Record<FleetStatus, { solid: string; ring: string; text: string }> = {
   moving: { solid: "#10b981", ring: "#a7f3d0", text: "text-emerald-600 dark:text-emerald-400" },
-  stopped: { solid: "#f59e0b", ring: "#fde68a", text: "text-amber-600 dark:text-amber-400" },
+  stopped: { solid: "#f6921e", ring: "#ffd071", text: "text-amber-600 dark:text-amber-400" },
   offline: { solid: "#94a3b8", ring: "#e2e8f0", text: "text-slate-500" },
 };
 
@@ -761,7 +761,7 @@ function PhonesMapInner() {
       {/* Fullscreen container: cancel layout padding, fill viewport minus topbar & footer */}
       <div className="-m-4 h-[calc(100vh-6.5rem)] flex flex-col bg-slate-950 overflow-hidden">
         {/* Compact top bar */}
-        <div className="shrink-0 bg-[#0b1b18] border-b border-white/10">
+        <div className="shrink-0 bg-[#003260] border-b border-white/10">
           <div className="flex flex-wrap items-center gap-3 px-4 py-2.5">
             <div className="flex items-center gap-2.5 shrink-0">
               <div className="w-9 h-9 rounded-lg bg-white/10 backdrop-blur flex items-center justify-center ring-1 ring-white/20">

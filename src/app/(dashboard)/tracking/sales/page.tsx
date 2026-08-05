@@ -308,7 +308,7 @@ function BillLiveMap({ position }: { position: CarPosition }) {
     const icon = L.divIcon({
       className: "",
       html:
-        '<div style="width:20px;height:20px;border-radius:50%;background:#0ea5e9;border:3px solid white;box-shadow:0 2px 6px rgba(0,0,0,0.35)"></div>',
+        '<div style="width:20px;height:20px;border-radius:50%;background:#24abdb;border:3px solid white;box-shadow:0 2px 6px rgba(0,0,0,0.35)"></div>',
       iconSize: [20, 20],
       iconAnchor: [10, 10],
     });

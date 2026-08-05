@@ -1,5 +1,5 @@
 import type { Metadata } from "next";
-import { Noto_Sans_Lao } from "next/font/google";
+import { Montserrat, Noto_Sans_Lao } from "next/font/google";
 import { Toaster } from "react-hot-toast";
 import { SessionProvider } from "@/providers/session-provider";
 import "./globals.css";
@@ -15,6 +15,18 @@ const notoLao = Noto_Sans_Lao({
   variable: "--font-lao-sans",
 });
 
+// ຟອນແບຣນສຳລັບຕົວອັກສອນລາຕິນ ແລະ ຕົວເລກ (Brand Guideline ໜ້າ 06).
+// ວາງໄວ້ກ່ອນ Noto Sans Lao ໃນ --font-sans: browser ເລືອກຟອນຕໍ່ glyph
+// ຈຶ່ງໄດ້ Montserrat ສຳລັບລາຕິນ ແລະ Noto Sans Lao ສຳລັບພາສາລາວ.
+// TODO: guideline ກຳນົດ BoonHome ສຳລັບພາສາລາວ ແຕ່ບໍ່ມີໃນ Google Fonts —
+// ເມື່ອໄດ້ໄຟລ໌ .woff2 ແລ້ວ ໃຫ້ປ່ຽນມາໃຊ້ next/font/local ແທນ notoLao.
+const montserrat = Montserrat({
+  subsets: ["latin"],
+  weight: ["400", "500", "600", "700", "900"],
+  display: "swap",
+  variable: "--font-brand-sans",
+});
+
 export const metadata: Metadata = {
   title: "ODG TMS",
   description: "Odien Group Transport Management System",
@@ -26,7 +38,7 @@ export default function RootLayout({
   children: React.ReactNode;
 }>) {
   return (
-    <html lang="lo" className={`${notoLao.variable} h-full antialiased`}>
+    <html lang="lo" className={`${montserrat.variable} ${notoLao.variable} h-full antialiased`}>
       {/* suppressHydrationWarning: ສ່ວນຂະຫຍາຍຂອງ browser (ຕົວແປພາສາ,
           ຕົວຈຳລະຫັດຜ່ານ ແລະ ອື່ນໆ) ຕື່ມ attribute ໃສ່ <body> ກ່ອນ React
           hydrate ເຊັ່ນ __processed_<uuid>__ ແລ້ວເກີດ hydration mismatch

@@ -195,7 +195,7 @@ export default function Topbar() {
       : [];
 
   return (
-    <header className="sticky top-0 z-40 border-b border-white/[0.06] bg-[#0b1614]/95 shadow-[0_10px_30px_-14px_rgba(0,0,0,0.55)] backdrop-blur-xl transition-all duration-300 print:hidden">
+    <header className="sticky top-0 z-40 border-b border-white/[0.06] bg-[#00223f]/95 shadow-[0_10px_30px_-14px_rgba(0,0,0,0.55)] backdrop-blur-xl transition-all duration-300 print:hidden">
       <div className="flex h-16 items-center justify-between gap-3 pl-16 pr-3 sm:gap-4 sm:pr-4 md:px-6">
         {/* Left: Title + Breadcrumb */}
         <div className="flex items-center gap-2.5 min-w-0">

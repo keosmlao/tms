@@ -16,6 +16,7 @@ import {
 } from "react-icons/fa";
 import { Auth } from "@/lib/api";
 import { useSession } from "@/providers/session-provider";
+import { BrandLogo } from "@/components/brand-logo";
 
 export default function LoginPage() {
   return (
@@ -60,13 +61,13 @@ function Login() {
       {/* Decorative background blobs */}
       <div className="pointer-events-none absolute inset-0">
         <div className="absolute -top-32 -left-32 h-96 w-96 rounded-full bg-teal-400/20 blur-3xl dark:bg-teal-500/15" />
-        <div className="absolute top-1/3 -right-32 h-[28rem] w-[28rem] rounded-full bg-emerald-300/20 blur-3xl dark:bg-emerald-500/10" />
+        <div className="absolute top-1/3 -right-32 h-[28rem] w-[28rem] rounded-full bg-sky-300/20 blur-3xl dark:bg-sky-500/10" />
         <div className="absolute -bottom-40 left-1/4 h-96 w-96 rounded-full bg-cyan-300/15 blur-3xl dark:bg-cyan-500/10" />
       </div>
 
       <div className="relative z-10 grid min-h-screen lg:grid-cols-2">
         {/* Left brand panel */}
-        <div className="relative hidden overflow-hidden bg-gradient-to-br from-[#0b1b18] via-[#0e2a26] to-[#13403a] lg:flex lg:flex-col lg:justify-between lg:p-12 lg:text-white">
+        <div className="relative hidden overflow-hidden bg-gradient-to-br from-[#003260] via-[#12497f] to-[#2c6fb6] lg:flex lg:flex-col lg:justify-between lg:p-12 lg:text-white">
           {/* Subtle grid overlay */}
           <div
             className="pointer-events-none absolute inset-0 opacity-[0.07]"
@@ -79,18 +80,14 @@ function Login() {
           />
           {/* Glow accents */}
           <div className="pointer-events-none absolute -top-24 -right-24 h-72 w-72 rounded-full bg-teal-400/25 blur-3xl" />
-          <div className="pointer-events-none absolute bottom-0 left-1/3 h-64 w-64 rounded-full bg-emerald-400/15 blur-3xl" />
+          <div className="pointer-events-none absolute bottom-0 left-1/3 h-64 w-64 rounded-full bg-amber-300/15 blur-3xl" />
 
-          <div className="relative flex items-center gap-3">
-            <div className="flex h-11 w-11 items-center justify-center overflow-hidden rounded-xl bg-white/10 ring-1 ring-white/20 backdrop-blur">
-              <img src="/odg.png" alt="ODG" className="h-full w-full object-contain" />
-            </div>
-            <div className="leading-tight">
-              <p className="text-base font-bold tracking-wide">ODIEN GROUP</p>
-              <p className="text-[11px] uppercase tracking-[0.18em] text-teal-200/70">
-                Transport Suite
-              </p>
-            </div>
+          {/* ພື້ນ gradient navy → ໃຊ້ໂລໂກ້ຂາວລ້ວນຕາມກົດ (ໜ້າ 11) */}
+          <div className="relative">
+            <BrandLogo variant="white" className="h-11" />
+            <p className="mt-2.5 text-[11px] uppercase tracking-[0.18em] text-teal-200/70">
+              Transport Suite
+            </p>
           </div>
 
           <div className="relative max-w-md">
@@ -101,7 +98,7 @@ function Login() {
             <h2 className="mt-5 text-4xl font-bold leading-tight">
               ຈັດການການຂົນສົ່ງ
               <br />
-              <span className="bg-gradient-to-r from-teal-200 via-emerald-200 to-cyan-200 bg-clip-text text-transparent">
+              <span className="bg-gradient-to-r from-sky-200 via-sky-100 to-amber-200 bg-clip-text text-transparent">
                 ໃຫ້ສະຫຼາດກວ່າ
               </span>
             </h2>
@@ -127,14 +124,10 @@ function Login() {
         <div className="flex items-center justify-center px-6 py-12 sm:px-10">
           <div className="w-full max-w-md">
             {/* Mobile-only brand header */}
-            <div className="mb-8 flex items-center gap-3 lg:hidden">
-              <div className="flex h-12 w-12 items-center justify-center overflow-hidden rounded-xl bg-white shadow-lg">
-                <img src="/odg.png" alt="ODG" className="h-full w-full object-contain" />
-              </div>
-              <div className="leading-tight">
-                <p className="text-base font-bold text-slate-800 dark:text-white">
-                  ODIEN GROUP
-                </p>
+            <div className="mb-8 lg:hidden">
+              {/* auto = 3 ສີເທິງກ່ອງຂາວ (ໂໝດແຈ້ງ) / ຂາວລ້ວນ (ໂໝດມືດ) */}
+              <BrandLogo className="h-9" />
+              <div className="mt-2 leading-tight">
                 <p className="text-[11px] uppercase tracking-[0.18em] text-slate-500 dark:text-slate-400">
                   Transport Suite
                 </p>
@@ -213,7 +206,7 @@ function Login() {
               <button
                 type="submit"
                 disabled={loading}
-                className="group relative flex h-12 w-full items-center justify-center gap-2 overflow-hidden rounded-xl bg-gradient-to-br from-teal-600 to-emerald-700 text-sm font-semibold text-white shadow-lg shadow-teal-900/20 transition-all hover:from-teal-500 hover:to-emerald-600 hover:shadow-xl hover:shadow-teal-900/30 focus:outline-none focus:ring-4 focus:ring-teal-500/30 active:scale-[0.99] disabled:cursor-not-allowed disabled:opacity-60 dark:from-teal-500 dark:to-emerald-600 dark:text-slate-950 dark:shadow-teal-500/20"
+                className="group relative flex h-12 w-full items-center justify-center gap-2 overflow-hidden rounded-xl bg-gradient-to-br from-teal-500 to-teal-800 text-sm font-semibold text-white shadow-lg shadow-teal-900/20 transition-all hover:from-teal-400 hover:to-teal-700 hover:shadow-xl hover:shadow-teal-900/30 focus:outline-none focus:ring-4 focus:ring-teal-500/30 active:scale-[0.99] disabled:cursor-not-allowed disabled:opacity-60 dark:from-teal-400 dark:to-teal-700 dark:text-slate-950 dark:shadow-teal-500/20"
               >
                 {/* Shimmer overlay */}
                 <span className="pointer-events-none absolute inset-0 -translate-x-full bg-gradient-to-r from-transparent via-white/20 to-transparent transition-transform duration-700 group-hover:translate-x-full" />

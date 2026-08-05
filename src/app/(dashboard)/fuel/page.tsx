@@ -485,7 +485,7 @@ export default function FuelPage() {
             <table className="min-w-full text-[11px]">
               <thead>
                 <tr className="bg-white/40 dark:bg-white/5 border-b border-slate-200/30 dark:border-white/5">
-                  <th className="sticky left-0 z-10 bg-white/90 dark:bg-[#13211f] px-3 py-2 text-center font-semibold text-slate-600 dark:text-slate-300">
+                  <th className="sticky left-0 z-10 bg-white/90 dark:bg-[#062338] px-3 py-2 text-center font-semibold text-slate-600 dark:text-slate-300">
                     ລ/ດ
                   </th>
                   <th className="px-3 py-2 text-left font-semibold text-slate-600 dark:text-slate-300 min-w-[180px]">
@@ -514,7 +514,7 @@ export default function FuelPage() {
                     key={row.key}
                     className="border-b border-slate-200/20 dark:border-white/5 hover:bg-white/30 dark:hover:bg-white/5"
                   >
-                    <td className="sticky left-0 z-10 bg-white/90 dark:bg-[#13211f] px-3 py-2 text-center tabular-nums text-slate-500">
+                    <td className="sticky left-0 z-10 bg-white/90 dark:bg-[#062338] px-3 py-2 text-center tabular-nums text-slate-500">
                       {index + 1}
                     </td>
                     <td className="px-3 py-2 font-medium text-slate-800 dark:text-slate-100">{row.carName || "-"}</td>

@@ -772,12 +772,12 @@ export default function CarsManagePage() {
   return (
     <div className="space-y-5">
       {/* ========== HERO ========== */}
-      <div className="relative overflow-hidden rounded-lg bg-[#0b1b18] p-5 sm:p-6 shadow-xl">
+      <div className="relative overflow-hidden rounded-lg bg-[#003260] p-5 sm:p-6 shadow-xl">
         <div
           className="absolute inset-0 opacity-20"
           style={{
             backgroundImage:
-              "radial-gradient(circle at 10% 10%, #38bdf8 0%, transparent 35%), radial-gradient(circle at 90% 80%, #a78bfa 0%, transparent 35%)",
+              "radial-gradient(circle at 10% 10%, #4bc7ef 0%, transparent 35%), radial-gradient(circle at 90% 80%, #f6921e 0%, transparent 35%)",
           }}
         />
 
@@ -1133,12 +1133,12 @@ export default function CarsManagePage() {
             className="relative w-full max-w-5xl overflow-hidden rounded-lg glass-heavy shadow-2xl flex flex-col max-h-[92vh]"
           >
             {/* Modal header */}
-            <div className="relative bg-[#0b1b18] px-5 py-4 text-white">
+            <div className="relative bg-[#003260] px-5 py-4 text-white">
               <div
                 className="absolute inset-0 opacity-20"
                 style={{
                   backgroundImage:
-                    "radial-gradient(circle at 10% 10%, #38bdf8 0%, transparent 40%), radial-gradient(circle at 90% 60%, #a78bfa 0%, transparent 40%)",
+                    "radial-gradient(circle at 10% 10%, #4bc7ef 0%, transparent 40%), radial-gradient(circle at 90% 60%, #f6921e 0%, transparent 40%)",
                 }}
               />
               <div className="relative flex items-start justify-between gap-4">

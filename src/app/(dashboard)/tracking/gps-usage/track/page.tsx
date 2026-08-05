@@ -184,8 +184,8 @@ function fmtKm(km: number) {
 function speedColor(speed: number): string {
   if (speed <= 3) return "#64748b";
   if (speed <= 20) return "#10b981";
-  if (speed <= 50) return "#3b82f6";
-  if (speed <= 80) return "#f59e0b";
+  if (speed <= 50) return "#2c6fb6";
+  if (speed <= 80) return "#f6921e";
   return "#ef4444";
 }
 function speedLabel(speed: number): string {
@@ -435,7 +435,7 @@ function GpsUsageTrackInner() {
     }
 
     const progress = L.polyline([latlngs[0]], {
-      color: "#a855f7",
+      color: "#2c6fb6",
       weight: 5.5,
       opacity: 0.95,
       fill: false,
@@ -525,7 +525,7 @@ function GpsUsageTrackInner() {
         .map((pt) => [pt.lat, pt.lng] as [number, number]);
       if (slice.length >= 1) {
         const next = L.polyline(slice, {
-          color: "#a855f7",
+          color: "#2c6fb6",
           weight: 5.5,
           opacity: 0.95,
           fill: false,
@@ -702,8 +702,8 @@ function GpsUsageTrackInner() {
   const speedLegendItems = [
     { color: "#64748b", label: "ຈອດ", range: "≤3" },
     { color: "#10b981", label: "ຊ້າ", range: "4-20" },
-    { color: "#3b82f6", label: "ປົກກະຕິ", range: "21-50" },
-    { color: "#f59e0b", label: "ໄວ", range: "51-80" },
+    { color: "#2c6fb6", label: "ປົກກະຕິ", range: "21-50" },
+    { color: "#f6921e", label: "ໄວ", range: "51-80" },
     { color: "#ef4444", label: "ເລັ່ງ", range: "81+" },
   ];
 
@@ -759,7 +759,7 @@ function GpsUsageTrackInner() {
         .gps-cursor-car {
           position: relative;
           width: 30px; height: 30px;
-          background: linear-gradient(135deg, #a855f7, #6366f1);
+          background: linear-gradient(135deg, #2c6fb6, #003260);
           border: 2.5px solid white;
           border-radius: 14px;
           display: flex; align-items: center; justify-content: center;
@@ -789,7 +789,7 @@ function GpsUsageTrackInner() {
           position: relative;
           width: 22px; height: 22px;
           border-radius: 50%;
-          background: linear-gradient(135deg, #06b6d4, #0891b2);
+          background: linear-gradient(135deg, #4bc7ef, #2c6fb6);
           border: 2.5px solid white;
           display: flex; align-items: center; justify-content: center;
           box-shadow: 0 3px 10px rgba(6, 182, 212, 0.6);
@@ -803,33 +803,33 @@ function GpsUsageTrackInner() {
         .gps-slider::-webkit-slider-runnable-track {
           height: 6px; border-radius: 999px;
           background: linear-gradient(to right,
-            #a855f7 0%, #a855f7 var(--p, 0%),
+            #2c6fb6 0%, #2c6fb6 var(--p, 0%),
             rgba(255,255,255,0.15) var(--p, 0%), rgba(255,255,255,0.15) 100%);
         }
         .gps-slider::-moz-range-track {
           height: 6px; border-radius: 999px;
           background: linear-gradient(to right,
-            #a855f7 0%, #a855f7 var(--p, 0%),
+            #2c6fb6 0%, #2c6fb6 var(--p, 0%),
             rgba(255,255,255,0.15) var(--p, 0%), rgba(255,255,255,0.15) 100%);
         }
         .gps-slider::-webkit-slider-thumb {
           -webkit-appearance: none; appearance: none;
           width: 16px; height: 16px; border-radius: 50%;
-          background: white; border: 3px solid #a855f7;
+          background: white; border: 3px solid #2c6fb6;
           box-shadow: 0 2px 6px rgba(0,0,0,0.35);
           cursor: pointer;
           margin-top: -5px;
         }
         .gps-slider::-moz-range-thumb {
           width: 14px; height: 14px; border-radius: 50%;
-          background: white; border: 3px solid #a855f7;
+          background: white; border: 3px solid #2c6fb6;
           box-shadow: 0 2px 6px rgba(0,0,0,0.35);
           cursor: pointer;
         }
       `}</style>
       <div className="gps-track-page -m-4 h-[calc(100vh-6.5rem)] flex flex-col bg-slate-950 overflow-hidden">
         {/* HEADER */}
-        <div className="shrink-0 bg-[#0b1b18] border-b border-white/10">
+        <div className="shrink-0 bg-[#003260] border-b border-white/10">
           <div className="flex flex-wrap items-center gap-3 px-4 py-3 sm:px-5">
             <button
               type="button"
