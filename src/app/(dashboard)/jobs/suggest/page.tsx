@@ -6,6 +6,7 @@ import { FaLightbulb, FaSpinner, FaTruck, FaMapMarkerAlt, FaPlus, FaCheck } from
 import { Actions } from "@/lib/api";
 import { StatusPageHeader } from "@/components/status-page-shell";
 import { useSession } from "@/providers/session-provider";
+import { getLaoToday } from "@/lib/lao-date";
 
 interface TripBill {
   bill_no: string;
@@ -46,7 +47,7 @@ interface Option {
   time_label?: string;
 }
 
-const today = () => new Date().toISOString().slice(0, 10);
+const today = () => getLaoToday();
 
 export default function SuggestTripsPage() {
   const { session } = useSession();

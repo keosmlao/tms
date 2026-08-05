@@ -8,6 +8,8 @@
 // ແລະ ຍັງໄດ້ type ຄົບຈາກ JSDoc ຂ້າງລຸ່ມ.
 "use strict";
 
+const { getLaoToday } = require("./lao-date");
+
 const FIXED_YEAR = 2026;
 const FIXED_YEAR_START = `${FIXED_YEAR}-01-01`;
 const FIXED_YEAR_END = `${FIXED_YEAR}-12-31`;
@@ -33,9 +35,12 @@ function getDaysInMonth(year, month) {
  * @returns {string}
  */
 function getFixedTodayDate(now = new Date()) {
-  const month = Math.min(Math.max(now.getMonth() + 1, 1), 12);
+  // ໂມງຝາຢູ່ລາວ ບໍ່ແມ່ນ now.getMonth()/getDate() ຂອງເຄື່ອງທີ່ແລ່ນ — ຖ້າ server
+  // ຕັ້ງເປັນ UTC ທຸກໜ້າຈະຖືວ່າ "ມື້ນີ້" ເປັນວັນວານ ຕະຫຼອດ 00:00–07:00 ຢູ່ລາວ.
+  const [, laoMonth, laoDay] = getLaoToday(now).split("-");
+  const month = Math.min(Math.max(Number.parseInt(laoMonth, 10), 1), 12);
   const day = Math.min(
-    Math.max(now.getDate(), 1),
+    Math.max(Number.parseInt(laoDay, 10), 1),
     getDaysInMonth(FIXED_YEAR, month)
   );
 

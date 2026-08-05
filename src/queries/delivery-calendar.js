@@ -12,6 +12,7 @@ const { query } = require("../lib/db");
 const { listDeliveryRounds } = require("./delivery-round");
 const { listDeliveryRoutes } = require("./delivery-route");
 const { ensurePendingBillSchema } = require("./pending-bill");
+const { getLaoTodayMonth } = require("../lib/lao-date");
 
 const NO_ROUND = "__none__";
 const NO_ROUTE = "__none__";
@@ -19,9 +20,10 @@ const NO_ROUTE = "__none__";
 // "YYYY-MM" -> { start: "YYYY-MM-01", next: first day of the following month }.
 function monthBounds(month) {
   const match = /^(\d{4})-(\d{2})$/.exec(String(month ?? ""));
-  const now = new Date();
-  const year = match ? Number.parseInt(match[1], 10) : now.getFullYear();
-  const mon = match ? Number.parseInt(match[2], 10) : now.getMonth() + 1;
+  // ເດືອນປັດຈຸບັນຢູ່ລາວ — ບໍ່ແມ່ນຂອງເຄື່ອງ server (ວັນທີ 1 ກ່ອນ 07:00 ຈະຕົກເດືອນກ່ອນ)
+  const [laoYear, laoMonth] = getLaoTodayMonth().split("-");
+  const year = match ? Number.parseInt(match[1], 10) : Number.parseInt(laoYear, 10);
+  const mon = match ? Number.parseInt(match[2], 10) : Number.parseInt(laoMonth, 10);
   const pad = (n) => String(n).padStart(2, "0");
   const start = `${year}-${pad(mon)}-01`;
   const next =

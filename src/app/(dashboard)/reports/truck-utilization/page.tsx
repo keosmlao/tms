@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import { FaExclamationTriangle, FaSpinner, FaTruckLoading } from "react-icons/fa";
 import { Actions } from "@/lib/api";
 import { StatusPageHeader, StatusTableShell } from "@/components/status-page-shell";
+import { addDays, getLaoToday } from "@/lib/lao-date";
 
 interface Row {
   docNo: string;
@@ -32,9 +33,8 @@ interface Summary {
   bands: Array<{ label: string; trips: number }>;
 }
 
-const today = () => new Date().toISOString().slice(0, 10);
-const daysAgo = (n: number) =>
-  new Date(Date.now() - n * 86400000).toISOString().slice(0, 10);
+const today = () => getLaoToday();
+const daysAgo = (n: number) => addDays(getLaoToday(), -n);
 
 export default function TruckUtilizationPage() {
   const [from, setFrom] = useState(daysAgo(30));

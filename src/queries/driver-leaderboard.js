@@ -1,34 +1,41 @@
 const { query } = require("../lib/db");
 const { getFixedTodayDate, getFixedYearSqlFilter } = require("../lib/fixed-year");
+const { addMonths, startOfMonth } = require("../lib/lao-date");
 const { getBranchScope } = require("./helpers");
 
 // Driver performance leaderboard for a chosen window (today/month/year).
 // Computed on completed bills (status=1, sent_end set). Returns one row per
 // driver with totals + averages mirrored from the delivery-KPI definition.
 async function getDriverLeaderboard(session, period = "month") {
+  // ຄິດເປັນຂໍ້ຄວາມລ້ວນໆ — new Date(`${monthStart}T00:00:00`).toISOString()
+  // ຢູ່ເຄື່ອງ +07 ຄືນວັນສຸດທ້າຍຂອງເດືອນກ່ອນ ຈຶ່ງນັບບິນເກີນມາທັງເດືອນ
   const fixedToday = getFixedTodayDate();
-  const monthStart = `${fixedToday.slice(0, 7)}-01`;
-  const next = new Date(`${monthStart}T00:00:00`);
-  next.setMonth(next.getMonth() + 1);
-  const nextMonthStart = next.toISOString().slice(0, 10);
+  const monthStart = startOfMonth(fixedToday);
+  const nextMonthStart = addMonths(monthStart, 1);
 
   const scope = getBranchScope(session);
   const branchClause = scope.scoped
     ? `AND EXISTS (SELECT 1 FROM ic_trans_shipment __ts WHERE __ts.doc_no = d.bill_no AND __ts.transport_code IN (${scope.branchListSql}))`
     : "";
 
-  const params = [fixedToday, monthStart, nextMonthStart];
+  // ສົ່ງສະເພາະ param ທີ່ຊ່ວງນັ້ນໃຊ້ຈິງ. ເມື່ອກ່ອນສົ່ງທັງ 3 ຕົວສະເໝີ ແຕ່ຊ່ວງ
+  // "ເດືອນ" (ຄ່າເລີ່ມຕົ້ນ) ແລະ "ປີ" ບໍ່ໄດ້ອ້າງ $1 ເລີຍ Postgres ຈຶ່ງຕອບ
+  // "could not determine data type of parameter $1" ແລ້ວໜ້າຄະແນນຄົນຂັບຂຶ້ນ error.
   let dateFilter;
+  let params;
   switch (period) {
     case "today":
       dateFilter = `d.sent_end::date = $1::date`;
+      params = [fixedToday];
       break;
     case "year":
       dateFilter = "TRUE";
+      params = [];
       break;
     case "month":
     default:
-      dateFilter = `d.sent_end::date >= $2::date AND d.sent_end::date < $3::date`;
+      dateFilter = `d.sent_end::date >= $1::date AND d.sent_end::date < $2::date`;
+      params = [monthStart, nextMonthStart];
   }
 
   return query(

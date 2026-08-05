@@ -1,4 +1,5 @@
 const { pool, query, queryOne } = require("../lib/db");
+const { getLaoToday, addDays } = require("../lib/lao-date");
 
 const gpsUsageCache = globalThis;
 const YMD_RE = /^\d{4}-\d{2}-\d{2}$/;
@@ -989,17 +990,9 @@ function buildDailyRow(car, day, summary) {
 
 function enumerateDays(from, to) {
   const out = [];
-  const start = new Date(`${from}T00:00:00`);
-  const end = new Date(`${to}T00:00:00`);
-  if (Number.isNaN(start.getTime()) || Number.isNaN(end.getTime())) return out;
-  const cur = new Date(start);
-  while (cur <= end) {
-    const y = cur.getFullYear();
-    const m = String(cur.getMonth() + 1).padStart(2, "0");
-    const d = String(cur.getDate()).padStart(2, "0");
-    out.push(`${y}-${m}-${d}`);
-    cur.setDate(cur.getDate() + 1);
-  }
+  if (!YMD_RE.test(String(from ?? "")) || !YMD_RE.test(String(to ?? ""))) return out;
+  // ບວກມື້ເປັນຂໍ້ຄວາມລ້ວນໆ — ບໍ່ຜ່ານ Date ຂອງເຄື່ອງ ຈຶ່ງບໍ່ມີວັນເລື່ອນຕາມ TZ
+  for (let day = from; day <= to; day = addDays(day, 1)) out.push(day);
   return out;
 }
 
@@ -1204,12 +1197,10 @@ async function getSyncedDaysForImei(imei, fromDate, toDate) {
   return new Set(rows.map((r) => r.d));
 }
 
+// ວັນທີລາວ — ບໍ່ເອົາເວລາເຄື່ອງ ເພາະ server ອາດຕັ້ງເປັນ UTC ແລ້ວ sync GPS
+// ຂອງມື້ນີ້ຈະໄປດຶງຂອງມື້ວານ ຕະຫຼອດ 00:00–07:00
 function todayYmd() {
-  const d = new Date();
-  const y = d.getFullYear();
-  const m = String(d.getMonth() + 1).padStart(2, "0");
-  const day = String(d.getDate()).padStart(2, "0");
-  return `${y}-${m}-${day}`;
+  return getLaoToday();
 }
 
 async function syncGpsRange(fromDate, toDate, carCode) {

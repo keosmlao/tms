@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import { FaMapMarkedAlt, FaSpinner, FaExternalLinkAlt } from "react-icons/fa";
 import { Actions } from "@/lib/api";
 import { StatusPageHeader, StatusTableShell } from "@/components/status-page-shell";
+import { addDays, getLaoToday } from "@/lib/lao-date";
 
 interface Row {
   bill_no: string;
@@ -34,9 +35,8 @@ interface Summary {
   without_gps: number;
 }
 
-const today = () => new Date().toISOString().slice(0, 10);
-const daysAgo = (n: number) =>
-  new Date(Date.now() - n * 86400000).toISOString().slice(0, 10);
+const today = () => getLaoToday();
+const daysAgo = (n: number) => addDays(getLaoToday(), -n);
 
 const mapsUrl = (lat: string, lng: string) =>
   `https://www.google.com/maps?q=${lat},${lng}`;

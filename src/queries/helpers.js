@@ -810,6 +810,29 @@ function customerAreaFields() {
     COALESCE(NULLIF(TRIM(arx_pv.name_1), ''), '') as cust_province`;
 }
 
+// ເວລາເປີດບິນຂາຍແທ້ (ເວລາລາວ).
+//
+// ⚠️ ຢ່າໃຊ້ ic_trans / ic_trans_shipment.create_date_time_now ເປັນເວລາເປີດບິນ:
+// ERP ຂຽນຄໍລຳນັ້ນເປັນ UTC — ວັດຈາກຖານຂໍ້ມູນຈິງ (2026-08-05, ບິນແຕ່ 01-07-2026):
+// ic_trans_shipment 3,975 ໃບ ຫ່າງຈາກ doc_time ພໍດີ 7 ຊົ່ວໂມງ ແລະ ຊົ່ວໂມງທີ່ບັນທຶກ
+// ກະຈຸກຢູ່ 01:00–10:00 ແລ້ວຫາຍໄປຫຼັງ 11:00 (= 08:00–17:00 ເວລາລາວ). ຜົນຄື
+// ບິນ INHPB26010788 ທີ່ເປີດ 14:46 ຂຶ້ນຈໍວ່າ 07:46 ແລະ ອາຍຸບິນເກີນຈິງ 7 ຊົ່ວໂມງ.
+//
+// doc_date + doc_time ຂອງ ic_trans ເປັນເວລາລາວທີ່ພະນັກງານຂາຍເປີດບິນ, ຄືກັບທີ່
+// ພິມໃສ່ໜ້າບິນ ແລະ ມີຄົບ 82,803/82,869 ໃບ (99.9%) ຂອງປີ 2026 — tv-dashboard.js
+// ໃຊ້ຄູ່ນີ້ຢູ່ກ່ອນແລ້ວດ້ວຍເຫດຜົນດຽວກັນ.
+//
+// icAlias = alias ຂອງ ic_trans ໃນ query (ຕ້ອງມີ .doc_date ແລະ .doc_time)
+// fallbackSql = ໃຊ້ເມື່ອບໍ່ມີແຖວ ic_trans ເລີຍ (ເຊັ່ນ LEFT JOIN ບໍ່ຕິດ)
+function billOpenedAtSql(icAlias, fallbackSql = "NULL::timestamp") {
+  return `(CASE
+    WHEN ${icAlias}.doc_time ~ '^[0-9]{1,2}:[0-9]{2}'
+      THEN ${icAlias}.doc_date + ${icAlias}.doc_time::time
+    WHEN ${icAlias}.doc_date IS NOT NULL THEN ${icAlias}.doc_date::timestamp
+    ELSE ${fallbackSql}
+  END)`;
+}
+
 module.exports = {
   invalidateRemainingSummary,
   invalidatePendingList,
@@ -818,6 +841,7 @@ module.exports = {
   customerAreaJoins,
   customerAreaFields,
   customerAreaSql,
+  billOpenedAtSql,
   effectivePickupCodeSql,
   safeDdl,
   once,

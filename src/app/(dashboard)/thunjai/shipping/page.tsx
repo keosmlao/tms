@@ -27,17 +27,16 @@ import {
   FaWeightHanging,
 } from "react-icons/fa";
 import { Actions } from "@/lib/api";
+import { getLaoToday, startOfMonth } from "@/lib/lao-date";
 
 type Row = Record<string, unknown>;
 
 function todayYmd() {
-  return new Date().toISOString().slice(0, 10);
+  return getLaoToday();
 }
 
 function monthStartYmd() {
-  const d = new Date();
-  d.setDate(1);
-  return d.toISOString().slice(0, 10);
+  return startOfMonth(getLaoToday());
 }
 
 function unwrapRows(value: unknown): Row[] {

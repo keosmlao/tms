@@ -2,10 +2,16 @@ const { query, queryOne } = require("../lib/db");
 const { getFixedYearSqlFilter } = require("../lib/fixed-year");
 const {
   customerAreaSql,
+  billOpenedAtSql,
   getBranchScope,
   branchFilterJob,
   ensureForwardBranchColumn,
 } = require("./helpers");
+
+// ເວລາເປີດບິນ ສຳລັບ query ທີ່ join ic_trans ເປັນ `t` ແລະ ic_trans_shipment ເປັນ `s`.
+// ເບິ່ງ billOpenedAtSql — create_date_time_now ຂອງສອງຕາຕະລາງນີ້ເປັນ UTC ຈຶ່ງໃຊ້
+// ບໍ່ໄດ້ (ບິນທີ່ເປີດຫຼັງ 17:00 ຈະຖືກນັບເປັນມື້ຖັດໄປ).
+const BILL_OPENED_AT = billOpenedAtSql("t", "s.doc_date::timestamp");
 
 async function getReportDaily(session, fromDate, toDate) {
   const scope = getBranchScope(session);
@@ -158,7 +164,7 @@ async function getReportMonthlyDelivery(session, monthly) {
            NULLIF(TRIM(sale_u.department::text), ''),
            'ບໍ່ລະບຸພະແນກ'
          ) AS department_name,
-         COALESCE(t.create_date_time_now, s.create_date_time_now, s.doc_date::timestamp) AS opened_at,
+         ${BILL_OPENED_AT} AS opened_at,
          completed.sent_end AS completed_at,
          p.end_at AS month_end_at
        FROM public.ic_trans_shipment s
@@ -175,8 +181,8 @@ async function getReportMonthlyDelivery(session, monthly) {
            AND COALESCE(done_job.approve_status,0) = 1
        ) completed ON true
        CROSS JOIN params p
-       WHERE COALESCE(t.create_date_time_now, s.create_date_time_now, s.doc_date::timestamp) >= p.start_at
-         AND COALESCE(t.create_date_time_now, s.create_date_time_now, s.doc_date::timestamp) < p.end_at
+       WHERE ${BILL_OPENED_AT} >= p.start_at
+         AND ${BILL_OPENED_AT} < p.end_at
          AND s.transport_code IS NOT NULL
          AND s.transport_code IN (${branchCodeSql})
          ${openedBranchClause}
@@ -236,7 +242,7 @@ async function getReportMonthlyDelivery(session, monthly) {
          d.sent_start,
          COALESCE(d.date_logistic::timestamp, a.date_logistic::timestamp, d.sent_start, a.dispatch_started_at) AS delivery_date_at,
          d.sent_end,
-         COALESCE(t.create_date_time_now, s.create_date_time_now, s.doc_date::timestamp) AS bill_opened_at,
+         ${BILL_OPENED_AT} AS bill_opened_at,
          COALESCE(history.delivery_rounds, 0) AS delivery_rounds,
          p.start_at AS month_start_at,
          p.end_at AS month_end_at
@@ -461,7 +467,7 @@ async function getReportMonthlyDelivery(session, monthly) {
     `WITH params AS (SELECT $1::timestamp AS start_at, $2::timestamp AS end_at),
      opened_source AS (
        SELECT s.doc_no AS bill_no,
-         COALESCE(t.create_date_time_now, s.create_date_time_now, s.doc_date::timestamp) AS opened_at,
+         ${BILL_OPENED_AT} AS opened_at,
          (SELECT MIN(done.sent_end) FROM public.odg_tms_detail done
             LEFT JOIN public.odg_tms done_job ON done_job.doc_no = done.doc_no
             WHERE done.bill_no = s.doc_no AND done.status = 1 AND done.sent_end IS NOT NULL
@@ -469,8 +475,8 @@ async function getReportMonthlyDelivery(session, monthly) {
        FROM public.ic_trans_shipment s
        LEFT JOIN public.ic_trans t ON t.doc_no = s.doc_no
        CROSS JOIN params p
-       WHERE COALESCE(t.create_date_time_now, s.create_date_time_now, s.doc_date::timestamp) >= p.start_at
-         AND COALESCE(t.create_date_time_now, s.create_date_time_now, s.doc_date::timestamp) < p.end_at
+       WHERE ${BILL_OPENED_AT} >= p.start_at
+         AND ${BILL_OPENED_AT} < p.end_at
          AND s.transport_code IS NOT NULL
          AND s.transport_code IN (${branchCodeSql})
          ${openedBranchClause}
@@ -502,7 +508,7 @@ async function getReportMonthlyDelivery(session, monthly) {
          CASE WHEN TRIM(COALESCE(cust.province,'')) = '01' THEN 'ນະຄອນຫຼວງ' ELSE 'ຕ່າງແຂວງ' END AS zone,
          d.status,
          COALESCE(d.date_logistic::timestamp, a.date_logistic::timestamp, d.sent_start, a.dispatch_started_at) AS appt_at,
-         COALESCE(t.create_date_time_now, s.create_date_time_now, s.doc_date::timestamp) AS bill_opened_at,
+         ${BILL_OPENED_AT} AS bill_opened_at,
          d.sent_end
        FROM public.odg_tms_detail d
        LEFT JOIN public.odg_tms a ON a.doc_no = d.doc_no
@@ -594,8 +600,8 @@ async function getReportMonthlyDelivery(session, monthly) {
               AND COALESCE(dj.approve_status,0) = 1) AS completed_at
        FROM public.ic_trans_shipment s
        LEFT JOIN public.ic_trans t ON t.doc_no = s.doc_no
-       WHERE COALESCE(t.create_date_time_now, s.create_date_time_now, s.doc_date::timestamp) >= $1::timestamp
-         AND COALESCE(t.create_date_time_now, s.create_date_time_now, s.doc_date::timestamp) < $2::timestamp
+       WHERE ${BILL_OPENED_AT} >= $1::timestamp
+         AND ${BILL_OPENED_AT} < $2::timestamp
          AND s.transport_code IS NOT NULL
          AND s.transport_code IN (${branchCodeSql})
          ${openedBranchClause}

@@ -4,6 +4,7 @@
 // the physical bill so the driver can scan to navigate.
 
 import QRCode from "qrcode";
+import { getLaoParts } from "./lao-date";
 
 export interface PrintBillLocationQrArgs {
   billNo: string;
@@ -36,9 +37,9 @@ export async function printBillLocationQr({
     margin: 1,
     width: 280,
   });
-  const today = new Date();
-  const pad = (n: number) => String(n).padStart(2, "0");
-  const printedAt = `${pad(today.getDate())}-${pad(today.getMonth() + 1)}-${today.getFullYear()} ${pad(today.getHours())}:${pad(today.getMinutes())}`;
+  // ເວລາລາວສະເໝີ — ເຈ້ຍນີ້ຖືກຕິດໃສ່ບິນຈິງ ຈຶ່ງບໍ່ຄວນປ່ຽນຕາມໂມງຂອງເຄື່ອງທີ່ພິມ
+  const p = getLaoParts();
+  const printedAt = `${p.day}-${p.month}-${p.year} ${p.hour}:${p.minute}`;
 
   const safe = (s: string) =>
     s.replace(/[&<>"']/g, (c) =>

@@ -12,6 +12,7 @@ const {
   customerAreaSql,
   customerAreaJoins,
   customerAreaFields,
+  billOpenedAtSql,
   getBranchScope,
   branchFilterShipment,
   branchFilterJob,
@@ -997,8 +998,8 @@ async function getManualPendingRowsForPending(
       COALESCE(NULLIF(TRIM(od.department_name_lo), ''), oe.department_code, '') as department,
       COALESCE(pb.transport_code, '') as transport_code,
       COALESCE(NULLIF(TRIM(tt.name_1), ''), NULLIF(TRIM(pb.transport_code), ''), '') as transport,
-      to_char(COALESCE(a.create_date_time_now, pb.updated_at),'DD-MM-YYYY HH24:MI') as time_open,
-      now() - COALESCE(a.create_date_time_now, pb.updated_at) as time_use,
+      to_char(COALESCE(${billOpenedAtSql("a")}, pb.updated_at),'DD-MM-YYYY HH24:MI') as time_open,
+      now() - COALESCE(${billOpenedAtSql("a")}, pb.updated_at) as time_use,
       true as manual_pending_bill,
       a.trans_flag as source_trans_flag,
       'ic_trans' as source_type`}
@@ -1167,8 +1168,9 @@ async function getBillsPending(session, fromDate, toDate, transportCode) {
         COALESCE(NULLIF(TRIM(oe.mobile), ''), '') as salesperson_phone,
         COALESCE(NULLIF(TRIM(oe.line_id), ''), '') as salesperson_line,
         COALESCE(NULLIF(TRIM(od.department_name_lo), ''), oe.department_code, '') as department,
-        COALESCE(NULLIF(TRIM(dov.name_1), ''), d.name_1) as transport, to_char(a.create_date_time_now,'DD-MM-YYYY HH24:MI') as time_open,
-        now() - a.create_date_time_now as time_use,
+        COALESCE(NULLIF(TRIM(dov.name_1), ''), d.name_1) as transport,
+        to_char(${billOpenedAtSql("b", "a.doc_date::timestamp")},'DD-MM-YYYY HH24:MI') as time_open,
+        now() - ${billOpenedAtSql("b", "a.doc_date::timestamp")} as time_use,
         now() - b.send_date::timestamp as time_use_send,
         -- Forwarded-in: a completed 'ສົ່ງສາຂາ' leg dropped this bill at the branch
         -- it now sits in (a.transport_code). Surfaces it for onward delivery here

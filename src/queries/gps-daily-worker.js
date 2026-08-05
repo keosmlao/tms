@@ -1,6 +1,7 @@
 const { query } = require("../lib/db");
 const { FIXED_YEAR_START, getFixedTodayDate } = require("../lib/fixed-year");
 const { ensureSchema, getExistingDays, insertDay } = require("./gps-day-store");
+const { addDays } = require("../lib/lao-date");
 
 // We reuse the single-day fetcher from gps-usage so the URL format stays:
 //   /exporter/log/getHistory/{imei}/{YYYYMMDD}
@@ -8,19 +9,13 @@ const gpsUsage = require("./gps-usage");
 
 // ==================== Helpers ====================
 
+const YMD_RE = /^\d{4}-\d{2}-\d{2}$/;
+
 function enumerateDays(from, to) {
   const out = [];
-  const start = new Date(`${from}T00:00:00`);
-  const end = new Date(`${to}T00:00:00`);
-  if (Number.isNaN(start.getTime()) || Number.isNaN(end.getTime())) return out;
-  const cur = new Date(start);
-  while (cur <= end) {
-    const y = cur.getFullYear();
-    const m = String(cur.getMonth() + 1).padStart(2, "0");
-    const d = String(cur.getDate()).padStart(2, "0");
-    out.push(`${y}-${m}-${d}`);
-    cur.setDate(cur.getDate() + 1);
-  }
+  if (!YMD_RE.test(String(from ?? "")) || !YMD_RE.test(String(to ?? ""))) return out;
+  // ບວກມື້ເປັນຂໍ້ຄວາມລ້ວນໆ — ບໍ່ຜ່ານ Date ຂອງເຄື່ອງ ຈຶ່ງບໍ່ມີວັນເລື່ອນຕາມ TZ
+  for (let day = from; day <= to; day = addDays(day, 1)) out.push(day);
   return out;
 }
 

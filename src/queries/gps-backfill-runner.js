@@ -8,6 +8,7 @@
 
 const { backfillGpsLog } = require("./gps-usage");
 const { query } = require("../lib/db");
+const { getLaoNowStamp } = require("../lib/lao-date");
 
 let state = freshState();
 
@@ -32,7 +33,9 @@ function freshState() {
 }
 
 function pushLog(line) {
-  const ts = new Date().toISOString().replace("T", " ").slice(0, 19);
+  // ບັນທຶກສະແດງດິບໆໃນໜ້າຈໍ (ບໍ່ຜ່ານ new Date() ຂອງ browser) ຈຶ່ງຕ້ອງເປັນເວລາລາວ
+  // ຢູ່ແລ້ວ — toISOString() ຈະໃຫ້ UTC ຊ້າ 7 ຊົ່ວໂມງ
+  const ts = getLaoNowStamp();
   state.log.push(`[${ts}] ${line}`);
   if (state.log.length > 200) state.log.shift();
 }

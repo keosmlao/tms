@@ -1,5 +1,6 @@
 const { query, queryOne } = require("../lib/db");
 const { getFixedYearSqlFilter, getFixedTodayDate } = require("../lib/fixed-year");
+const { addDays } = require("../lib/lao-date");
 const { getSetting } = require("./settings");
 const { sendLineText } = require("../lib/line");
 
@@ -99,10 +100,9 @@ async function evaluateKpiAlerts() {
 
   if (breaches.length === 0) return { skipped: true, reason: "all_targets_met", kpi };
 
-  const today = getFixedTodayDate();
-  const yesterday = new Date(`${today}T00:00:00`);
-  yesterday.setDate(yesterday.getDate() - 1);
-  const dateStr = yesterday.toISOString().slice(0, 10);
+  // addDays ຄິດດ້ວຍ UTC ລ້ວນໆ — new Date(`${today}T00:00:00`).toISOString()
+  // ຢູ່ເຄື່ອງ +07 ຫຼຸດໄປ 1 ມື້ຢູ່ແລ້ວ ແລ້ວ -1 ອີກ ກາຍເປັນ 2 ມື້ກ່ອນ
+  const dateStr = addDays(getFixedTodayDate(), -1);
   const message =
     `⚠️ KPI Alert · ${dateStr}\n` +
     `ສົ່ງສຳເລັດ ${kpi.total} ບິນ\n\n` +

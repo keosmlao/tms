@@ -35,6 +35,7 @@ import {
   FaLine,
 } from "react-icons/fa";
 import { FIXED_YEAR_END, FIXED_YEAR_START, getFixedTodayDate } from "@/lib/fixed-year";
+import { addDays } from "@/lib/lao-date";
 import { Actions } from "@/lib/api";
 import { BillItemsModal, BillVolumeTag, useBillVolumes } from "@/components/bill-volume";
 import {
@@ -211,10 +212,7 @@ const ACTION_STATUS_MAP: Record<string, { label: string; color: string }> = {
 // ບວກມື້ໃສ່ວັນທີ ໂດຍຄ້າງໄວ້ໃນປີທີ່ຕຶງ (FIXED_YEAR) — ໃຊ້ກັບປຸ່ມດ່ວນ "ມື້ອື່ນ"
 // ຂອງຕາຕະລາງການຈັດສົ່ງ ຈຶ່ງບໍ່ໄດ້ວັນທີທີ່ເກີນ min/max ຂອງ input.
 function addDaysInFixedYear(date: string, days: number): string {
-  const [y, m, d] = date.split("-").map(Number);
-  if (!y || !m || !d) return date;
-  const shifted = new Date(Date.UTC(y, m - 1, d + days));
-  const iso = shifted.toISOString().slice(0, 10);
+  const iso = addDays(date, days);
   if (iso < FIXED_YEAR_START) return FIXED_YEAR_START;
   if (iso > FIXED_YEAR_END) return FIXED_YEAR_END;
   return iso;
@@ -643,11 +641,6 @@ export default function BillsPendingClient() {
   const [scheduleHistory, setScheduleHistory] = useState<ScheduleHistoryRow[]>([]);
   const [historyLoading, setHistoryLoading] = useState(false);
   const today = getFixedTodayDate();
-  const addDays = (date: string, days: number) => {
-    const d = new Date(date + "T00:00:00");
-    d.setDate(d.getDate() + days);
-    return d.toISOString().slice(0, 10);
-  };
   const tomorrow = addDays(today, 1);
   const notYetThresholdDate = addDays(today, notYetDays);
 

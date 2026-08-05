@@ -19,6 +19,7 @@ const {
   getFixedTodayDate,
   getFixedYearSqlFilter,
 } = require("../lib/fixed-year");
+const { getLaoToday } = require("../lib/lao-date");
 const {
   effectivePickupCodeSql,
   customerAreaSql,
@@ -1993,7 +1994,8 @@ async function mobileJobAction(body) {
         if (!docNo) throw new Error("doc_no is required");
         if (!lat || !lng) throw new Error("lat and lng are required");
 
-        const today = new Date().toISOString().split("T")[0];
+        // ວັນທີລາວ ບໍ່ແມ່ນ UTC — ຄົນຂັບທີ່ອອກລົດກ່ອນ 07:00 ຈະຖືກບັນທຶກເປັນວັນວານ
+        const today = getLaoToday();
         await client.query(
           `INSERT INTO odg_tms_travel_history (doc_no, doc_date, lat, lng, recorded_at)
            VALUES ($1, $2::date, $3, $4, LOCALTIMESTAMP(0))`,
@@ -2449,7 +2451,7 @@ async function mobileSaveLocations({ doc_no, driver_id, imei, device, points }) 
       );
     }
 
-    const today = new Date().toISOString().split("T")[0];
+    const today = getLaoToday();
     const rows = [];
     const params = [];
     let i = 1;
@@ -2773,9 +2775,7 @@ async function mobileManagerDashboard({ date = "", branch = "" } = {}) {
 }
 
 async function mobileSupervisorKpi({ date = "" } = {}) {
-  const day = coerceDateToFixedYear(
-    date || new Date().toISOString().split("T")[0]
-  );
+  const day = coerceDateToFixedYear(date || getLaoToday());
   const row = await query(
     `SELECT
        COUNT(DISTINCT t.doc_no)::int AS total_trips,

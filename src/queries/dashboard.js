@@ -5,6 +5,7 @@ const {
   FIXED_YEAR_END,
   getFixedYearSqlFilter,
 } = require("../lib/fixed-year");
+const { addDays } = require("../lib/lao-date");
 const {
   formatInterval,
   getNextMonthStart,
@@ -323,9 +324,10 @@ async function computeKpi(session) {
   const trendMap = new Map(trendRows.map((row) => [row.day, row]));
   const deliveryKpiTrend = [];
   for (let i = 29; i >= 0; i--) {
-    const d = new Date(`${c.fixedToday}T00:00:00`);
-    d.setDate(d.getDate() - i);
-    const key = d.toISOString().slice(0, 10);
+    // ຄີຫຼັກຂອງກຣາຟຕ້ອງກົງກັບວັນທີທີ່ SQL ຄືນມາ — ຖ້າຄິດດ້ວຍ
+    // new Date(...T00:00:00).toISOString() ຢູ່ເຄື່ອງ +07 ຄີຈະເລື່ອນໄປ 1 ມື້
+    // ແລ້ວ trendMap.get() ບໍ່ຕິດຈັກແຖວ ກຣາຟຈຶ່ງເປັນສູນທັງ 30 ມື້
+    const key = addDays(c.fixedToday, -i);
     const row = trendMap.get(key);
     deliveryKpiTrend.push({
       day: key,

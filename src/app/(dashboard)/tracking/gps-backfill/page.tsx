@@ -12,6 +12,7 @@ import {
   FaTruck,
 } from "react-icons/fa";
 import { Actions } from "@/lib/api";
+import { getLaoToday } from "@/lib/lao-date";
 
 interface CarProgress {
   code: string;
@@ -61,9 +62,7 @@ function countdownTo(iso: string | null) {
 
 export default function GpsBackfillPage() {
   const [fromDate, setFromDate] = useState("2026-01-01");
-  const [toDate, setToDate] = useState(
-    new Date().toISOString().slice(0, 10)
-  );
+  const [toDate, setToDate] = useState(getLaoToday());
   const [maxIterations, setMaxIterations] = useState(20);
   const [status, setStatus] = useState<BackfillStatus | null>(null);
   const [loading, setLoading] = useState(false);

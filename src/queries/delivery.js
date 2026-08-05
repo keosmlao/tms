@@ -1,5 +1,6 @@
 const { pool } = require("../lib/db");
 const { getFixedYearSqlFilter } = require("../lib/fixed-year");
+const { getLaoToday } = require("../lib/lao-date");
 
 const deliveryCache = globalThis;
 
@@ -582,7 +583,7 @@ async function saveDeliveryImages(billNo, images, client) {
     [billNo]
   );
 
-  const docDate = billRow?.doc_date ?? new Date().toISOString().split("T")[0];
+  const docDate = billRow?.doc_date ?? getLaoToday();
 
   for (const imageData of images) {
     if (imageData && imageData.length > 0) {

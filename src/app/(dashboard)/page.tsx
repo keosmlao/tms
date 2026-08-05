@@ -40,7 +40,7 @@ interface TeamData {
   bill_count: CountValue; still: CountValue; complete: CountValue;
 }
 
-interface PendingShipment { 
+interface PendingShipment {
   doc_no: string; doc_date: string; transport_name: string | null;
   sale: string | null; transport: string | null;
   time_open: string | null; time_use: string | null; time_use_seconds?: CountValue;
@@ -234,6 +234,10 @@ function getAgingClassName(value: CountValue) {
 
 const EMPTY_TEAM: TeamData = { bill_count: 0, still: 0, complete: 0 };
 
+// Shared card shell — soft brand-tinted border, gentle shadow, xl radius.
+const CARD =
+  "rounded-xl border border-slate-200/70 bg-white/80 shadow-sm dark:border-slate-800 dark:bg-slate-900/65";
+
 // ==================== UI Pieces ====================
 
 const quickActions = [
@@ -260,25 +264,40 @@ function HeroKpiTile({
   loading?: boolean;
 }) {
   return (
-    <div className="relative overflow-hidden rounded-lg border border-white/12 bg-white/8 p-4 backdrop-blur-xl transition-all hover:bg-white/12">
-      <div className="relative flex items-start justify-between gap-3">
+    <div className="group relative overflow-hidden rounded-xl border border-white/15 bg-white/10 p-4 backdrop-blur-md transition-all hover:border-white/25 hover:bg-white/15">
+      <div className="flex items-start justify-between gap-3">
         <div className="min-w-0">
-          <p className="text-[10px] font-semibold uppercase tracking-[0.18em] text-white/60">{label}</p>
+          <p className="text-[10px] font-semibold uppercase tracking-[0.18em] text-sky-100/80">{label}</p>
           {loading ? (
-            <span className="mt-1 block h-7 w-16 animate-pulse rounded bg-white/20" />
+            <span className="mt-1.5 block h-8 w-16 animate-pulse rounded bg-white/20" />
           ) : (
-            <p className="mt-1 text-3xl font-bold text-white leading-none tabular-nums">{formatNumber(value)}</p>
+            <p className="mt-1 text-3xl font-extrabold leading-none text-white tabular-nums">{formatNumber(value)}</p>
           )}
           {loading ? (
-            <span className="mt-1.5 block h-2.5 w-24 animate-pulse rounded bg-white/10" />
+            <span className="mt-2 block h-2.5 w-24 animate-pulse rounded bg-white/10" />
           ) : (
-            caption && <p className="mt-1 text-[11px] text-white/70">{caption}</p>
+            caption && <p className="mt-1.5 text-[11px] text-sky-100/70">{caption}</p>
           )}
         </div>
-        <div className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-lg ${accent} text-white shadow-sm`}>
+        <div className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-xl shadow-lg ring-1 ring-white/25 ${accent}`}>
           {icon}
         </div>
       </div>
+    </div>
+  );
+}
+
+// Zone divider — brand accent bar + title + fading rule, separates the live-ops
+// zone from the insights zone without adding visual weight.
+function ZoneHeading({ title, subtitle }: { title: string; subtitle?: string }) {
+  return (
+    <div className="flex items-center gap-3 pt-2">
+      <span className="h-7 w-1.5 shrink-0 rounded-full brand-gradient-cool" />
+      <div className="min-w-0">
+        <h2 className="text-base font-extrabold leading-tight text-slate-800 dark:text-white">{title}</h2>
+        {subtitle && <p className="truncate text-[11px] text-slate-400 dark:text-slate-500">{subtitle}</p>}
+      </div>
+      <div className="h-px flex-1 bg-gradient-to-r from-slate-200 to-transparent dark:from-slate-700/70" />
     </div>
   );
 }
@@ -302,13 +321,13 @@ function PendingStat({ label, value, icon, tone }: {
 }) {
   const c = pendingStatPalette[tone];
   return (
-    <div className={`rounded-lg ${c.badge} p-3 flex items-center gap-3`}>
-      <div className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-lg ${c.icon}`}>
+    <div className={`rounded-xl ${c.badge} p-3.5 flex items-center gap-3`}>
+      <div className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-lg ${c.icon}`}>
         {icon}
       </div>
       <div className="min-w-0">
         <p className="text-[10px] font-semibold uppercase tracking-wider text-slate-500 dark:text-slate-400 truncate">{label}</p>
-        <p className={`text-xl font-bold tabular-nums leading-tight ${c.text}`}>{formatNumber(value)}</p>
+        <p className={`text-2xl font-extrabold tabular-nums leading-tight ${c.text}`}>{formatNumber(value)}</p>
       </div>
     </div>
   );
@@ -339,7 +358,7 @@ function MiniDonut({
   const percent = getPercent(complete, total);
 
   return (
-    <div className="flex flex-col items-center gap-2 rounded-lg border border-slate-200/70 bg-white/65 p-3 dark:border-slate-800 dark:bg-slate-900/50">
+    <div className="flex flex-col items-center gap-2 rounded-xl border border-slate-200/70 bg-white/65 p-3 dark:border-slate-800 dark:bg-slate-900/50">
       <div className="flex items-center gap-1.5">
         <p className="text-[10px] font-semibold uppercase tracking-widest text-slate-500 dark:text-gray-400">
           {label}
@@ -439,7 +458,7 @@ function TeamCard({ name, code, stats, color }: {
   const c = palette[color];
 
   return (
-    <div className="rounded-lg border border-slate-200/70 bg-white/75 p-4 transition-all hover:-translate-y-0.5 hover:shadow-lg dark:border-slate-800 dark:bg-slate-900/60">
+    <div className="rounded-xl border border-slate-200/70 bg-white/75 p-4 transition-all hover:-translate-y-0.5 hover:shadow-lg dark:border-slate-800 dark:bg-slate-900/60">
       <div className="flex items-center justify-between">
         <div className="flex items-center gap-2.5">
           <div className={`w-9 h-9 rounded-lg ${c.soft} ${c.text} flex items-center justify-center`}>
@@ -451,7 +470,7 @@ function TeamCard({ name, code, stats, color }: {
           </div>
         </div>
         <div className={`text-right ${c.text}`}>
-          <p className="text-2xl font-bold tabular-nums leading-none">{rate}%</p>
+          <p className="text-2xl font-extrabold tabular-nums leading-none">{rate}%</p>
           <p className="text-[10px] text-slate-400 mt-0.5">ສຳເລັດ</p>
         </div>
       </div>
@@ -513,9 +532,9 @@ function PendingList({ items, emptyMessage, agingTick }: {
       {items.map((item) => {
         const liveAging = item.time_use_seconds == null ? null : toNumber(item.time_use_seconds) + agingTick;
         return (
-          <div key={item.doc_no} className="flex items-center gap-3 px-4 py-3 transition-colors hover:bg-white/55 dark:hover:bg-white/5">
-            <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-teal-50 text-teal-700 dark:bg-teal-950/40 dark:text-teal-300">
-              <FaBoxOpen size={12} />
+          <div key={item.doc_no} className="flex items-center gap-3 px-5 py-3 transition-colors hover:bg-slate-50/80 dark:hover:bg-white/5">
+            <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-teal-50 text-teal-700 dark:bg-teal-950/40 dark:text-teal-300">
+              <FaBoxOpen size={13} />
             </div>
             <div className="min-w-0 flex-1">
               <p className="font-semibold text-sm text-slate-800 dark:text-white truncate">{item.doc_no}</p>
@@ -575,7 +594,7 @@ function InProgressList({ items, total, agingTick }: {
         {items.map((item) => {
           const liveSeconds = item.active_seconds == null ? null : toNumber(item.active_seconds) + agingTick;
           return (
-            <div key={`${item.doc_no}-${item.bill_no}`} className="px-4 py-3 hover:bg-white/30 dark:hover:bg-white/5 transition-colors">
+            <div key={`${item.doc_no}-${item.bill_no}`} className="px-5 py-3 hover:bg-slate-50/80 dark:hover:bg-white/5 transition-colors">
               <div className="flex flex-wrap items-center gap-3">
                 <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-sky-50 text-sky-700 dark:bg-sky-950/50 dark:text-sky-300">
                   <FaTruck size={13} />
@@ -652,7 +671,7 @@ function WaitingDispatchList({ items, total, agingTick }: {
         {items.map((item) => {
           const liveSeconds = item.waiting_seconds == null ? null : toNumber(item.waiting_seconds) + agingTick;
           return (
-            <div key={`${item.doc_no}-${item.bill_no}`} className="px-4 py-3 hover:bg-white/30 dark:hover:bg-white/5 transition-colors">
+            <div key={`${item.doc_no}-${item.bill_no}`} className="px-5 py-3 hover:bg-slate-50/80 dark:hover:bg-white/5 transition-colors">
               <div className="flex flex-wrap items-center gap-3">
                 <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-amber-50 text-amber-700 dark:bg-amber-950/50 dark:text-amber-300">
                   <FaClock size={13} />
@@ -776,7 +795,7 @@ function DeliveredPendingCloseList({ items, total, agingTick }: {
             return true;
           });
           return (
-            <div key={`${item.doc_no}-${item.bill_no}`} className="px-4 py-3 hover:bg-white/30 dark:hover:bg-white/5 transition-colors">
+            <div key={`${item.doc_no}-${item.bill_no}`} className="px-5 py-3 hover:bg-slate-50/80 dark:hover:bg-white/5 transition-colors">
               <div className="flex flex-wrap items-center gap-3">
                 <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-emerald-50 text-emerald-700 dark:bg-emerald-950/50 dark:text-emerald-300">
                   <FaCheckCircle size={13} />
@@ -955,11 +974,11 @@ function DeliveryKpiCard({ kpi }: { kpi: DeliveryKpi }) {
   ];
 
   return (
-    <div className="rounded-lg border border-slate-200/70 bg-white/80 p-4 dark:border-slate-800 dark:bg-slate-900/65">
-      <div className="flex flex-wrap items-center justify-between gap-3 mb-3">
-        <div className="flex items-center gap-2">
-          <div className="w-7 h-7 rounded-lg bg-teal-500/10 flex items-center justify-center">
-            <FaChartLine className="text-teal-600 dark:text-teal-400" size={12} />
+    <div className={`${CARD} p-5`}>
+      <div className="flex flex-wrap items-center justify-between gap-3 mb-4">
+        <div className="flex items-center gap-2.5">
+          <div className="w-8 h-8 rounded-lg bg-teal-500/10 flex items-center justify-center">
+            <FaChartLine className="text-teal-600 dark:text-teal-400" size={13} />
           </div>
           <h2 className="text-sm font-bold text-slate-800 dark:text-white">KPI ການຈັດສົ່ງ</h2>
           <Link
@@ -976,7 +995,7 @@ function DeliveryKpiCard({ kpi }: { kpi: DeliveryKpi }) {
               key={t.key}
               type="button"
               onClick={() => setTab(t.key)}
-              className={`px-3 py-1 rounded-lg text-[11px] font-semibold transition-all ${
+              className={`px-3 py-1 rounded-md text-[11px] font-semibold transition-all ${
                 tab === t.key
                   ? "bg-white text-teal-700 shadow-sm dark:bg-slate-900 dark:text-teal-300"
                   : "text-slate-500 dark:text-gray-400 hover:text-slate-700"
@@ -989,7 +1008,7 @@ function DeliveryKpiCard({ kpi }: { kpi: DeliveryKpi }) {
       </div>
 
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
-        <div className="rounded-lg bg-emerald-50 dark:bg-emerald-950/30 p-3">
+        <div className="rounded-xl bg-emerald-50 dark:bg-emerald-950/30 p-3.5">
           <div className="flex items-center justify-between gap-2 mb-1">
             <div className="flex items-center gap-2 min-w-0">
               <FaCheckCircle className="text-emerald-600 dark:text-emerald-400 shrink-0" size={11} />
@@ -999,7 +1018,7 @@ function DeliveryKpiCard({ kpi }: { kpi: DeliveryKpi }) {
             </div>
             {targetBadge(onTimeStatus, targets.on_time_rate != null ? `${targets.on_time_rate}%` : null)}
           </div>
-          <p className="text-2xl font-bold text-emerald-700 dark:text-emerald-300 tabular-nums leading-tight">
+          <p className="text-2xl font-extrabold text-emerald-700 dark:text-emerald-300 tabular-nums leading-tight">
             {onTimeRate}%
           </p>
           <p className="text-[10px] text-slate-500 dark:text-slate-400 mt-0.5">
@@ -1008,21 +1027,21 @@ function DeliveryKpiCard({ kpi }: { kpi: DeliveryKpi }) {
           <Sparkline values={onTimeSeries} color="#059669" label="ທັນເວລາ" targetLine={targets.on_time_rate} />
         </div>
 
-        <div className="rounded-lg bg-rose-50 dark:bg-rose-950/30 p-3">
+        <div className="rounded-xl bg-rose-50 dark:bg-rose-950/30 p-3.5">
           <div className="flex items-center gap-2 mb-1">
             <FaExclamationTriangle className="text-rose-600 dark:text-rose-400" size={11} />
             <p className="text-[10px] font-semibold uppercase tracking-wider text-slate-500 dark:text-slate-400">
               ຊ້າກວ່າກຳນົດ
             </p>
           </div>
-          <p className="text-2xl font-bold text-rose-700 dark:text-rose-300 tabular-nums leading-tight">
+          <p className="text-2xl font-extrabold text-rose-700 dark:text-rose-300 tabular-nums leading-tight">
             {formatNumber(period.breach)}
           </p>
           <p className="text-[10px] text-slate-500 dark:text-slate-400 mt-0.5">{breachRate}% ຂອງທີ່ສົ່ງ</p>
           <Sparkline values={breachSeries} color="#e11d48" label="ຊ້າ" />
         </div>
 
-        <div className="rounded-lg bg-sky-50 dark:bg-sky-950/30 p-3">
+        <div className="rounded-xl bg-sky-50 dark:bg-sky-950/30 p-3.5">
           <div className="flex items-center justify-between gap-2 mb-1">
             <div className="flex items-center gap-2 min-w-0">
               <FaTruck className="text-sky-600 dark:text-sky-400 shrink-0" size={11} />
@@ -1032,14 +1051,14 @@ function DeliveryKpiCard({ kpi }: { kpi: DeliveryKpi }) {
             </div>
             {targetBadge(avgDeliveryStatus, targets.avg_delivery_minutes != null ? formatKpiDuration(targets.avg_delivery_minutes * 60) : null)}
           </div>
-          <p className="text-2xl font-bold text-sky-700 dark:text-sky-300 tabular-nums leading-tight">
+          <p className="text-2xl font-extrabold text-sky-700 dark:text-sky-300 tabular-nums leading-tight">
             {formatKpiDuration(period.avg_delivery_seconds)}
           </p>
           <p className="text-[10px] text-slate-500 dark:text-slate-400 mt-0.5">ຮັບຖ້ຽວ → ສົ່ງສຳເລັດ</p>
           <Sparkline values={avgDeliverySeries} color="#1489ba" label="ສະເລ່ຍສົ່ງ" targetLine={targets.avg_delivery_minutes} />
         </div>
 
-        <div className="rounded-lg bg-amber-50 dark:bg-amber-950/30 p-3">
+        <div className="rounded-xl bg-amber-50 dark:bg-amber-950/30 p-3.5">
           <div className="flex items-center justify-between gap-2 mb-1">
             <div className="flex items-center gap-2 min-w-0">
               <FaClock className="text-amber-600 dark:text-amber-400 shrink-0" size={11} />
@@ -1049,7 +1068,7 @@ function DeliveryKpiCard({ kpi }: { kpi: DeliveryKpi }) {
             </div>
             {targetBadge(avgCloseStatus, targets.avg_close_minutes != null ? formatKpiDuration(targets.avg_close_minutes * 60) : null)}
           </div>
-          <p className="text-2xl font-bold text-amber-700 dark:text-amber-300 tabular-nums leading-tight">
+          <p className="text-2xl font-extrabold text-amber-700 dark:text-amber-300 tabular-nums leading-tight">
             {formatKpiDuration(period.avg_close_seconds)}
           </p>
           <p className="text-[10px] text-slate-500 dark:text-slate-400 mt-0.5">ສົ່ງສຳເລັດ → ປິດຖ້ຽວ</p>
@@ -1112,14 +1131,45 @@ function DeliveryKpiCard({ kpi }: { kpi: DeliveryKpi }) {
 // section's space is reserved and the user sees it is on the way.
 function SectionSkeleton({ height = "h-28", title }: { height?: string; title?: string }) {
   return (
-    <div className="rounded-lg border border-slate-200/70 bg-white/80 p-4 dark:border-slate-800 dark:bg-slate-900/65">
+    <div className={`${CARD} p-5`}>
       {title && (
         <div className="mb-3 flex items-center gap-2">
-          <div className="h-7 w-7 animate-pulse rounded-lg bg-slate-200/70 dark:bg-white/5" />
+          <div className="h-8 w-8 animate-pulse rounded-lg bg-slate-200/70 dark:bg-white/5" />
           <div className="h-3.5 w-44 animate-pulse rounded bg-slate-200/70 dark:bg-white/5" />
         </div>
       )}
       <div className={`w-full animate-pulse rounded-lg bg-slate-100 dark:bg-white/5 ${height}`} />
+    </div>
+  );
+}
+
+// Shared header for the live-ops list cards: tinted icon chip, title, count
+// subtitle and a colored "view all" action.
+function ActivityCardHeader({ icon, tint, title, subtitle, href, ctaClass }: {
+  icon: React.ReactNode;
+  tint: string;
+  title: string;
+  subtitle: string;
+  href: string;
+  ctaClass: string;
+}) {
+  return (
+    <div className="flex flex-wrap items-center gap-3 justify-between px-5 py-3.5 border-b border-slate-200/40 dark:border-white/5">
+      <div className="flex items-center gap-2.5">
+        <div className={`w-8 h-8 rounded-lg flex items-center justify-center ${tint}`}>
+          {icon}
+        </div>
+        <div>
+          <h2 className="text-sm font-bold text-slate-800 dark:text-white">{title}</h2>
+          <p className="text-[11px] text-slate-400 dark:text-gray-500">{subtitle}</p>
+        </div>
+      </div>
+      <Link
+        href={href}
+        className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-[11px] font-semibold text-white shadow-sm transition-colors ${ctaClass}`}
+      >
+        ເບິ່ງທັງໝົດ <FaArrowRight size={9} />
+      </Link>
     </div>
   );
 }
@@ -1255,7 +1305,7 @@ export default function DashboardPage() {
 
   if (!summary || !computed) {
     return (
-      <div className="rounded-lg border border-rose-200 bg-rose-50 p-6 text-rose-700 dark:border-rose-800 dark:bg-rose-950/30 dark:text-rose-300">
+      <div className="rounded-xl border border-rose-200 bg-rose-50 p-6 text-rose-700 dark:border-rose-800 dark:bg-rose-950/30 dark:text-rose-300">
         <div className="flex items-start gap-3">
           <FaExclamationTriangle className="mt-0.5" />
           <div>
@@ -1296,50 +1346,50 @@ export default function DashboardPage() {
   const currentPending = pendingLists[pendingTab];
 
   return (
-    <div className="space-y-5">
+    <div className="space-y-6 pb-2">
       {/* ========== HERO ========== */}
-      <div className="relative overflow-hidden rounded-lg bg-[#003260] p-5 shadow-xl sm:p-6">
+      <div className="relative overflow-hidden rounded-2xl brand-gradient-cool p-5 shadow-xl ring-1 ring-white/10 sm:p-6">
+        {/* Decorative layers: fine grid + soft light blooms */}
         <div
-          className="absolute inset-0 opacity-30"
+          className="absolute inset-0 opacity-20"
           style={{
             backgroundImage:
-              "linear-gradient(90deg, rgba(45,212,191,.16) 1px, transparent 1px), linear-gradient(rgba(45,212,191,.11) 1px, transparent 1px)",
+              "linear-gradient(90deg, rgba(255,255,255,.14) 1px, transparent 1px), linear-gradient(rgba(255,255,255,.10) 1px, transparent 1px)",
             backgroundSize: "48px 48px",
           }}
         />
+        <div className="pointer-events-none absolute -top-24 -right-16 h-64 w-64 rounded-full bg-sky-300/25 blur-3xl" />
+        <div className="pointer-events-none absolute -bottom-28 -left-10 h-72 w-72 rounded-full bg-amber-300/15 blur-3xl" />
+
         <div className="relative">
           {/* Title row */}
           <div className="flex flex-wrap items-start justify-between gap-3">
-            <div className="flex items-center gap-3">
-              <div className="flex h-11 w-11 items-center justify-center rounded-lg bg-white/10 ring-1 ring-white/20 backdrop-blur">
-                <FaTruck className="text-teal-200" size={18} />
+            <div>
+              <div className="flex items-center gap-2">
+                <span className="relative flex h-1.5 w-1.5">
+                  <span className="absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75 animate-ping" />
+                  <span className="relative inline-flex h-1.5 w-1.5 rounded-full bg-emerald-400" />
+                </span>
+                <p className="text-[10px] font-semibold uppercase tracking-[0.24em] text-sky-100/90">
+                  Transport Control Center
+                </p>
               </div>
-              <div>
-                <div className="flex items-center gap-2">
-                  <span className="relative flex h-1.5 w-1.5">
-                    <span className="absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75 animate-ping" />
-                    <span className="relative inline-flex h-1.5 w-1.5 rounded-full bg-emerald-400" />
-                  </span>
-                  <p className="text-[10px] font-semibold uppercase tracking-[0.22em] text-teal-200">
-                    Transport Control Center
-                  </p>
-                </div>
-                <h1 className="text-xl sm:text-2xl font-bold text-white leading-tight">
-                  ສູນຄວບຄຸມການຂົນສົ່ງ
-                </h1>
-                <p className="text-[11px] text-slate-300 mt-0.5">ODG Transport · ປີ {currentYear}</p>
-              </div>
+              <h1 className="mt-1 text-2xl sm:text-3xl font-extrabold text-white leading-tight">
+                ສູນຄວບຄຸມການຂົນສົ່ງ
+              </h1>
+              <p className="text-[11px] text-sky-100/70 mt-1">ODG Transport · ປີ {currentYear}</p>
             </div>
             <div className="flex items-center gap-2">
               {lastFetched && (
-                <span className="hidden sm:inline text-[11px] text-slate-400">
+                <span className="hidden sm:inline-flex items-center gap-1.5 rounded-full border border-white/15 bg-white/10 px-2.5 py-1 text-[10px] text-sky-100/80 backdrop-blur">
+                  <FaClock size={9} />
                   {lastFetched.toLocaleTimeString("lo-LA", { hour12: false })}
                 </span>
               )}
               <button
                 onClick={() => void handleRefresh()}
                 disabled={loading}
-                className="flex items-center gap-2 rounded-lg border border-white/15 bg-white/10 px-3.5 py-2 text-xs font-medium text-white backdrop-blur transition-all hover:bg-white/15 disabled:opacity-60"
+                className="flex items-center gap-2 rounded-lg border border-white/15 bg-white/10 px-3.5 py-2 text-xs font-medium text-white backdrop-blur transition-all hover:bg-white/20 disabled:opacity-60"
               >
                 <FaSyncAlt className={loading ? "animate-spin" : ""} size={11} />
                 ຣີເຟຣຊ
@@ -1354,7 +1404,7 @@ export default function DashboardPage() {
               value={totalBills}
               caption={`ປີ ${currentYear}`}
               icon={<FaBoxOpen size={14} />}
-              accent="bg-teal-600"
+              accent="bg-white text-teal-900"
             />
             <HeroKpiTile
               label="ຕ້ອງຂົນສົ່ງ"
@@ -1362,14 +1412,14 @@ export default function DashboardPage() {
               loading={totalLogisticWork == null}
               caption={logisticWorkRate == null ? undefined : `${logisticWorkRate}% ຂອງບິນທັງໝົດ`}
               icon={<FaTruck size={14} />}
-              accent="bg-sky-600"
+              accent="bg-sky-500 text-white"
             />
             <HeroKpiTile
               label="ສົ່ງສຳເລັດ"
               value={totalComplete}
               caption={completionRate == null ? undefined : `${completionRate}% ສຳເລັດ`}
               icon={<FaCheckCircle size={14} />}
-              accent="bg-emerald-600"
+              accent="bg-emerald-500 text-white"
             />
             <HeroKpiTile
               label="ຄ້າງສົ່ງ"
@@ -1377,62 +1427,177 @@ export default function DashboardPage() {
               loading={totalPending == null}
               caption={totalPending == null ? undefined : `${getPercent(totalPending, totalPending + totalComplete)}% ລໍຖ້າ`}
               icon={<FaClock size={14} />}
-              accent="bg-amber-600"
+              accent="bg-amber-500 text-white"
             />
+          </div>
+
+          {/* Quick actions — glass pills pinned to the hero bottom */}
+          <div className="mt-5 border-t border-white/10 pt-4">
+            <div className="flex flex-wrap items-center gap-2">
+              {quickActions.map((action) => (
+                <Link
+                  key={action.href}
+                  href={action.href}
+                  className="group flex items-center gap-2.5 rounded-xl border border-white/15 bg-white/10 py-2 pl-2.5 pr-3 backdrop-blur transition-all hover:border-white/30 hover:bg-white/20"
+                >
+                  <span className={`flex h-7 w-7 items-center justify-center rounded-lg text-[11px] ${action.color} text-white shadow-sm`}>
+                    {action.icon}
+                  </span>
+                  <span className="min-w-0">
+                    <span className="block text-xs font-semibold text-white leading-tight">{action.label}</span>
+                    <span className="block text-[10px] text-sky-100/70 leading-tight">{action.description}</span>
+                  </span>
+                  <FaArrowRight className="ml-1 text-white/40 transition-all group-hover:translate-x-0.5 group-hover:text-white" size={10} />
+                </Link>
+              ))}
+            </div>
           </div>
         </div>
       </div>
 
       {/* Error */}
       {error && (
-        <div className="bg-amber-50 dark:bg-amber-950/30 border border-amber-200 dark:border-amber-800 rounded-lg px-4 py-3 text-sm text-amber-800 dark:text-amber-300 flex items-center gap-2">
+        <div className="bg-amber-50 dark:bg-amber-950/30 border border-amber-200 dark:border-amber-800 rounded-xl px-4 py-3 text-sm text-amber-800 dark:text-amber-300 flex items-center gap-2">
           <FaExclamationTriangle size={12} />
           {error}
         </div>
       )}
 
-      {/* ThunJai express — bills + products moved via ThunJai (transport 02-0005) */}
-      {data.thunjai && (
-        <div className="rounded-lg border border-violet-200/70 bg-violet-50/50 p-4 dark:border-violet-900/40 dark:bg-violet-950/20">
-          <div className="mb-3 flex items-center gap-2">
-            <div className="flex h-7 w-7 items-center justify-center rounded-lg bg-violet-500/15">
-              <FaTruck className="text-violet-600 dark:text-violet-400" size={12} />
-            </div>
-            <h2 className="text-sm font-bold text-slate-800 dark:text-white">ຂົນສົ່ງທັນໃຈ (ThunJai)</h2>
-            <span className="ml-auto text-[11px] text-slate-400">ປີ {currentYear}</span>
-          </div>
-          <div className="grid grid-cols-2 gap-3">
-            <div className="rounded-lg bg-white/70 px-3 py-2 dark:bg-white/5">
-              <p className="text-[11px] text-slate-400">ຈຳນວນບິນ</p>
-              <p className="text-2xl font-extrabold tabular-nums text-violet-700 dark:text-violet-400">
-                {toNumber(data.thunjai.bill_count).toLocaleString("en-US")}
-              </p>
-            </div>
-            <div className="rounded-lg bg-white/70 px-3 py-2 dark:bg-white/5">
-              <p className="text-[11px] text-slate-400">ຈຳນວນສິນຄ້າ</p>
-              <p className="text-2xl font-extrabold tabular-nums text-violet-700 dark:text-violet-400">
-                {toNumber(data.thunjai.item_qty).toLocaleString("en-US", { maximumFractionDigits: 0 })}
-              </p>
-            </div>
-          </div>
-        </div>
-      )}
+      {/* ========== LIVE OPERATIONS ZONE ========== */}
+      <ZoneHeading
+        title="ການເຄື່ອນໄຫວສົດ"
+        subtitle="ລົດ ແລະ ບິນທີ່ກຳລັງເຄື່ອນໄຫວ · ອັບເດດອັດຕະໂນມັດ"
+      />
 
-      {/* ========== LIVE FLEET (cars + driver phones) ========== */}
+      {/* Live fleet map (cars + driver phones) */}
       <LiveFleetOverview />
 
-      {/* ========== PENDING BREAKDOWN ========== */}
+      {/* Waiting dispatch */}
+      <div className={`${CARD} overflow-hidden`}>
+        <ActivityCardHeader
+          icon={<FaClock className="text-amber-500" size={13} />}
+          tint="bg-amber-500/10"
+          title="ຈັດຖ້ຽວແລ້ວ ລໍຖ້າຈັດສົ່ງ"
+          subtitle={`ສະແດງ ${formatNumber((activity?.waiting_dispatch ?? []).length)} / ${formatNumber(activity?.waiting_dispatch_count ?? 0)} ບິນ`}
+          href="/bills-waitingsent"
+          ctaClass="bg-amber-600 hover:bg-amber-700"
+        />
+        <WaitingDispatchList
+          items={activity?.waiting_dispatch ?? []}
+          total={activity?.waiting_dispatch_count ?? 0}
+          agingTick={agingTick}
+        />
+      </div>
+
+      {/* In progress */}
+      <div className={`${CARD} overflow-hidden`}>
+        <ActivityCardHeader
+          icon={<FaTruck className="text-sky-500" size={13} />}
+          tint="bg-sky-500/10"
+          title="ລາຍການກຳລັງຈັດສົ່ງ"
+          subtitle={`ສະແດງ ${formatNumber((activity?.in_progress ?? []).length)} / ${formatNumber(activity?.in_progress_count ?? 0)} ບິນ`}
+          href="/bills-inprogress"
+          ctaClass="bg-sky-600 hover:bg-sky-700"
+        />
+        <InProgressList
+          items={activity?.in_progress ?? []}
+          total={activity?.in_progress_count ?? 0}
+          agingTick={agingTick}
+        />
+      </div>
+
+      {/* Delivered, awaiting job close */}
+      <div className={`${CARD} overflow-hidden`}>
+        <ActivityCardHeader
+          icon={<FaCheckCircle className="text-emerald-500" size={13} />}
+          tint="bg-emerald-500/10"
+          title="ຈັດສົ່ງສຳເລັດ ແຕ່ຍັງບໍ່ປິດຖ້ຽວ"
+          subtitle={`ສະແດງ ${formatNumber((activity?.delivered_pending_close ?? []).length)} / ${formatNumber(activity?.delivered_pending_close_count ?? 0)} ບິນ`}
+          href="/bill-complete"
+          ctaClass="bg-emerald-600 hover:bg-emerald-700"
+        />
+        <DeliveredPendingCloseList
+          items={activity?.delivered_pending_close ?? []}
+          total={activity?.delivered_pending_close_count ?? 0}
+          agingTick={agingTick}
+        />
+      </div>
+
+      {/* Pending bills */}
+      <div className={`${CARD} overflow-hidden`}>
+        <ActivityCardHeader
+          icon={<FaClock className="text-amber-500" size={13} />}
+          tint="bg-amber-500/10"
+          title="ລາຍການລໍຖ້າຈັດສົ່ງ"
+          subtitle={currentPending.subtitle}
+          href="/bills-pending"
+          ctaClass="bg-slate-900 hover:bg-slate-800 dark:bg-white dark:text-slate-900 dark:hover:bg-slate-100"
+        />
+
+        {pendingReady ? (
+        <>
+        {/* Tabs */}
+        <div className="px-5 pt-3">
+          <div className="inline-flex items-center gap-1 rounded-lg bg-slate-100 p-1 dark:bg-slate-800/70">
+            {([
+              { key: "today" as const, label: "ວັນນີ້", count: ps?.today_count },
+              { key: "month" as const, label: "ເດືອນນີ້", count: ps?.month_count },
+              { key: "year" as const, label: `ປີ ${currentYear}`, count: totalPending },
+            ]).map((tab) => (
+              <button
+                key={tab.key}
+                type="button"
+                onClick={() => setPendingTab(tab.key)}
+                className={`flex items-center gap-1.5 px-3 py-1.5 rounded-md text-[11px] font-semibold transition-all ${
+                  pendingTab === tab.key
+                    ? "bg-white text-teal-700 shadow-sm dark:bg-slate-900 dark:text-teal-300"
+                    : "text-slate-500 dark:text-gray-400 hover:text-slate-700"
+                }`}
+              >
+                {tab.label}
+                <span className={`rounded-full px-1.5 py-0.5 text-[9px] font-bold ${
+                  pendingTab === tab.key
+                    ? "bg-teal-500/10 text-teal-700 dark:text-teal-300"
+                    : "bg-white/50 dark:bg-white/5 text-slate-500"
+                }`}>
+                  {formatNumber(tab.count)}
+                </span>
+              </button>
+            ))}
+          </div>
+        </div>
+
+        <PendingList
+          items={currentPending.items}
+          emptyMessage={`ບໍ່ມີລາຍການໃນ${currentPending.subtitle}`}
+          agingTick={agingTick}
+        />
+        </>
+        ) : (
+          <div className="flex items-center justify-center py-16">
+            <FaSpinner className="animate-spin text-2xl text-slate-300" />
+          </div>
+        )}
+      </div>
+
+      {/* ========== INSIGHTS ZONE ========== */}
+      <ZoneHeading
+        title="ພາບລວມ ແລະ ຕົວຊີ້ວັດ"
+        subtitle="ສະຫຼຸບຜົນງານການຂົນສົ່ງ · ປີຽບທຽບສາຂາ ແລະ ແນວໂນ້ມ"
+      />
+
+      {/* Pending breakdown */}
       {!data.pending_breakdown ? (
         <SectionSkeleton title="ສະຖານະບິນຄ້າງສົ່ງ" height="h-20" />
       ) : (
         <Link
           href="/bills-pending"
-          className="block rounded-lg border border-slate-200/70 bg-white/80 p-4 transition-all hover:-translate-y-0.5 hover:shadow-lg dark:border-slate-800 dark:bg-slate-900/65"
+          className={`block ${CARD} p-5 transition-all hover:-translate-y-0.5 hover:shadow-lg`}
         >
           <div className="flex items-center justify-between gap-3 mb-3">
-            <div className="flex items-center gap-2">
-              <div className="w-7 h-7 rounded-lg bg-amber-500/10 flex items-center justify-center">
-                <FaClock className="text-amber-500" size={12} />
+            <div className="flex items-center gap-2.5">
+              <div className="w-8 h-8 rounded-lg bg-amber-500/10 flex items-center justify-center">
+                <FaClock className="text-amber-500" size={13} />
               </div>
               <h2 className="text-sm font-bold text-slate-800 dark:text-white">ສະຖານະບິນຄ້າງສົ່ງ</h2>
             </div>
@@ -1442,109 +1607,89 @@ export default function DashboardPage() {
             <PendingStat
               label="ຈຳນວນທີ່ຄ້າງສົ່ງ"
               value={data.pending_breakdown.total}
-              icon={<FaBoxOpen size={12} />}
+              icon={<FaBoxOpen size={13} />}
               tone="amber"
             />
             <PendingStat
               label="ເກີນກຳນົດແລ້ວ"
               value={data.pending_breakdown.overdue}
-              icon={<FaExclamationTriangle size={12} />}
+              icon={<FaExclamationTriangle size={13} />}
               tone="rose"
             />
             <PendingStat
               label="ຕິດຕໍ່ແລ້ວ"
               value={data.pending_breakdown.contacted}
-              icon={<FaPhone size={12} />}
+              icon={<FaPhone size={13} />}
               tone="sky"
             />
             <PendingStat
               label="ຍັງບໍ່ຕິດຕໍ່"
               value={data.pending_breakdown.uncontacted}
-              icon={<FaPhoneSlash size={12} />}
+              icon={<FaPhoneSlash size={13} />}
               tone="slate"
             />
             <PendingStat
               label="ພ້ອມສົ່ງແລ້ວ"
               value={data.pending_breakdown.ready}
-              icon={<FaThumbsUp size={12} />}
+              icon={<FaThumbsUp size={13} />}
               tone="emerald"
             />
             <PendingStat
               label="ກາຍມື້ສົ່ງ"
               value={data.pending_breakdown.past_send_date}
-              icon={<FaCalendarTimes size={12} />}
+              icon={<FaCalendarTimes size={13} />}
               tone="orange"
             />
           </div>
         </Link>
       )}
 
-      {/* ========== DELIVERY KPI ========== */}
+      {/* Delivery KPI */}
       {data.delivery_kpi ? (
         <DeliveryKpiCard kpi={data.delivery_kpi} />
       ) : (
         <SectionSkeleton title="KPI ການຈັດສົ່ງ" height="h-32" />
       )}
 
-      {/* ========== CUSTOMER RATING ========== */}
+      {/* Customer rating */}
       {data.customer_rating && data.customer_rating.total > 0 && (
-        <div className="rounded-lg border border-slate-200/70 bg-white/80 p-4 dark:border-slate-800 dark:bg-slate-900/65">
-          <div className="flex items-center gap-2 mb-3">
-            <div className="w-7 h-7 rounded-lg bg-amber-500/10 flex items-center justify-center text-amber-500">
+        <div className={`${CARD} p-5`}>
+          <div className="flex items-center gap-2.5 mb-3">
+            <div className="w-8 h-8 rounded-lg bg-amber-500/10 flex items-center justify-center text-amber-500">
               ★
             </div>
             <h2 className="text-sm font-bold text-slate-800 dark:text-white">ການປະເມີນຈາກລູກຄ້າ</h2>
           </div>
           <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
-            <div className="rounded-lg bg-amber-50 dark:bg-amber-950/30 p-3">
+            <div className="rounded-xl bg-amber-50 dark:bg-amber-950/30 p-3.5">
               <p className="text-[10px] font-semibold uppercase tracking-wider text-slate-500 dark:text-slate-400">ສະເລ່ຍ</p>
-              <p className="text-2xl font-bold text-amber-700 dark:text-amber-300 tabular-nums">
+              <p className="text-2xl font-extrabold text-amber-700 dark:text-amber-300 tabular-nums">
                 {data.customer_rating.avg_stars?.toFixed(2) ?? "—"} <span className="text-base">★</span>
               </p>
             </div>
-            <div className="rounded-lg bg-slate-50 dark:bg-slate-800/40 p-3">
+            <div className="rounded-xl bg-slate-50 dark:bg-slate-800/40 p-3.5">
               <p className="text-[10px] font-semibold uppercase tracking-wider text-slate-500 dark:text-slate-400">ປະເມີນທັງໝົດ</p>
-              <p className="text-2xl font-bold text-slate-700 dark:text-slate-200 tabular-nums">{formatNumber(data.customer_rating.total)}</p>
+              <p className="text-2xl font-extrabold text-slate-700 dark:text-slate-200 tabular-nums">{formatNumber(data.customer_rating.total)}</p>
             </div>
-            <div className="rounded-lg bg-emerald-50 dark:bg-emerald-950/30 p-3">
+            <div className="rounded-xl bg-emerald-50 dark:bg-emerald-950/30 p-3.5">
               <p className="text-[10px] font-semibold uppercase tracking-wider text-slate-500 dark:text-slate-400">ດີ (4–5★)</p>
-              <p className="text-2xl font-bold text-emerald-700 dark:text-emerald-300 tabular-nums">{formatNumber(data.customer_rating.positive)}</p>
+              <p className="text-2xl font-extrabold text-emerald-700 dark:text-emerald-300 tabular-nums">{formatNumber(data.customer_rating.positive)}</p>
             </div>
-            <div className="rounded-lg bg-rose-50 dark:bg-rose-950/30 p-3">
+            <div className="rounded-xl bg-rose-50 dark:bg-rose-950/30 p-3.5">
               <p className="text-[10px] font-semibold uppercase tracking-wider text-slate-500 dark:text-slate-400">ບໍ່ດີ (1–2★)</p>
-              <p className="text-2xl font-bold text-rose-700 dark:text-rose-300 tabular-nums">{formatNumber(data.customer_rating.negative)}</p>
+              <p className="text-2xl font-extrabold text-rose-700 dark:text-rose-300 tabular-nums">{formatNumber(data.customer_rating.negative)}</p>
             </div>
           </div>
         </div>
       )}
 
-      {/* ========== QUICK ACTIONS ========== */}
-      <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3">
-        {quickActions.map((action) => (
-          <Link
-            key={action.href}
-             href={action.href}
-            className="group relative flex items-center gap-3 overflow-hidden rounded-lg border border-slate-200/70 bg-white/80 p-4 transition-all hover:-translate-y-0.5 hover:shadow-lg dark:border-slate-800 dark:bg-slate-900/65"
-          >
-            <div className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-lg ${action.color} text-white shadow-sm transition-transform group-hover:scale-105`}>
-              {action.icon}
-            </div>
-            <div className="min-w-0 flex-1">
-              <p className="text-sm font-semibold text-slate-800 dark:text-white truncate">{action.label}</p>
-              <p className="text-[11px] text-slate-500 dark:text-gray-400 truncate">{action.description}</p>
-            </div>
-            <FaArrowRight className="text-slate-300 transition-all group-hover:translate-x-0.5 group-hover:text-teal-700 dark:group-hover:text-teal-300" size={11} />
-          </Link>
-        ))}
-      </div>
-
-      {/* ========== OVERVIEW GRID ========== */}
+      {/* Overview grid: completion donuts / carrier mix / teams */}
       <div className="grid grid-cols-1 lg:grid-cols-4 gap-4">
         {/* Completion donut card — split by day / month / year */}
-        <div className="rounded-lg border border-slate-200/70 bg-white/80 p-5 dark:border-slate-800 dark:bg-slate-900/65 lg:col-span-2">
-          <div className="flex items-center gap-2 mb-2">
-            <div className="flex h-7 w-7 items-center justify-center rounded-lg bg-teal-50 dark:bg-teal-950/40">
-              <FaChartLine className="text-teal-700 dark:text-teal-300" size={12} />
+        <div className={`${CARD} p-5 lg:col-span-2`}>
+          <div className="flex items-center gap-2.5 mb-2">
+            <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-teal-50 dark:bg-teal-950/40">
+              <FaChartLine className="text-teal-700 dark:text-teal-300" size={13} />
             </div>
             <h2 className="text-sm font-bold text-slate-800 dark:text-white">ຄວາມຄືບໜ້າການຂົນສົ່ງ</h2>
           </div>
@@ -1583,17 +1728,17 @@ export default function DashboardPage() {
           ) : (
           <div className="mt-4 grid grid-cols-1 sm:grid-cols-3 gap-3">
             {[0, 1, 2].map((i) => (
-              <div key={i} className="h-[170px] animate-pulse rounded-lg bg-slate-100 dark:bg-white/5" />
+              <div key={i} className="h-[170px] animate-pulse rounded-xl bg-slate-100 dark:bg-white/5" />
             ))}
           </div>
           )}
         </div>
 
         {/* Carrier mix */}
-        <div className="rounded-lg border border-slate-200/70 bg-white/80 p-5 dark:border-slate-800 dark:bg-slate-900/65">
-          <div className="flex items-center gap-2 mb-1">
-            <div className="w-7 h-7 rounded-lg bg-sky-500/10 flex items-center justify-center">
-              <FaRoute className="text-sky-500" size={12} />
+        <div className={`${CARD} p-5`}>
+          <div className="flex items-center gap-2.5 mb-1">
+            <div className="w-8 h-8 rounded-lg bg-sky-500/10 flex items-center justify-center">
+              <FaRoute className="text-sky-500" size={13} />
             </div>
             <h2 className="text-sm font-bold text-slate-800 dark:text-white">ສັດສ່ວນຂົນສົ່ງ</h2>
           </div>
@@ -1608,10 +1753,10 @@ export default function DashboardPage() {
         </div>
 
         {/* Teams */}
-        <div className="rounded-lg border border-slate-200/70 bg-white/80 p-5 dark:border-slate-800 dark:bg-slate-900/65">
-          <div className="flex items-center gap-2 mb-3">
-            <div className="flex h-7 w-7 items-center justify-center rounded-lg bg-teal-500/10">
-              <FaUsers className="text-teal-700 dark:text-teal-300" size={12} />
+        <div className={`${CARD} p-5`}>
+          <div className="flex items-center gap-2.5 mb-3">
+            <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-teal-500/10">
+              <FaUsers className="text-teal-700 dark:text-teal-300" size={13} />
             </div>
             <h2 className="text-sm font-bold text-slate-800 dark:text-white">ໜ່ວຍຂົນສົ່ງ</h2>
           </div>
@@ -1623,155 +1768,32 @@ export default function DashboardPage() {
         </div>
       </div>
 
-      {/* ========== WAITING DISPATCH ========== */}
-      <div className="overflow-hidden rounded-lg border border-slate-200/70 bg-white/80 dark:border-slate-800 dark:bg-slate-900/65">
-        <div className="flex flex-wrap items-center gap-3 justify-between px-5 py-3 border-b border-slate-200/30 dark:border-white/5">
-          <div className="flex items-center gap-2">
-            <div className="w-7 h-7 rounded-lg bg-amber-500/10 flex items-center justify-center">
-              <FaClock className="text-amber-500" size={12} />
+      {/* ThunJai express — bills + products moved via ThunJai (transport 02-0005) */}
+      {data.thunjai && (
+        <div className="rounded-xl border border-violet-200/70 bg-violet-50/50 p-5 shadow-sm dark:border-violet-900/40 dark:bg-violet-950/20">
+          <div className="mb-3 flex items-center gap-2.5">
+            <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-violet-500/15">
+              <FaTruck className="text-violet-600 dark:text-violet-400" size={13} />
             </div>
-            <div>
-              <h2 className="text-sm font-bold text-slate-800 dark:text-white">ຈັດຖ້ຽວແລ້ວ ລໍຖ້າຈັດສົ່ງ</h2>
-              <p className="text-[11px] text-slate-400 dark:text-gray-500">
-                ສະແດງ {formatNumber((activity?.waiting_dispatch ?? []).length)} / {formatNumber(activity?.waiting_dispatch_count ?? 0)} ບິນ
+            <h2 className="text-sm font-bold text-slate-800 dark:text-white">ຂົນສົ່ງທັນໃຈ (ThunJai)</h2>
+            <span className="ml-auto text-[11px] text-slate-400">ປີ {currentYear}</span>
+          </div>
+          <div className="grid grid-cols-2 gap-3">
+            <div className="rounded-xl bg-white/70 px-3.5 py-2.5 dark:bg-white/5">
+              <p className="text-[11px] text-slate-400">ຈຳນວນບິນ</p>
+              <p className="text-2xl font-extrabold tabular-nums text-violet-700 dark:text-violet-400">
+                {toNumber(data.thunjai.bill_count).toLocaleString("en-US")}
+              </p>
+            </div>
+            <div className="rounded-xl bg-white/70 px-3.5 py-2.5 dark:bg-white/5">
+              <p className="text-[11px] text-slate-400">ຈຳນວນສິນຄ້າ</p>
+              <p className="text-2xl font-extrabold tabular-nums text-violet-700 dark:text-violet-400">
+                {toNumber(data.thunjai.item_qty).toLocaleString("en-US", { maximumFractionDigits: 0 })}
               </p>
             </div>
           </div>
-          <Link
-             href="/bills-waitingsent"
-            className="flex items-center gap-1.5 px-3 py-1.5 bg-amber-600 text-white rounded-lg text-[11px] font-semibold hover:bg-amber-700 transition-colors"
-          >
-            ເບິ່ງທັງໝົດ <FaArrowRight size={9} />
-          </Link>
         </div>
-        <WaitingDispatchList
-          items={activity?.waiting_dispatch ?? []}
-          total={activity?.waiting_dispatch_count ?? 0}
-          agingTick={agingTick}
-        />
-      </div>
-
-      {/* ========== IN PROGRESS ========== */}
-      <div className="overflow-hidden rounded-lg border border-slate-200/70 bg-white/80 dark:border-slate-800 dark:bg-slate-900/65">
-        <div className="flex flex-wrap items-center gap-3 justify-between px-5 py-3 border-b border-slate-200/30 dark:border-white/5">
-          <div className="flex items-center gap-2">
-            <div className="w-7 h-7 rounded-lg bg-sky-500/10 flex items-center justify-center">
-              <FaTruck className="text-sky-500" size={12} />
-            </div>
-            <div>
-              <h2 className="text-sm font-bold text-slate-800 dark:text-white">ລາຍການກຳລັງຈັດສົ່ງ</h2>
-              <p className="text-[11px] text-slate-400 dark:text-gray-500">
-                ສະແດງ {formatNumber((activity?.in_progress ?? []).length)} / {formatNumber(activity?.in_progress_count ?? 0)} ບິນ
-              </p>
-            </div>
-          </div>
-          <Link
-             href="/bills-inprogress"
-            className="flex items-center gap-1.5 px-3 py-1.5 bg-sky-600 text-white rounded-lg text-[11px] font-semibold hover:bg-sky-700 transition-colors"
-          >
-            ເບິ່ງທັງໝົດ <FaArrowRight size={9} />
-          </Link>
-        </div>
-        <InProgressList
-          items={activity?.in_progress ?? []}
-          total={activity?.in_progress_count ?? 0}
-          agingTick={agingTick}
-        />
-      </div>
-
-      {/* ========== DELIVERED, AWAITING JOB CLOSE ========== */}
-      <div className="overflow-hidden rounded-lg border border-slate-200/70 bg-white/80 dark:border-slate-800 dark:bg-slate-900/65">
-        <div className="flex flex-wrap items-center gap-3 justify-between px-5 py-3 border-b border-slate-200/30 dark:border-white/5">
-          <div className="flex items-center gap-2">
-            <div className="w-7 h-7 rounded-lg bg-emerald-500/10 flex items-center justify-center">
-              <FaCheckCircle className="text-emerald-500" size={12} />
-            </div>
-            <div>
-              <h2 className="text-sm font-bold text-slate-800 dark:text-white">ຈັດສົ່ງສຳເລັດ ແຕ່ຍັງບໍ່ປິດຖ້ຽວ</h2>
-              <p className="text-[11px] text-slate-400 dark:text-gray-500">
-                ສະແດງ {formatNumber((activity?.delivered_pending_close ?? []).length)} / {formatNumber(activity?.delivered_pending_close_count ?? 0)} ບິນ
-              </p>
-            </div>
-          </div>
-          <Link
-             href="/bill-complete"
-            className="flex items-center gap-1.5 px-3 py-1.5 bg-emerald-600 text-white rounded-lg text-[11px] font-semibold hover:bg-emerald-700 transition-colors"
-          >
-            ເບິ່ງທັງໝົດ <FaArrowRight size={9} />
-          </Link>
-        </div>
-        <DeliveredPendingCloseList
-          items={activity?.delivered_pending_close ?? []}
-          total={activity?.delivered_pending_close_count ?? 0}
-          agingTick={agingTick}
-        />
-      </div>
-
-      {/* ========== PENDING ========== */}
-      <div className="overflow-hidden rounded-lg border border-slate-200/70 bg-white/80 dark:border-slate-800 dark:bg-slate-900/65">
-        <div className="flex flex-wrap items-center gap-3 justify-between px-5 py-3 border-b border-slate-200/30 dark:border-white/5">
-          <div className="flex items-center gap-2">
-            <div className="w-7 h-7 rounded-lg bg-amber-500/10 flex items-center justify-center">
-              <FaClock className="text-amber-500" size={12} />
-            </div>
-            <div>
-              <h2 className="text-sm font-bold text-slate-800 dark:text-white">ລາຍການລໍຖ້າຈັດສົ່ງ</h2>
-              <p className="text-[11px] text-slate-400 dark:text-gray-500">{currentPending.subtitle}</p>
-            </div>
-          </div>
-          <Link
-             href="/bills-pending"
-            className="flex items-center gap-1.5 px-3 py-1.5 bg-slate-900 dark:bg-white dark:text-slate-900 text-white rounded-lg text-[11px] font-semibold hover:bg-slate-800 transition-colors"
-          >
-            ເບິ່ງທັງໝົດ <FaArrowRight size={9} />
-          </Link>
-        </div>
-
-        {pendingReady ? (
-        <>
-        {/* Tabs */}
-        <div className="px-5 pt-3">
-          <div className="inline-flex items-center gap-1 rounded-lg bg-slate-100 p-1 dark:bg-slate-800/70">
-            {([
-              { key: "today" as const, label: "ວັນນີ້", count: ps?.today_count },
-              { key: "month" as const, label: "ເດືອນນີ້", count: ps?.month_count },
-              { key: "year" as const, label: `ປີ ${currentYear}`, count: totalPending },
-            ]).map((tab) => (
-              <button
-                key={tab.key}
-                type="button"
-                onClick={() => setPendingTab(tab.key)}
-                className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-[11px] font-semibold transition-all ${
-                  pendingTab === tab.key
-                    ? "bg-white text-teal-700 shadow-sm dark:bg-slate-900 dark:text-teal-300"
-                    : "text-slate-500 dark:text-gray-400 hover:text-slate-700"
-                }`}
-              >
-                {tab.label}
-                <span className={`rounded-full px-1.5 py-0.5 text-[9px] font-bold ${
-                  pendingTab === tab.key
-                    ? "bg-teal-500/10 text-teal-700 dark:text-teal-300"
-                    : "bg-white/50 dark:bg-white/5 text-slate-500"
-                }`}>
-                  {formatNumber(tab.count)}
-                </span>
-              </button>
-            ))}
-          </div>
-        </div>
-
-        <PendingList
-          items={currentPending.items}
-          emptyMessage={`ບໍ່ມີລາຍການໃນ${currentPending.subtitle}`}
-          agingTick={agingTick}
-        />
-        </>
-        ) : (
-          <div className="flex items-center justify-center py-16">
-            <FaSpinner className="animate-spin text-2xl text-slate-300" />
-          </div>
-        )}
-      </div>
+      )}
     </div>
   );
 }
