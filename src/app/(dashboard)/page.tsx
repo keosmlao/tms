@@ -25,6 +25,11 @@ import {
 import { FIXED_YEAR } from "@/lib/fixed-year";
 import { Actions } from "@/lib/api";
 import { LiveFleetOverview } from "@/components/live-fleet-overview";
+import {
+  deliveryPerfRates,
+  formatLeadHours,
+  type DeliveryPerfReport,
+} from "@/lib/delivery-performance";
 // Ported from server actions: getDashboardData
 
 // ==================== Types ====================
@@ -1127,6 +1132,131 @@ function DeliveryKpiCard({ kpi }: { kpi: DeliveryKpi }) {
   );
 }
 
+// ປະສິດທິພາບການຈັດສົ່ງ ຂອງເດືອນນີ້ — ຍ່ອມາຈາກລາຍງານເຕັມທີ່
+// /reports/delivery-performance (ໃຊ້ຊຸດຂໍ້ມູນ ແລະ ສູດຄິດເປີເຊັນອັນດຽວກັນ).
+function DeliveryPerformanceCard({ perf }: { perf: DeliveryPerfReport }) {
+  const overall = perf.overall;
+  const rates = deliveryPerfRates(overall);
+
+  const balance: Array<{ label: string; value: number; cls: string }> = [
+    { label: "ຍອດຍົກມາ", value: overall.carry_in, cls: "text-amber-700 dark:text-amber-300" },
+    { label: "ເປີດບິນໃນເດືອນ", value: overall.opened, cls: "text-sky-700 dark:text-sky-300" },
+    { label: "ສົ່ງສຳເລັດ", value: overall.delivered, cls: "text-emerald-700 dark:text-emerald-300" },
+    { label: "ຫຼຸດອອກ (ຄືນ/ຕັດບິນ)", value: overall.closed_other, cls: "text-slate-600 dark:text-slate-300" },
+    { label: "ຍອດຄົງເຫຼືອຍົກໄປ", value: overall.carry_out, cls: "text-rose-700 dark:text-rose-300" },
+  ];
+
+  const lanes: Array<{ title: string; hint: string; slices: Array<{ label: string; rate: number; count: number; bar: string; text: string }> }> = [
+    {
+      title: "ນັບແຕ່ເວລາເປີດບິນ",
+      hint: "ເປີດບິນ → ສົ່ງສຳເລັດ",
+      slices: [
+        { label: "≤24h", rate: rates.openOnTimeRate, count: overall.from_open.le_24h, bar: "bg-emerald-500", text: "text-emerald-700 dark:text-emerald-300" },
+        { label: "24–48h", rate: rates.open24to48Rate, count: overall.from_open.h24_48, bar: "bg-amber-500", text: "text-amber-700 dark:text-amber-300" },
+        { label: ">48h", rate: rates.openOver48Rate, count: overall.from_open.gt_48h, bar: "bg-rose-500", text: "text-rose-700 dark:text-rose-300" },
+      ],
+    },
+    {
+      title: "ນັບແຕ່ວັນນັດຈັດສົ່ງ",
+      hint: "ວັນນັດ → ສົ່ງສຳເລັດ",
+      slices: [
+        { label: "≤24h", rate: rates.schedOnTimeRate, count: overall.from_schedule.le_24h, bar: "bg-emerald-500", text: "text-emerald-700 dark:text-emerald-300" },
+        { label: "24–48h", rate: rates.sched24to48Rate, count: overall.from_schedule.h24_48, bar: "bg-amber-500", text: "text-amber-700 dark:text-amber-300" },
+        { label: ">48h", rate: rates.schedOver48Rate, count: overall.from_schedule.gt_48h, bar: "bg-rose-500", text: "text-rose-700 dark:text-rose-300" },
+        { label: "ບໍ່ໄດ້ນັດ", rate: rates.schedUnknownRate, count: overall.from_schedule.no_schedule, bar: "bg-slate-400", text: "text-slate-600 dark:text-slate-300" },
+      ],
+    },
+  ];
+
+  const quality = [
+    { label: "ເລື່ອນນັດ >2 ຄັ້ງ", rate: rates.rescheduledRate, count: overall.rescheduled_over_2 },
+    { label: "ທະຍອຍສົ່ງ", rate: rates.multiLegRate, count: overall.multi_leg_bills },
+    { label: "ສົ່ງບໍ່ຄົບຈຳນວນ", rate: rates.shortRate, count: overall.short_bills },
+    { label: "ຍົກເລີກ", rate: rates.cancelledRate, count: overall.cancelled_bills },
+  ];
+
+  return (
+    <div className={`${CARD} p-5`}>
+      <div className="flex flex-wrap items-center justify-between gap-3 mb-4">
+        <div className="flex items-center gap-2.5">
+          <div className="w-8 h-8 rounded-lg bg-indigo-500/10 flex items-center justify-center">
+            <FaClipboardCheck className="text-indigo-600 dark:text-indigo-400" size={13} />
+          </div>
+          <div>
+            <h2 className="text-sm font-bold text-slate-800 dark:text-white">ປະສິດທິພາບການຈັດສົ່ງ · ເດືອນນີ້</h2>
+            <p className="text-[11px] text-slate-400 dark:text-gray-500">
+              {formatNumber(overall.handled)} ບິນຢູ່ໃນມື · ເວລານຳສົ່ງສະເລ່ຍ {formatLeadHours(overall.avg_lead_open_h)}
+            </p>
+          </div>
+        </div>
+        <Link
+          href="/reports/delivery-performance"
+          className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-[11px] font-semibold text-white shadow-sm transition-colors bg-indigo-600 hover:bg-indigo-500"
+        >
+          ລາຍງານເຕັມ <FaArrowRight size={9} />
+        </Link>
+      </div>
+
+      <div className="grid grid-cols-2 lg:grid-cols-5 gap-3">
+        {balance.map((item) => (
+          <div key={item.label} className="rounded-xl bg-slate-50 dark:bg-white/5 p-3.5">
+            <p className="text-[10px] font-semibold uppercase tracking-wider text-slate-500 dark:text-slate-400">
+              {item.label}
+            </p>
+            <p className={`text-2xl font-extrabold tabular-nums leading-tight ${item.cls}`}>
+              {formatNumber(item.value)}
+            </p>
+          </div>
+        ))}
+      </div>
+
+      <div className="mt-4 grid grid-cols-1 lg:grid-cols-2 gap-4">
+        {lanes.map((lane) => (
+          <div key={lane.title}>
+            <div className="flex items-baseline justify-between gap-2 mb-1.5">
+              <p className="text-[11px] font-bold text-slate-600 dark:text-slate-300">{lane.title}</p>
+              <p className="text-[10px] text-slate-400">{lane.hint}</p>
+            </div>
+            <div className="flex h-2.5 w-full overflow-hidden rounded-full bg-slate-100 dark:bg-white/5">
+              {lane.slices.map((slice) => (
+                <div key={slice.label} className={slice.bar} style={{ width: `${slice.rate}%` }} />
+              ))}
+            </div>
+            <div className="mt-2 flex flex-wrap gap-x-4 gap-y-1">
+              {lane.slices.map((slice) => (
+                <div key={slice.label} className="flex items-center gap-1.5">
+                  <span className={`h-2 w-2 rounded-full ${slice.bar}`} />
+                  <span className="text-[10px] text-slate-500 dark:text-slate-400">{slice.label}</span>
+                  <span className={`text-[11px] font-bold tabular-nums ${slice.text}`}>
+                    {slice.rate.toFixed(1)}%
+                  </span>
+                  <span className="text-[9px] text-slate-400">({formatNumber(slice.count)})</span>
+                </div>
+              ))}
+            </div>
+          </div>
+        ))}
+      </div>
+
+      <div className="mt-4 border-t border-slate-200/60 dark:border-white/10 pt-3 grid grid-cols-2 lg:grid-cols-4 gap-3">
+        {quality.map((item) => (
+          <div key={item.label}>
+            <p className="text-[10px] font-semibold text-slate-500 dark:text-slate-400">{item.label}</p>
+            <p className="text-lg font-extrabold tabular-nums text-slate-800 dark:text-slate-100">
+              {item.rate.toFixed(1)}%
+              <span className="ml-1 text-[10px] font-normal text-slate-400">{formatNumber(item.count)} ບິນ</span>
+            </p>
+          </div>
+        ))}
+      </div>
+
+      <p className="mt-2 text-[9px] text-slate-400">
+        ຍົກມາ + ເປີດໃໝ່ − ສຳເລັດ − ຫຼຸດອອກ = ຍົກໄປ · ຍອດຍົກໄປລວມບິນທີ່ຂຶ້ນລົດແລ້ວກຳລັງສົ່ງ ຈຶ່ງສູງກວ່າໜ້າ &quot;ບິນລໍຈັດຖ້ຽວ&quot;
+      </p>
+    </div>
+  );
+}
+
 // Placeholder shown while a slow slice (KPI / pending) is still loading, so the
 // section's space is reserved and the user sees it is on the way.
 function SectionSkeleton({ height = "h-28", title }: { height?: string; title?: string }) {
@@ -1177,6 +1307,7 @@ function ActivityCardHeader({ icon, tint, title, subtitle, href, ctaClass }: {
 export default function DashboardPage() {
   const [summary, setSummary] = useState<SummarySlice | null>(null);
   const [kpi, setKpi] = useState<KpiSlice | null>(null);
+  const [perf, setPerf] = useState<DeliveryPerfReport | null>(null);
   const [pending, setPending] = useState<PendingSlice | null>(null);
   const [activity, setActivity] = useState<Partial<DashboardData> | null>(null);
   const [loading, setLoading] = useState(true);
@@ -1197,6 +1328,9 @@ export default function DashboardPage() {
       .finally(() => setLoading(false));
     Actions.getDashboardKpi(force)
       .then((k) => setKpi(k as KpiSlice))
+      .catch(() => undefined);
+    Actions.getDashboardDeliveryPerformance(force)
+      .then((p) => setPerf((p as { delivery_performance: DeliveryPerfReport }).delivery_performance))
       .catch(() => undefined);
     Actions.getDashboardPending(force)
       .then((p) => setPending(p as PendingSlice))
@@ -1649,6 +1783,13 @@ export default function DashboardPage() {
         <DeliveryKpiCard kpi={data.delivery_kpi} />
       ) : (
         <SectionSkeleton title="KPI ການຈັດສົ່ງ" height="h-32" />
+      )}
+
+      {/* ປະສິດທິພາບການຈັດສົ່ງ (ຍອດຍົກມາ/ຍົກໄປ + ຊັ້ນເວລານຳສົ່ງ) */}
+      {perf ? (
+        <DeliveryPerformanceCard perf={perf} />
+      ) : (
+        <SectionSkeleton title="ປະສິດທິພາບການຈັດສົ່ງ" height="h-40" />
       )}
 
       {/* Customer rating */}

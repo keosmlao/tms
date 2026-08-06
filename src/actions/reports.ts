@@ -10,6 +10,7 @@ import {
   getReportMonthlyDriver as svcGetReportMonthlyDriver,
   getReportMonthlyDelivery as svcGetReportMonthlyDelivery,
   getMonthlyDeliveryKpi as svcGetMonthlyDeliveryKpi,
+  getDeliveryPerformance as svcGetDeliveryPerformance,
   getReportPendingDaily as svcGetReportPendingDaily,
   getReportDeliveredDaily as svcGetReportDeliveredDaily,
   getReportCancelledDaily as svcGetReportCancelledDaily,
@@ -66,6 +67,12 @@ export async function getReportMonthlyDelivery(monthly: string) {
 export async function getMonthlyDeliveryKpi(monthly: string) {
   const s = await requireSession();
   return svcGetMonthlyDeliveryKpi(s, monthly);
+}
+
+// ລາຍງານປະສິດທິພາບການຈັດສົ່ງ (ຍອດຍົກມາ/ຍົກໄປ + ຊັ້ນເວລານຳສົ່ງ) ຂອງເດືອນ
+export async function getDeliveryPerformance(monthly: string) {
+  const s = await requireSession();
+  return svcGetDeliveryPerformance(s, monthly);
 }
 
 export async function getReportPendingDaily(fromDate: string, toDate: string) {

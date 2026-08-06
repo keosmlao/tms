@@ -112,6 +112,7 @@ const navSections: NavSection[] = [
     icon: <FaChartPie size={16} />,
     key: "report",
     items: [
+      { label: "ປະສິດທິພາບການຈັດສົ່ງ", href: "/reports/delivery-performance", icon: <FaChartLine size={13} /> },
       { label: "ການຈັດສົ່ງປະຈຳວັນ", href: "/reports/daily", icon: <FaCalendarDay size={13} /> },
       { label: "ອັດຕາໃຊ້ພື້ນທີ່ລົດ", href: "/reports/truck-utilization", icon: <FaTruckLoading size={13} /> },
       { label: "ຈຸດປິດບິນ vs ຈຸດລູກຄ້າ", href: "/reports/delivery-location", icon: <FaMapMarkerAlt size={13} /> },

@@ -367,6 +367,19 @@ async function computeKpi(session) {
 }
 
 // ════════════════════════════════════════════════════════════════════════
+// Slice 2b — DELIVERY PERFORMANCE (ຍອດຍົກມາ/ຍົກໄປ + ຊັ້ນເວລານຳສົ່ງ ຂອງເດືອນນີ້)
+// ຄິດຈາກ getDeliveryPerformance ໂດຍກົງ ຈຶ່ງບໍ່ມີທາງທີ່ໜ້າ Dashboard ກັບໜ້າ
+// /reports/delivery-performance ຈະສະແດງຕົວເລກຄົນລະຢ່າງໃນເດືອນດຽວກັນ.
+// ════════════════════════════════════════════════════════════════════════
+function getDashboardDeliveryPerformance(session, force = false) {
+  return cached("delivery_performance", session, force, async () => {
+    const { getDeliveryPerformance } = require("./reports");
+    const c = ctx(session);
+    return { delivery_performance: await getDeliveryPerformance(session, c.fixedMonth) };
+  });
+}
+
+// ════════════════════════════════════════════════════════════════════════
 // Slice 3 — PENDING (slow: whole-year pending bills + remaining counts)
 // The single heaviest part (~0.9s). Isolated so it streams in last while the
 // rest of the dashboard is already on screen.
@@ -608,6 +621,7 @@ module.exports = {
   getDashboardData,
   getDashboardSummary,
   getDashboardKpi,
+  getDashboardDeliveryPerformance,
   getDashboardPending,
   getDashboardActivity,
 };

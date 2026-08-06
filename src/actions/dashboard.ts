@@ -5,6 +5,7 @@ import {
   getDashboardData as svc,
   getDashboardSummary as svcSummary,
   getDashboardKpi as svcKpi,
+  getDashboardDeliveryPerformance as svcDeliveryPerformance,
   getDashboardPending as svcPending,
   getDashboardActivity as svcActivity,
 } from "@/queries/dashboard.js";
@@ -26,6 +27,13 @@ export async function getDashboardSummary(force = false) {
 export async function getDashboardKpi(force = false) {
   const s = await requireSession();
   return svcKpi(s, force);
+}
+
+// ປະສິດທິພາບການຈັດສົ່ງຂອງເດືອນປັດຈຸບັນ — ຊຸດດຽວກັບໜ້າ
+// /reports/delivery-performance ພຽງແຕ່ຕຶງເດືອນໄວ້ທີ່ "ເດືອນນີ້".
+export async function getDashboardDeliveryPerformance(force = false) {
+  const s = await requireSession();
+  return svcDeliveryPerformance(s, force);
 }
 
 export async function getDashboardPending(force = false) {
