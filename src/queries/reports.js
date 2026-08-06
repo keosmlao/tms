@@ -1429,6 +1429,12 @@ function toPerfBucket(r) {
       no_schedule: num(r?.sched_none),
     },
     rescheduled_over_2: num(r?.rescheduled_over_2),
+    jumped: { d1: num(r?.jumped_1d), d3: num(r?.jumped_3d), d7: num(r?.jumped_7d) },
+    jumped_ready: {
+      d1: num(r?.jumped_ready_1d),
+      d3: num(r?.jumped_ready_3d),
+      d7: num(r?.jumped_ready_7d),
+    },
     multi_leg_bills: num(r?.multi_leg_bills),
     short_bills: num(r?.short_bills),
     cancelled_bills: num(r?.cancelled_bills),
@@ -1442,6 +1448,43 @@ function emptyPerfBucket() {
   return toPerfBucket(null);
 }
 
+/**
+ * ເລກບິນທີ່ "ສິນຄ້າຍັງບໍ່ຮອດມືລູກຄ້າ" ໃນຂະນະນີ້.
+ *
+ * ⚠️ ຢ່າຂຽນກົດນີ້ຂຶ້ນມາໃໝ່ໃນ SQL. ກົດຈິງມີຫຼາຍຊັ້ນ (check_status ຂອງ ERP,
+ * ຈຳນວນຄົງເຫຼືອຫຼັງຫັກຂອງທີ່ lock ຢູ່ຖ້ຽວ, ໃບຫຼຸດໜີ້, ບິນບໍລິການທີ່ສົ່ງຊ້ຳໄດ້,
+ * ບິນສົ່ງຕໍ່ສາຂາ) ແລະ ການຂຽນຄືນເຮັດໃຫ້ຍອດເກີນຄວາມຈິງເຖິງ 3 ເທົ່າ (207 ທຽບກັບ
+ * 63 ທີ່ຖືກຕ້ອງ ວັດເມື່ອ 06/08/2026). ຈຶ່ງເອີ້ນໃຊ້ຟັງຊັນທີ່ໜ້າຈໍໃຊ້ຢູ່ແທ້ໆ:
+ *
+ *   ບິນລໍຈັດຖ້ຽວ (getBillsPending) ∪ ບິນທີ່ຢູ່ເທິງຖ້ຽວທີ່ຍັງບໍ່ຈົບ
+ *
+ * ຜົນຄື ຍອດຄົງເຫຼືອຂອງເດືອນປັດຈຸບັນຈະຕົງກັບໜ້າ /bills-pending ແລະ
+ * /bills-inprogress ສະເໝີ ໂດຍບໍ່ມີທາງແຕກຕ່າງ.
+ */
+async function getOutstandingBillNos() {
+  const { getBillsPending } = require("./bills");
+  const { FIXED_YEAR_START, FIXED_YEAR_END } = require("../lib/fixed-year");
+  const [pending, onTripRows] = await Promise.all([
+    // ບໍ່ສົ່ງ session ໄປ — ຕ້ອງການທັງ 3 ສາຂາ ແລ້ວຄ່ອຍແບ່ງສາຂາດ້ວຍກົດຂອງລາຍງານເອງ
+    getBillsPending({}, FIXED_YEAR_START, FIXED_YEAR_END, "all"),
+    // ບິນທີ່ຢູ່ເທິງຖ້ຽວທີ່ຍັງບໍ່ຈົບ (ລໍອອກລົດ ຫຼື ກຳລັງສົ່ງ) — ຍັງບໍ່ຮອດມືລູກຄ້າ
+    // ແຕ່ບໍ່ຂຶ້ນໜ້າ "ບິນລໍຈັດຖ້ຽວ" ເພາະຖືກຈັດຖ້ຽວແລ້ວ
+    query(
+      `SELECT DISTINCT d.bill_no
+         FROM public.odg_tms_detail d
+         JOIN public.odg_tms j ON j.doc_no = d.doc_no
+        WHERE COALESCE(d.status, 0) NOT IN (1, 2)
+          AND COALESCE(j.approve_status, 0) = 1
+          AND COALESCE(j.job_status, 0) <> 4
+          AND ${getFixedYearSqlFilter("d.doc_date")}`
+    ),
+  ]);
+  const set = new Set();
+  for (const bill of pending.trans ?? []) if (bill?.doc_no) set.add(String(bill.doc_no));
+  for (const row of onTripRows) if (row?.bill_no) set.add(String(row.bill_no));
+  return Array.from(set);
+}
+
 async function getDeliveryPerformance(session, monthly) {
   const scope = getBranchScope(session);
   const monthStart = `${monthly}-01`;
@@ -1451,10 +1494,11 @@ async function getDeliveryPerformance(session, monthly) {
     ? MONTHLY_DELIVERY_BRANCH_CODES.filter((code) => scope.branches.includes(code))
     : MONTHLY_DELIVERY_BRANCH_CODES;
   if (visibleBranches.length === 0) {
-    return { month: monthly, overall: emptyPerfBucket(), branches: [] };
+    return { month: monthly, overall: emptyPerfBucket(), branches: [], departments: [] };
   }
   const branchCodeSql = visibleBranches.map((code) => `'${code}'`).join(",");
   const yearFilter = getFixedYearSqlFilter("d.doc_date");
+  const outstandingNow = await getOutstandingBillNos();
 
   const rows = await query(
     `WITH params AS (
@@ -1507,64 +1551,10 @@ async function getDeliveryPerformance(session, monthly) {
        FROM assigned a
        FULL JOIN legs lg ON lg.bill_no = a.bill_no
      ),
-     -- ທຸກບິນຂອງສາຂາທີ່ເບິ່ງຢູ່ — ຕ້ອງກວດ "ຍັງເຫຼືອສິນຄ້າບໍ" ກັບທຸກໃບ
-     -- ບໍ່ແມ່ນສະເພາະໃບທີ່ບໍ່ເຄີຍສົ່ງ ເພາະບິນທະຍອຍສົ່ງກໍ່ຍັງບໍ່ຮອດມືລູກຄ້າ
-     undelivered AS (
-       SELECT bill_no FROM bills WHERE branch_code IN (${branchCodeSql})
-     ),
-     -- ຈຳນວນສັ່ງຊື້ຕໍ່ລາຍການ (ບໍ່ນັບລະຫັດ 97% = ຄ່າບໍລິການ)
-     ord AS (
-       SELECT u.bill_no, td.item_code, SUM(COALESCE(td.qty, 0))::numeric AS ordered_qty
-       FROM undelivered u
-       JOIN public.ic_trans_detail td ON td.doc_no = u.bill_no
-       WHERE td.item_code NOT LIKE '97%'
-       GROUP BY u.bill_no, td.item_code
-     ),
-     -- ຈຳນວນທີ່ອອກຈາກມືໄປແລ້ວ: ສົ່ງໃຫ້ລູກຄ້າ + ຄືນສາງ (ນິຍາມດຽວກັບ
-     -- getRemainingSummaryMap ລວມທັງ fallback delivered_qty=0 → selected_qty)
-     dlv AS (
-       SELECT i.bill_no, i.item_code,
-         SUM(
-           CASE WHEN COALESCE(d.status, 0) = 1 AND COALESCE(i.delivered_qty, 0) = 0
-                THEN COALESCE(i.selected_qty, 0)
-                ELSE COALESCE(i.delivered_qty, 0) END
-         )::numeric AS delivered_qty,
-         SUM(COALESCE(i.returned_qty, 0))::numeric AS returned_wh
-       FROM undelivered u
-       JOIN public.odg_tms_detail_item i ON i.bill_no = u.bill_no
-       JOIN public.odg_tms_detail d ON d.doc_no = i.doc_no AND d.bill_no = i.bill_no
-       WHERE COALESCE(d.status, 0) IN (1, 2)
-         AND NULLIF(TRIM(d.forward_transport_code), '') IS NULL
-       GROUP BY i.bill_no, i.item_code
-     ),
-     -- ໃບຫຼຸດໜີ້/ຄືນສິນຄ້າ (trans_flag=48) ທີ່ອ້າງອີງບິນນີ້ — ທັງຈຳນວນ ແລະ ວັນທີ
-     credit AS (
-       SELECT rd.ref_doc_no AS bill_no, rd.item_code,
-         SUM(ABS(COALESCE(rd.qty, 0)))::numeric AS returned_qty,
-         MIN(r.doc_date) AS credited_on
-       FROM undelivered u
-       JOIN public.ic_trans_detail rd ON rd.ref_doc_no = u.bill_no
-       JOIN public.ic_trans r ON r.doc_no = rd.doc_no AND r.trans_flag = 48
-       WHERE rd.item_code NOT LIKE '97%'
-       GROUP BY rd.ref_doc_no, rd.item_code
-     ),
-     settlement AS (
-       SELECT o.bill_no,
-         SUM(GREATEST(
-           o.ordered_qty - COALESCE(dl.delivered_qty, 0)
-             - COALESCE(dl.returned_wh, 0) - COALESCE(c.returned_qty, 0), 0
-         )) AS remaining_qty,
-         -- ⚠️ ຫຼັກຖານ: ມີແຖວ odg_tms_detail_item ຈັກລາຍການ. ວັດແລ້ວມີ 1,908 ໃບ
-         -- ທີ່ຄົນຂັບປິດງານໂດຍບໍ່ບັນທຶກລາຍການເລີຍ ແລະ ERP ຢືນຢັນວ່າຄົບ
-         -- (check_status=1) — ຖ້າຖືວ່າ "ຍັງເຫຼືອຂອງ" ຍອດຄ້າງຈະພຸ່ງເປັນ 2,100 ໃບ
-         -- ທັງທີ່ຄວາມຈິງສົ່ງໄປແລ້ວ. ຈຶ່ງນັບວ່າຍັງບໍ່ຮອດມືລູກຄ້າສະເພາະເມື່ອ
-         -- ມີແຖວລາຍການເປັນຫຼັກຖານເທົ່ານັ້ນ.
-         COUNT(dl.item_code)::int AS items_with_rows,
-         MAX(c.credited_on) AS credited_on
-       FROM ord o
-       LEFT JOIN dlv dl ON dl.bill_no = o.bill_no AND dl.item_code = o.item_code
-       LEFT JOIN credit c ON c.bill_no = o.bill_no AND c.item_code = o.item_code
-       GROUP BY o.bill_no
+     -- ບິນທີ່ "ຍັງບໍ່ຮອດມືລູກຄ້າ" ໃນຂະນະນີ້ — ມາຈາກຟັງຊັນທີ່ໜ້າຈໍໃຊ້ຢູ່
+     -- (ເບິ່ງ getOutstandingBillNos) ບໍ່ແມ່ນກົດທີ່ຂຽນຄືນຢູ່ນີ້
+     outstanding_now AS (
+       SELECT DISTINCT o.bill_no FROM unnest($3::varchar[]) AS o(bill_no)
      ),
      -- ຈຳນວນຄັ້ງທີ່ "ວັນນັດ" ຖືກປ່ຽນຈິງ (ບໍ່ນັບຄັ້ງທຳອິດທີ່ຕັ້ງຄ່າ NULL → ວັນ)
      resched AS (
@@ -1596,6 +1586,12 @@ async function getDeliveryPerformance(session, monthly) {
        SELECT
          b.bill_no,
          b.branch_code,
+         COALESCE(NULLIF(TRIM(sale_u.department::text), ''), 'unknown') AS department_code,
+         COALESCE(
+           NULLIF(TRIM(dep.name_1::text), ''),
+           NULLIF(TRIM(sale_u.department::text), ''),
+           'ບໍ່ລະບຸພະແນກ'
+         ) AS department_name,
          -- ເວລາເປີດບິນ: ic_trans (ເວລາລາວ) → ວັນທີ shipment → ວັນສ້າງບິນມື
          -- → ວັນຂອງຖ້ຽວທຳອິດ (ບິນໂອນທີ່ບໍ່ມີເອກະສານ ERP ເລີຍ)
          COALESCE(
@@ -1604,32 +1600,29 @@ async function getDeliveryPerformance(session, monthly) {
            cb.created_at,
            b.first_trip_date::timestamp
          ) AS opened_at,
-         -- "ຮອດມືລູກຄ້າ" = ສົ່ງຄົບແລ້ວ. ບິນທະຍອຍສົ່ງຈຶ່ງນັບຕອນຖ້ຽວສຸດທ້າຍ ແລະ
-         -- ບິນທີ່ຍັງຂາດຈຳນວນຢູ່ (ມີແຖວລາຍການເປັນຫຼັກຖານ) ຍັງບໍ່ຖືວ່າສຳເລັດ
+         -- ບິນທີ່ຍັງຄ້າງຢູ່ຕອນນີ້ = ຍັງບໍ່ອອກຈາກຍອດ ຈຶ່ງບໍ່ມີວັນສຳເລັດ/ວັນຫຼຸດອອກ.
+         -- ບິນທີ່ອອກໄປແລ້ວ ຈຶ່ງລົງວັນທີວ່າອອກຕອນໃດ:
+         --   ມີຖ້ຽວສົ່ງສຳເລັດ → ວັນຖ້ຽວສຸດທ້າຍ (ບິນທະຍອຍສົ່ງນັບຕອນຄົບ)
          CASE
-           WHEN b.last_delivered_at IS NULL THEN NULL
-           WHEN COALESCE(st.items_with_rows, 0) > 0 AND COALESCE(st.remaining_qty, 0) > 0
-             THEN NULL
+           WHEN on_now.bill_no IS NOT NULL THEN NULL
            ELSE b.last_delivered_at
          END AS completed_at,
-         -- ບິນອອກຈາກຍອດຄ້າງໂດຍບໍ່ໄດ້ສົ່ງ: ບໍ່ມີຖ້ຽວສຳເລັດ ແລະ ບໍ່ເຫຼືອສິນຄ້າ
-         -- ແລ້ວ (ຄືນຜ່ານໃບຫຼຸດໜີ້ ຫຼື ຖືກປິດຢູ່ ERP). ວັນທີ່ອອກ = ວັນໃບຫຼຸດໜີ້
-         -- ຖ້າບໍ່ມີຈຶ່ງນັບແຕ່ວັນເປີດບິນ (ຖືວ່າບໍ່ເຄີຍເປັນວຽກຈັດສົ່ງ) — ວັດແລ້ວ
-         -- ມີ 53 ໃບ/ປີ ທີ່ຕົກໃນກໍລະນີຫຼັງ ເພາະ ERP ບໍ່ເກັບປະຫວັດການປິດບິນ.
+         -- ບໍ່ມີຖ້ຽວສົ່ງສຳເລັດເລີຍ ແຕ່ອອກຈາກຍອດແລ້ວ (ຄືນຜ່ານໃບຫຼຸດໜີ້ ຫຼື
+         -- ຖືກປິດຢູ່ ERP) → ວັນໃບຫຼຸດໜີ້ ຖ້າບໍ່ມີຈຶ່ງນັບແຕ່ວັນເປີດບິນ ເພາະ ERP
+         -- ບໍ່ເກັບປະຫວັດການປິດບິນ ຈຶ່ງບອກວັນທີ່ແທ້ບໍ່ໄດ້
          CASE
-           WHEN b.first_delivered_at IS NOT NULL THEN NULL
-           WHEN st.bill_no IS NULL AND cr.credited_on IS NULL THEN NULL
-           WHEN COALESCE(st.remaining_qty, 0) > 0 THEN NULL
-           ELSE COALESCE(cr.credited_on::timestamp, st.credited_on::timestamp,
-                         ${BILL_OPENED_AT}, s.doc_date::timestamp)
+           WHEN on_now.bill_no IS NOT NULL THEN NULL
+           WHEN b.last_delivered_at IS NOT NULL THEN NULL
+           ELSE COALESCE(cr.credited_on::timestamp, ${BILL_OPENED_AT}, s.doc_date::timestamp)
          END AS closed_other_at,
          COALESCE(pb.scheduled_date::timestamp, b.first_logistic_date::timestamp) AS scheduled_at,
+         COALESCE(NULLIF(TRIM(pb.action_status), ''), '') AS action_status,
          COALESCE(b.success_legs, 0) AS success_legs,
          COALESCE(b.cancelled_legs_in_month, 0) AS cancelled_legs_in_month,
          COALESCE(rs.reschedule_count, 0) AS reschedule_count,
          (sb.bill_no IS NOT NULL) AS is_short
        FROM bills b
-       LEFT JOIN settlement st ON st.bill_no = b.bill_no
+       LEFT JOIN outstanding_now on_now ON on_now.bill_no = b.bill_no
        LEFT JOIN LATERAL (
          SELECT MIN(r.doc_date) AS credited_on
          FROM public.ic_trans_detail rd
@@ -1638,9 +1631,12 @@ async function getDeliveryPerformance(session, monthly) {
        ) cr ON true
        -- LATERAL … LIMIT 1: ic_trans ມີ doc_no ຊ້ຳ (ເບິ່ງໝາຍເຫດຫົວຟັງຊັນ)
        LEFT JOIN LATERAL (
-         SELECT tt.doc_date, tt.doc_time FROM public.ic_trans tt
+         SELECT tt.doc_date, tt.doc_time, tt.sale_code FROM public.ic_trans tt
          WHERE tt.doc_no = b.bill_no ORDER BY tt.doc_date, tt.doc_time LIMIT 1
        ) t ON true
+       -- ພະແນກຂອງພະນັກງານຂາຍທີ່ເປີດບິນ (ນິຍາມດຽວກັບ KPI ບໍລິຫານການຈັດສົ່ງ)
+       LEFT JOIN erp_user sale_u ON sale_u.code = t.sale_code
+       LEFT JOIN erp_department_list dep ON dep.code = sale_u.department
        LEFT JOIN public.ic_trans_shipment s ON s.doc_no = b.bill_no
        LEFT JOIN public.odg_tms_custom_bill cb ON cb.bill_no = b.bill_no
        LEFT JOIN resched rs ON rs.bill_no = b.bill_no
@@ -1665,13 +1661,39 @@ async function getDeliveryPerformance(session, monthly) {
          ((completed_at IS NULL OR completed_at >= p.next_month_start)
             AND (closed_other_at IS NULL OR closed_other_at >= p.next_month_start)) AS is_carry_out,
          EXTRACT(EPOCH FROM (completed_at - opened_at)) / 3600.0 AS lead_open_h,
-         EXTRACT(EPOCH FROM (completed_at - scheduled_at)) / 3600.0 AS lead_sched_h
+         EXTRACT(EPOCH FROM (completed_at - scheduled_at)) / 3600.0 AS lead_sched_h,
+         p.next_month_start
        FROM pool CROSS JOIN params p
        -- ບິນທີ່ຍັງບໍ່ເປີດກ່ອນສິ້ນເດືອນ ບໍ່ຢູ່ໃນຍອດຂອງເດືອນນີ້
        WHERE opened_at IS NOT NULL AND opened_at < p.next_month_start
+     ),
+     -- ບິນທີ່ຖືກລັດຄິວ: ມີບິນທີ່ "ເປີດຫຼັງ" (ສາຂາດຽວກັນ) ຖືກສົ່ງໄປກ່ອນແລ້ວ.
+     -- min_done_newer = ເວລາສົ່ງສຳເລັດທຳອິດ ໃນບັນດາບິນທີ່ເປີດຫຼັງບິນນີ້.
+     -- ORDER BY opened_at DESC ຈຶ່ງ "ແຖວກ່ອນໜ້າ" = ບິນທີ່ເປີດຫຼັງ.
+     --
+     -- ⚠️ ຕ້ອງເປັນ ROWS ບໍ່ແມ່ນ RANGE … EXCLUDE GROUP: ວັດແລ້ວ EXCLUDE GROUP
+     -- ບັງຄັບໃຫ້ Postgres ຄິດ MIN ຄືນໃໝ່ທຸກແຖວ (O(n²)) ເຮັດໃຫ້ຄຳຂໍນີ້ໃຊ້ເວລາ
+     -- 110 ວິນາທີ. ROWS ຄິດແບບສະສົມ O(n) ເຫຼືອ ~2 ວິ. ຜົນຕ່າງມີສະເພາະບິນທີ່
+     -- ເປີດວິນາທີດຽວກັນເປັນເປະ ເຊິ່ງບໍ່ມີຜົນຕໍ່ຕົວເລກລວມ.
+     queued AS (
+       SELECT f.*,
+         MIN(completed_at) OVER (
+           PARTITION BY branch_code ORDER BY opened_at DESC, bill_no
+           ROWS BETWEEN UNBOUNDED PRECEDING AND 1 PRECEDING
+         ) AS min_done_newer,
+         -- ຈຸດອ້າງອີງເວລາ: ບິນທີ່ສົ່ງແລ້ວໃຊ້ເວລາສົ່ງ, ບິນທີ່ຍັງຄ້າງໃຊ້ສິ້ນເດືອນ
+         LEAST(COALESCE(completed_at, next_month_start), next_month_start) AS ref_at
+       FROM flagged f
      )
      SELECT
+       CASE
+         WHEN GROUPING(branch_code) = 0 THEN 'branch'
+         WHEN GROUPING(department_code) = 0 THEN 'department'
+         ELSE 'overall'
+       END AS dimension,
        branch_code,
+       department_code,
+       MAX(department_name) AS department_name,
        COUNT(*) FILTER (WHERE is_carry_in)::int AS carry_in,
        COUNT(*) FILTER (WHERE is_opened)::int AS opened,
        COUNT(*) FILTER (WHERE is_delivered)::int AS delivered,
@@ -1688,6 +1710,32 @@ async function getDeliveryPerformance(session, monthly) {
        COUNT(*) FILTER (WHERE (is_carry_in OR is_opened) AND reschedule_count > 2)::int AS rescheduled_over_2,
        COUNT(*) FILTER (WHERE (is_carry_in OR is_opened) AND success_legs >= 2)::int AS multi_leg_bills,
        COUNT(*) FILTER (WHERE (is_carry_in OR is_opened) AND is_short)::int AS short_bills,
+       -- ບິນທີ່ຖືກລັດຄິວ ຕາມເກນ N ວັນ (ບິນທີ່ເປີດຫຼັງ ຖືກສົ່ງກ່ອນເກີນ N ວັນ)
+       COUNT(*) FILTER (
+         WHERE (is_carry_in OR is_opened) AND min_done_newer IS NOT NULL
+           AND min_done_newer + INTERVAL '1 day' < ref_at
+       )::int AS jumped_1d,
+       COUNT(*) FILTER (
+         WHERE (is_carry_in OR is_opened) AND min_done_newer IS NOT NULL
+           AND min_done_newer + INTERVAL '3 days' < ref_at
+       )::int AS jumped_3d,
+       COUNT(*) FILTER (
+         WHERE (is_carry_in OR is_opened) AND min_done_newer IS NOT NULL
+           AND min_done_newer + INTERVAL '7 days' < ref_at
+       )::int AS jumped_7d,
+       -- ສະເພາະບິນທີ່ຜູ້ຈັດໝາຍວ່າ "ຕິດຕໍ່ແລ້ວ/ພ້ອມສົ່ງ" ແຕ່ຍັງຖືກຂ້າມ
+       COUNT(*) FILTER (
+         WHERE (is_carry_in OR is_opened) AND action_status = 'contacted_ready'
+           AND min_done_newer IS NOT NULL AND min_done_newer + INTERVAL '1 day' < ref_at
+       )::int AS jumped_ready_1d,
+       COUNT(*) FILTER (
+         WHERE (is_carry_in OR is_opened) AND action_status = 'contacted_ready'
+           AND min_done_newer IS NOT NULL AND min_done_newer + INTERVAL '3 days' < ref_at
+       )::int AS jumped_ready_3d,
+       COUNT(*) FILTER (
+         WHERE (is_carry_in OR is_opened) AND action_status = 'contacted_ready'
+           AND min_done_newer IS NOT NULL AND min_done_newer + INTERVAL '7 days' < ref_at
+       )::int AS jumped_ready_7d,
        COUNT(*) FILTER (WHERE (is_carry_in OR is_opened) AND cancelled_legs_in_month > 0)::int AS cancelled_bills,
        COALESCE(SUM(cancelled_legs_in_month) FILTER (WHERE is_carry_in OR is_opened), 0)::int AS cancelled_legs,
        ROUND(AVG(lead_open_h) FILTER (WHERE is_delivered)::numeric, 2) AS avg_lead_open_h,
@@ -1695,9 +1743,9 @@ async function getDeliveryPerformance(session, monthly) {
          percentile_cont(0.5) WITHIN GROUP (ORDER BY lead_open_h)
            FILTER (WHERE is_delivered)::numeric, 2
        ) AS median_lead_open_h
-     FROM flagged
-     GROUP BY GROUPING SETS ((), (branch_code))`,
-    [monthStart, nextMonthStart]
+     FROM queued
+     GROUP BY GROUPING SETS ((), (branch_code), (department_code))`,
+    [monthStart, nextMonthStart, outstandingNow]
   );
 
   const branchNameRows = await query(
@@ -1713,10 +1761,9 @@ async function getDeliveryPerformance(session, monthly) {
     ...Object.fromEntries(branchNameRows.map((r) => [r.code, r.name])),
   };
 
-  // GROUPING SETS ((), (branch_code)) — ແຖວລວມມີ branch_code = NULL
-  const overallRow = rows.find((r) => r.branch_code == null);
+  const overallRow = rows.find((r) => r.dimension === "overall");
   const branches = rows
-    .filter((r) => r.branch_code != null)
+    .filter((r) => r.dimension === "branch")
     .map((r) => {
       const code = String(r.branch_code || "").trim() || "unknown";
       return {
@@ -1727,7 +1774,17 @@ async function getDeliveryPerformance(session, monthly) {
     })
     .sort((a, b) => a.branch_code.localeCompare(b.branch_code));
 
-  return { month: monthly, overall: toPerfBucket(overallRow), branches };
+  const departments = rows
+    .filter((r) => r.dimension === "department")
+    .map((r) => ({
+      department_code: String(r.department_code || "").trim() || "unknown",
+      department_name: String(r.department_name || "").trim() || "ບໍ່ລະບຸພະແນກ",
+      ...toPerfBucket(r),
+    }))
+    // ພະແນກທີ່ຮັບຜິດຊອບບິນຫຼາຍສຸດຂຶ້ນກ່ອນ
+    .sort((a, b) => b.handled - a.handled || a.department_name.localeCompare(b.department_name));
+
+  return { month: monthly, overall: toPerfBucket(overallRow), branches, departments };
 }
 
 module.exports = {

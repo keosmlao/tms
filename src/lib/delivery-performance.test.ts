@@ -3,6 +3,8 @@ import {
   EMPTY_PERF_BUCKET,
   deliveryPerfRates,
   formatLeadHours,
+  jumpedRate,
+  jumpedReadyRate,
   perfBalanceIsSound,
   perfPercent,
   type DeliveryPerfBucket,
@@ -11,21 +13,23 @@ import {
 // ຕົວເລກຈິງຂອງເດືອນ 07/2026 (ລວມ 3 ສາຂາ) ທີ່ດຶງມາຈາກຖານຂໍ້ມູນຕອນສ້າງລາຍງານ —
 // ໃຊ້ເປັນ fixture ເພື່ອໃຫ້ການຄິດເປີເຊັນຖືກກວດກັບຮູບຮ່າງຂໍ້ມູນຈິງ ບໍ່ແມ່ນຄ່າສົມມຸດ.
 const JULY: DeliveryPerfBucket = {
-  carry_in: 261,
+  carry_in: 136,
   opened: 2619,
-  delivered: 2602,
-  closed_other: 44,
-  carry_out: 234,
-  handled: 2880,
-  from_open: { le_24h: 2015, h24_48: 358, gt_48h: 229 },
-  from_schedule: { le_24h: 2538, h24_48: 50, gt_48h: 14, no_schedule: 0 },
+  delivered: 2608,
+  closed_other: 49,
+  carry_out: 98,
+  handled: 2755,
+  from_open: { le_24h: 2019, h24_48: 360, gt_48h: 229 },
+  from_schedule: { le_24h: 2544, h24_48: 50, gt_48h: 14, no_schedule: 0 },
   rescheduled_over_2: 3,
-  multi_leg_bills: 25,
+  jumped: { d1: 440, d3: 142, d7: 79 },
+  jumped_ready: { d1: 397, d3: 101, d7: 43 },
+  multi_leg_bills: 24,
   short_bills: 9,
   cancelled_bills: 54,
   cancelled_legs: 55,
-  avg_lead_open_h: 28.93,
-  median_lead_open_h: 17.95,
+  avg_lead_open_h: 28.91,
+  median_lead_open_h: 17.97,
 };
 
 describe("perfPercent", () => {
@@ -51,7 +55,7 @@ describe("perfBalanceIsSound", () => {
   });
 
   it("ຈັບໄດ້ເມື່ອຍອດບໍ່ສົມດຸນ", () => {
-    expect(perfBalanceIsSound({ ...JULY, carry_out: 235 })).toBe(false);
+    expect(perfBalanceIsSound({ ...JULY, carry_out: 99 })).toBe(false);
   });
 
   it("ລືມນັບບິນທີ່ຫຼຸດອອກ ຖືວ່າບໍ່ສົມດຸນ", () => {
@@ -65,7 +69,7 @@ describe("deliveryPerfRates", () => {
   it("ຊັ້ນເວລານັບແຕ່ເປີດບິນ ບວກກັນໄດ້ 100%", () => {
     const sum = rates.openOnTimeRate + rates.open24to48Rate + rates.openOver48Rate;
     expect(sum).toBeCloseTo(100, 6);
-    expect(rates.openOnTimeRate).toBeCloseTo(77.44, 2);
+    expect(rates.openOnTimeRate).toBeCloseTo(77.42, 2);
   });
 
   it("ຊັ້ນເວລານັບແຕ່ວັນນັດ ລວມກຸ່ມບໍ່ມີວັນນັດແລ້ວ ໄດ້ 100%", () => {
@@ -88,10 +92,31 @@ describe("deliveryPerfRates", () => {
   });
 
   it("ອັດຕາຄຸນນະພາບໃຊ້ບິນທີ່ຢູ່ໃນມືເດືອນນີ້ເປັນໂຕຫານ", () => {
-    expect(rates.cancelledRate).toBeCloseTo((54 / 2880) * 100, 6);
-    expect(rates.multiLegRate).toBeCloseTo((25 / 2880) * 100, 6);
-    expect(rates.rescheduledRate).toBeCloseTo((3 / 2880) * 100, 6);
-    expect(rates.shortRate).toBeCloseTo((9 / 2880) * 100, 6);
+    expect(rates.cancelledRate).toBeCloseTo((54 / 2755) * 100, 6);
+    expect(rates.multiLegRate).toBeCloseTo((24 / 2755) * 100, 6);
+    expect(rates.rescheduledRate).toBeCloseTo((3 / 2755) * 100, 6);
+    expect(rates.shortRate).toBeCloseTo((9 / 2755) * 100, 6);
+  });
+
+  it("ອັດຕາລັດຄິວ ໃຊ້ບິນທີ່ຢູ່ໃນມືເປັນໂຕຫານ ແລະ ເກນຍິ່ງກວ້າງຍິ່ງໜ້ອຍ", () => {
+    expect(jumpedRate(JULY, "d1")).toBeCloseTo((440 / 2755) * 100, 6);
+    expect(jumpedRate(JULY, "d3")).toBeCloseTo((142 / 2755) * 100, 6);
+    expect(jumpedRate(JULY, "d7")).toBeCloseTo((79 / 2755) * 100, 6);
+    // ເກນ N ໃຫຍ່ຂຶ້ນ ຕ້ອງກອງໄດ້ໜ້ອຍລົງສະເໝີ
+    expect(jumpedRate(JULY, "d1")).toBeGreaterThan(jumpedRate(JULY, "d3"));
+    expect(jumpedRate(JULY, "d3")).toBeGreaterThan(jumpedRate(JULY, "d7"));
+  });
+
+  it("ບິນ 'ພ້ອມສົ່ງແຕ່ຖືກຂ້າມ' ເປັນສ່ວນຍ່ອຍຂອງບິນລັດຄິວ", () => {
+    for (const win of ["d1", "d3", "d7"] as const) {
+      expect(JULY.jumped_ready[win]).toBeLessThanOrEqual(JULY.jumped[win]);
+      expect(jumpedReadyRate(JULY, win)).toBeLessThanOrEqual(jumpedRate(JULY, win));
+    }
+  });
+
+  it("ເດືອນທີ່ບໍ່ມີຂໍ້ມູນ ອັດຕາລັດຄິວເປັນ 0 ບໍ່ແມ່ນ NaN", () => {
+    expect(jumpedRate(EMPTY_PERF_BUCKET, "d1")).toBe(0);
+    expect(jumpedReadyRate(EMPTY_PERF_BUCKET, "d7")).toBe(0);
   });
 
   it("ຍອດອອກ 2 ທາງ ບວກກັບຍອດຍົກໄປ ໄດ້ 100% ຂອງບິນທີ່ຢູ່ໃນມື", () => {

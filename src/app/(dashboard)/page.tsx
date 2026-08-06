@@ -105,7 +105,7 @@ interface PendingSummary {
   month_count: CountValue; today_count: CountValue;
   today_pending: CountValue; today_complete: CountValue;
   month_pending: CountValue; month_complete: CountValue;
-  year_pending: CountValue; year_complete: CountValue;
+  year_pending: CountValue; year_in_progress?: CountValue; year_complete: CountValue;
   current_date: string; current_month: string;
 }
 
@@ -1142,7 +1142,6 @@ function DeliveryPerformanceCard({ perf }: { perf: DeliveryPerfReport }) {
     { label: "ຍອດຍົກມາ", value: overall.carry_in, cls: "text-amber-700 dark:text-amber-300" },
     { label: "ເປີດບິນໃນເດືອນ", value: overall.opened, cls: "text-sky-700 dark:text-sky-300" },
     { label: "ສົ່ງສຳເລັດ", value: overall.delivered, cls: "text-emerald-700 dark:text-emerald-300" },
-    { label: "ຫຼຸດອອກ (ຄືນ/ຕັດບິນ)", value: overall.closed_other, cls: "text-slate-600 dark:text-slate-300" },
     { label: "ຍອດຄົງເຫຼືອຍົກໄປ", value: overall.carry_out, cls: "text-rose-700 dark:text-rose-300" },
   ];
 
@@ -1197,7 +1196,7 @@ function DeliveryPerformanceCard({ perf }: { perf: DeliveryPerfReport }) {
         </Link>
       </div>
 
-      <div className="grid grid-cols-2 lg:grid-cols-5 gap-3">
+      <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
         {balance.map((item) => (
           <div key={item.label} className="rounded-xl bg-slate-50 dark:bg-white/5 p-3.5">
             <p className="text-[10px] font-semibold uppercase tracking-wider text-slate-500 dark:text-slate-400">
@@ -1251,7 +1250,7 @@ function DeliveryPerformanceCard({ perf }: { perf: DeliveryPerfReport }) {
       </div>
 
       <p className="mt-2 text-[9px] text-slate-400">
-        ຍົກມາ + ເປີດໃໝ່ − ສຳເລັດ − ຫຼຸດອອກ = ຍົກໄປ · ຍອດຍົກໄປລວມບິນທີ່ຂຶ້ນລົດແລ້ວກຳລັງສົ່ງ ຈຶ່ງສູງກວ່າໜ້າ &quot;ບິນລໍຈັດຖ້ຽວ&quot;
+        ຍອດຍົກໄປ = ບິນລໍຈັດຖ້ຽວ + ບິນທີ່ຂຶ້ນລົດແລ້ວແຕ່ຍັງບໍ່ຮອດມືລູກຄ້າ (ຄືກັບ tile &quot;ຄ້າງສົ່ງ&quot; ດ້ານເທິງ)
       </p>
     </div>
   );
@@ -1396,11 +1395,16 @@ export default function DashboardPage() {
     const teams = data.user_branch ? allTeams.filter((t) => t.branch === data.user_branch) : allTeams;
 
     // Pending-derived metrics are null until the pending slice lands; the hero
-    // tiles + completion donuts render a skeleton in the meantime. The year
-    // total comes straight from pending_summary so the "ຄ້າງສົ່ງ" KPI matches
-    // /bills-pending exactly.
+    // tiles + completion donuts render a skeleton in the meantime.
+    //
+    // "ຄ້າງສົ່ງ" = ບິນລໍຈັດຖ້ຽວ + ບິນທີ່ຈັດຖ້ຽວແລ້ວແຕ່ຍັງບໍ່ຮອດມືລູກຄ້າ.
+    // ບິນທີ່ຂຶ້ນລົດແລ້ວຫາຍອອກຈາກໜ້າ /bills-pending ຈຶ່ງເຄີຍຕົກຫາຍໄປຈາກ KPI ນີ້
+    // ທັງທີ່ຍັງເປັນວຽກຄ້າງຢູ່.
     const hasPending = !!data.pending_breakdown;
-    const totalPending = hasPending ? toNumber(data.pending_summary?.year_pending) : null;
+    const waitingDispatch = hasPending ? toNumber(data.pending_summary?.year_pending) : null;
+    const inProgressBills = hasPending ? toNumber(data.pending_summary?.year_in_progress) : null;
+    const totalPending =
+      waitingDispatch == null ? null : waitingDispatch + (inProgressBills ?? 0);
     const totalComplete = teams.reduce((s, t) => s + toNumber(t.stats.complete), 0);
     const totalLogisticWork = totalPending == null ? null : totalComplete + totalPending;
     const completionRate = totalPending == null ? null : getPercent(totalComplete, totalPending + totalComplete);
@@ -1420,6 +1424,8 @@ export default function DashboardPage() {
       totalLogisticWork,
       teams,
       totalPending,
+      waitingDispatch,
+      inProgressBills,
       totalComplete,
       completionRate,
       logisticWorkRate,
@@ -1463,6 +1469,8 @@ export default function DashboardPage() {
     totalLogisticWork,
     teams,
     totalPending,
+    waitingDispatch,
+    inProgressBills,
     totalComplete,
     completionRate,
     logisticWorkRate,
@@ -1473,7 +1481,9 @@ export default function DashboardPage() {
 
   const ps = data.pending_summary;
   const pendingLists: Record<PendingTab, { count: CountValue; items: PendingShipment[]; subtitle: string }> = {
-    year: { count: totalPending ?? 0, items: data.trans ?? [], subtitle: `ປີ ${currentYear}` },
+    // ລາຍການນີ້ສະແດງສະເພາະບິນລໍຈັດຖ້ຽວ ຈຳນວນຈຶ່ງຕ້ອງເປັນ waitingDispatch
+    // ບໍ່ແມ່ນຍອດຄ້າງລວມ (ທີ່ບວກບິນກຳລັງສົ່ງນຳ) ບໍ່ດັ່ງນັ້ນຫົວຂໍ້ກັບລາຍການຈະບໍ່ຕົງ
+    year: { count: waitingDispatch ?? 0, items: data.trans ?? [], subtitle: `ປີ ${currentYear}` },
     month: { count: ps?.month_count, items: data.trans_month ?? [], subtitle: `ເດືອນ ${ps?.current_month ?? ""}` },
     today: { count: ps?.today_count, items: data.trans_today ?? [], subtitle: `ວັນ ${ps?.current_date ?? ""}` },
   };
@@ -1559,7 +1569,11 @@ export default function DashboardPage() {
               label="ຄ້າງສົ່ງ"
               value={totalPending ?? 0}
               loading={totalPending == null}
-              caption={totalPending == null ? undefined : `${getPercent(totalPending, totalPending + totalComplete)}% ລໍຖ້າ`}
+              caption={
+                totalPending == null
+                  ? undefined
+                  : `ລໍຈັດຖ້ຽວ ${formatNumber(waitingDispatch ?? 0)} · ກຳລັງສົ່ງ ${formatNumber(inProgressBills ?? 0)}`
+              }
               icon={<FaClock size={14} />}
               accent="bg-amber-500 text-white"
             />
@@ -1676,7 +1690,7 @@ export default function DashboardPage() {
             {([
               { key: "today" as const, label: "ວັນນີ້", count: ps?.today_count },
               { key: "month" as const, label: "ເດືອນນີ້", count: ps?.month_count },
-              { key: "year" as const, label: `ປີ ${currentYear}`, count: totalPending },
+              { key: "year" as const, label: `ປີ ${currentYear}`, count: waitingDispatch },
             ]).map((tab) => (
               <button
                 key={tab.key}

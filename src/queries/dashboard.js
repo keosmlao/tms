@@ -391,12 +391,29 @@ function getDashboardPending(session, force = false) {
 async function computePending(session) {
   const c = ctx(session);
   const { getBillsPending } = require("./bills");
-  const { trans: pendingWithRemaining } = await getBillsPending(
-    session,
-    FIXED_YEAR_START,
-    FIXED_YEAR_END,
-    "all"
-  );
+  const branchScopeClause = c.scope.scoped
+    ? `AND EXISTS (SELECT 1 FROM public.ic_trans_shipment __s
+                    WHERE __s.doc_no = d.bill_no
+                      AND __s.transport_code IN (${c.scope.branchListSql}))`
+    : "";
+  const [{ trans: pendingWithRemaining }, onTripRows] = await Promise.all([
+    getBillsPending(session, FIXED_YEAR_START, FIXED_YEAR_END, "all"),
+    // ບິນທີ່ຢູ່ເທິງຖ້ຽວທີ່ຍັງບໍ່ຈົບ (ຮັບຖ້ຽວແລ້ວ / ກຳລັງສົ່ງ) — ຍັງບໍ່ຮອດມືລູກຄ້າ
+    // ແຕ່ບໍ່ຂຶ້ນໜ້າ "ບິນລໍຈັດຖ້ຽວ" ອີກແລ້ວເພາະຖືກຈັດຖ້ຽວໄປແລ້ວ
+    query(
+      `SELECT DISTINCT d.bill_no
+         FROM public.odg_tms_detail d
+         JOIN public.odg_tms j ON j.doc_no = d.doc_no
+        WHERE COALESCE(d.status, 0) NOT IN (1, 2)
+          AND COALESCE(j.approve_status, 0) = 1
+          AND COALESCE(j.job_status, 0) <> 4
+          AND ${getFixedYearSqlFilter("d.doc_date")}
+          ${branchScopeClause}`
+    ),
+  ]);
+  // ນັບບໍ່ຊ້ຳ: ບິນທະຍອຍສົ່ງອາດຢູ່ທັງ 2 ລາຍການ
+  const pendingDocNos = new Set(pendingWithRemaining.map((b) => b.doc_no));
+  const inProgressBills = onTripRows.filter((r) => !pendingDocNos.has(r.bill_no)).length;
 
   const inMonth = (bill) =>
     bill.send_date >= c.monthStart && bill.send_date < c.nextMonthStart;
@@ -439,7 +456,10 @@ async function computePending(session) {
       today_count: todayCount,
       today_pending: todayCount,
       month_pending: monthCount,
+      // ບິນລໍຈັດຖ້ຽວຢ່າງດຽວ — ໜ້າ /bills-pending ອີງຄ່ານີ້
       year_pending: pendingWithRemaining.length,
+      // ບິນທີ່ຈັດຖ້ຽວແລ້ວແຕ່ຍັງບໍ່ຮອດມືລູກຄ້າ — tile "ຄ້າງສົ່ງ" ບວກສອງອັນນີ້
+      year_in_progress: inProgressBills,
     },
     pending_breakdown: pendingBreakdown,
     still: {

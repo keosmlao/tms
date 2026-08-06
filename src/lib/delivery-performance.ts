@@ -15,6 +15,17 @@ export type ScheduleBuckets = LeadTimeBuckets & {
   no_schedule: number;
 };
 
+/** ເກນ N ວັນ ຂອງການລັດຄິວ — d1 = 1 ວັນ, d3 = 3 ວັນ, d7 = 7 ວັນ */
+export type JumpWindow = "d1" | "d3" | "d7";
+
+export type JumpBuckets = Record<JumpWindow, number>;
+
+export const JUMP_WINDOW_LABEL: Record<JumpWindow, string> = {
+  d1: "1 ວັນ",
+  d3: "3 ວັນ",
+  d7: "7 ວັນ",
+};
+
 export type DeliveryPerfBucket = {
   /** ບິນທີ່ເປີດກ່ອນເດືອນນີ້ ແລະ ຍັງບໍ່ທັນສົ່ງສຳເລັດຕອນຕົ້ນເດືອນ */
   carry_in: number;
@@ -37,6 +48,13 @@ export type DeliveryPerfBucket = {
   from_schedule: ScheduleBuckets;
   /** ບິນທີ່ຖືກປ່ຽນວັນນັດຈັດສົ່ງຫຼາຍກວ່າ 2 ຄັ້ງ */
   rescheduled_over_2: number;
+  /**
+   * ບິນທີ່ຖືກລັດຄິວ — ມີບິນທີ່ເປີດຫຼັງ (ສາຂາດຽວກັນ) ຖືກສົ່ງໄປກ່ອນເກີນ N ວັນ.
+   * ເກັບ 3 ເກນໄວ້ພ້ອມກັນ ເພື່ອໃຫ້ໜ້າຈໍສະຫຼັບເບິ່ງໄດ້ໂດຍບໍ່ຕ້ອງຖາມຖານຂໍ້ມູນຄືນ.
+   */
+  jumped: JumpBuckets;
+  /** ຍ່ອຍລົງມາ: ສະເພາະບິນທີ່ຜູ້ຈັດໝາຍວ່າ "ຕິດຕໍ່ແລ້ວ/ພ້ອມສົ່ງ" ແຕ່ຍັງຖືກຂ້າມ */
+  jumped_ready: JumpBuckets;
   /** ບິນທີ່ທະຍອຍສົ່ງ — ສົ່ງສຳເລັດຫຼາຍກວ່າ 1 ຖ້ຽວ */
   multi_leg_bills: number;
   /** ບິນທີ່ປິດງານແລ້ວແຕ່ຈຳນວນສົ່ງຍັງບໍ່ຄົບຕາມທີ່ເບີກ */
@@ -54,10 +72,17 @@ export type DeliveryPerfBranch = DeliveryPerfBucket & {
   branch_name: string;
 };
 
+export type DeliveryPerfDepartment = DeliveryPerfBucket & {
+  department_code: string;
+  department_name: string;
+};
+
 export type DeliveryPerfReport = {
   month: string;
   overall: DeliveryPerfBucket;
   branches: DeliveryPerfBranch[];
+  /** ແຍກຕາມພະແນກຂອງພະນັກງານຂາຍທີ່ເປີດບິນ */
+  departments: DeliveryPerfDepartment[];
 };
 
 export const EMPTY_PERF_BUCKET: DeliveryPerfBucket = {
@@ -70,6 +95,8 @@ export const EMPTY_PERF_BUCKET: DeliveryPerfBucket = {
   from_open: { le_24h: 0, h24_48: 0, gt_48h: 0 },
   from_schedule: { le_24h: 0, h24_48: 0, gt_48h: 0, no_schedule: 0 },
   rescheduled_over_2: 0,
+  jumped: { d1: 0, d3: 0, d7: 0 },
+  jumped_ready: { d1: 0, d3: 0, d7: 0 },
   multi_leg_bills: 0,
   short_bills: 0,
   cancelled_bills: 0,
@@ -82,6 +109,7 @@ export const EMPTY_PERF_REPORT: DeliveryPerfReport = {
   month: "",
   overall: EMPTY_PERF_BUCKET,
   branches: [],
+  departments: [],
 };
 
 /** ເປີເຊັນທີ່ບໍ່ລະເບີດເມື່ອໂຕຫານເປັນ 0 */
@@ -135,6 +163,19 @@ export function deliveryPerfRates(bucket: DeliveryPerfBucket): DeliveryPerfRates
     shortRate: perfPercent(bucket.short_bills, handled),
     cancelledRate: perfPercent(bucket.cancelled_bills, handled),
   };
+}
+
+/**
+ * ອັດຕາບິນທີ່ຖືກລັດຄິວ ຕາມເກນ N ວັນ — ໂຕຫານແມ່ນບິນທີ່ຢູ່ໃນມືເດືອນນີ້
+ * ຄືກັນກັບອັດຕາຄຸນນະພາບອື່ນ ຈຶ່ງທຽບກັນໄດ້ໂດຍກົງ.
+ */
+export function jumpedRate(bucket: DeliveryPerfBucket, win: JumpWindow) {
+  return perfPercent(bucket.jumped[win], bucket.handled);
+}
+
+/** ອັດຕາສະເພາະບິນທີ່ໝາຍວ່າ "ພ້ອມສົ່ງ" ແລ້ວແຕ່ຍັງຖືກຂ້າມ */
+export function jumpedReadyRate(bucket: DeliveryPerfBucket, win: JumpWindow) {
+  return perfPercent(bucket.jumped_ready[win], bucket.handled);
 }
 
 /**

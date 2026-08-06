@@ -12,7 +12,6 @@ import {
   FaSearch,
   FaSpinner,
   FaTimesCircle,
-  FaUndoAlt,
 } from "react-icons/fa";
 import {
   FIXED_MONTH_MAX,
@@ -23,12 +22,15 @@ import { Actions } from "@/lib/api";
 import { exportToExcel } from "@/lib/excel-export";
 import {
   EMPTY_PERF_REPORT,
+  JUMP_WINDOW_LABEL,
   deliveryPerfRates,
   formatLeadHours,
+  jumpedRate,
+  jumpedReadyRate,
   perfBalanceIsSound,
-  type DeliveryPerfBranch,
   type DeliveryPerfBucket,
   type DeliveryPerfReport,
+  type JumpWindow,
 } from "@/lib/delivery-performance";
 
 const MONTH_NAMES = [
@@ -174,30 +176,48 @@ function scheduleSlices(bucket: DeliveryPerfBucket): Slice[] {
   ];
 }
 
-function BranchTable({ branches }: { branches: DeliveryPerfBranch[] }) {
+// ຕາຕະລາງແຍກມິຕິ — ໃຊ້ຮ່ວມກັນທັງ "ຕາມສາຂາ" ແລະ "ຕາມພະແນກ" ເພື່ອໃຫ້ 2 ມຸມມອງ
+// ໃຊ້ສູດຄິດເປີເຊັນອັນດຽວກັນສະເໝີ
+function BreakdownTable<T extends DeliveryPerfBucket>({
+  title,
+  subtitle,
+  columnLabel,
+  rows,
+  jumpWindow,
+  getKey,
+  getName,
+  getCode,
+}: {
+  title: string;
+  subtitle: string;
+  columnLabel: string;
+  rows: T[];
+  jumpWindow: JumpWindow;
+  getKey: (row: T) => string;
+  getName: (row: T) => string;
+  getCode: (row: T) => string;
+}) {
   return (
     <section className="rounded-lg border border-slate-200 bg-white shadow-sm dark:border-slate-800 dark:bg-slate-900/70">
       <div className="border-b border-slate-200 bg-slate-50/70 px-4 py-3 dark:border-slate-800 dark:bg-slate-950/30">
-        <h2 className="text-sm font-bold text-slate-950 dark:text-white">ແຍກຕາມສາຂາຂົນສົ່ງ</h2>
-        <p className="mt-0.5 text-xs text-slate-500 dark:text-slate-400">
-          ເປີເຊັນທັນເວລາຄິດຈາກບິນທີ່ສົ່ງສຳເລັດ · ເປີເຊັນອື່ນຄິດຈາກບິນທີ່ຢູ່ໃນມືເດືອນນີ້
-        </p>
+        <h2 className="text-sm font-bold text-slate-950 dark:text-white">{title}</h2>
+        <p className="mt-0.5 text-xs text-slate-500 dark:text-slate-400">{subtitle}</p>
       </div>
-      {branches.length === 0 ? (
+      {rows.length === 0 ? (
         <p className="px-4 py-10 text-center text-sm font-semibold text-slate-400">ບໍ່ມີຂໍ້ມູນ</p>
       ) : (
         <div className="overflow-x-auto">
           <table className="w-full min-w-[900px] text-xs">
             <thead className="bg-slate-50/60 text-slate-500 dark:bg-slate-950/20 dark:text-slate-400">
               <tr>
-                <th className="px-3 py-2 text-left font-semibold">ສາຂາ</th>
+                <th className="px-3 py-2 text-left font-semibold">{columnLabel}</th>
                 <th className="px-3 py-2 text-right font-semibold">ຍົກມາ</th>
                 <th className="px-3 py-2 text-right font-semibold">ເປີດໃນເດືອນ</th>
                 <th className="px-3 py-2 text-right font-semibold">ສົ່ງສຳເລັດ</th>
-                <th className="px-3 py-2 text-right font-semibold">ຫຼຸດອອກ</th>
                 <th className="px-3 py-2 text-right font-semibold">ຍົກໄປ</th>
                 <th className="px-3 py-2 text-right font-semibold">≤24h (ເປີດບິນ)</th>
                 <th className="px-3 py-2 text-right font-semibold">≤24h (ວັນນັດ)</th>
+                <th className="px-3 py-2 text-right font-semibold">ລັດຄິວ</th>
                 <th className="px-3 py-2 text-right font-semibold">ເລື່ອນນັດ &gt;2</th>
                 <th className="px-3 py-2 text-right font-semibold">ທະຍອຍສົ່ງ</th>
                 <th className="px-3 py-2 text-right font-semibold">ຍົກເລີກ</th>
@@ -205,18 +225,17 @@ function BranchTable({ branches }: { branches: DeliveryPerfBranch[] }) {
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-200/70 dark:divide-white/5">
-              {branches.map((branch) => {
+              {rows.map((branch) => {
                 const rates = deliveryPerfRates(branch);
                 return (
-                  <tr key={branch.branch_code} className="hover:bg-slate-50/70 dark:hover:bg-white/5">
+                  <tr key={getKey(branch)} className="hover:bg-slate-50/70 dark:hover:bg-white/5">
                     <td className="px-3 py-2">
-                      <p className="font-bold text-slate-900 dark:text-white">{branch.branch_name}</p>
-                      <p className="font-mono text-[10px] text-slate-400">{branch.branch_code}</p>
+                      <p className="font-bold text-slate-900 dark:text-white">{getName(branch)}</p>
+                      <p className="font-mono text-[10px] text-slate-400">{getCode(branch)}</p>
                     </td>
                     <td className="px-3 py-2 text-right tabular-nums text-amber-700 dark:text-amber-300">{numberText(branch.carry_in)}</td>
                     <td className="px-3 py-2 text-right tabular-nums text-slate-700 dark:text-slate-200">{numberText(branch.opened)}</td>
                     <td className="px-3 py-2 text-right tabular-nums text-emerald-700 dark:text-emerald-300">{numberText(branch.delivered)}</td>
-                    <td className="px-3 py-2 text-right tabular-nums text-slate-500 dark:text-slate-400">{numberText(branch.closed_other)}</td>
                     <td className="px-3 py-2 text-right tabular-nums text-rose-700 dark:text-rose-300">{numberText(branch.carry_out)}</td>
                     <td className="px-3 py-2 text-right tabular-nums font-bold text-slate-800 dark:text-slate-100">
                       {percentText(rates.openOnTimeRate)}
@@ -225,6 +244,10 @@ function BranchTable({ branches }: { branches: DeliveryPerfBranch[] }) {
                     <td className="px-3 py-2 text-right tabular-nums font-bold text-slate-800 dark:text-slate-100">
                       {percentText(rates.schedOnTimeRate)}
                       <span className="ml-1 text-[10px] font-normal text-slate-400">{numberText(branch.from_schedule.le_24h)}</span>
+                    </td>
+                    <td className="px-3 py-2 text-right tabular-nums text-orange-600 dark:text-orange-400">
+                      {percentText(jumpedRate(branch, jumpWindow))}
+                      <span className="ml-1 text-[10px] text-slate-400">{numberText(branch.jumped[jumpWindow])}</span>
                     </td>
                     <td className="px-3 py-2 text-right tabular-nums text-slate-600 dark:text-slate-300">
                       {percentText(rates.rescheduledRate)}
@@ -257,6 +280,8 @@ export default function DeliveryPerformancePage() {
   const [report, setReport] = useState<DeliveryPerfReport>(EMPTY_PERF_REPORT);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
+  // ເກນ N ວັນ ຂອງການລັດຄິວ — ຂໍ້ມູນທັງ 3 ເກນມາພ້ອມກັນ ຈຶ່ງສະຫຼັບໄດ້ທັນທີ
+  const [jumpWindow, setJumpWindow] = useState<JumpWindow>("d1");
 
   const loadReport = useCallback(() => {
     setLoading(true);
@@ -277,21 +302,18 @@ export default function DeliveryPerformancePage() {
 
   const overall = report.overall ?? EMPTY_PERF_REPORT.overall;
   const branches = report.branches ?? [];
+  const departments = report.departments ?? [];
   const rates = useMemo(() => deliveryPerfRates(overall), [overall]);
   const balanceSound = perfBalanceIsSound(overall);
 
   const handleExport = () => {
-    const rows = [
-      { ...overall, branch_code: "ALL", branch_name: "ລວມທຸກສາຂາ" } as DeliveryPerfBranch,
-      ...branches,
-    ].map((row) => {
+    const toRow = (name: string, row: DeliveryPerfBucket) => {
       const r = deliveryPerfRates(row);
       return {
-        branch_name: row.branch_name,
+        branch_name: name,
         carry_in: row.carry_in,
         opened: row.opened,
         delivered: row.delivered,
-        closed_other: row.closed_other,
         carry_out: row.carry_out,
         handled: row.handled,
         open_le24: row.from_open.le_24h,
@@ -307,6 +329,11 @@ export default function DeliveryPerformancePage() {
         sched_gt48: row.from_schedule.gt_48h,
         sched_gt48_pct: Number(r.schedOver48Rate.toFixed(1)),
         sched_none: row.from_schedule.no_schedule,
+        jumped_1d: row.jumped.d1,
+        jumped_1d_pct: Number(jumpedRate(row, "d1").toFixed(1)),
+        jumped_3d: row.jumped.d3,
+        jumped_7d: row.jumped.d7,
+        jumped_ready_1d: row.jumped_ready.d1,
         rescheduled_over_2: row.rescheduled_over_2,
         rescheduled_pct: Number(r.rescheduledRate.toFixed(1)),
         multi_leg_bills: row.multi_leg_bills,
@@ -316,14 +343,20 @@ export default function DeliveryPerformancePage() {
         cancelled_bills: row.cancelled_bills,
         cancelled_pct: Number(r.cancelledRate.toFixed(1)),
       };
-    });
+    };
+
+    // ໃບດຽວ ມີທັງ 2 ມິຕິ ແຍກດ້ວຍແຖວຫົວຂໍ້ ເພື່ອໃຫ້ເປີດເບິ່ງງ່າຍ
+    const rows = [
+      toRow("ລວມທຸກສາຂາ", overall),
+      ...branches.map((b) => toRow(`ສາຂາ · ${b.branch_name}`, b)),
+      ...departments.map((d) => toRow(`ພະແນກ · ${d.department_name}`, d)),
+    ];
 
     exportToExcel(`delivery-performance-${month}`, rows, [
-      { key: "branch_name", header: "ສາຂາ", width: 20 },
+      { key: "branch_name", header: "ສາຂາ / ພະແນກ", width: 28 },
       { key: "carry_in", header: "ຍອດຍົກມາ", width: 11 },
       { key: "opened", header: "ເປີດບິນໃນເດືອນ", width: 14 },
       { key: "delivered", header: "ສົ່ງສຳເລັດ", width: 11 },
-      { key: "closed_other", header: "ຫຼຸດອອກ (ຄືນ/ຕັດບິນ)", width: 19 },
       { key: "carry_out", header: "ຍອດຍົກໄປ", width: 11 },
       { key: "handled", header: "ບິນທີ່ຢູ່ໃນມື", width: 13 },
       { key: "open_le24", header: "ເປີດບິນ ≤24h", width: 13 },
@@ -339,6 +372,11 @@ export default function DeliveryPerformancePage() {
       { key: "sched_gt48", header: "ວັນນັດ >48h", width: 13 },
       { key: "sched_gt48_pct", header: "ວັນນັດ >48h %", width: 15 },
       { key: "sched_none", header: "ບໍ່ໄດ້ນັດວັນ", width: 13 },
+      { key: "jumped_1d", header: "ລັດຄິວ >1 ວັນ", width: 14 },
+      { key: "jumped_1d_pct", header: "ລັດຄິວ >1 ວັນ %", width: 16 },
+      { key: "jumped_3d", header: "ລັດຄິວ >3 ວັນ", width: 14 },
+      { key: "jumped_7d", header: "ລັດຄິວ >7 ວັນ", width: 14 },
+      { key: "jumped_ready_1d", header: "ພ້ອມສົ່ງແຕ່ຖືກຂ້າມ >1 ວັນ", width: 24 },
       { key: "rescheduled_over_2", header: "ເລື່ອນນັດ >2 ຄັ້ງ", width: 16 },
       { key: "rescheduled_pct", header: "ເລື່ອນນັດ >2 ຄັ້ງ %", width: 18 },
       { key: "multi_leg_bills", header: "ບິນທະຍອຍສົ່ງ", width: 14 },
@@ -421,7 +459,7 @@ export default function DeliveryPerformancePage() {
           <div>
             <h2 className="text-sm font-bold text-slate-950 dark:text-white">ຍອດບິນປະຈຳເດືອນ</h2>
             <p className="mt-0.5 text-xs text-slate-500 dark:text-slate-400">
-              ຍອດຍົກມາ + ເປີດບິນໃນເດືອນ − ສົ່ງສຳເລັດ − ຫຼຸດອອກ = ຍອດຄົງເຫຼືອຍົກໄປ
+              ບິນທີ່ຍັງບໍ່ຮອດມືລູກຄ້າ ຕົ້ນເດືອນ → ທ້າຍເດືອນ
             </p>
           </div>
           <span
@@ -434,7 +472,7 @@ export default function DeliveryPerformancePage() {
             {balanceSound ? "ຍອດສົມດຸນ" : "ຍອດບໍ່ສົມດຸນ"}
           </span>
         </div>
-        <div className="grid grid-cols-2 gap-3 p-4 lg:grid-cols-6">
+        <div className="grid grid-cols-2 gap-3 p-4 lg:grid-cols-5">
           <StatTile
             label="ຍອດຍົກມາ"
             value={numberText(overall.carry_in)}
@@ -455,13 +493,6 @@ export default function DeliveryPerformancePage() {
             sub={`${percentText(rates.deliveredRate)} ຂອງບິນທີ່ຢູ່ໃນມື`}
             tone="emerald"
             icon={<FaCalendarCheck size={11} className="mt-0.5 text-emerald-500" />}
-          />
-          <StatTile
-            label="ຫຼຸດອອກ (ຄືນ/ຕັດບິນ)"
-            value={numberText(overall.closed_other)}
-            sub={`${percentText(rates.closedOtherRate)} · ບໍ່ໄດ້ສົ່ງແຕ່ບໍ່ເຫຼືອຂອງ`}
-            tone="slate"
-            icon={<FaUndoAlt size={11} className="mt-0.5 text-slate-400" />}
           />
           <StatTile
             label="ຍອດຄົງເຫຼືອຍົກໄປ"
@@ -496,6 +527,53 @@ export default function DeliveryPerformancePage() {
           footnote="ວັນນັດມາຈາກທີ່ຜູ້ຈັດຖ້ຽວນັດໄວ້ (ຖ້າບໍ່ມີຈຶ່ງໃຊ້ວັນຈັດສົ່ງຂອງຖ້ຽວທຳອິດ) ແລະ ທຽບຈາກ 00:00 ຂອງວັນນັ້ນ — ສົ່ງພາຍໃນວັນທີ່ນັດ = ບໍ່ເກີນ 24 ຊົ່ວໂມງ. ລະບົບເກັບແຕ່ວັນນັດຫຼ້າສຸດ ບິນທີ່ຖືກເລື່ອນນັດຈຶ່ງນັບເປັນທັນເວລາຕາມນັດໃໝ່ — ອ່ານຄູ່ກັບ 'ເລື່ອນນັດຫຼາຍກວ່າ 2 ຄັ້ງ' ຂ້າງລຸ່ມ."
         />
       </div>
+
+      {/* ບິນລັດຄິວ */}
+      <section className="rounded-lg border border-slate-200 bg-white shadow-sm dark:border-slate-800 dark:bg-slate-900/70">
+        <div className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-200 bg-slate-50/70 px-4 py-3 dark:border-slate-800 dark:bg-slate-950/30">
+          <div>
+            <h2 className="text-sm font-bold text-slate-950 dark:text-white">ບິນທີ່ຖືກລັດຄິວ</h2>
+            <p className="mt-0.5 text-xs text-slate-500 dark:text-slate-400">
+              ບິນທີ່ເປີດກ່ອນ ແຕ່ມີບິນເປີດຫຼັງ (ສາຂາດຽວກັນ) ຖືກສົ່ງໄປກ່ອນເກີນ {JUMP_WINDOW_LABEL[jumpWindow]}
+            </p>
+          </div>
+          <div className="inline-flex items-center gap-1 rounded-lg bg-slate-100 p-1 dark:bg-slate-800/70">
+            {(["d1", "d3", "d7"] as JumpWindow[]).map((win) => (
+              <button
+                key={win}
+                type="button"
+                onClick={() => setJumpWindow(win)}
+                className={`rounded-md px-3 py-1 text-[11px] font-semibold transition-all ${
+                  jumpWindow === win
+                    ? "bg-white text-orange-700 shadow-sm dark:bg-slate-900 dark:text-orange-300"
+                    : "text-slate-500 hover:text-slate-700 dark:text-slate-400"
+                }`}
+              >
+                ເກີນ {JUMP_WINDOW_LABEL[win]}
+              </button>
+            ))}
+          </div>
+        </div>
+        <div className="grid grid-cols-1 gap-3 p-4 sm:grid-cols-2">
+          <StatTile
+            label={`ບິນທີ່ຖືກລັດຄິວ (ເກີນ ${JUMP_WINDOW_LABEL[jumpWindow]})`}
+            value={percentText(jumpedRate(overall, jumpWindow))}
+            sub={`${numberText(overall.jumped[jumpWindow])} ບິນ ຈາກ ${numberText(overall.handled)} ບິນທີ່ຢູ່ໃນມື`}
+            tone="amber"
+          />
+          <StatTile
+            label="ໃນນັ້ນ ໝາຍວ່າ &quot;ຕິດຕໍ່ແລ້ວ/ພ້ອມສົ່ງ&quot; ແຕ່ຖືກຂ້າມ"
+            value={percentText(jumpedReadyRate(overall, jumpWindow))}
+            sub={`${numberText(overall.jumped_ready[jumpWindow])} ບິນ`}
+            tone="rose"
+          />
+        </div>
+        <p className="px-4 pb-4 text-[10px] leading-relaxed text-slate-400">
+          ວັດຈາກ<b>ເວລາເປີດບິນ</b> ບໍ່ແມ່ນວັນນັດ ເພາະວັນນັດຖືກຕັ້ງເປັນວັນທີ່ສົ່ງຈິງ (98% ຂອງບິນສົ່ງໃນວັນນັດພໍດີ)
+          ຈຶ່ງວັດການລັດຄິວຈາກມັນບໍ່ໄດ້. ບິນທີ່ຍັງບໍ່ທັນສົ່ງ ທຽບເຖິງສິ້ນເດືອນ.
+          ໝາຍເຫດ: ສະຖານະ &quot;ພ້ອມສົ່ງ&quot; ຖືກໃສ່ໃຫ້ 97% ຂອງບິນ ຈຶ່ງແຍກແຍະໄດ້ໜ້ອຍ.
+        </p>
+      </section>
 
       {/* ຄຸນນະພາບການຈັດສົ່ງ */}
       <section className="rounded-lg border border-slate-200 bg-white shadow-sm dark:border-slate-800 dark:bg-slate-900/70">
@@ -537,7 +615,27 @@ export default function DeliveryPerformancePage() {
         </p>
       </section>
 
-      <BranchTable branches={branches} />
+      <BreakdownTable
+        title="ແຍກຕາມສາຂາຂົນສົ່ງ"
+        subtitle="ເປີເຊັນທັນເວລາຄິດຈາກບິນທີ່ສົ່ງສຳເລັດ · ເປີເຊັນອື່ນຄິດຈາກບິນທີ່ຢູ່ໃນມືເດືອນນີ້"
+        columnLabel="ສາຂາ"
+        rows={branches}
+        jumpWindow={jumpWindow}
+        getKey={(row) => row.branch_code}
+        getName={(row) => row.branch_name}
+        getCode={(row) => row.branch_code}
+      />
+
+      <BreakdownTable
+        title="ແຍກຕາມພະແນກ"
+        subtitle="ພະແນກຂອງພະນັກງານຂາຍທີ່ເປີດບິນ · ຍອດລວມທຸກພະແນກເທົ່າກັບຍອດລວມທຸກສາຂາ"
+        columnLabel="ພະແນກ"
+        rows={departments}
+        jumpWindow={jumpWindow}
+        getKey={(row) => row.department_code}
+        getName={(row) => row.department_name}
+        getCode={(row) => row.department_code}
+      />
 
       {!loading && !hasData && (
         <p className="rounded-lg border border-slate-200 bg-white px-4 py-10 text-center text-sm font-semibold text-slate-400 dark:border-slate-800 dark:bg-slate-900/70">
@@ -557,18 +655,19 @@ export default function DeliveryPerformancePage() {
           <b>ຖ້ຽວສຸດທ້າຍ</b> ບໍ່ແມ່ນຖ້ຽວທຳອິດ ແລະ ຖ້າຍັງຂາດຈຳນວນຢູ່ ຍັງບໍ່ນັບເປັນສຳເລັດ.
         </p>
         <p>
-          • &quot;ຍອດຄົງເຫຼືອຍົກໄປ&quot; = ບິນທີ່ <b>ສິນຄ້າຍັງບໍ່ຮອດມືລູກຄ້າ</b> — ລວມບິນທີ່ຂຶ້ນລົດແລ້ວກຳລັງສົ່ງ
-          ແລະ ບິນທະຍອຍສົ່ງທີ່ຍັງສົ່ງບໍ່ຄົບ. ຈຶ່ງສູງກວ່າຕົວເລກໜ້າ &quot;ບິນລໍຈັດຖ້ຽວ&quot; ທີ່ນັບສະເພາະບິນທີ່ຍັງບໍ່ໄດ້ຂຶ້ນລົດ.
+          • &quot;ຍອດຄົງເຫຼືອຍົກໄປ&quot; = <b>ບິນລໍຈັດຖ້ຽວ + ບິນທີ່ຂຶ້ນລົດແລ້ວແຕ່ຍັງບໍ່ຮອດມືລູກຄ້າ</b>.
+          ຄິດຈາກຟັງຊັນດຽວກັບໜ້າ &quot;ບິນລໍຈັດຖ້ຽວ&quot; ແລະ &quot;ບິນກຳລັງຈັດສົ່ງ&quot; ຈຶ່ງຕົງກັບ 2 ໜ້ານັ້ນສະເໝີ
+          ແລະ ຕົງກັບ tile &quot;ຄ້າງສົ່ງ&quot; ໃນໜ້າຫຼັກ.
         </p>
         <p>
-          • ບິນທີ່ຄົນຂັບປິດງານໂດຍບໍ່ບັນທຶກລາຍການສິນຄ້າ (ວັດແລ້ວ ~1,900 ໃບ/ປີ) ຖືວ່າສົ່ງຄົບ —
-          ບໍ່ມີຫຼັກຖານວ່າຂາດ ແລະ ERP ຢືນຢັນຄົບແລ້ວ. ນັບເປັນຄ້າງສະເພາະເມື່ອ<b>ມີແຖວລາຍການເປັນຫຼັກຖານ</b>ວ່າຍັງຂາດ.
+          • ⚠️ ຍອດຍົກໄປ<b>ຂອງເດືອນທີ່ຜ່ານມາເປັນຄ່າປະມານ</b>: ຄິດຈາກສະພາບປັດຈຸບັນແລ້ວຍ້ອນກັບດ້ວຍ
+          ວັນສົ່ງສຳເລັດ ແລະ ວັນໃບຫຼຸດໜີ້. ບິນທີ່ຖືກປິດຢູ່ ERP ໂດຍບໍ່ມີໃບຫຼຸດໜີ້ບອກວັນທີ່ແທ້ບໍ່ໄດ້
+          ເພາະ ERP ບໍ່ເກັບປະຫວັດ. ເດືອນປັດຈຸບັນຖືກຕ້ອງ 100%.
         </p>
         <p>
-          • &quot;ຫຼຸດອອກ&quot; = ບິນທີ່ອອກຈາກຍອດຄ້າງໂດຍບໍ່ໄດ້ສົ່ງ (ຄືນຜ່ານໃບຫຼຸດໜີ້ trans_flag 48 ຫຼື ຖືກປິດຢູ່ ERP).
-          ບິນທີ່ບໍ່ມີໃບຫຼຸດໜີ້ໃຫ້ອ້າງວັນທີ (ປະມານ 53 ໃບ/ປີ) ຖືກນັບອອກຕັ້ງແຕ່ວັນເປີດບິນ ເພາະ ERP ບໍ່ເກັບປະຫວັດການປິດບິນ.
+          • ບິນທີ່ຄືນສິນຄ້າ (ໃບຫຼຸດໜີ້) ຫຼື ຖືກປິດຢູ່ ERP ໂດຍບໍ່ໄດ້ສົ່ງ ຈະຖືກຫັກອອກຈາກຍອດຄ້າງ
+          ໃນເດືອນທີ່ເກີດເຫດ ແຕ່ບໍ່ນັບເປັນ &quot;ສົ່ງສຳເລັດ&quot; — ຍອດ ຍົກມາ + ເປີດ − ສຳເລັດ ຈຶ່ງບໍ່ເທົ່າ ຍົກໄປ ພໍດີ.
         </p>
-        <p>• ບິນທະຍອຍສົ່ງນັບວ່າສຳເລັດຕັ້ງແຕ່ຖ້ຽວທຳອິດ ຈຶ່ງລາຍງານແຍກໄວ້ໃນ &quot;ຄຸນນະພາບການຈັດສົ່ງ&quot;.</p>
         <p>• ບິນລໍຈັດຖ້ຽວນັບສະເພາະບິນຂາຍ (trans_flag 44) ຄືກັບໜ້າ &quot;ບິນລໍຈັດຖ້ຽວ&quot; — ຕັດເອກະສານ RWSO/SRH ທີ່ບໍ່ແມ່ນວຽກຈັດສົ່ງອອກ.</p>
         <p>• ບິນທີ່ເປີດກ່ອນປີ {FIXED_MONTH_MIN.slice(0, 4)} ບໍ່ຢູ່ໃນຍອດຍົກມາ ເພາະລະບົບຕຶງການກັ່ນຕອງໄວ້ທີ່ປີນີ້.</p>
       </section>
