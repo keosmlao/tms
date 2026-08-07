@@ -379,11 +379,46 @@ async function getTvDashboard({ date = "", branch = "" } = {}) {
            AND COALESCE(NULLIF(TRIM(t.origin_transport_code), ''), '') IN (${branchList})`,
         []
       ),
+
+      // ── POD ລ່າສຸດ 2 ໃບ: ຄົນຂັບຫາກໍປິດບິນດ້ວຍຫຼັກຖານຫຍັງແດ່ ──
+      //
+      //    ອີງ sent_end (ເວລາລາວ) ບໍ່ແມ່ນວັນຖ້ຽວ — ຖ້ຽວມື້ວານທີ່ຫາກໍປິດມື້ນີ້
+      //    ຄືສິ່ງທີ່ຫ້ອງຈັດສົ່ງຢາກເຫັນ. ບໍ່ດຶງ base64 ຂອງຮູບອອກມາ (ໃບໜຶ່ງ
+      //    100–400 KB ແລະ ຈໍ poll ທຸກ 15 ວິ) — ຈໍໄປດຶງຮູບຜ່ານ /api/tv/pod-photo
+      //    ເປັນລາຍບິນ ແລ້ວ browser cache ໃຫ້ເອງ.
+      query(
+        `SELECT d.bill_no,
+                d.doc_no,
+                COALESCE(NULLIF(TRIM(c.name_1), ''), d.cust_code, '-') AS cust_name,
+                COALESCE(NULLIF(TRIM(dv.name_1), ''), t.driver::text, '-') AS driver_name,
+                to_char(d.sent_end, 'HH24:MI') AS closed_at,
+                EXTRACT(EPOCH FROM (LOCALTIMESTAMP - d.sent_end))::int AS closed_seconds_ago,
+                (COALESCE(img.n, 0) > 0 OR COALESCE(substr(d.url_img, 1, 1), '') <> '') AS has_photo,
+                COALESCE(img.n, 0)::int AS photo_count,
+                (COALESCE(substr(d.sight_img, 1, 1), '') <> '') AS has_signature,
+                (NULLIF(TRIM(COALESCE(d.lat_end, '')), '') IS NOT NULL) AS has_gps
+         FROM public.odg_tms_detail d
+         JOIN odg_tms t ON t.doc_no = d.doc_no
+         LEFT JOIN ar_customer c ON c.code = d.cust_code
+         LEFT JOIN public.odg_tms_driver dv ON dv.code = t.driver
+         LEFT JOIN LATERAL (
+           SELECT COUNT(*)::int AS n
+           FROM public.odg_tms_delivery_images di
+           WHERE di.bill_no = d.bill_no
+         ) img ON true
+         WHERE COALESCE(d.status, 0) = 1
+           AND d.sent_end IS NOT NULL
+           AND d.sent_end::date = $1::date
+           AND ${yearFilter}${branchClause}
+         ORDER BY d.sent_end DESC
+         LIMIT 2`,
+        params
+      ),
   ])));
   __batches.push(
     await getBillsPending({}, FIXED_YEAR_START, FIXED_YEAR_END, branchCode)
   );
-  const [totals, doneToday, trips, notStarted, alerts, cancelled, feed, vehicles, tripPoints, trails, drivers, scheduledOpen, pendingRaw] = __batches;
+  const [totals, doneToday, trips, notStarted, alerts, cancelled, feed, vehicles, tripPoints, trails, drivers, scheduledOpen, podRecent, pendingRaw] = __batches;
 
   // Fleet availability follows the selected transport branch in the car
   // master. A car is busy while it belongs to any open trip (job_status 0–2).
@@ -861,6 +896,19 @@ async function getTvDashboard({ date = "", branch = "" } = {}) {
         minutes_left: Number(openCutoff?.minutes_left ?? 0),
       };
     })(),
+    // ຫຼັກຖານການສົ່ງລ່າສຸດ 2 ໃບ (ບໍ່ມີຮູບຢູ່ນີ້ — ຈໍດຶງຮູບຕ່າງຫາກ)
+    pod_recent: (podRecent ?? []).map((row) => ({
+      bill_no: String(row.bill_no ?? ""),
+      doc_no: String(row.doc_no ?? ""),
+      cust_name: String(row.cust_name || "-"),
+      driver_name: String(row.driver_name || "-"),
+      closed_at: String(row.closed_at ?? ""),
+      closed_seconds_ago: Number(row.closed_seconds_ago ?? 0),
+      has_photo: Boolean(row.has_photo),
+      photo_count: Number(row.photo_count ?? 0),
+      has_signature: Boolean(row.has_signature),
+      has_gps: Boolean(row.has_gps),
+    })),
     queue_jumped: queueJumped.map((row) => ({
       bill_no: String(row.bill_no ?? ""),
       cust_name: String(row.cust_name || "-"),

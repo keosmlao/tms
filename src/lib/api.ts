@@ -14,6 +14,7 @@ import * as geofence from "@/actions/geofence";
 import * as gps from "@/actions/gps";
 import * as jobs from "@/actions/jobs";
 import * as deliveryAudit from "@/actions/delivery-audit";
+import * as pod from "@/actions/pod";
 import * as tripSuggest from "@/actions/trip-suggest";
 import * as masterData from "@/actions/master-data";
 import * as notifications from "@/actions/notifications";
@@ -90,6 +91,12 @@ export const Actions = {
   getJobPrintData: jobs.getJobPrintData,
   getTripRoutePlan: jobs.getTripRoutePlan,
   getDeliveryLocationReport: deliveryAudit.getDeliveryLocationReport,
+
+  // POD — ຫຼັກຖານການສົ່ງ (ຮູບ · ລາຍເຊັນ · GPS)
+  getPodTrackingReport: pod.getPodTrackingReport,
+  getPodLiveFeed: pod.getPodLiveFeed,
+  getPodBillProof: pod.getPodBillProof,
+
   getSuggestedTrips: tripSuggest.getSuggestedTrips,
   addBillToDraft: jobs.addBillToDraft,
   removeBillFromDraft: jobs.removeBillFromDraft,

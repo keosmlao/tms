@@ -1,12 +1,13 @@
-import { createToken } from "@/lib/auth";
+import { MOBILE_TOKEN_TTL, createToken } from "@/lib/auth";
 import { rateLimit, rateLimitResponse } from "@/lib/rate-limit";
 import { mobileErrorResponse, requireMobileSession } from "@/lib/mobile-auth";
 
-// Re-mint a fresh 8h access token for an app whose token is still valid but
-// nearing expiry. The driver app calls this proactively during long trips (and
-// at launch) so continuous GPS tracking survives past the 8h token lifetime
-// without forcing a re-login. A fully-expired token can't be refreshed here
-// (requireMobileSession rejects it) — that path falls back to a normal login.
+// Re-mint an access token for an app whose token is still valid. Mobile tokens
+// no longer expire by default (see MOBILE_TOKEN_TTL), so this is now only
+// needed when an admin sets a TTL, or to pick up changed claims (e.g. a user
+// promoted from driver to supervisor) without a re-login. A token that IS
+// expired can't be refreshed here — requireMobileSession rejects it and the app
+// falls back to a normal login.
 export async function POST(request: Request) {
   try {
     const limit = rateLimit(request, {
@@ -17,15 +18,18 @@ export async function POST(request: Request) {
     if (!limit.allowed) return rateLimitResponse(limit);
 
     const session = await requireMobileSession(request);
-    const token = await createToken({
-      usercode: session.usercode,
-      username: session.username,
-      driver_id: session.driver_id,
-      logistic_code: session.logistic_code,
-      title: session.title,
-      roles: session.roles,
-      is_driver: session.is_driver,
-    });
+    const token = await createToken(
+      {
+        usercode: session.usercode,
+        username: session.username,
+        driver_id: session.driver_id,
+        logistic_code: session.logistic_code,
+        title: session.title,
+        roles: session.roles,
+        is_driver: session.is_driver,
+      },
+      MOBILE_TOKEN_TTL
+    );
     return Response.json({ token });
   } catch (error) {
     return mobileErrorResponse(error);

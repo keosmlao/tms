@@ -28,11 +28,30 @@ function getJwtSecret(): Uint8Array {
   return new TextEncoder().encode(value);
 }
 
-export async function createToken(payload: JWTPayload): Promise<string> {
-  return new SignJWT({ ...payload })
-    .setProtectedHeader({ alg: "HS256" })
-    .setExpirationTime("8h")
-    .sign(getJwtSecret());
+/**
+ * ອາຍຸ token ຂອງແອັບມືຖື.
+ *
+ * ຄົນຂັບ/ຫົວໜ້າຢູ່ນອກສະຖານທີ່ທັງມື້ — ບັງຄັບ login ໃໝ່ທຸກ 8 ຊົ່ວໂມງເຮັດໃຫ້
+ * ໜ້າຈໍຂຶ້ນ "Unauthorized" ກາງທາງ. ຕາມນະໂຍບາຍທີ່ຕົກລົງ: ບໍ່ໃຫ້ໝົດອາຍຸ.
+ *
+ * ⚠️ ຜົນຕາມມາ: token ທີ່ຫຼຸດອອກໄປໃຊ້ໄດ້ຕະຫຼອດ ແລະ ລະບົບຍັງບໍ່ມີບັນຊີດຳ. ຢາກ
+ * ເອົາອາຍຸຄືນ ໃສ່ env `MOBILE_TOKEN_TTL` (ຮູບແບບຂອງ jose ເຊັ່ນ `30d`, `12h`)
+ * ໂດຍບໍ່ຕ້ອງແກ້ code.
+ */
+export const MOBILE_TOKEN_TTL: string | null =
+  (process.env.MOBILE_TOKEN_TTL ?? "").trim() || null;
+
+/**
+ * @param expiresIn ອາຍຸແບບ jose (`8h`, `30d`). ໃສ່ `null` = ບໍ່ມີ exp ໃນ token.
+ *   ຄ່າເລີ່ມຕົ້ນ 8 ຊົ່ວໂມງ ໄວ້ໃຫ້ session ຂອງເວັບ (cookie ຢູ່ເຄື່ອງທີ່ອາດໃຊ້ຮ່ວມກັນ).
+ */
+export async function createToken(
+  payload: JWTPayload,
+  expiresIn: string | null = "8h"
+): Promise<string> {
+  const jwt = new SignJWT({ ...payload }).setProtectedHeader({ alg: "HS256" });
+  if (expiresIn) jwt.setExpirationTime(expiresIn);
+  return jwt.sign(getJwtSecret());
 }
 
 export async function verifyToken(token: string): Promise<JWTPayload | null> {

@@ -1,5 +1,5 @@
 import { mobileLogin } from "@/queries/mobile.js";
-import { createToken } from "@/lib/auth";
+import { MOBILE_TOKEN_TTL, createToken } from "@/lib/auth";
 import { parseJsonBody } from "@/lib/validation";
 import { LoginSchema } from "@/lib/mobile-schemas";
 import { rateLimit, rateLimitResponse } from "@/lib/rate-limit";
@@ -14,15 +14,20 @@ export async function POST(request: Request) {
 
     const data = await parseJsonBody(request, LoginSchema);
     const user = await mobileLogin(data);
-    const token = await createToken({
-      usercode: user.code,
-      username: user.name_1 ?? user.username,
-      driver_id: user.driver_id,
-      logistic_code: user.logistic_code ?? "",
-      title: user.title ?? "",
-      roles: user.roles ?? user.title ?? "",
-      is_driver: user.is_driver === true,
-    });
+    // ບໍ່ໃສ່ອາຍຸ (ເວັ້ນແຕ່ຕັ້ງ MOBILE_TOKEN_TTL) — ແອັບຢູ່ໃນເຄື່ອງຂອງພະນັກງານ
+    // ຄົນດຽວ ແລະ ການບັງຄັບ login ໃໝ່ກາງທາງເຮັດວຽກບໍ່ໄດ້.
+    const token = await createToken(
+      {
+        usercode: user.code,
+        username: user.name_1 ?? user.username,
+        driver_id: user.driver_id,
+        logistic_code: user.logistic_code ?? "",
+        title: user.title ?? "",
+        roles: user.roles ?? user.title ?? "",
+        is_driver: user.is_driver === true,
+      },
+      MOBILE_TOKEN_TTL
+    );
     await ((touchUserPresence as unknown) as (input: Record<string, unknown>) => Promise<unknown>)({
       session: {
         usercode: user.code,

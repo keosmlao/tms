@@ -46,6 +46,7 @@ import {
   FaBook,
   FaRulerCombined,
   FaBoxOpen,
+  FaCamera,
 } from "react-icons/fa";
 
 interface NavItem {
@@ -68,6 +69,7 @@ const navSections: NavSection[] = [
     key: "tracking",
     items: [
       { label: "ຕິດຕາມສິນຄ້າ", href: "/tracking", icon: <FaMapMarkerAlt size={13} /> },
+      { label: "ຕິດຕາມ POD", href: "/tracking/pod", icon: <FaCamera size={13} /> },
       { label: "ບິນສົ່ງບໍ່ສຳເລັດ", href: "/tracking/sales", icon: <FaFileInvoice size={13} /> },
       { label: "ແຜນທີ່ລົດ", href: "/tracking/cars-map", icon: <FaBroadcastTower size={13} /> },
       { label: "ແຜນທີ່ມືຖື", href: "/tracking/phones-map", icon: <FaMobileAlt size={13} /> },

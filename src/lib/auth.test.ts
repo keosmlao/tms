@@ -28,6 +28,38 @@ describe("auth tokens", () => {
     });
   });
 
+  it("ຄ່າເລີ່ມຕົ້ນຍັງມີອາຍຸ 8 ຊົ່ວໂມງ (session ຂອງເວັບ)", async () => {
+    const { createToken } = await import("./auth");
+    const token = await createToken({ usercode: "U1" });
+    const claims = JSON.parse(
+      Buffer.from(token.split(".")[1], "base64url").toString()
+    ) as { exp?: number };
+    expect(claims.exp).toBeTypeOf("number");
+    const hours = (claims.exp! - Math.floor(Date.now() / 1000)) / 3600;
+    expect(hours).toBeGreaterThan(7.9);
+    expect(hours).toBeLessThan(8.1);
+  });
+
+  it("expiresIn = null → ບໍ່ມີ exp ເລີຍ ແລະ ຍັງ verify ຜ່ານ (token ຂອງແອັບມືຖື)", async () => {
+    const { createToken, verifyToken } = await import("./auth");
+    const token = await createToken({ usercode: "U1", is_driver: false }, null);
+    const claims = JSON.parse(
+      Buffer.from(token.split(".")[1], "base64url").toString()
+    ) as { exp?: number };
+    expect(claims.exp).toBeUndefined();
+    expect(await verifyToken(token)).toMatchObject({ usercode: "U1" });
+  });
+
+  it("ໃສ່ອາຍຸເອງໄດ້ (MOBILE_TOKEN_TTL)", async () => {
+    const { createToken } = await import("./auth");
+    const token = await createToken({ usercode: "U1" }, "30d");
+    const claims = JSON.parse(
+      Buffer.from(token.split(".")[1], "base64url").toString()
+    ) as { exp?: number };
+    const days = (claims.exp! - Math.floor(Date.now() / 1000)) / 86_400;
+    expect(days).toBeGreaterThan(29.9);
+  });
+
   it("returns null for malformed tokens", async () => {
     const { verifyToken } = await import("./auth");
     expect(await verifyToken("garbage")).toBeNull();

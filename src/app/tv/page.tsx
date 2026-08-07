@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useState } from "react";
 
+import { podAgoLabel } from "@/lib/pod";
 import "./tv.css";
 
 
@@ -156,6 +157,20 @@ type QueueJump = {
   oldest_waiting: string;
 };
 
+/** ຫຼັກຖານການສົ່ງລ່າສຸດ — ຮູບບໍ່ໄດ້ມາກັບ payload ນີ້ (ດຶງຜ່ານ /api/tv/pod-photo) */
+type PodRecent = {
+  bill_no: string;
+  doc_no: string;
+  cust_name: string;
+  driver_name: string;
+  closed_at: string;
+  closed_seconds_ago: number;
+  has_photo: boolean;
+  photo_count: number;
+  has_signature: boolean;
+  has_gps: boolean;
+};
+
 type Trail = {
   car_code: string;
   car_name: string;
@@ -208,6 +223,7 @@ type TvData = {
   workload: Workload;
   open_cutoff: OpenCutoff;
   queue_jumped: QueueJump[];
+  pod_recent: PodRecent[];
 };
 
 const PAGES = ["ພາບລວມມື້ນີ້", "ຕ້ອງແກ້ດຽວນີ້", "ບິນທີ່ຊ້າ", "ບິນລັດຄິວ"];
@@ -471,6 +487,7 @@ function Overview({
         </div>
       </div>
 
+      <div className="tv-bottom">
       <div className="tv-trips">
         <div className="tv-trips-head">
           <span>ຖ້ຽວກຳລັງແລ່ນ</span>
@@ -493,6 +510,78 @@ function Overview({
         </div>
         <RunningStrip trips={data.running} drift={drift} />
       </div>
+      <PodStrip rows={data.pod_recent ?? []} drift={drift} />
+      </div>
+    </div>
+  );
+}
+
+/**
+ * ຫຼັກຖານການສົ່ງ 2 ໃບລ່າສຸດ — ຫ້ອງຈັດສົ່ງເຫັນທັນທີວ່າຄົນຂັບປິດບິນດ້ວຍຮູບແນວໃດ.
+ *
+ * ຮູບບໍ່ໄດ້ມາກັບ payload ຫຼັກ (ໃບໜຶ່ງ 100–400 KB, ຈໍ poll ທຸກ 15 ວິ) —
+ * ດຶງເປັນ <img> ຕໍ່ບິນຈາກ /api/tv/pod-photo ແລ້ວ browser cache ໄວ້ເອງ, ຮູບຈຶ່ງ
+ * ໂຫຼດເທື່ອດຽວຕໍ່ບິນ ບໍ່ແມ່ນທຸກຮອບ.
+ */
+function PodStrip({ rows, drift }: { rows: PodRecent[]; drift: number }) {
+  // key ຢູ່ໃນ URL ຂອງຈໍ — ອ່ານຫຼັງ mount ເພື່ອບໍ່ໃຫ້ SSR ກັບ client ບໍ່ກົງກັນ
+  const [tvKey, setTvKey] = useState<string | null>(null);
+  useEffect(() => {
+    setTvKey(new URLSearchParams(window.location.search).get("key") ?? "");
+  }, []);
+
+  return (
+    <div className="tv-pod">
+      <div className="tv-pod-head">
+        <span>ຫຼັກຖານການສົ່ງລ່າສຸດ</span>
+        <span className="tv-pod-sub">ຮູບ · ລາຍເຊັນ · GPS</span>
+      </div>
+      {rows.length === 0 ? (
+        <Empty text="ຍັງບໍ່ມີບິນທີ່ປິດ" />
+      ) : (
+        rows.map((row) => (
+          <div className="tv-pod-card" key={`${row.doc_no}-${row.bill_no}`}>
+            <div className="tv-pod-shot">
+              {row.has_photo && tvKey !== null ? (
+                // eslint-disable-next-line @next/next/no-img-element
+                <img
+                  src={`/api/tv/pod-photo?key=${encodeURIComponent(
+                    tvKey
+                  )}&bill=${encodeURIComponent(row.bill_no)}&doc=${encodeURIComponent(
+                    row.doc_no
+                  )}`}
+                  alt={row.bill_no}
+                />
+              ) : (
+                <span className="tv-pod-nophoto">ບໍ່ມີຮູບ</span>
+              )}
+              {row.photo_count > 1 && (
+                <span className="tv-pod-count">{row.photo_count} ຮູບ</span>
+              )}
+            </div>
+            <div className="tv-pod-body">
+              <div className="tv-pod-cust">{row.cust_name}</div>
+              <div className="tv-pod-meta">
+                {row.driver_name} · {row.closed_at}{" "}
+                <span className="tv-pod-ago">
+                  ({podAgoLabel(row.closed_seconds_ago + drift)})
+                </span>
+              </div>
+              <div className="tv-pod-flags">
+                <span className={row.has_photo ? "tv-pod-ok" : "tv-pod-bad"}>
+                  {row.has_photo ? "✓" : "✕"} ຮູບ
+                </span>
+                <span className={row.has_signature ? "tv-pod-ok" : "tv-pod-off"}>
+                  {row.has_signature ? "✓" : "✕"} ລາຍເຊັນ
+                </span>
+                <span className={row.has_gps ? "tv-pod-ok" : "tv-pod-bad"}>
+                  {row.has_gps ? "✓" : "✕"} GPS
+                </span>
+              </div>
+            </div>
+          </div>
+        ))
+      )}
     </div>
   );
 }

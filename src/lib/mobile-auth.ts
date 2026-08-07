@@ -36,30 +36,31 @@ export function isSupervisorSession(session: {
   );
 }
 
+// 401 ພ້ອມເຫດຜົນ. ບໍ່ມີອັນນີ້ ແອັບເຫັນແຕ່ຄຳວ່າ "Unauthorized" ແລ້ວເດົາເອງວ່າ
+// API ຂາດ — ມີເກີດຂຶ້ນມາແລ້ວ: token ໝົດອາຍຸ 8 ຊົ່ວໂມງ ແຕ່ໜ້າຈໍຫົວໜ້າຂຶ້ນວ່າ
+// "ກະລຸນາເພີ່ມ all-jobs API ສຳລັບ supervisor". code ບອກແອັບໃຫ້ພາໄປໜ້າ login.
+function unauthorized(code: "missing_token" | "token_expired"): Error {
+  const error = new Error("Unauthorized") as Error & {
+    status?: number;
+    details?: Record<string, unknown>;
+  };
+  error.status = 401;
+  error.details = { code, reason: code === "missing_token" ? "ບໍ່ມີ token" : "ໝົດອາຍຸ ຫຼື ບໍ່ຖືກຕ້ອງ — ກະລຸນາເຂົ້າລະບົບໃໝ່" };
+  return error;
+}
+
 export async function requireMobileSession(
   request: Request | NextRequest
 ): Promise<MobileSession> {
   const header = request.headers.get("authorization") ?? "";
   const match = header.match(/^Bearer\s+(.+)$/i);
-  if (!match) {
-    const error = new Error("Unauthorized");
-    (error as Error & { status?: number }).status = 401;
-    throw error;
-  }
+  if (!match) throw unauthorized("missing_token");
   const payload = await verifyToken(match[1]);
-  if (!payload) {
-    const error = new Error("Unauthorized");
-    (error as Error & { status?: number }).status = 401;
-    throw error;
-  }
+  if (!payload) throw unauthorized("token_expired");
   const usercode = String(payload.usercode ?? payload.code ?? "");
   const username = String(payload.username ?? usercode);
   const driverId = String(payload.driver_id ?? usercode);
-  if (!usercode || !driverId) {
-    const error = new Error("Unauthorized");
-    (error as Error & { status?: number }).status = 401;
-    throw error;
-  }
+  if (!usercode || !driverId) throw unauthorized("token_expired");
   // Force a client update before any protected work when the app version is
   // below the admin-set minimum. Throws a 426 that mobileErrorResponse turns
   // into a force_update payload.
@@ -71,7 +72,11 @@ export async function requireMobileSession(
     logistic_code: String(payload.logistic_code ?? ""),
     title: String(payload.title ?? ""),
     roles: String(payload.roles ?? ""),
-    is_driver: payload.is_driver === true,
+    // ບໍ່ມີ claim = ຄົນຂັບ. ເມື່ອກ່ອນຂຽນ `=== true` ເຊິ່ງແປງ claim ທີ່ຂາດໄປໃຫ້ເປັນ
+    // false ແລ້ວ gate ອ່ານວ່າ "ບໍ່ແມ່ນຄົນຂັບ = ຫົວໜ້າ" — token ເກົ່າກ່ອນມີ claim
+    // ນີ້ຈຶ່ງເຫັນຂໍ້ມູນທັງກອງລົດໄດ້. ຄ່າເລີ່ມຕົ້ນຕ້ອງເປັນສິດຕ່ຳສຸດ ສ່ວນຫົວໜ້າທີ່
+    // ຖື token ເກົ່າຍັງຜ່ານໄດ້ດ້ວຍການກວດຄຳໃນ roles/title (isSupervisorSession).
+    is_driver: payload.is_driver !== false,
   };
   await ((touchUserPresence as unknown) as (input: Record<string, unknown>) => Promise<unknown>)({
     session,
