@@ -78,6 +78,8 @@ export function RouteMapPicker({
   stops,
   activeIndex,
   onPick,
+  drivingPath,
+  readOnly = false,
   className = "h-[420px]",
 }: {
   /** Origin, waypoints and destination in travel order. */
@@ -85,6 +87,11 @@ export function RouteMapPicker({
   /** Stop a map click assigns to (see ORIGIN_INDEX / DESTINATION_INDEX). */
   activeIndex: number;
   onPick: (index: number, lat: number, lng: number) => void;
+  /** Road geometry from OSRM. When present it is drawn as the solid route and
+   *  the straight-line link between pins drops to a faint guide. */
+  drivingPath?: Array<[number, number]>;
+  /** View-only: no click-to-place, no dragging (the list's map preview). */
+  readOnly?: boolean;
   className?: string;
 }) {
   const containerRef = useRef<HTMLDivElement>(null);
@@ -95,6 +102,8 @@ export function RouteMapPicker({
   const activeRef = useRef(activeIndex);
   const onPickRef = useRef(onPick);
   const stopsRef = useRef(stops);
+  const drivingRef = useRef(drivingPath);
+  const readOnlyRef = useRef(readOnly);
   // Fit the view to the route the first time it has something to show, then
   // leave the admin's pan/zoom alone.
   const fittedRef = useRef(false);
@@ -103,7 +112,9 @@ export function RouteMapPicker({
     activeRef.current = activeIndex;
     onPickRef.current = onPick;
     stopsRef.current = stops;
-  }, [activeIndex, onPick, stops]);
+    drivingRef.current = drivingPath;
+    readOnlyRef.current = readOnly;
+  }, [activeIndex, onPick, stops, drivingPath, readOnly]);
 
   useEffect(() => {
     let cancelled = false;
@@ -122,6 +133,7 @@ export function RouteMapPicker({
         maxZoom: 19,
       }).addTo(map);
       map.on("click", (e) => {
+        if (readOnlyRef.current) return;
         onPickRef.current(
           activeRef.current,
           Number(e.latlng.lat.toFixed(6)),
@@ -142,7 +154,15 @@ export function RouteMapPicker({
     const L = getL();
     const map = mapRef.current;
     if (L && map) draw(L, map);
-  }, [stops, activeIndex]);
+  }, [stops, activeIndex, drivingPath, readOnly]);
+
+  // A freshly calculated road route is what the user asked to see — frame it,
+  // overriding the "leave their pan/zoom alone" rule that applies otherwise.
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map || !drivingPath || drivingPath.length < 2) return;
+    map.fitBounds(drivingPath, { padding: [40, 40] });
+  }, [drivingPath]);
 
   useEffect(() => {
     return () => {
@@ -177,7 +197,7 @@ export function RouteMapPicker({
       const label = isOrigin ? "A" : isDestination ? "B" : `${position}`;
       const marker = L.marker(ll, {
         icon: pinIcon(L, color, label, index === activeRef.current),
-        draggable: true,
+        draggable: !readOnlyRef.current,
       })
         .addTo(map)
         .bindTooltip(stop.name.trim() || (isOrigin ? "ຕົ້ນທາງ" : isDestination ? "ປາຍທາງ" : `ທາງຜ່ານ ${position}`));
@@ -195,20 +215,34 @@ export function RouteMapPicker({
       layersRef.current.push(marker);
     });
 
+    const driving = drivingRef.current;
+    const hasDriving = Array.isArray(driving) && driving.length > 1;
     if (line.length > 1) {
+      // With a road route on screen, the pin-to-pin line becomes a faint guide
+      // so the two are never mistaken for each other.
       layersRef.current.push(
         L.polyline(line, {
           color: "#0d9488",
-          weight: 3,
-          opacity: 0.75,
+          weight: hasDriving ? 1.5 : 3,
+          opacity: hasDriving ? 0.3 : 0.75,
           dashArray: "6 6",
         }).addTo(map)
       );
     }
-    if (!fittedRef.current && line.length > 0) {
+    if (hasDriving) {
+      layersRef.current.push(
+        L.polyline(driving, {
+          color: "#2563eb",
+          weight: 5,
+          opacity: 0.85,
+        }).addTo(map)
+      );
+    }
+    const bounds = hasDriving ? driving : line;
+    if (!fittedRef.current && bounds.length > 0) {
       fittedRef.current = true;
-      if (line.length === 1) map.setView(line[0], 12);
-      else map.fitBounds(line, { padding: [40, 40] });
+      if (bounds.length === 1) map.setView(bounds[0], 12);
+      else map.fitBounds(bounds, { padding: [40, 40] });
     }
   }
 

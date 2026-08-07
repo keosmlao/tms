@@ -23,6 +23,7 @@ import * as packDim from "@/actions/pack-dim";
 import * as pipeDim from "@/actions/pipe-dim";
 import * as presence from "@/actions/presence";
 import * as reports from "@/actions/reports";
+import * as routing from "@/actions/routing";
 import * as settings from "@/actions/settings";
 import * as thunjai from "@/actions/thunjai";
 import * as tracking from "@/actions/tracking";
@@ -323,6 +324,7 @@ export const Actions = {
   getDeliveryRoute: deliveryRoute.getDeliveryRoute,
   upsertDeliveryRoute: deliveryRoute.upsertDeliveryRoute,
   listRouteStopSuggestions: deliveryRoute.listRouteStopSuggestions,
+  getDrivingRoute: routing.getDrivingRoute,
   deleteDeliveryRoute: deliveryRoute.deleteDeliveryRoute,
 
   // Delivery calendar (ປະຕິທິນຈັດສົ່ງ)

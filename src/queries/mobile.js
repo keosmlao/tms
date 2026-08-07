@@ -28,7 +28,11 @@ const {
 } = require("./helpers");
 const { saveToken: saveFcmToken, deleteToken: deleteFcmToken } = require("./push");
 const { saveFuelRefill, getFuelLogs, getFuelSummary } = require("./fuel");
-const { notifyBillStatus, notifyPickupVariance } = require("./notifications");
+const {
+  notifyBillStatus,
+  notifyPickupVariance,
+  notifyBillDelivered,
+} = require("./notifications");
 const { computePickupVariance } = require("../lib/pickup-variance");
 const { assertJobGeofence } = require("./geofence");
 const { ensureDeliveryRouteSchema } = require("./delivery-route");
@@ -1509,6 +1513,14 @@ async function mobileJobAction(body) {
           billNo,
           fullyDelivered ? "✅ ຈັດສົ່ງສຳເລັດ" : "📦 ຈັດສົ່ງບາງສ່ວນ"
         );
+        // ຫ້ອງຈັດສົ່ງເຄີຍຮູ້ພຽງຕອນເປີດຈໍເບິ່ງເອງ — ດຽວນີ້ຮູ້ທັນທີ ພ້ອມລິ້ງໄປ POD.
+        void notifyBillDelivered({
+          billNo,
+          docNo: currentDocNo,
+          driverCode: driverId,
+          fullyDelivered,
+          collectedAmount,
+        });
         return {
           success: true,
           doc_no: currentDocNo,

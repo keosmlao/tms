@@ -206,6 +206,51 @@ paths:
         '400': { $ref: '#/components/responses/ValidationError' }
         '401': { $ref: '#/components/responses/Unauthorized' }
 
+  /api/mobile/pod:
+    get:
+      tags: [pod]
+      summary: |
+        Proof of delivery. Supervisor sessions only (403 for drivers).
+        Without bill_no: live feed of recently closed bills, no images.
+        With bill_no: the full proof of that bill, including base64 images.
+      parameters:
+        - in: query
+          name: bill_no
+          schema: { type: string }
+          description: Return one bill's full proof instead of the feed.
+        - in: query
+          name: doc_no
+          schema: { type: string }
+          description: Disambiguates a bill delivered across several trips.
+        - in: query
+          name: minutes
+          schema: { type: integer, minimum: 5, maximum: 4320, default: 720 }
+        - in: query
+          name: limit
+          schema: { type: integer, minimum: 1, maximum: 100, default: 50 }
+        - in: query
+          name: branch
+          schema: { type: string }
+        - in: query
+          name: driver
+          schema: { type: string }
+      responses:
+        '200':
+          description: Feed rows, or one proof object when bill_no is given.
+          content:
+            application/json:
+              schema:
+                oneOf:
+                  - type: array
+                    items: { type: object }
+                  - type: object
+        '400': { $ref: '#/components/responses/ValidationError' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403':
+          description: Not a supervisor session.
+        '404':
+          description: No proof found for that bill.
+
   /api/mobile/settings:
     get:
       tags: [settings]

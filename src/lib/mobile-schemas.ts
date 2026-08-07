@@ -26,6 +26,19 @@ export const JobsListQuerySchema = z.object({
   days: z.coerce.number().int().min(1).max(366).optional(),
 });
 
+// POD (ຫຼັກຖານການສົ່ງ) for the supervisor app screen. Without `bill_no` this
+// is the live feed of recently closed bills; with it, the full proof of one
+// bill (base64 images), which is why the two are one endpoint.
+export const PodQuerySchema = z.object({
+  bill_no: OptionalString,
+  doc_no: OptionalString,
+  // How far back the feed reaches, in minutes. Bounded server-side too.
+  minutes: z.coerce.number().int().min(5).max(4320).optional(),
+  limit: z.coerce.number().int().min(1).max(100).optional(),
+  branch: OptionalString,
+  driver: OptionalString,
+});
+
 // Per-user push history (the app's ແຈ້ງເຕືອນ screen).
 export const NotificationsListQuerySchema = z.object({
   limit: z.coerce.number().int().min(1).max(100).optional(),

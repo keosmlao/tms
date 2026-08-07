@@ -482,6 +482,84 @@ async function notifyPickupVariance({ billNo, docNo, driverCode, variance }) {
   }
 }
 
+/**
+ * ຄົນຂັບແຈ້ງ "ສົ່ງສຳເລັດ" — ດັນແຈ້ງເຕືອນຫາຫ້ອງຈັດສົ່ງທັນທີ.
+ *
+ * ຜູ້ຮັບຄືຄົນດຽວກັບແຈ້ງເຕືອນເບີກເຄື່ອງບໍ່ຄົບ: ຄົນສ້າງຖ້ຽວ + ພະນັກງານສາຂາຕົ້ນທາງ
+ * (ຍົກເວັ້ນຄົນຂັບເອງ). ສົ່ງທັງ pushToEmployees ແລະ pushToDriver ເພາະຫົວໜ້າບາງ
+ * ຄົນລົງທະບຽນ token ໄວ້ໃນແອັບຄົນຂັບເທົ່ານັ້ນ.
+ *
+ * Best-effort ທັງໝົດ: ການແຈ້ງເຕືອນລົ້ມເຫຼວຕ້ອງບໍ່ເຮັດໃຫ້ການປິດບິນລົ້ມເຫຼວ —
+ * ຜູ້ເອີ້ນຈຶ່ງເອີ້ນແບບ void ຫຼັງ COMMIT ແລ້ວ.
+ */
+async function notifyBillDelivered({
+  billNo,
+  docNo,
+  driverCode,
+  fullyDelivered = true,
+  collectedAmount = 0,
+}) {
+  try {
+    const bill = String(billNo ?? "").trim();
+    const doc = String(docNo ?? "").trim();
+    if (!bill || !doc) return;
+
+    const job = await queryOne(
+      `SELECT COALESCE(NULLIF(TRIM(j.user_created), ''), '') AS user_created,
+              COALESCE(NULLIF(TRIM(j.origin_transport_code), ''), '') AS origin_transport_code,
+              COALESCE(NULLIF(TRIM(drv.name_1), ''), j.driver, '') AS driver_name,
+              COALESCE(NULLIF(TRIM(cust.name_1), ''), d.cust_code, '') AS cust_name,
+              to_char(d.sent_end, 'HH24:MI') AS closed_time
+       FROM public.odg_tms j
+       LEFT JOIN public.odg_tms_driver drv ON drv.code = j.driver
+       LEFT JOIN public.odg_tms_detail d ON d.doc_no = j.doc_no AND d.bill_no = $2
+       LEFT JOIN public.ar_customer cust ON cust.code = d.cust_code
+       WHERE j.doc_no = $1
+       LIMIT 1`,
+      [doc, bill]
+    ).catch(() => null);
+
+    const codes = new Set();
+    if (job?.user_created) codes.add(job.user_created);
+    if (job?.origin_transport_code) {
+      const branchStaff = await query(
+        `SELECT code FROM erp_user WHERE NULLIF(TRIM(logistic_code), '') = $1`,
+        [job.origin_transport_code]
+      ).catch(() => []);
+      for (const row of branchStaff) {
+        if (row?.code) codes.add(row.code);
+      }
+    }
+    // The driver just did this — no need to tell them.
+    codes.delete(String(driverCode ?? "").trim());
+    if (codes.size === 0) return;
+
+    const amount = Number(collectedAmount ?? 0);
+    const body = [
+      `ບິນ ${bill}${job?.cust_name ? ` · ${job.cust_name}` : ""}`,
+      job?.driver_name ? `ຄົນຂັບ ${job.driver_name} · ຖ້ຽວ ${doc}` : `ຖ້ຽວ ${doc}`,
+      job?.closed_time ? `ເວລາ ${job.closed_time}` : "",
+      Number.isFinite(amount) && amount > 0
+        ? `ເກັບເງິນ ${amount.toLocaleString("en-US")} ກີບ`
+        : "",
+    ]
+      .filter(Boolean)
+      .join("\n");
+
+    const { pushToEmployees, pushToDriver } = require("./push");
+    const recipients = Array.from(codes);
+    const title = fullyDelivered ? "✅ ສົ່ງສຳເລັດ" : "📦 ສົ່ງບາງສ່ວນ";
+    // bill_no lets the app open the POD proof for exactly this bill.
+    const data = { type: "bill_delivered", bill_no: bill, doc_no: doc };
+    await Promise.allSettled([
+      pushToEmployees(recipients, title, body, data),
+      ...recipients.map((code) => pushToDriver(code, title, body, data)),
+    ]);
+  } catch (err) {
+    console.warn("[notify] bill-delivered failed:", err?.message ?? err);
+  }
+}
+
 // Fan-out a status update to both the sales OA and the customer LINE in one
 // call so mobile.js doesn't have to remember both.
 async function notifyBillStatus(billNo, statusLabel, options = {}) {
@@ -815,6 +893,7 @@ module.exports = {
   notifyBillForwardedToBranch,
   notifyBillStatus,
   notifyPickupVariance,
+  notifyBillDelivered,
   notifyCustomerLine,
   notifySalesLine,
   getActivityNotifications,

@@ -7,9 +7,11 @@ import {
   FaCheck,
   FaCopy,
   FaExclamationTriangle,
+  FaMapMarkedAlt,
   FaMapMarkerAlt,
   FaPen,
   FaPlus,
+  FaRoad,
   FaRoute,
   FaSearch,
   FaSpinner,
@@ -22,6 +24,7 @@ import {
   StatusTableShell,
 } from "@/components/status-page-shell";
 import { useConfirm } from "@/components/confirm-dialog";
+import { formatDuration, type DrivingRoute } from "@/lib/osrm";
 import {
   DESTINATION_INDEX,
   ORIGIN_INDEX,
@@ -119,6 +122,7 @@ export default function DeliveryRoutesPage() {
   const [search, setSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState<"all" | "on" | "off">("all");
   const [editing, setEditing] = useState<RouteRow | null>(null);
+  const [viewing, setViewing] = useState<RouteRow | null>(null);
   // Branches that actually have transport vehicles stationed at them — the
   // stops a route realistically starts, passes or ends at.
   const [suggestions, setSuggestions] = useState<StopSuggestion[]>([]);
@@ -346,6 +350,12 @@ export default function DeliveryRoutesPage() {
                         <td className="px-4 py-3">
                           <div className="flex items-center justify-end gap-1">
                             <IconButton
+                              title="ເບິ່ງເສັ້ນທາງໃນແຜນທີ່"
+                              onClick={() => setViewing(normalizeRoute(row))}
+                            >
+                              <FaMapMarkedAlt size={11} />
+                            </IconButton>
+                            <IconButton
                               title="ແກ້ໄຂ"
                               onClick={() => setEditing(normalizeRoute(row))}
                             >
@@ -405,6 +415,12 @@ export default function DeliveryRoutesPage() {
                       </span>
                       <div className="ml-auto flex gap-1">
                         <IconButton
+                          title="ເບິ່ງເສັ້ນທາງໃນແຜນທີ່"
+                          onClick={() => setViewing(normalizeRoute(row))}
+                        >
+                          <FaMapMarkedAlt size={11} />
+                        </IconButton>
+                        <IconButton
                           title="ແກ້ໄຂ"
                           onClick={() => setEditing(normalizeRoute(row))}
                         >
@@ -429,6 +445,10 @@ export default function DeliveryRoutesPage() {
           </>
         )}
       </StatusTableShell>
+
+      {viewing && (
+        <RouteViewDialog row={viewing} onClose={() => setViewing(null)} />
+      )}
 
       {editing && (
         <RouteEditor
@@ -531,6 +551,132 @@ function PinBadge({ pinned, total }: { pinned: number; total: number }) {
   );
 }
 
+// ─── Read-only route view ──────────────────────────────────────────────────
+
+/**
+ * "What does this route actually drive, and how far?" — asked from the list,
+ * without opening the editor and risking an accidental edit. The road route is
+ * fetched as soon as the dialog opens, since seeing it is the whole point.
+ */
+function RouteViewDialog({
+  row,
+  onClose,
+}: {
+  row: RouteRow;
+  onClose: () => void;
+}) {
+  const [driving, setDriving] = useState<DrivingRoute | null>(null);
+  const [busy, setBusy] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+
+  const stops = useMemo(() => routeStops(row), [row]);
+  const pinned = useMemo(() => stops.filter(hasCoords), [stops]);
+  const straightKm = useMemo(() => routeDistanceKm(stops), [stops]);
+
+  useEffect(() => {
+    let cancelled = false;
+    void (async () => {
+      if (pinned.length < 2) {
+        setBusy(false);
+        setError("ເສັ້ນທາງນີ້ຍັງປັກໝຸດບໍ່ຄົບ — ຕ້ອງມີຢ່າງໜ້ອຍ 2 ຈຸດ");
+        return;
+      }
+      try {
+        const result = await Actions.getDrivingRoute(
+          pinned.map((stop) => ({
+            lat: stop.lat as number,
+            lng: stop.lng as number,
+          }))
+        );
+        if (cancelled) return;
+        setDriving(result.route);
+        setError(result.error ?? null);
+      } catch (e) {
+        console.error(e);
+        if (!cancelled) setError("ຄິດໄລ່ເສັ້ນທາງບໍ່ສຳເລັດ");
+      } finally {
+        if (!cancelled) setBusy(false);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [pinned]);
+
+  return (
+    <div
+      className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-3"
+      onClick={onClose}
+    >
+      <div
+        className="glass flex max-h-[94vh] w-full max-w-4xl flex-col overflow-hidden rounded-xl"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <div className="flex items-center justify-between border-b border-slate-200/30 bg-white/30 px-5 py-3 dark:border-white/5 dark:bg-white/5">
+          <div className="min-w-0">
+            <h3 className="truncate text-sm font-bold text-slate-800 dark:text-white">
+              {row.name || row.code}
+            </h3>
+            <p className="truncate text-[10px] text-slate-400">
+              {routePathLabel(stops) || "—"}
+            </p>
+          </div>
+          <button
+            type="button"
+            onClick={onClose}
+            className="flex h-7 w-7 shrink-0 items-center justify-center rounded-lg text-slate-500 hover:bg-slate-100 dark:hover:bg-white/5"
+            aria-label="ປິດ"
+          >
+            <FaTimes size={12} />
+          </button>
+        </div>
+
+        <div className="flex flex-wrap items-center gap-2 border-b border-slate-200/30 px-5 py-3 dark:border-white/5">
+          {busy ? (
+            <span className="inline-flex items-center gap-1.5 text-[11px] text-slate-500">
+              <FaSpinner className="animate-spin" size={10} />{" "}
+              ກຳລັງຄິດໄລ່ເສັ້ນທາງທີ່ແລ່ນ...
+            </span>
+          ) : driving ? (
+            <>
+              <span className="inline-flex items-center gap-1.5 rounded-full bg-blue-500/10 px-2.5 py-1 text-[11px] font-bold text-blue-700 dark:text-blue-300">
+                <FaRoad size={10} /> ແລ່ນຈິງ{" "}
+                {driving.distanceKm.toLocaleString()} km
+              </span>
+              <span className="rounded-full bg-slate-500/10 px-2.5 py-1 text-[11px] font-semibold text-slate-600 dark:text-slate-300">
+                ~{formatDuration(driving.durationMin)}
+              </span>
+            </>
+          ) : null}
+          {straightKm !== null && (
+            <span className="rounded-full bg-slate-500/10 px-2.5 py-1 text-[11px] text-slate-500">
+              ເສັ້ນຊື່ {straightKm.toLocaleString()} km
+            </span>
+          )}
+          <span className="rounded-full bg-slate-500/10 px-2.5 py-1 text-[11px] text-slate-500">
+            ບັນທຶກໄວ້{" "}
+            {row.distance_km > 0 ? `${row.distance_km.toLocaleString()} km` : "—"}
+          </span>
+          {error && (
+            <span className="text-[11px] text-amber-600">{error}</span>
+          )}
+        </div>
+
+        <div className="flex-1 overflow-y-auto p-5">
+          <RouteMapPicker
+            stops={stops}
+            activeIndex={ORIGIN_INDEX}
+            onPick={() => undefined}
+            drivingPath={driving?.path}
+            readOnly
+            className="h-[300px] lg:h-[440px]"
+          />
+        </div>
+      </div>
+    </div>
+  );
+}
+
 // ─── Editor ────────────────────────────────────────────────────────────────
 
 function RouteEditor({
@@ -552,6 +698,10 @@ function RouteEditor({
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [showProblems, setShowProblems] = useState(false);
+
+  const [driving, setDriving] = useState<DrivingRoute | null>(null);
+  const [drivingBusy, setDrivingBusy] = useState(false);
+  const [drivingError, setDrivingError] = useState<string | null>(null);
 
   const dirty = useMemo(
     () => JSON.stringify(draft) !== JSON.stringify(initial),
@@ -599,6 +749,40 @@ function RouteEditor({
       return { ...current, waypoints };
     });
   };
+
+  const pinned = stops.filter(hasCoords);
+
+  // Ask the routing service for the road the truck actually drives, then draw
+  // it and offer its distance. The pin-to-pin figure stays visible for
+  // comparison — it is what the old page called "ໄລຍະທາງ".
+  const calculateDriving = async () => {
+    setDrivingBusy(true);
+    setDrivingError(null);
+    try {
+      const result = await Actions.getDrivingRoute(
+        pinned.map((stop) => ({ lat: stop.lat as number, lng: stop.lng as number }))
+      );
+      setDriving(result.route);
+      setDrivingError(result.error ?? null);
+    } catch (e) {
+      console.error(e);
+      setDrivingError("ຄິດໄລ່ເສັ້ນທາງບໍ່ສຳເລັດ");
+    } finally {
+      setDrivingBusy(false);
+    }
+  };
+
+  // Any change to the pins invalidates the drawn route.
+  useEffect(() => {
+    setDriving(null);
+    setDrivingError(null);
+  }, [
+    draft.origin_lat,
+    draft.origin_lng,
+    draft.destination_lat,
+    draft.destination_lng,
+    draft.waypoints,
+  ]);
 
   const close = async () => {
     if (submitting) return;
@@ -891,8 +1075,49 @@ function RouteEditor({
               stops={stops}
               activeIndex={activeIndex}
               onPick={(index, lat, lng) => setPoint(index, lat, lng)}
+              drivingPath={driving?.path}
               className="h-[300px] lg:h-[460px]"
             />
+            <div className="flex flex-wrap items-center gap-2">
+              <button
+                type="button"
+                onClick={() => void calculateDriving()}
+                disabled={drivingBusy || pinned.length < 2}
+                title={
+                  pinned.length < 2 ? "ຕ້ອງປັກໝຸດຢ່າງໜ້ອຍ 2 ຈຸດ" : undefined
+                }
+                className="inline-flex items-center gap-1.5 rounded-lg bg-blue-600 px-3 py-1.5 text-[11px] font-semibold text-white hover:bg-blue-700 disabled:opacity-50"
+              >
+                {drivingBusy ? (
+                  <FaSpinner className="animate-spin" size={10} />
+                ) : (
+                  <FaRoad size={11} />
+                )}
+                ເບິ່ງເສັ້ນທາງທີ່ແລ່ນຈິງ
+              </button>
+              {driving && (
+                <>
+                  <span className="rounded-full bg-blue-500/10 px-2.5 py-1 text-[11px] font-bold text-blue-700 dark:text-blue-300">
+                    ໄລຍະທາງແລ່ນຈິງ {driving.distanceKm.toLocaleString()} km
+                  </span>
+                  <span className="rounded-full bg-slate-500/10 px-2.5 py-1 text-[11px] font-semibold text-slate-600 dark:text-slate-300">
+                    ~{formatDuration(driving.durationMin)}
+                  </span>
+                  {draft.distance_km !== driving.distanceKm && (
+                    <button
+                      type="button"
+                      onClick={() => patch({ distance_km: driving.distanceKm })}
+                      className="rounded-md bg-blue-600 px-2 py-1 text-[10px] font-semibold text-white hover:bg-blue-700"
+                    >
+                      ໃຊ້ເປັນໄລຍະທາງ
+                    </button>
+                  )}
+                </>
+              )}
+            </div>
+            {drivingError && (
+              <p className="text-[11px] text-amber-600">{drivingError}</p>
+            )}
             <p className="text-[11px] text-slate-500">
               ລຳດັບ: {routePathLabel(stops) || "—"}
             </p>
