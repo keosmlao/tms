@@ -22,6 +22,7 @@ import * as pickupVariance from "@/actions/pickup-variance";
 import * as packDim from "@/actions/pack-dim";
 import * as pipeDim from "@/actions/pipe-dim";
 import * as presence from "@/actions/presence";
+import * as pushTest from "@/actions/push-test";
 import * as reports from "@/actions/reports";
 import * as routing from "@/actions/routing";
 import * as settings from "@/actions/settings";
@@ -325,6 +326,8 @@ export const Actions = {
   upsertDeliveryRoute: deliveryRoute.upsertDeliveryRoute,
   listRouteStopSuggestions: deliveryRoute.listRouteStopSuggestions,
   getDrivingRoute: routing.getDrivingRoute,
+  getPushStatus: pushTest.getPushStatus,
+  sendPushTest: pushTest.sendPushTest,
   deleteDeliveryRoute: deliveryRoute.deleteDeliveryRoute,
 
   // Delivery calendar (ປະຕິທິນຈັດສົ່ງ)

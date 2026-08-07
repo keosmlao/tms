@@ -1,5 +1,6 @@
 import { cookies } from "next/headers";
 import { SignJWT, jwtVerify, type JWTPayload } from "jose";
+import { describeJwtSecretProblem } from "@/lib/jwt-secret";
 
 export interface Session {
   usercode: string;
@@ -22,10 +23,12 @@ const MAX_AGE_SECONDS = 8 * 60 * 60;
 
 function getJwtSecret(): Uint8Array {
   const value = process.env.JWT_SECRET;
-  if (!value || value === "default-secret-change-me") {
-    throw new Error("JWT_SECRET is required");
-  }
-  return new TextEncoder().encode(value);
+  // Deliberately re-read + re-checked on every call: the env is the source of
+  // truth (a test swaps it mid-run), and the check is a string scan — far
+  // cheaper than the signing that follows.
+  const problem = describeJwtSecretProblem(value);
+  if (problem) throw new Error(problem);
+  return new TextEncoder().encode(value as string);
 }
 
 /**

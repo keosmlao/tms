@@ -4,15 +4,20 @@ import Link from "next/link";
 import { useEffect, useState } from "react";
 import {
   FaArrowLeft,
+  FaBell,
+  FaCheckCircle,
   FaCog,
+  FaExclamationTriangle,
   FaLocationArrow,
   FaMobileAlt,
   FaQrcode,
+  FaSpinner,
 } from "react-icons/fa";
 import { Actions } from "@/lib/api";
 import { StatusPageHeader } from "@/components/status-page-shell";
 import { Field, PageLoading, SaveBar, SectionCard, Toggle } from "../_components";
 import { EMPTY_SETTINGS, type NotifySettings } from "../_settings";
+import type { PushTestResult } from "@/actions/push-test";
 
 export default function AppSettingsPage() {
   const [data, setData] = useState<NotifySettings>(EMPTY_SETTINGS);
@@ -33,6 +38,41 @@ export default function AppSettingsPage() {
       }
     })();
   }, []);
+
+  // ── ທົດສອບແຈ້ງເຕືອນ ─────────────────────────────────────────────────
+  const [pushStatus, setPushStatus] = useState<PushTestResult | null>(null);
+  const [pushBusy, setPushBusy] = useState(false);
+  const [pushResult, setPushResult] = useState<PushTestResult | null>(null);
+
+  useEffect(() => {
+    void (async () => {
+      try {
+        setPushStatus((await Actions.getPushStatus()) as PushTestResult);
+      } catch {
+        // ສະຖານະອ່ານບໍ່ໄດ້ກໍ່ຍັງກົດທົດສອບໄດ້ຢູ່ — ບໍ່ຕ້ອງລົບກວນຜູ້ໃຊ້.
+      }
+    })();
+  }, []);
+
+  const testPush = async () => {
+    setPushBusy(true);
+    setPushResult(null);
+    try {
+      const result = (await Actions.sendPushTest()) as PushTestResult;
+      setPushResult(result);
+      setPushStatus(result);
+    } catch (e) {
+      setPushResult({
+        ok: false,
+        configured: false,
+        app_tokens: 0,
+        sales_tokens: 0,
+        error: e instanceof Error ? e.message : "ຍິງທົດສອບບໍ່ສຳເລັດ",
+      });
+    } finally {
+      setPushBusy(false);
+    }
+  };
 
   const save = async () => {
     setSaving(true);
@@ -119,6 +159,65 @@ export default function AppSettingsPage() {
           </SectionCard>
 
           <SectionCard
+            title="ແຈ້ງເຕືອນ (Push)"
+            subtitle="ທົດສອບວ່າ server ຍິງແຈ້ງເຕືອນອອກໄດ້ບໍ — ສົ່ງຫາເຄື່ອງຂອງທ່ານເອງເທົ່ານັ້ນ"
+            icon={<FaBell className="text-teal-600" />}
+            tone="teal"
+          >
+            <div className="space-y-3">
+              {pushStatus && (
+                <div className="flex flex-wrap items-center gap-2 text-[11px]">
+                  <StatusPill
+                    ok={pushStatus.configured}
+                    okText="Firebase ພ້ອມ"
+                    badText="Firebase ຍັງບໍ່ຕັ້ງຄ່າຢູ່ server"
+                  />
+                  <StatusPill
+                    ok={pushStatus.app_tokens + pushStatus.sales_tokens > 0}
+                    okText={`ອຸປະກອນທີ່ລົງທະບຽນ ${
+                      pushStatus.app_tokens + pushStatus.sales_tokens
+                    }`}
+                    badText="ບັນຊີນີ້ຍັງບໍ່ມີອຸປະກອນ — ເປີດແອັບ ODG TMS 1 ຄັ້ງກ່ອນ"
+                  />
+                </div>
+              )}
+              <button
+                type="button"
+                onClick={() => void testPush()}
+                disabled={pushBusy}
+                className="inline-flex items-center gap-2 rounded-lg bg-teal-700 px-4 py-2 text-[11px] font-semibold text-white hover:bg-teal-800 disabled:opacity-50"
+              >
+                {pushBusy ? (
+                  <FaSpinner className="animate-spin" size={11} />
+                ) : (
+                  <FaBell size={11} />
+                )}
+                ຍິງທົດສອບຫາເຄື່ອງຂອງຂ້ອຍ
+              </button>
+              {pushResult && (
+                <div
+                  className={`rounded-lg px-3 py-2 text-[11px] ${
+                    pushResult.ok
+                      ? "bg-emerald-500/10 text-emerald-700 dark:text-emerald-300"
+                      : "bg-rose-500/10 text-rose-600 dark:text-rose-300"
+                  }`}
+                >
+                  {pushResult.ok
+                    ? `ສົ່ງອອກແລ້ວ ${pushResult.sent} ເຄື່ອງ${
+                        pushResult.failed ? ` (ລົ້ມເຫຼວ ${pushResult.failed})` : ""
+                      } — ກວດເບິ່ງມືຖືພາຍໃນ 2-3 ວິນາທີ`
+                    : pushResult.error}
+                </div>
+              )}
+              <p className="text-[10px] text-slate-400">
+                ບໍ່ໄດ້ຮັບ? ກວດວ່າ (1) server ມີໄຟລ໌ firebase-service-account.json
+                ຫຼື env FIREBASE_SERVICE_ACCOUNT_BASE64, (2) ມືຖືເປີດສິດແຈ້ງເຕືອນໃຫ້
+                ແອັບ, (3) ໄດ້ເປີດແອັບດ້ວຍບັນຊີນີ້ຢ່າງໜ້ອຍ 1 ຄັ້ງ.
+              </p>
+            </div>
+          </SectionCard>
+
+          <SectionCard
             title="ບັງຄັບອັບເດດ App"
             subtitle="ກຳນົດເວີຊັນຕ່ຳສຸດ — app ທີ່ເກົ່າກວ່ານີ້ຈະຖືກບັງຄັບໃຫ້ອັບເດດກ່ອນໃຊ້ງານ"
             icon={<FaMobileAlt className="text-teal-600" />}
@@ -160,5 +259,29 @@ export default function AppSettingsPage() {
         </>
       )}
     </div>
+  );
+}
+
+/** ປ້າຍສະຖານະນ້ອຍ — ຂຽວ = ພ້ອມ, ແດງ = ຕ້ອງແກ້. */
+function StatusPill({
+  ok,
+  okText,
+  badText,
+}: {
+  ok: boolean;
+  okText: string;
+  badText: string;
+}) {
+  return (
+    <span
+      className={`inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 font-semibold ${
+        ok
+          ? "bg-emerald-500/10 text-emerald-700 dark:text-emerald-300"
+          : "bg-rose-500/10 text-rose-600 dark:text-rose-300"
+      }`}
+    >
+      {ok ? <FaCheckCircle size={10} /> : <FaExclamationTriangle size={10} />}
+      {ok ? okText : badText}
+    </span>
   );
 }

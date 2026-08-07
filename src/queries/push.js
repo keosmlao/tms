@@ -292,6 +292,96 @@ async function pushToDriver(driverCode, title, body, data = {}) {
   }
 }
 
+/**
+ * ສະຖານະການຕັ້ງຄ່າ push — ໃຊ້ໂດຍປຸ່ມ "ທົດສອບແຈ້ງເຕືອນ" ໃນເວັບ.
+ *
+ * ບອກໄດ້ວ່າບັນຫາຢູ່ໃສ: Firebase ຍັງບໍ່ຕັ້ງຄ່າ, ຫຼື ຕັ້ງແລ້ວແຕ່ຜູ້ໃຊ້ຄົນນັ້ນ
+ * ຍັງບໍ່ເຄີຍເປີດແອັບ (ບໍ່ມີ token). ສອງອັນນີ້ແກ້ຄົນລະວິທີ.
+ */
+async function pushDiagnostics(userCode) {
+  const configured = initFirebaseIfNeeded();
+  const code = String(userCode ?? "").trim();
+  let appTokens = 0;
+  let salesTokens = 0;
+  try {
+    appTokens = (await getTokensFor(code)).length;
+  } catch {
+    // ຕາຕະລາງຍັງບໍ່ມີ = ຍັງບໍ່ເຄີຍມີໃຜລົງທະບຽນ
+  }
+  try {
+    const rows = await query(
+      `SELECT COUNT(*)::int AS n FROM public.app_fcm_token WHERE employee_code = $1`,
+      [code]
+    );
+    salesTokens = Number(rows?.[0]?.n ?? 0);
+  } catch {
+    // ຕາຕະລາງຂອງແອັບຝ່າຍຂາຍອາດບໍ່ມີໃນລະບົບນີ້
+  }
+  return {
+    configured,
+    error: configured
+      ? ""
+      : String(firebaseInitError?.message ?? firebaseInitError ?? ""),
+    app_tokens: appTokens,
+    sales_tokens: salesTokens,
+  };
+}
+
+/**
+ * ຍິງແຈ້ງເຕືອນທົດສອບຫາຜູ້ໃຊ້ຄົນໜຶ່ງ ແລ້ວຄືນຜົນລະອຽດ.
+ *
+ * ໃຊ້ເສັ້ນທາງດຽວກັບແຈ້ງເຕືອນຈິງ (pushToDriver) ຈຶ່ງທົດສອບໄດ້ຄົບທັງ
+ * credential, token, ແລະ ການສົ່ງຂອງ FCM — ບໍ່ແມ່ນພຽງກວດການຕັ້ງຄ່າ.
+ */
+async function sendTestPush(userCode, { title, body } = {}) {
+  const code = String(userCode ?? "").trim();
+  if (!code) return { ok: false, error: "ບໍ່ຮູ້ວ່າຈະສົ່ງຫາໃຜ" };
+
+  const diagnostics = await pushDiagnostics(code);
+  if (!diagnostics.configured) {
+    return {
+      ok: false,
+      ...diagnostics,
+      error:
+        diagnostics.error ||
+        "Firebase ຍັງບໍ່ໄດ້ຕັ້ງຄ່າຢູ່ server (ຂາດ service account)",
+    };
+  }
+  if (diagnostics.app_tokens === 0 && diagnostics.sales_tokens === 0) {
+    return {
+      ok: false,
+      ...diagnostics,
+      error:
+        "ບັນຊີນີ້ຍັງບໍ່ມີອຸປະກອນລົງທະບຽນ — ກະລຸນາເປີດແອັບ ODG TMS ດ້ວຍບັນຊີນີ້ 1 ຄັ້ງກ່ອນ",
+    };
+  }
+
+  const data = { type: "push_test" };
+  const useTitle = title || "🔔 ທົດສອບແຈ້ງເຕືອນ";
+  const useBody = body || "ຖ້າເຫັນຂໍ້ຄວາມນີ້ ແປວ່າແຈ້ງເຕືອນໃຊ້ງານໄດ້ປົກກະຕິ";
+  const [driverResult, employeeResult] = await Promise.all([
+    pushToDriver(code, useTitle, useBody, data).catch(() => undefined),
+    diagnostics.sales_tokens > 0
+      ? pushToEmployees([code], useTitle, useBody, data).catch(() => undefined)
+      : Promise.resolve(undefined),
+  ]);
+
+  const sent =
+    Number(driverResult?.sent ?? 0) + Number(employeeResult?.sent ?? 0);
+  const failed =
+    Number(driverResult?.failed ?? 0) + Number(employeeResult?.failed ?? 0);
+  return {
+    ok: sent > 0,
+    ...diagnostics,
+    sent,
+    failed,
+    error:
+      sent > 0
+        ? ""
+        : "ສົ່ງອອກບໍ່ສຳເລັດ — token ອາດໝົດອາຍຸ, ລອງເປີດແອັບໃໝ່ແລ້ວທົດສອບອີກ",
+  };
+}
+
 // Scan trips that have been received + had at least one bill picked up but
 // the driver hasn't yet tapped "ເລີ່ມຈັດສົ່ງ". Push a nudge to the driver
 // every cron tick. Returns count of trips pushed for caller logging.
@@ -442,6 +532,8 @@ module.exports = {
   saveToken,
   deleteToken,
   pushToDriver,
+  pushDiagnostics,
+  sendTestPush,
   pushToEmployees,
   pushHistory,
   pushHistoryMarkRead,
