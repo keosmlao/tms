@@ -56,6 +56,17 @@ export const ManagerDashboardQuerySchema = z.object({
   branch: OptionalString,
 });
 
+/**
+ * ລາຍການບິນຂອງແຕ່ລະຊ່ອງໃນຕາລາງຍອດບິນປະຈຳວັນ.
+ *
+ * `bucket` ຈຳກັດເປັນ enum ໃຫ້ຕົງກັບ `DAILY_BILL_BUCKETS` ຝັ່ງ query —
+ * ຄ່າອື່ນຖືກປະຕິເສດເປັນ 400 ຕັ້ງແຕ່ດ່ານນີ້ ບໍ່ຕ້ອງໄປຮອດ SQL.
+ */
+export const DailyBillsQuerySchema = z.object({
+  date: z.string().trim().optional(),
+  bucket: z.enum(["carried", "opened", "sending", "outstanding"]),
+});
+
 export const BillsListQuerySchema = z.object({
   doc_no: OptionalString,
   bill_no: OptionalString,

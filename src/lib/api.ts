@@ -23,6 +23,7 @@ import * as packDim from "@/actions/pack-dim";
 import * as pipeDim from "@/actions/pipe-dim";
 import * as presence from "@/actions/presence";
 import * as pushTest from "@/actions/push-test";
+import * as notifyPrefs from "@/actions/notify-prefs";
 import * as reports from "@/actions/reports";
 import * as routing from "@/actions/routing";
 import * as settings from "@/actions/settings";
@@ -327,6 +328,9 @@ export const Actions = {
   listRouteStopSuggestions: deliveryRoute.listRouteStopSuggestions,
   getDrivingRoute: routing.getDrivingRoute,
   getPushStatus: pushTest.getPushStatus,
+  listPushTargets: pushTest.listPushTargets,
+  getNotifyPrefs: notifyPrefs.getNotifyPrefs,
+  saveNotifyPrefs: notifyPrefs.saveNotifyPrefs,
   sendPushTest: pushTest.sendPushTest,
   deleteDeliveryRoute: deliveryRoute.deleteDeliveryRoute,
 

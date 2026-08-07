@@ -17,7 +17,7 @@ import { Actions } from "@/lib/api";
 import { StatusPageHeader } from "@/components/status-page-shell";
 import { Field, PageLoading, SaveBar, SectionCard, Toggle } from "../_components";
 import { EMPTY_SETTINGS, type NotifySettings } from "../_settings";
-import type { PushTestResult } from "@/actions/push-test";
+import type { PushTarget, PushTestResult } from "@/actions/push-test";
 
 export default function AppSettingsPage() {
   const [data, setData] = useState<NotifySettings>(EMPTY_SETTINGS);
@@ -43,6 +43,9 @@ export default function AppSettingsPage() {
   const [pushStatus, setPushStatus] = useState<PushTestResult | null>(null);
   const [pushBusy, setPushBusy] = useState(false);
   const [pushResult, setPushResult] = useState<PushTestResult | null>(null);
+  // "" = ຕົນເອງ. ເລືອກຄົນອື່ນໄດ້ເພາະຄົນທີ່ນັ່ງໜ້າຄອມມັກບໍ່ແມ່ນຄົນຖືມືຖືທົດສອບ.
+  const [pushTarget, setPushTarget] = useState("");
+  const [pushTargets, setPushTargets] = useState<PushTarget[]>([]);
 
   useEffect(() => {
     void (async () => {
@@ -51,6 +54,11 @@ export default function AppSettingsPage() {
       } catch {
         // ສະຖານະອ່ານບໍ່ໄດ້ກໍ່ຍັງກົດທົດສອບໄດ້ຢູ່ — ບໍ່ຕ້ອງລົບກວນຜູ້ໃຊ້.
       }
+      try {
+        setPushTargets((await Actions.listPushTargets()) as PushTarget[]);
+      } catch {
+        // ຝ່າຍຂາຍບໍ່ມີສິດເບິ່ງລາຍຊື່ — ຍັງຍິງຫາຕົນເອງໄດ້ຢູ່.
+      }
     })();
   }, []);
 
@@ -58,7 +66,9 @@ export default function AppSettingsPage() {
     setPushBusy(true);
     setPushResult(null);
     try {
-      const result = (await Actions.sendPushTest()) as PushTestResult;
+      const result = (await Actions.sendPushTest(
+        pushTarget || undefined
+      )) as PushTestResult;
       setPushResult(result);
       setPushStatus(result);
     } catch (e) {
@@ -160,7 +170,7 @@ export default function AppSettingsPage() {
 
           <SectionCard
             title="ແຈ້ງເຕືອນ (Push)"
-            subtitle="ທົດສອບວ່າ server ຍິງແຈ້ງເຕືອນອອກໄດ້ບໍ — ສົ່ງຫາເຄື່ອງຂອງທ່ານເອງເທົ່ານັ້ນ"
+            subtitle="ທົດສອບວ່າ server ຍິງແຈ້ງເຕືອນອອກໄດ້ບໍ — ເລືອກເຄື່ອງປາຍທາງໄດ້"
             icon={<FaBell className="text-teal-600" />}
             tone="teal"
           >
@@ -172,28 +182,52 @@ export default function AppSettingsPage() {
                     okText="Firebase ພ້ອມ"
                     badText="Firebase ຍັງບໍ່ຕັ້ງຄ່າຢູ່ server"
                   />
+                  {/* ນັບສະເພາະ app_tokens — sales_tokens ຢູ່ຄົນລະ Firebase
+                      project ຈຶ່ງຍິງຫາບໍ່ໄດ້ຈາກນີ້ ບໍ່ຄວນນັບເປັນອຸປະກອນທີ່ພ້ອມ. */}
                   <StatusPill
-                    ok={pushStatus.app_tokens + pushStatus.sales_tokens > 0}
-                    okText={`ອຸປະກອນທີ່ລົງທະບຽນ ${
-                      pushStatus.app_tokens + pushStatus.sales_tokens
-                    }`}
+                    ok={pushStatus.app_tokens > 0}
+                    okText={`ອຸປະກອນທີ່ລົງທະບຽນ ${pushStatus.app_tokens}`}
                     badText="ບັນຊີນີ້ຍັງບໍ່ມີອຸປະກອນ — ເປີດແອັບ ODG TMS 1 ຄັ້ງກ່ອນ"
                   />
                 </div>
               )}
-              <button
-                type="button"
-                onClick={() => void testPush()}
-                disabled={pushBusy}
-                className="inline-flex items-center gap-2 rounded-lg bg-teal-700 px-4 py-2 text-[11px] font-semibold text-white hover:bg-teal-800 disabled:opacity-50"
-              >
-                {pushBusy ? (
-                  <FaSpinner className="animate-spin" size={11} />
-                ) : (
-                  <FaBell size={11} />
+              <div className="flex flex-wrap items-center gap-2">
+                {pushTargets.length > 0 && (
+                  <select
+                    value={pushTarget}
+                    onChange={(e) => setPushTarget(e.target.value)}
+                    className="rounded-lg border border-slate-300 bg-white px-3 py-2 text-[11px] text-slate-700 dark:border-slate-600 dark:bg-slate-800 dark:text-slate-200"
+                  >
+                    <option value="">ຫາເຄື່ອງຂອງຂ້ອຍເອງ</option>
+                    {pushTargets.map((t) => (
+                      <option key={t.user_code} value={t.user_code}>
+                        {t.user_code} · {t.name || "—"} ({t.devices} ເຄື່ອງ)
+                      </option>
+                    ))}
+                  </select>
                 )}
-                ຍິງທົດສອບຫາເຄື່ອງຂອງຂ້ອຍ
-              </button>
+                <button
+                  type="button"
+                  onClick={() => void testPush()}
+                  disabled={pushBusy}
+                  className="inline-flex items-center gap-2 rounded-lg bg-teal-700 px-4 py-2 text-[11px] font-semibold text-white hover:bg-teal-800 disabled:opacity-50"
+                >
+                  {pushBusy ? (
+                    <FaSpinner className="animate-spin" size={11} />
+                  ) : (
+                    <FaBell size={11} />
+                  )}
+                  ຍິງທົດສອບ
+                </button>
+              </div>
+              {pushTarget && (
+                <p className="text-[10px] text-amber-600">
+                  ຈະຍິງຫາ{" "}
+                  {pushTargets.find((t) => t.user_code === pushTarget)?.name ||
+                    pushTarget}{" "}
+                  — ເຂົາຈະໄດ້ຮັບແຈ້ງເຕືອນຈິງເທິງມືຖື
+                </p>
+              )}
               {pushResult && (
                 <div
                   className={`rounded-lg px-3 py-2 text-[11px] ${
@@ -203,8 +237,10 @@ export default function AppSettingsPage() {
                   }`}
                 >
                   {pushResult.ok
-                    ? `ສົ່ງອອກແລ້ວ ${pushResult.sent} ເຄື່ອງ${
-                        pushResult.failed ? ` (ລົ້ມເຫຼວ ${pushResult.failed})` : ""
+                    ? `ສົ່ງເຖິງເຄື່ອງທີ່ login ລ່າສຸດແລ້ວ${
+                        pushResult.target_device
+                          ? ` (${pushResult.target_device})`
+                          : ""
                       } — ກວດເບິ່ງມືຖືພາຍໃນ 2-3 ວິນາທີ`
                     : pushResult.error}
                 </div>

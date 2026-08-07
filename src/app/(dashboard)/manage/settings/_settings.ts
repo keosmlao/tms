@@ -61,8 +61,15 @@ export const SETTING_TOPICS = [
   {
     key: "app",
     title: "App ຄົນຂັບ",
-    subtitle: "ຄຸນສົມບັດທີ່ສະແດງໃນ app ຂອງຄົນຂັບ",
+    subtitle: "ທົດສອບແຈ້ງເຕືອນ · ຕິດຕາມ location · ບັງຄັບອັບເດດ",
     icon: "qr",
+    tone: "teal",
+  },
+  {
+    key: "notify",
+    title: "ໃຜຮັບແຈ້ງເຕືອນຫຍັງ",
+    subtitle: "ກຳນົດປະເພດແຈ້ງເຕືອນທີ່ພະນັກງານແຕ່ລະຄົນຈະໄດ້ຮັບ",
+    icon: "bell",
     tone: "teal",
   },
   {

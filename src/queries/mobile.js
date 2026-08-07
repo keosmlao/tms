@@ -2928,6 +2928,70 @@ async function mobileDailyBillFlow(day) {
 }
 
 /**
+ * ລາຍການ **ບິນ** ຂອງແຕ່ລະຊ່ອງໃນຕາລາງຍອດບິນປະຈຳວັນ.
+ *
+ * ໃຊ້ `DAILY_BILL_BUCKETS` ອັນດຽວກັບຕົວນັບ — ຈຳນວນຢູ່ບັດ ກັບ ຈຳນວນແຖວທີ່
+ * ກົດເຂົ້າໄປເຫັນ ຈຶ່ງຕົງກັນສະເໝີ. ຖ້າຂຽນ WHERE ຊ້ຳສອງບ່ອນ ມັນຈະເລີ່ມ
+ * ຄາດເຄື່ອນກັນມື້ໃດມື້ໜຶ່ງ ແລ້ວຫາສາເຫດຍາກ.
+ *
+ * ⚠️ ເວລາເປີດບິນມາຈາກ billOpenedAtSql() (doc_date + doc_time = ໂມງລາວ)
+ * ບໍ່ແມ່ນ create_date_time_now ທີ່ ERP ຂຽນເປັນ UTC.
+ */
+async function mobileDailyBills(day, bucket) {
+  const where = DAILY_BILL_BUCKETS[bucket];
+  if (!where) {
+    const err = new Error("ບໍ່ຮູ້ຈັກປະເພດຍອດບິນ");
+    err.status = 400;
+    throw err;
+  }
+  const opened = billOpenedAtSql("ic");
+  const rows = await query(
+    `WITH scoped AS (
+       SELECT
+         d.bill_no,
+         d.doc_no,
+         COALESCE(d.status, 0) AS status,
+         d.sent_start,
+         d.sent_end,
+         COALESCE(d.cust_code, '')  AS cust_code,
+         COALESCE(cus.name_1, '')   AS cust_name,
+         COALESCE(t.driver, '')     AS driver_code,
+         COALESCE(drv.name_1, '')   AS driver_name,
+         COALESCE(car.name_1, t.car, '') AS car_name,
+         ${opened} AS opened_at
+       FROM public.odg_tms_detail d
+       LEFT JOIN public.ic_trans ic ON ic.doc_no = d.bill_no
+       LEFT JOIN public.ar_customer cus ON cus.code = d.cust_code
+       LEFT JOIN public.odg_tms t ON t.doc_no = d.doc_no
+       LEFT JOIN public.odg_tms_driver drv ON drv.code = t.driver
+       LEFT JOIN public.odg_tms_car car ON car.code = t.car
+       WHERE ${getFixedYearSqlFilter("d.doc_date")}
+     )
+     SELECT bill_no, doc_no, status, cust_code, cust_name,
+            driver_code, driver_name, car_name,
+            to_char(opened_at, 'YYYY-MM-DD HH24:MI') AS opened_at,
+            to_char(sent_end,  'YYYY-MM-DD HH24:MI') AS sent_end
+       FROM scoped
+      WHERE ${where}
+      ORDER BY opened_at DESC NULLS LAST
+      LIMIT 300`,
+    [day]
+  );
+  return (rows ?? []).map((r) => ({
+    bill_no: String(r.bill_no ?? ""),
+    doc_no: String(r.doc_no ?? ""),
+    status: Number(r.status ?? 0),
+    cust_code: String(r.cust_code ?? ""),
+    cust_name: String(r.cust_name ?? "").trim(),
+    driver_code: String(r.driver_code ?? ""),
+    driver_name: String(r.driver_name ?? "").trim(),
+    car_name: String(r.car_name ?? "").trim(),
+    opened_at: String(r.opened_at ?? ""),
+    sent_end: String(r.sent_end ?? ""),
+  }));
+}
+
+/**
  * ຄຸນນະພາບການສົ່ງຂອງມື້ນັ້ນ — ຄິດຈາກບິນທີ່ **ສົ່ງສຳເລັດແລ້ວ** ເທົ່ານັ້ນ.
  *
  * ສາມຕົວ:
@@ -2998,6 +3062,7 @@ async function mobileDeliveryQuality(day) {
 
 module.exports = {
   mobileLogin,
+  mobileDailyBills,
   mobileJobsList,
   mobileJobsListAll,
   mobileSupervisorKpi,

@@ -386,6 +386,63 @@ paths:
         '400': { $ref: '#/components/responses/ValidationError' }
         '401': { $ref: '#/components/responses/Unauthorized' }
 
+  /api/mobile/daily-bills:
+    get:
+      tags: [bills]
+      summary: Bills behind one figure of the daily bill-flow grid.
+      description: |
+        The supervisor home shows four balanced figures — carried over, opened
+        today, sent/sending, outstanding. Tapping one must open the **bills**
+        that make up that number, not the trips they happen to sit on.
+
+        The `WHERE` for each bucket is the same `DAILY_BILL_BUCKETS` constant the
+        counters use, so the list length always matches the figure on the tile.
+
+        Restricted to supervisor/manager sessions (a plain driver gets 403), as
+        these are fleet-wide figures.
+      parameters:
+        - in: query
+          name: bucket
+          required: true
+          schema:
+            type: string
+            enum: [carried, opened, sending, outstanding]
+          description: |
+            `carried` opened before today and still open · `opened` opened today
+            with a delivery · `sending` finished today plus still on the road ·
+            `outstanding` not yet closed.
+        - in: query
+          name: date
+          schema: { type: string, example: "2026-08-08" }
+          description: Day to report on. Defaults to today on the Laos wall clock.
+      responses:
+        "200":
+          description: Bills in that bucket, newest opened first (max 300).
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  date: { type: string, example: "2026-08-08" }
+                  bucket: { type: string, example: "carried" }
+                  count: { type: integer, example: 22 }
+                  bills:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        bill_no: { type: string, example: "INHPB26010968" }
+                        doc_no: { type: string, example: "TMS26080001" }
+                        status: { type: integer, example: 0, description: "0 open · 1 delivered · 2 cancelled" }
+                        cust_code: { type: string }
+                        cust_name: { type: string, example: "ຮ້ານ ບຸນຖະໜອມ" }
+                        driver_code: { type: string }
+                        driver_name: { type: string }
+                        car_name: { type: string }
+                        opened_at: { type: string, example: "2026-08-07 09:14" }
+                        sent_end: { type: string, example: "2026-08-08 14:02" }
+        "403":
+          description: Caller is a plain driver.
   /api/mobile/manager:
     get:
       tags: [jobs]

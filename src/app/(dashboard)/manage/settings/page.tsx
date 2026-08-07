@@ -3,6 +3,7 @@
 import Link from "next/link";
 import {
   FaArrowRight,
+  FaBell,
   FaChartLine,
   FaCog,
   FaLine,
@@ -22,6 +23,7 @@ const ICONS: Record<string, React.ReactNode> = {
   line: <FaLine className="text-emerald-500" />,
   whatsapp: <FaWhatsapp className="text-emerald-500" />,
   map: <FaMapMarkedAlt className="text-sky-600" />,
+  bell: <FaBell className="text-teal-600" />,
 };
 
 export default function SettingsMenuPage() {

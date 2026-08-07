@@ -50,6 +50,23 @@ async function recordAudit(input) {
         changes == null ? null : JSON.stringify(changes),
       ]
     );
+    // ທຸກການເຄື່ອນໄຫວໃນເວັບຜ່ານ recordAudit ຢູ່ແລ້ວ ຈຶ່ງແຂວນການແຈ້ງເຕືອນໄວ້
+    // ບ່ອນນີ້ບ່ອນດຽວ — action ໃໝ່ໃນອະນາຄົດຖືກກວມເອງໂດຍບໍ່ຕ້ອງໄປແກ້ຫຍັງອີກ.
+    //
+    // ບໍ່ await: ການແຈ້ງເຕືອນຊ້າກວ່າການຂຽນ audit ຫຼາຍເທົ່າ ແລະ ບໍ່ຄວນຖ່ວງ
+    // ຄຳຕອບຂອງ action ທີ່ຜູ້ໃຊ້ກຳລັງລໍຢູ່.
+    try {
+      const { notifyManagersOfActivity } = require("./activity-feed");
+      void notifyManagersOfActivity({
+        action,
+        entityType,
+        entityId,
+        userCode,
+      });
+    } catch (err) {
+      console.warn("[audit] activity notify skipped:", err?.message ?? err);
+    }
+
     return row.rows[0]?.id ?? null;
   } catch (err) {
     console.warn("[audit] write failed:", err?.message ?? err);

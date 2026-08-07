@@ -36,9 +36,27 @@ function loadServiceAccount() {
 }
 
 function initFirebaseIfNeeded() {
-  if (firebaseReady || firebaseInitError) return firebaseReady;
+  if (firebaseReady) return true;
+  // ກວດ registry ກ່ອນ error ທີ່ຄ້າງ: ຄວາມຜິດພາດຊົ່ວຄາວ (ເຊັ່ນ app ຊ້ຳ) ບໍ່ຄວນ
+  // ປິດ push ຖາວອນຕະຫຼອດອາຍຸ process.
+  if (admin.apps.length > 0) {
+    firebaseReady = true;
+    firebaseInitError = null;
+    return true;
+  }
+  if (firebaseInitError) return false;
 
   try {
+    // ໃນ dev ຂອງ Next, hot-reload ໂຫຼດ module ນີ້ຄືນ (ທຸງ firebaseReady ຫາຍ)
+    // ແຕ່ registry ຂອງ firebase-admin ຢູ່ລະດັບ process ຈຶ່ງຍັງຄ້າງຢູ່ →
+    // initializeApp ຮອບສອງ throw "app [DEFAULT] already exists" ແລ້ວໜ້າເວັບ
+    // ຂຶ້ນວ່າ "Firebase ຍັງບໍ່ຕັ້ງຄ່າຢູ່ server" ທັງທີ່ຕັ້ງຄ່າຮຽບຮ້ອຍແລ້ວ.
+    if (admin.apps.length > 0) {
+      firebaseReady = true;
+      firebaseInitError = null;
+      return true;
+    }
+
     const loaded = loadServiceAccount();
     if (!loaded) {
       firebaseInitError =
@@ -112,6 +130,30 @@ async function getTokensFor(userCode) {
   return rows.map((r) => r.token).filter(Boolean);
 }
 
+/**
+ * ເຄື່ອງທີ່ **login ລ່າສຸດ** ຂອງຜູ້ໃຊ້ຄົນນີ້ — ໃຊ້ກັບການທົດສອບເທົ່ານັ້ນ.
+ *
+ * ຄົນໜຶ່ງມັກມີຫຼາຍ token ຄ້າງ (ປ່ຽນເຄື່ອງ, ຕິດຕັ້ງໃໝ່). ຖ້າທົດສອບຍິງໝົດທຸກ
+ * ອັນ ຈະບອກບໍ່ໄດ້ວ່າ "ບໍ່ເຫັນ" ຍ້ອນລະບົບພັງ ຫຼື ຍ້ອນມັນໄປລົງເຄື່ອງເກົ່າ.
+ * ຍິງໃສ່ເຄື່ອງລ່າສຸດອັນດຽວຈຶ່ງອ່ານຜົນໄດ້ແນ່ນອນ.
+ *
+ * ⚠️ ແຈ້ງເຕືອນຈິງ (pushToDriver) ຍັງຍິງທຸກເຄື່ອງຢູ່ຄືເກົ່າ — ຄົນຂັບອາດຖືສອງ
+ * ເຄື່ອງ ແລະ ບໍ່ຄວນພາດງານ.
+ */
+async function getLatestTokenFor(userCode) {
+  await ensureFcmSchema();
+  if (!userCode) return null;
+  const rows = await query(
+    `SELECT token, platform, to_char(updated_at, 'YYYY-MM-DD HH24:MI') AS last_seen
+       FROM public.odg_tms_fcm_tokens
+      WHERE user_code = $1
+      ORDER BY updated_at DESC NULLS LAST
+      LIMIT 1`,
+    [userCode]
+  );
+  return rows?.[0] ?? null;
+}
+
 // ── Per-user push history ────────────────────────────────────────────────
 // Every push is journaled here before FCM delivery, so the app's ແຈ້ງເຕືອນ
 // screen can show history that survives reinstalls and device changes — and
@@ -145,8 +187,11 @@ async function logPush(userCode, title, body, data = {}) {
   try {
     await ensurePushLogSchema();
     await query(
+      // ຕ້ອງ cast ທຸກຕົວ: $1 ຖືກໃຊ້ທັງໃນ SELECT ແລະ ໃນ WHERE ຂອງ subquery
+      // → Postgres ຫາຊະນິດບໍ່ໄດ້ ("inconsistent types deduced for parameter $1")
+      // ແລ້ວ log ຕົກງຽບໆ ປະຫວັດການແຈ້ງເຕືອນຈຶ່ງຫວ່າງເປົ່າ.
       `INSERT INTO public.odg_tms_push_log (user_code, title, body, type, doc_no)
-       SELECT $1, $2, $3, $4, $5
+       SELECT $1::varchar, $2::text, $3::text, $4::varchar, $5::varchar
        WHERE NOT EXISTS (
          SELECT 1 FROM public.odg_tms_push_log
          WHERE user_code = $1 AND title = $2 AND type = $4 AND doc_no = $5
@@ -204,8 +249,33 @@ async function pushHistoryMarkRead(userCode, ids = []) {
 
 // Core send — multi-device per user. Silently no-ops when Firebase is not
 // configured so job actions never crash because of notifications.
+/**
+ * ຄົນນີ້ຢາກຮັບ push ປະເພດນີ້ບໍ — ຕາມໜ້າ "ໃຜຮັບແຈ້ງເຕືອນຫຍັງ".
+ *
+ * ວາງໄວ້ໃນ pushToDriver/pushToEmployees ຈຸດດຽວ ຈຶ່ງກວມທຸກຈຸດເອີ້ນ (ຈັດຖ້ຽວ,
+ * ອະນຸມັດ, ແຊັດ, ເຕືອນ, …) ແລະ push ໃໝ່ໃນອະນາຄົດຖືກກວມເອງ.
+ *
+ * ຜິດພາດ = ປ່ອຍຜ່ານ. ແຈ້ງເຕືອນທີ່ຄວນໄປແຕ່ບໍ່ໄປ ຮ້າຍແຮງກວ່າແຈ້ງເຕືອນເກີນ.
+ */
+async function wantsPush(userCode, data) {
+  try {
+    const { topicForPushType } = require("../lib/notify-topics");
+    const topic = topicForPushType(data?.type);
+    if (!topic) return true;
+    const { filterByPrefs } = require("./notify-prefs");
+    const allowed = await filterByPrefs(topic, [userCode]);
+    return allowed.length > 0;
+  } catch (err) {
+    console.warn("[push] pref check failed:", err?.message ?? err);
+    return true;
+  }
+}
+
 async function pushToDriver(driverCode, title, body, data = {}) {
   if (!driverCode) return;
+  // ກັ່ນຕອງ **ກ່ອນ** ບັນທຶກ: ຖ້າບັນທຶກກ່ອນ ປະຫວັດໃນແອັບຈະຂຶ້ນລາຍການທີ່ຄົນນັ້ນ
+  // ບໍ່ເຄີຍໄດ້ຮັບຈິງ.
+  if (!(await wantsPush(driverCode, data))) return;
   // Journal before delivery — history exists even when FCM is down/unset.
   await logPush(driverCode, title, body, data);
   if (!initFirebaseIfNeeded()) return;
@@ -328,6 +398,40 @@ async function pushDiagnostics(userCode) {
 }
 
 /**
+ * ເຄື່ອງທີ່ລົງທະບຽນຮັບແຈ້ງເຕືອນແລ້ວ — ໃໝ່ສຸດຂຶ້ນກ່ອນ.
+ *
+ * ຮວມຫຼາຍ token ຂອງຄົນດຽວກັນເປັນແຖວດຽວ ເພາະຄົນໜຶ່ງມັກມີຫຼາຍເຄື່ອງ/ຫຼາຍ
+ * ຄັ້ງທີ່ຕິດຕັ້ງ ແລະ ຄົນເລືອກຢາກເລືອກ "ຄົນ" ບໍ່ແມ່ນ "token".
+ */
+async function listPushTargets(limit = 50) {
+  const max = Math.min(Math.max(Number(limit) || 50, 1), 200);
+  try {
+    const rows = await query(
+      `SELECT t.user_code,
+              COUNT(*)::int                                   AS devices,
+              to_char(MAX(t.updated_at), 'YYYY-MM-DD HH24:MI') AS last_seen,
+              COALESCE(MAX(e.fullname_lo), '')                 AS name
+         FROM public.odg_tms_fcm_tokens t
+         LEFT JOIN public.odg_employee e ON e.employee_code = t.user_code
+        GROUP BY t.user_code
+        ORDER BY MAX(t.updated_at) DESC NULLS LAST
+        LIMIT ${max}`
+    );
+    return (rows ?? []).map((r) => ({
+      user_code: String(r.user_code ?? ""),
+      name: String(r.name ?? "").trim(),
+      devices: Number(r.devices ?? 0),
+      last_seen: String(r.last_seen ?? ""),
+    }));
+  } catch (err) {
+    // ຄືນຫວ່າງ ດີກວ່າພັງທັງໜ້າ ແຕ່ **ຕ້ອງ log** — ຮອບກ່ອນ catch ງຽບໆ ປິດບັງ
+    // ຊື່ column ຜິດ ແລ້ວເບິ່ງຄືວ່າ "ບໍ່ມີໃຜລົງທະບຽນ" ທັງທີ່ມີ 8 ເຄື່ອງ.
+    console.warn("[push] listPushTargets failed:", err?.message ?? err);
+    return [];
+  }
+}
+
+/**
  * ຍິງແຈ້ງເຕືອນທົດສອບຫາຜູ້ໃຊ້ຄົນໜຶ່ງ ແລ້ວຄືນຜົນລະອຽດ.
  *
  * ໃຊ້ເສັ້ນທາງດຽວກັບແຈ້ງເຕືອນຈິງ (pushToDriver) ຈຶ່ງທົດສອບໄດ້ຄົບທັງ
@@ -347,7 +451,9 @@ async function sendTestPush(userCode, { title, body } = {}) {
         "Firebase ຍັງບໍ່ໄດ້ຕັ້ງຄ່າຢູ່ server (ຂາດ service account)",
     };
   }
-  if (diagnostics.app_tokens === 0 && diagnostics.sales_tokens === 0) {
+  // ນັບສະເພາະ app_tokens: sales_tokens ຢູ່ຄົນລະ Firebase project ຈຶ່ງຍິງບໍ່ໄດ້
+  // ຈາກນີ້ — ຖືວ່າ "ມີອຸປະກອນ" ຍ້ອນມັນ ຈະໄດ້ຜົນ "ສົ່ງ 0" ທີ່ອະທິບາຍບໍ່ໄດ້.
+  if (diagnostics.app_tokens === 0) {
     return {
       ok: false,
       ...diagnostics,
@@ -359,26 +465,68 @@ async function sendTestPush(userCode, { title, body } = {}) {
   const data = { type: "push_test" };
   const useTitle = title || "🔔 ທົດສອບແຈ້ງເຕືອນ";
   const useBody = body || "ຖ້າເຫັນຂໍ້ຄວາມນີ້ ແປວ່າແຈ້ງເຕືອນໃຊ້ງານໄດ້ປົກກະຕິ";
-  const [driverResult, employeeResult] = await Promise.all([
-    pushToDriver(code, useTitle, useBody, data).catch(() => undefined),
-    diagnostics.sales_tokens > 0
-      ? pushToEmployees([code], useTitle, useBody, data).catch(() => undefined)
-      : Promise.resolve(undefined),
-  ]);
+  // ຍິງໃສ່ **ເຄື່ອງທີ່ login ລ່າສຸດ ອັນດຽວ**. ຍິງໝົດທຸກ token ເຮັດໃຫ້ອ່ານຜົນ
+  // ບໍ່ອອກ: "ສົ່ງ 2 ເຄື່ອງສຳເລັດ" ແຕ່ຜູ້ທົດສອບບໍ່ເຫັນຫຍັງ ເພາະມັນລົງເຄື່ອງເກົ່າ.
+  //
+  // ນອກຈາກນັ້ນຍັງບໍ່ແຕະຕາຕະລາງ app_fcm_token (ແອັບຝ່າຍຂາຍ) ເພາະຢູ່ຄົນລະ
+  // Firebase project → ໄດ້ `messaging/mismatched-credential` ທຸກເທື່ອ ແລ້ວ
+  // ຜົນທົດສອບເບິ່ງຄືພັງທັງທີ່ແອັບ TMS ຮັບໄດ້ປົກກະຕິ.
+  const device = await getLatestTokenFor(code);
+  if (!device?.token) {
+    return {
+      ok: false,
+      ...diagnostics,
+      error: "ຫາເຄື່ອງລ່າສຸດຂອງບັນຊີນີ້ບໍ່ພົບ — ໃຫ້ເປີດແອັບ ແລ້ວ login ໃໝ່",
+    };
+  }
 
-  const sent =
-    Number(driverResult?.sent ?? 0) + Number(employeeResult?.sent ?? 0);
-  const failed =
-    Number(driverResult?.failed ?? 0) + Number(employeeResult?.failed ?? 0);
+  await logPush(code, useTitle, useBody, data);
+  let sent = 0;
+  let failed = 0;
+  try {
+    const res = await admin.messaging().send({
+      notification: { title: useTitle, body: useBody },
+      data: { ...data, driver_code: code },
+      android: {
+        priority: "high",
+        notification: {
+          channelId: "odgtms_jobs",
+          color: "#0d9488",
+          defaultSound: true,
+          defaultVibrateTimings: true,
+        },
+      },
+      apns: {
+        payload: { aps: { alert: { title: useTitle, body: useBody }, sound: "default" } },
+      },
+      token: device.token,
+    });
+    sent = res ? 1 : 0;
+  } catch (err) {
+    failed = 1;
+    const errCode = String(err?.code ?? "");
+    if (errCode.includes("registration-token-not-registered")) {
+      await deleteToken(device.token);
+    }
+    return {
+      ok: false,
+      ...diagnostics,
+      sent,
+      failed,
+      target_device: `${device.platform ?? "?"} · ${device.last_seen ?? ""}`,
+      error: errCode.includes("registration-token-not-registered")
+        ? "token ຂອງເຄື່ອງລ່າສຸດໝົດອາຍຸແລ້ວ (ລຶບອອກໃຫ້ແລ້ວ) — ໃຫ້ເປີດແອັບໃໝ່"
+        : `ສົ່ງບໍ່ສຳເລັດ — ${err?.message ?? errCode}`,
+    };
+  }
+
   return {
     ok: sent > 0,
     ...diagnostics,
     sent,
     failed,
-    error:
-      sent > 0
-        ? ""
-        : "ສົ່ງອອກບໍ່ສຳເລັດ — token ອາດໝົດອາຍຸ, ລອງເປີດແອັບໃໝ່ແລ້ວທົດສອບອີກ",
+    target_device: `${device.platform ?? "?"} · ${device.last_seen ?? ""}`,
+    error: "",
   };
 }
 
@@ -429,13 +577,25 @@ async function remindUnstartedDispatches({ minMinutesSincePickup = 5 } = {}) {
 // share the same Firebase project, so the same service account can push to
 // either token store.
 async function pushToEmployees(employeeCodes, title, body, data = {}) {
-  const codes = Array.from(
+  let codes = Array.from(
     new Set(
       (Array.isArray(employeeCodes) ? employeeCodes : [])
         .map((c) => (c == null ? "" : String(c).trim()))
         .filter(Boolean)
     )
   );
+  if (codes.length === 0) return;
+  // ຄືກັບ pushToDriver — ຕັດຄົນທີ່ປິດປະເພດນີ້ອອກກ່ອນຍິງ.
+  try {
+    const { topicForPushType } = require("../lib/notify-topics");
+    const topic = topicForPushType(data?.type);
+    if (topic) {
+      const { filterByPrefs } = require("./notify-prefs");
+      codes = await filterByPrefs(topic, codes);
+    }
+  } catch (err) {
+    console.warn("[push] pref check failed:", err?.message ?? err);
+  }
   if (codes.length === 0) return;
   if (!initFirebaseIfNeeded()) return;
 
@@ -533,6 +693,7 @@ module.exports = {
   deleteToken,
   pushToDriver,
   pushDiagnostics,
+  listPushTargets,
   sendTestPush,
   pushToEmployees,
   pushHistory,

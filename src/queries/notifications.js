@@ -468,6 +468,7 @@ async function notifyPickupVariance({ billNo, docNo, driverCode, variance }) {
       .join("\n");
 
     const { pushToEmployees, pushToDriver } = require("./push");
+    // ການກັ່ນຕອງຕາມ "ໃຜຮັບແຈ້ງເຕືອນຫຍັງ" ຢູ່ໃນ push.js ແລ້ວ (ອີງ data.type)
     const recipients = Array.from(codes);
     const data = { type: "pickup_variance", bill_no: bill, doc_no: doc };
     await Promise.allSettled([
@@ -547,6 +548,7 @@ async function notifyBillDelivered({
       .join("\n");
 
     const { pushToEmployees, pushToDriver } = require("./push");
+    // ການກັ່ນຕອງຕາມ "ໃຜຮັບແຈ້ງເຕືອນຫຍັງ" ຢູ່ໃນ push.js ແລ້ວ (ອີງ data.type)
     const recipients = Array.from(codes);
     const title = fullyDelivered ? "✅ ສົ່ງສຳເລັດ" : "📦 ສົ່ງບາງສ່ວນ";
     // bill_no lets the app open the POD proof for exactly this bill.

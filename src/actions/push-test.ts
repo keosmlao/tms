@@ -1,10 +1,19 @@
 "use server";
 
-import { requireSession } from "./_helpers";
+import { requireDispatchAccess, requireSession } from "./_helpers";
 import {
+  listPushTargets as svcListTargets,
   pushDiagnostics as svcDiagnostics,
   sendTestPush as svcSendTest,
 } from "@/queries/push.js";
+
+export interface PushTarget {
+  user_code: string;
+  name: string;
+  devices: number;
+  /** Laos wall-clock stamp of the newest token, "" when unknown. */
+  last_seen: string;
+}
 
 export interface PushTestResult {
   ok: boolean;
@@ -16,6 +25,8 @@ export interface PushTestResult {
   sales_tokens: number;
   sent?: number;
   failed?: number;
+  /** Which device the test actually hit, e.g. "android · 2026-08-07 21:06". */
+  target_device?: string;
   /** Lao message explaining what to fix; empty when everything worked. */
   error: string;
 }
@@ -36,16 +47,34 @@ export async function getPushStatus(): Promise<PushTestResult> {
 }
 
 /**
- * ຍິງແຈ້ງເຕືອນທົດສອບຫາ **ເຄື່ອງຂອງຜູ້ທີ່ກົດເອງ** ເທົ່ານັ້ນ.
+ * ລາຍຊື່ເຄື່ອງທີ່ລົງທະບຽນຮັບແຈ້ງເຕືອນແລ້ວ — ໃຫ້ເລືອກເປັນເປົ້າໝາຍທົດສອບ.
  *
- * ຕັ້ງໃຈບໍ່ໃຫ້ເລືອກຜູ້ຮັບ: ປຸ່ມທົດສອບຢູ່ໜ້າຕັ້ງຄ່າທີ່ຫຼາຍຄົນເຂົ້າໄດ້ ຖ້າສົ່ງຫາ
- * ຄົນອື່ນໄດ້ ມັນຈະກາຍເປັນຊ່ອງທາງລົບກວນຄົນຂັບທັງກອງ.
+ * ຝ່າຍຂາຍເຂົ້າບໍ່ໄດ້ (`requireDispatchAccess`) ເພາະລາຍຊື່ນີ້ບອກວ່າໃຜເປີດແອັບ
+ * ຢູ່ ແລະ ເປັນປະຕູໄປສູ່ການຍິງຫາຄົນອື່ນ.
  */
-export async function sendPushTest(): Promise<PushTestResult> {
+export async function listPushTargets(): Promise<PushTarget[]> {
+  await requireDispatchAccess();
+  return (await svcListTargets()) as PushTarget[];
+}
+
+/**
+ * ຍິງແຈ້ງເຕືອນທົດສອບ — ຫາເຄື່ອງຕົນເອງ ຫຼື ຫາເຄື່ອງທີ່ເລືອກ.
+ *
+ * ຍິງຫາຄົນອື່ນຕ້ອງມີສິດຈັດການຖ້ຽວ ເພື່ອບໍ່ໃຫ້ປຸ່ມທົດສອບກາຍເປັນຊ່ອງທາງ
+ * ລົບກວນຄົນຂັບທັງກອງ. ຍິງຫາຕົນເອງບໍ່ຈຳກັດ.
+ */
+export async function sendPushTest(
+  targetCode?: string
+): Promise<PushTestResult> {
   const session = await requireSession();
-  const result = (await svcSendTest(session.usercode, {
+  const wanted = String(targetCode ?? "").trim();
+  const target = wanted && wanted !== session.usercode ? wanted : null;
+  if (target) await requireDispatchAccess();
+
+  const by = session.username || session.usercode;
+  const result = (await svcSendTest(target ?? session.usercode, {
     title: "🔔 ທົດສອບແຈ້ງເຕືອນ",
-    body: `ສົ່ງຈາກໜ້າຕັ້ງຄ່າໂດຍ ${session.username || session.usercode}`,
+    body: `ສົ່ງຈາກໜ້າຕັ້ງຄ່າໂດຍ ${by}`,
   })) as PushTestResult;
   return result;
 }
