@@ -2,7 +2,13 @@
 
 import Link from "next/link";
 import { useEffect, useState } from "react";
-import { FaArrowLeft, FaCog, FaMobileAlt, FaQrcode } from "react-icons/fa";
+import {
+  FaArrowLeft,
+  FaCog,
+  FaLocationArrow,
+  FaMobileAlt,
+  FaQrcode,
+} from "react-icons/fa";
 import { Actions } from "@/lib/api";
 import { StatusPageHeader } from "@/components/status-page-shell";
 import { Field, PageLoading, SaveBar, SectionCard, Toggle } from "../_components";
@@ -34,6 +40,8 @@ export default function AppSettingsPage() {
     try {
       await Actions.saveNotifySettings({
         "app.qr_scan_verify_enabled": data["app.qr_scan_verify_enabled"],
+        "app.mobile.location_tracking_enabled":
+          data["app.mobile.location_tracking_enabled"],
         "app.mobile.min_version": data["app.mobile.min_version"].trim(),
         "app.mobile.latest_version": data["app.mobile.latest_version"].trim(),
         "app.mobile.update_url_android": data["app.mobile.update_url_android"].trim(),
@@ -51,6 +59,12 @@ export default function AppSettingsPage() {
     data["app.qr_scan_verify_enabled"] === "1" ||
     data["app.qr_scan_verify_enabled"] === "true" ||
     data["app.qr_scan_verify_enabled"] === "";
+
+  // Unset = on. Only an explicit "0"/"false" switches phone GPS off.
+  const locationTrackingEnabled = !(
+    data["app.mobile.location_tracking_enabled"] === "0" ||
+    data["app.mobile.location_tracking_enabled"] === "false"
+  );
 
   return (
     <div className="space-y-5">
@@ -82,6 +96,25 @@ export default function AppSettingsPage() {
               description="ເມື່ອເປີດ: ປຸ່ມ Scan QR ປະກົດໃນບີນຕອນຈັດສົ່ງ ໃຫ້ຄົນຂັບ scan ບີນເພື່ອກວດສອບໄລຍະ. ປິດເພື່ອເຊື່ອງ."
               checked={qrScanEnabled}
               onChange={(v) => setData((d) => ({ ...d, "app.qr_scan_verify_enabled": v ? "1" : "0" }))}
+            />
+          </SectionCard>
+
+          <SectionCard
+            title="ຕິດຕາມຕຳແໜ່ງ (GPS ມືຖື)"
+            subtitle="ຮັບຕຳແໜ່ງຈາກມືຖືພະນັກງານ — ມີຜົນທັນທີ ບໍ່ຕ້ອງອອກ-ເຂົ້າລະບົບໃໝ່"
+            icon={<FaLocationArrow className="text-teal-600" />}
+            tone="teal"
+          >
+            <Toggle
+              label="ຮັບຕຳແໜ່ງຈາກມືຖື (auto realtime)"
+              description="ເມື່ອເປີດ: ທຸກຄົນທີ່ໃຊ້ແອັບຖືກບັງຄັບໃຫ້ເປີດ GPS ແລະ ອະນຸຍາດສິດຕຳແໜ່ງ ຈຶ່ງໃຊ້ແອັບໄດ້, ແລະ ມືຖືສົ່ງຕຳແໜ່ງທຸກ 5 ວິນາທີຕອນມີຖ້ຽວກຳລັງແລ່ນ. ເມື່ອປິດ: ມືຖືເຊົາສົ່ງ, ເຊົາບັງຄັບເປີດ GPS ແລະ server ບໍ່ຮັບຕຳແໜ່ງທີ່ສົ່ງມາອີກ (ລວມແອັບເວີຊັນເກົ່າ). ແອັບຮັບຮູ້ການປ່ຽນພາຍໃນ 1 ນາທີ."
+              checked={locationTrackingEnabled}
+              onChange={(v) =>
+                setData((d) => ({
+                  ...d,
+                  "app.mobile.location_tracking_enabled": v ? "1" : "0",
+                }))
+              }
             />
           </SectionCard>
 

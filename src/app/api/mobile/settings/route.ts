@@ -6,10 +6,17 @@ import {
   requireMobileSession,
 } from "@/lib/mobile-auth";
 import { evaluateMobileAppVersion } from "@/lib/app-version";
+import {
+  LOCATION_TRACKING_KEY,
+  isLocationTrackingEnabled,
+} from "@/lib/mobile-tracking";
 
 // Allow-list of settings safe to expose to the driver app. New mobile feature
 // flags belong here; nothing else from `odg_tms_setting` should leak.
-const MOBILE_KEYS = ["app.qr_scan_verify_enabled"] as const;
+const MOBILE_KEYS = [
+  "app.qr_scan_verify_enabled",
+  LOCATION_TRACKING_KEY,
+] as const;
 
 export async function GET(request: NextRequest) {
   try {
@@ -32,6 +39,12 @@ export async function GET(request: NextRequest) {
         : "";
     return Response.json({
       qr_scan_verify_enabled: isOn(raw["app.qr_scan_verify_enabled"]),
+      // Master switch for phone GPS. The app polls this endpoint on a short
+      // cycle, so flipping it in the dashboard reaches every handset within
+      // that window — no re-login, no new build.
+      location_tracking_enabled: isLocationTrackingEnabled(
+        raw[LOCATION_TRACKING_KEY]
+      ),
       tv_url: tvUrl,
       app_update,
     });

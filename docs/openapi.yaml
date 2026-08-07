@@ -219,6 +219,14 @@ paths:
                 type: object
                 properties:
                   qr_scan_verify_enabled: { type: boolean }
+                  location_tracking_enabled:
+                    type: boolean
+                    description: |
+                      Master switch for phone GPS (dashboard → App ຄົນຂັບ).
+                      When false the app stops posting positions and stops
+                      requiring staff to keep location switched on; the server
+                      also drops save_travel_history / tracking_status posts.
+                      Defaults to true when the setting has never been saved.
                   tv_url:
                     type: string
                     description: |

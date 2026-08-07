@@ -3,6 +3,7 @@ import { mobileJobsList, mobileJobsListAll, mobileJobAction, mobileSupervisorKpi
 import { getGpsRealtimeAll, getPhoneFleet } from "@/queries/tracking.js";
 import { approveJob } from "@/queries/approve.js";
 import { mobileErrorResponse, requireMobileSession } from "@/lib/mobile-auth";
+import { locationTrackingEnabled } from "@/lib/mobile-tracking";
 import { parseJsonBody, parseSearchParams } from "@/lib/validation";
 import { JobActionSchema, JobsListQuerySchema } from "@/lib/mobile-schemas";
 
@@ -142,6 +143,20 @@ export async function POST(request: Request) {
       }
       await approveJob(session, body.doc_no);
       return Response.json({ success: true });
+    }
+    // Master switch (dashboard → App ຄົນຂັບ → ຕິດຕາມຕຳແໜ່ງ). When an admin
+    // turns location off, stop accepting it here too — the flag has to hold
+    // for app builds that predate it, and for anything replaying a queued
+    // position from its offline outbox.
+    if (
+      body.action === "save_travel_history" ||
+      body.action === "tracking_status"
+    ) {
+      if (!(await locationTrackingEnabled())) {
+        // 202-style no-op rather than an error: the app must not treat a
+        // deliberate admin setting as a failed post and retry it forever.
+        return Response.json({ success: true, tracking_disabled: true });
+      }
     }
     const data = await mobileJobAction({
       ...body,

@@ -17,6 +17,10 @@ const NOTIFY_KEYS = [
   // Driver-app feature flag. "1" = QR-scan verify button visible in bill rows;
   // anything else hides it. Defaulted to "1" in the dashboard form.
   "app.qr_scan_verify_enabled",
+  // Master switch for receiving phone GPS. "0" = the app stops posting
+  // positions, stops forcing staff to keep location on, and the server drops
+  // any GPS an older build still sends. Anything else (incl. unset) = on.
+  "app.mobile.location_tracking_enabled",
   // Driver-app version gate. min_version = oldest build allowed (older builds
   // are forced to update). latest_version = newest build (soft prompt). The
   // two URLs point drivers to the store/APK per platform. Empty min = gate off.
@@ -51,6 +55,7 @@ export interface NotifySettings {
   "whatsapp.test_to": string;
   "pending.not_yet_days": string;
   "app.qr_scan_verify_enabled": string;
+  "app.mobile.location_tracking_enabled": string;
   "app.mobile.min_version": string;
   "app.mobile.latest_version": string;
   "app.mobile.update_url_android": string;
