@@ -210,6 +210,28 @@ async function mobileJobsList(driverId, date, options = {}) {
       WHERE ${getFixedYearSqlFilter("d.doc_date")}
       GROUP BY d.doc_no
     ),
+    -- ຈຸດຕໍ່ໄປ: ບິນທຳອິດທີ່ຍັງບໍ່ປິດ. ໃສ່ມາກັບລາຍການຖ້ຽວເພື່ອໃຫ້ບັດຖ້ຽວ
+    -- ບອກໄດ້ວ່າ "ຕໍ່ໄປໄປໃສ" ໂດຍບໍ່ຕ້ອງເປີດເຂົ້າໄປເບິ່ງບິນ.
+    next_stop AS (
+      SELECT DISTINCT ON (d.doc_no)
+        d.doc_no,
+        COALESCE(NULLIF(TRIM(cu.name_1), ''), d.cust_code, '') AS next_stop_name,
+        acd.latitude  AS next_stop_lat,
+        acd.longitude AS next_stop_lng
+      FROM public.odg_tms_detail d
+      LEFT JOIN public.ar_customer cu ON cu.code = d.cust_code
+      LEFT JOIN public.ar_customer_detail acd ON acd.ar_code = d.cust_code
+      WHERE COALESCE(d.status, 0) NOT IN (1, 2)
+        AND ${getFixedYearSqlFilter("d.doc_date")}
+      ORDER BY d.doc_no, d.sent_start NULLS LAST, d.bill_no
+    ),
+    -- ຕຳແໜ່ງລ່າສຸດຂອງລົດ — ໄລຍະຕ້ອງວັດຈາກ "ບ່ອນລົດຢູ່ດຽວນີ້" ບໍ່ແມ່ນຈາກສາງ
+    -- ຈຶ່ງຈະເປັນຕົວເລກທີ່ຄົນຂັບໃຊ້ຕັດສິນໃຈໄດ້.
+    last_fix AS (
+      SELECT DISTINCT ON (th.doc_no) th.doc_no, th.lat, th.lng
+      FROM public.odg_tms_travel_history th
+      ORDER BY th.doc_no, th.recorded_at DESC
+    ),
     worker_summary AS (
       SELECT doc_no, COUNT(*)::int AS worker_count,
         string_agg(worker_name, ', ' ORDER BY worker_name) AS workers
@@ -235,6 +257,22 @@ async function mobileJobsList(driverId, date, options = {}) {
       COALESCE(bs.inprogress_bill_count, 0) as inprogress_bill_count,
       COALESCE(bs.completed_bill_count, 0) as completed_bill_count,
       COALESCE(bs.cancelled_bill_count, 0) as cancelled_bill_count,
+      COALESCE(ns.next_stop_name, '') as next_stop_name,
+      -- ໄລຍະເສັ້ນຊື່ (ກມ) ຈາກລົດຫາຈຸດຕໍ່ໄປ. ວ່າງ = ຂາດພິກັດຝ່າຍໃດຝ່າຍໜຶ່ງ
+      -- → ຈໍບໍ່ສະແດງ ດີກວ່າສະແດງ 0 ໃຫ້ເຂົ້າໃຈຜິດວ່າຮອດແລ້ວ.
+      COALESCE(
+        CASE
+          WHEN COALESCE(ns.next_stop_lat, 0) = 0
+            OR COALESCE(ns.next_stop_lng, 0) = 0
+            OR lf.lat IS NULL OR lf.lng IS NULL
+            OR lf.lat !~ '^-?[0-9.]+$' OR lf.lng !~ '^-?[0-9.]+$'
+          THEN NULL
+          ELSE round((6371 * acos(LEAST(1, GREATEST(-1,
+              cos(radians(lf.lat::numeric)) * cos(radians(ns.next_stop_lat))
+              * cos(radians(ns.next_stop_lng) - radians(lf.lng::numeric))
+              + sin(radians(lf.lat::numeric)) * sin(radians(ns.next_stop_lat))
+            ))))::numeric, 1)::text
+        END, '') as next_stop_km,
       COALESCE(to_char(bs.received_at,'DD-MM-YYYY HH24:MI'), '-') as received_at,
       COALESCE(to_char(a.dispatch_started_at,'DD-MM-YYYY HH24:MI'), '-') as dispatch_started_at,
       COALESCE(a.miles_start, '') as miles_start,
@@ -262,6 +300,8 @@ async function mobileJobsList(driverId, date, options = {}) {
     LEFT JOIN erp_user d ON d.code = a.user_created
     LEFT JOIN bill_summary bs ON bs.doc_no = a.doc_no
     LEFT JOIN worker_summary ws ON ws.doc_no = a.doc_no
+    LEFT JOIN next_stop ns ON ns.doc_no = a.doc_no
+    LEFT JOIN last_fix lf ON lf.doc_no = a.doc_no
     LEFT JOIN public.odg_tms_delivery_route rt
       ON rt.code = a.delivery_route_code
     LEFT JOIN public.odg_tms_delivery_round dr

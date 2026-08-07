@@ -27,7 +27,17 @@ function getJwtSecret(): Uint8Array {
   // truth (a test swaps it mid-run), and the check is a string scan — far
   // cheaper than the signing that follows.
   const problem = describeJwtSecretProblem(value);
-  if (problem) throw new Error(problem);
+  if (problem) {
+    // ລາຍລະອຽດໄປ log ຂອງ server ເທົ່ານັ້ນ. ຜູ້ໃຊ້ບໍ່ຄວນເຫັນວ່າກະແຈເປັນຄ່າ
+    // ມາດຕະຖານ — ນັ້ນເປັນການບອກຄົນນອກວ່າຈະປອມ token ໄດ້ແນວໃດ ແລະ ຄົນຂັບ
+    // ກໍ່ເຮັດຫຍັງກັບຂໍ້ຄວາມນັ້ນບໍ່ໄດ້ຢູ່ດີ.
+    console.error(`[auth] ${problem}`);
+    const error = new Error(
+      "ລະບົບຍັງຕັ້ງຄ່າບໍ່ຄົບ — ກະລຸນາຕິດຕໍ່ IT"
+    ) as Error & { status?: number };
+    error.status = 503;
+    throw error;
+  }
   return new TextEncoder().encode(value as string);
 }
 
