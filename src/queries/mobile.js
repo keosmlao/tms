@@ -2853,8 +2853,78 @@ async function mobileSupervisorKpi({ date = "" } = {}) {
     [day]
   );
   const base = row[0] ?? {};
-  const quality = await mobileDeliveryQuality(day);
-  return { ...base, ...quality };
+  const [quality, flow] = await Promise.all([
+    mobileDeliveryQuality(day),
+    mobileDailyBillFlow(day),
+  ]);
+  return { ...base, ...quality, ...flow };
+}
+
+/**
+ * ເງື່ອນໄຂຂອງແຕ່ລະຍອດ — **ບ່ອນດຽວ** ທີ່ນິຍາມໄວ້.
+ *
+ * ທັງຕົວເລກໃນບັດ ແລະ ລາຍການບິນທີ່ເປີດຈາກການກົດບັດ ໃຊ້ອັນນີ້ຮ່ວມກັນ ຈຶ່ງເປັນ
+ * ໄປບໍ່ໄດ້ທີ່ບັດຈະບອກ 12 ແຕ່ລາຍການສະແດງ 9 — ຄວາມບໍ່ກົງກັນແບບນັ້ນເຮັດໃຫ້
+ * ຫົວໜ້າເຊົາເຊື່ອຕົວເລກທັງໜ້າ.
+ */
+const DAILY_BILL_BUCKETS = {
+  carried: `opened_at IS NOT NULL
+            AND opened_at::date < $1::date
+            AND (sent_end IS NULL OR sent_end::date >= $1::date)
+            AND status <> 2`,
+  opened: `opened_at IS NOT NULL AND opened_at::date = $1::date`,
+  sending: `(status = 1 AND sent_end IS NOT NULL AND sent_end::date = $1::date)
+            OR (status NOT IN (1, 2) AND sent_start IS NOT NULL)`,
+  outstanding: `status NOT IN (1, 2)
+                AND opened_at IS NOT NULL
+                AND opened_at::date <= $1::date`,
+};
+
+/**
+ * ຍອດບິນປະຈຳວັນແບບດຸ່ນດ່ຽງ — ອ່ານຄືບັນຊີ:
+ *
+ *   ຍົກມາ + ເປີດໃໝ່ − (ສົ່ງແລ້ວ + ຍົກເລີກ) = ຄົງເຫຼືອ
+ *
+ * ນິຍາມ (ນັບສະເພາະບິນທີ່ຖືກຈັດເຂົ້າຖ້ຽວແລ້ວ = ມີແຖວໃນ odg_tms_detail):
+ *   * `carried_over`   ເປີດບິນກ່ອນມື້ນີ້ ແລະ ຕົ້ນມື້ນີ້ຍັງບໍ່ທັນປິດ
+ *   * `opened_today`   ເປີດບິນມື້ນີ້ ແລະ ມີການຈັດສົ່ງ
+ *   * `sent_or_sending` ສົ່ງສຳເລັດມື້ນີ້ + ກຳລັງແລ່ນສົ່ງຢູ່
+ *   * `outstanding`    ຄົງເຫຼືອທີ່ຍັງບໍ່ປິດຮອດຂະນະນີ້
+ *
+ * ⚠️ ເວລາເປີດບິນມາຈາກ billOpenedAtSql() (doc_date + doc_time = ໂມງລາວ) ບໍ່ແມ່ນ
+ * create_date_time_now ທີ່ ERP ຂຽນເປັນ UTC — ຖ້າໃຊ້ອັນນັ້ນ ບິນທີ່ເປີດກ່ອນ
+ * 07:00 ຈະຖືກນັບເປັນມື້ວານທັງໝົດ.
+ */
+async function mobileDailyBillFlow(day) {
+  const opened = billOpenedAtSql("ic");
+  const rows = await query(
+    `WITH scoped AS (
+       SELECT
+         d.bill_no,
+         d.doc_no,
+         COALESCE(d.status, 0) AS status,
+         d.sent_start,
+         d.sent_end,
+         ${opened} AS opened_at
+       FROM public.odg_tms_detail d
+       LEFT JOIN public.ic_trans ic ON ic.doc_no = d.bill_no
+       WHERE ${getFixedYearSqlFilter("d.doc_date")}
+     )
+     SELECT
+       COUNT(*) FILTER (WHERE ${DAILY_BILL_BUCKETS.carried})::int AS carried_over,
+       COUNT(*) FILTER (WHERE ${DAILY_BILL_BUCKETS.opened})::int AS opened_today,
+       COUNT(*) FILTER (WHERE ${DAILY_BILL_BUCKETS.sending})::int AS sent_or_sending,
+       COUNT(*) FILTER (WHERE ${DAILY_BILL_BUCKETS.outstanding})::int AS outstanding
+     FROM scoped`,
+    [day]
+  );
+  const r = rows[0] ?? {};
+  return {
+    carried_over: Number(r.carried_over ?? 0),
+    opened_today: Number(r.opened_today ?? 0),
+    sent_or_sending: Number(r.sent_or_sending ?? 0),
+    outstanding: Number(r.outstanding ?? 0),
+  };
 }
 
 /**
