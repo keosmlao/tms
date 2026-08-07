@@ -25,6 +25,7 @@ const {
   customerAreaSql,
   ensureTmsWorkerTable,
   invalidateRemainingSummary,
+  billOpenedAtSql,
 } = require("./helpers");
 const { saveToken: saveFcmToken, deleteToken: deleteFcmToken } = require("./push");
 const { saveFuelRefill, getFuelLogs, getFuelSummary } = require("./fuel");
@@ -2796,6 +2797,12 @@ async function mobileSupervisorKpi({ date = "" } = {}) {
        COUNT(*) FILTER (WHERE COALESCE(d.status,0) = 1)::int AS delivered_bills,
        COUNT(*) FILTER (WHERE COALESCE(d.status,0) = 2)::int AS cancelled_bills,
        COUNT(*) FILTER (WHERE COALESCE(d.status,0) NOT IN (1,2))::int AS pending_bills,
+       -- ເບີກເຄື່ອງແລ້ວ (ຍົກຂຶ້ນລົດ) ແລະ ກຳລັງແລ່ນສົ່ງຢູ່ — ສອງອັນນີ້ຄື
+       -- "ຂອງທີ່ອອກຈາກສາງໄປແລ້ວ" ທີ່ຫົວໜ້າຖາມທຸກມື້.
+       COUNT(*) FILTER (WHERE d.recipt_job IS NOT NULL)::int AS picked_bills,
+       COUNT(*) FILTER (
+         WHERE COALESCE(d.status,0) NOT IN (1,2) AND d.sent_start IS NOT NULL
+       )::int AS delivering_bills,
        COALESCE(SUM(d.collected_amount), 0)::numeric AS cod_collected
      FROM odg_tms t
      LEFT JOIN public.odg_tms_detail d
@@ -2805,7 +2812,78 @@ async function mobileSupervisorKpi({ date = "" } = {}) {
        AND ${getFixedYearSqlFilter("t.doc_date")}`,
     [day]
   );
-  return row[0] ?? {};
+  const base = row[0] ?? {};
+  const quality = await mobileDeliveryQuality(day);
+  return { ...base, ...quality };
+}
+
+/**
+ * ຄຸນນະພາບການສົ່ງຂອງມື້ນັ້ນ — ຄິດຈາກບິນທີ່ **ສົ່ງສຳເລັດແລ້ວ** ເທົ່ານັ້ນ.
+ *
+ * ສາມຕົວ:
+ *   * `within24h`  — ສົ່ງພາຍໃນ 24 ຊົ່ວໂມງນັບແຕ່ **ເປີດບິນ**
+ *   * `onSchedule` — ສົ່ງບໍ່ເກີນວັນທີ່ນັດຈັດສົ່ງ (date_logistic)
+ *   * `queueJumped`— ບິນທີ່ **ເປີດຫຼັງ ແຕ່ໄດ້ສົ່ງກ່ອນ** ບິນທີ່ເປີດກ່ອນ
+ *
+ * ⚠️ ເວລາເປີດບິນຕ້ອງມາຈາກ billOpenedAtSql() (doc_date + doc_time = ໂມງລາວ).
+ * `ic_trans.create_date_time_now` ຖືກ ERP ຂຽນເປັນ UTC — ໃຊ້ອັນນັ້ນຈະຄາດເຄື່ອນ
+ * 7 ຊົ່ວໂມງ ແລ້ວຕົວເລກ "ພາຍໃນ 24 ຊມ" ຈະຜິດທັງໝົດ.
+ */
+async function mobileDeliveryQuality(day) {
+  const opened = billOpenedAtSql("ic");
+  const rows = await query(
+    `WITH sent AS (
+       SELECT d.bill_no,
+              d.sent_end,
+              t.date_logistic,
+              ${opened} AS opened_at
+       FROM odg_tms t
+       INNER JOIN public.odg_tms_detail d
+         ON d.doc_no = t.doc_no AND ${getFixedYearSqlFilter("d.doc_date")}
+       LEFT JOIN public.ic_trans ic ON ic.doc_no = d.bill_no
+       WHERE t.doc_date = $1
+         AND COALESCE(t.job_status,0) != 4
+         AND COALESCE(d.status,0) = 1
+         AND d.sent_end IS NOT NULL
+         AND ${getFixedYearSqlFilter("t.doc_date")}
+     )
+     SELECT
+       COUNT(*)::int AS sent_bills,
+       COUNT(*) FILTER (
+         WHERE opened_at IS NOT NULL
+           AND sent_end <= opened_at + INTERVAL '24 hours'
+       )::int AS within_24h_bills,
+       COUNT(*) FILTER (
+         WHERE date_logistic IS NOT NULL
+           AND sent_end::date <= date_logistic::date
+       )::int AS on_schedule_bills,
+       -- ບລັດຄິວ: ມີບິນອື່ນທີ່ເປີດກ່ອນ ແຕ່ຖືກສົ່ງຫຼັງ (ຫຼືຍັງບໍ່ໄດ້ສົ່ງ).
+       COUNT(*) FILTER (WHERE jumped)::int AS queue_jumped_bills
+     FROM (
+       SELECT s.*,
+              EXISTS (
+                SELECT 1 FROM sent e
+                WHERE e.opened_at IS NOT NULL
+                  AND s.opened_at IS NOT NULL
+                  AND e.opened_at < s.opened_at
+                  AND e.sent_end > s.sent_end
+              ) AS jumped
+       FROM sent s
+     ) q`,
+    [day]
+  );
+  const r = rows[0] ?? {};
+  const sent = Number(r.sent_bills ?? 0);
+  const pct = (n) => (sent > 0 ? Math.round((Number(n ?? 0) / sent) * 1000) / 10 : 0);
+  return {
+    sent_bills: sent,
+    within_24h_bills: Number(r.within_24h_bills ?? 0),
+    on_schedule_bills: Number(r.on_schedule_bills ?? 0),
+    queue_jumped_bills: Number(r.queue_jumped_bills ?? 0),
+    within_24h_pct: pct(r.within_24h_bills),
+    on_schedule_pct: pct(r.on_schedule_bills),
+    queue_jumped_pct: pct(r.queue_jumped_bills),
+  };
 }
 
 module.exports = {

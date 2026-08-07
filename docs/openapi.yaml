@@ -85,7 +85,12 @@ paths:
           schema: { type: string, format: date }
         - in: query
           name: scope
-          schema: { type: string, enum: [all, report] }
+          schema: { type: string, enum: [all, report, kpi, fleet] }
+          description: |
+            `all` = every driver's trips (supervisor only).
+            `report` = the caller's own trips between `from` and `to`.
+            `kpi` = today's supervisor summary (see KpiSummary below).
+            `fleet` = live positions of the branch's drivers.
         - in: query
           name: from
           description: Required when scope=report.
@@ -205,6 +210,17 @@ paths:
                   count: { type: integer }
         '400': { $ref: '#/components/responses/ValidationError' }
         '401': { $ref: '#/components/responses/Unauthorized' }
+
+  # KpiSummary (scope=kpi) returns, in addition to the trip/bill counts:
+  #   picked_bills       bills whose goods have left the warehouse
+  #   delivering_bills   bills on a truck that has already departed
+  #   sent_bills         bills delivered today (the base for every percentage)
+  #   within_24h_bills / within_24h_pct    delivered <= 24h after the bill was
+  #                                        opened (bill open time = doc_date +
+  #                                        doc_time, i.e. Laos wall clock)
+  #   on_schedule_bills / on_schedule_pct  delivered on or before date_logistic
+  #   queue_jumped_bills / queue_jumped_pct  bills opened LATER but delivered
+  #                                        EARLIER than a bill opened before them
 
   /api/mobile/pod:
     get:
