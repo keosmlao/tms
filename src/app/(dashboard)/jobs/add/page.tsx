@@ -36,6 +36,7 @@ import { FIXED_YEAR_END, FIXED_YEAR_START, getFixedTodayDate } from "@/lib/fixed
 import { Actions } from "@/lib/api";
 import { useSession } from "@/providers/session-provider";
 import SplitBillByBranch from "@/components/split-bill-by-branch";
+import { dispatchableCars, matchesCarSearch } from "@/lib/car-picker";
 
 interface Product {
   item_code: string;
@@ -78,6 +79,11 @@ export interface AvailableBill {
 export interface Option {
   code: string;
   name_1: string;
+  /** Vehicle-only fields, sent by getCars — used to keep yard equipment and
+   *  other branches' trucks out of the vehicle picker. */
+  car_type?: string;
+  transport_code?: string;
+  is_delivery?: boolean;
 }
 
 interface SelectedProduct extends Product {
@@ -359,6 +365,14 @@ export default function AddJobClient({
     setDeliveryRouteCode("");
     setRouteSearch("");
     setDeliveryRoundCode("");
+    // Drop a vehicle that belongs to the branch we just left: it is no longer
+    // in the dropdown, so leaving it selected would submit a truck the new
+    // branch doesn't have.
+    const picked = cars.find((item) => item.code === car);
+    if (picked && !dispatchableCars([picked], code).length) {
+      setCar("");
+      setCarSearch("");
+    }
   };
 
   useEffect(() => {
@@ -1129,11 +1143,11 @@ export default function AddJobClient({
   if (totalAddedBills === 0) validationHints.push("ເພີ່ມບິນ");
   if (billsMissingCondition > 0) validationHints.push(`ເລືອກເງື່ອນໄຂການຈັດສົ່ງ (${billsMissingCondition} ບິນ)`);
 
-  const filteredCars = cars.filter(
-    (item) =>
-      !deferredCarSearch ||
-      item.name_1.toLowerCase().includes(deferredCarSearch.toLowerCase()) ||
-      item.code.toLowerCase().includes(deferredCarSearch.toLowerCase())
+  // Only vehicles that can actually run this trip: delivery vehicles (no yard
+  // equipment) stationed at the chosen branch. Vehicles with no branch on
+  // record stay listed — see dispatchableCars.
+  const filteredCars = dispatchableCars(cars, selectedBranch).filter((item) =>
+    matchesCarSearch(item, deferredCarSearch)
   );
   // Ready bills scoped to the chosen branch. A branch admin's pool is already
   // server-scoped; a manager sees nothing until they pick a branch.

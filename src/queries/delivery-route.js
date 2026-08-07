@@ -220,10 +220,41 @@ async function deleteDeliveryRoute(code) {
   return { success: true };
 }
 
+/**
+ * ສາຂາທີ່ໃຊ້ແນະນຳຈຸດປັກໝຸດໃນໜ້າຕັ້ງຄ່າເສັ້ນທາງ.
+ *
+ * ດຶງ **ສະເພາະສາຂາທີ່ມີລົດຂົນສົ່ງຢູ່** — ບໍ່ແມ່ນທຸກສາຂາໃນ transport_type.
+ * "ລົດຂົນສົ່ງ" = ລົດທີ່ຕັ້ງ car_type ກົງກັບປະເພດລົດໃນ odg_tms_car_type
+ * (join ດ້ວຍຊື່ ຕາມແບບດຽວກັບ getCarProfiles). ອຸປະກອນທີ່ບໍ່ແມ່ນລົດຂົນສົ່ງ
+ * ເຊັ່ນ Forklift ບໍ່ມີ car_type ໃນລາຍການນັ້ນ ຈຶ່ງບໍ່ຖືກນັບ.
+ *
+ * ພິກັດມາຈາກຈຸດເລີ່ມຂອງ geofence ສາຂາ (ບ່ອນລົດຈອດ). ສາຂາທີ່ຍັງບໍ່ໄດ້ຕັ້ງ
+ * geofence ຍັງຄືນມາຢູ່ (lat/lng ວ່າງ) ເພື່ອໃຫ້ເລືອກຊື່ໄດ້ ແລ້ວປັກໝຸດເອງ.
+ */
+async function listRouteStopSuggestions() {
+  return query(
+    `SELECT
+       tt.code AS code,
+       COALESCE(NULLIF(TRIM(tt.name_1), ''), tt.code) AS name,
+       COALESCE(g.start_lat, '') AS lat,
+       COALESCE(g.start_lng, '') AS lng,
+       COUNT(c.code)::int AS car_count
+     FROM public.transport_type tt
+     JOIN public.odg_tms_car c
+       ON NULLIF(TRIM(c.transport_code), '') = tt.code
+     JOIN public.odg_tms_car_type ct
+       ON ct.name = NULLIF(TRIM(c.car_type), '')
+     LEFT JOIN public.odg_tms_geofence g ON g.transport_code = tt.code
+     GROUP BY tt.code, tt.name_1, g.start_lat, g.start_lng
+     ORDER BY name`
+  );
+}
+
 module.exports = {
   ensureDeliveryRouteSchema,
   listDeliveryRoutes,
   getDeliveryRoute,
   upsertDeliveryRoute,
   deleteDeliveryRoute,
+  listRouteStopSuggestions,
 };

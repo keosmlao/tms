@@ -54,6 +54,25 @@ async function ensureTmsCarAssignmentTables() {
   await query(`CREATE INDEX IF NOT EXISTS idx_odg_tms_car_worker_car_code ON public.odg_tms_car_worker (car_code)`);
 }
 
+// ensureTmsCarAssignmentTables() ຍິງ ALTER/CREATE ຫຼາຍສິບຄຳສັ່ງ + migration.
+// ໜ້າ admin ເອີ້ນເປັນຄັ້ງຄາວຈຶ່ງບໍ່ເປັນຫຍັງ ແຕ່ getCars() ຖືກເອີ້ນທຸກຄັ້ງທີ່ໂຫຼດ
+// ໜ້າສ້າງຖ້ຽວ — ຈຶ່ງແຄສໄວ້ໃຫ້ແລ່ນເທື່ອດຽວຕໍ່ process ຄືກັບ ensure ອື່ນໆ.
+const carSchemaCache = globalThis;
+async function ensureCarColumnsOnce() {
+  if (carSchemaCache.__tmsCarColumnsReady) return;
+  if (!carSchemaCache.__tmsCarColumnsPromise) {
+    carSchemaCache.__tmsCarColumnsPromise = ensureTmsCarAssignmentTables()
+      .then(() => {
+        carSchemaCache.__tmsCarColumnsReady = true;
+      })
+      .catch((err) => {
+        carSchemaCache.__tmsCarColumnsPromise = null;
+        throw err;
+      });
+  }
+  await carSchemaCache.__tmsCarColumnsPromise;
+}
+
 /**
  * ຍ້າຍຄວາມຈຸຈາກ "ປະເພດລົດ" ໄປໃສ່ "ແຕ່ລະຄັນ" ເທື່ອດຽວ.
  *
@@ -190,7 +209,28 @@ async function replaceCarWorkerAssignments(client, carCode, workerCodes, exclude
   }
 }
 
-async function getCars() { return query("SELECT code, name_1 FROM public.odg_tms_car"); }
+/**
+ * ລາຍການລົດ + ຂໍ້ມູນທີ່ໃຊ້ກັ່ນຕອງໃນຈໍເລືອກລົດ.
+ *
+ * `is_delivery` = ລົດຄັນນີ້ຕັ້ງ car_type ກົງກັບປະເພດລົດໃນ odg_tms_car_type ບໍ.
+ * ອຸປະກອນທີ່ບໍ່ແມ່ນລົດຂົນສົ່ງ (ເຊັ່ນ Forklift) ບໍ່ມີປະເພດໃນລາຍການນັ້ນ ຈຶ່ງເປັນ
+ * false ແລ້ວຈໍສ້າງຖ້ຽວກັ່ນອອກ. `transport_code` = ສາຂາທີ່ລົດຢູ່ ('' = ຍັງບໍ່
+ * ໄດ້ກຳນົດ). ຜູ້ເອີ້ນເກົ່າທີ່ໃຊ້ພຽງ code/name_1 ຍັງໃຊ້ໄດ້ຄືເກົ່າ.
+ */
+async function getCars() {
+  await ensureCarColumnsOnce();
+  return query(
+    `SELECT c.code,
+            c.name_1,
+            COALESCE(NULLIF(TRIM(c.car_type), ''), '')       AS car_type,
+            COALESCE(NULLIF(TRIM(c.transport_code), ''), '') AS transport_code,
+            (ct.name IS NOT NULL)                            AS is_delivery
+       FROM public.odg_tms_car c
+       LEFT JOIN public.odg_tms_car_type ct
+         ON ct.name = NULLIF(TRIM(c.car_type), '')
+      ORDER BY c.name_1`
+  );
+}
 async function addCar(code, name_1) { await queryOne("INSERT INTO public.odg_tms_car(code, name_1) VALUES ($1, $2)", [code, name_1]); }
 async function updateCar(code, name_1) { await queryOne("UPDATE odg_tms_car SET name_1=$1 WHERE code=$2", [name_1, code]); }
 async function deleteCar(code) { await queryOne("DELETE FROM odg_tms_car WHERE code=$1", [code]); }

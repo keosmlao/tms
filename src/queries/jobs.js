@@ -1243,7 +1243,7 @@ async function getJobInit(session) {
 
 async function getJobAddPageData(session) {
   const { getAvailableBills } = require("./bills");
-  const { getTransportDepartmentEmployees } = require("./master-data");
+  const { getTransportDepartmentEmployees, getCars } = require("./master-data");
 
   const fixedToday = getFixedTodayDate();
   const fixedMonth = fixedToday.slice(0, 7);
@@ -1253,7 +1253,9 @@ async function getJobAddPageData(session) {
       "SELECT max(doc_no) as doc_no FROM public.odg_tms WHERE to_char(doc_date,'YYYY-MM')=$1",
       [fixedMonth]
     ),
-    query("SELECT code, name_1 FROM public.odg_tms_car ORDER BY name_1 ASC, code ASC"),
+    // ຜ່ານ getCars() ບໍ່ແມ່ນ SELECT ຂອງຕົນເອງ — ຈໍສ້າງຖ້ຽວຕ້ອງໄດ້ car_type /
+    // transport_code / is_delivery ນຳ ຈຶ່ງກັ່ນເອົາສະເພາະລົດຂົນສົ່ງຂອງສາຂາໄດ້.
+    getCars(),
     getTransportDepartmentEmployees(session),
     getAvailableBills(session),
   ]);

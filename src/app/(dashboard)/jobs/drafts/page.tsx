@@ -19,6 +19,7 @@ import {
   FaSearch,
 } from "react-icons/fa";
 import { Actions } from "@/lib/api";
+import { dispatchableCars } from "@/lib/car-picker";
 import { BillItemsModal, BillVolumeTag, useBillVolumes } from "@/components/bill-volume";
 import {
   TripLoadInline,
@@ -1004,7 +1005,12 @@ export default function TripDraftsPage() {
                               <SearchPicker
                                 label="ລົດ"
                                 icon={<FaTruck size={9} />}
-                                options={cars}
+                                // Delivery vehicles stationed at this draft's
+                                // branch only — no forklifts, no other depots.
+                                options={dispatchableCars(
+                                  cars,
+                                  d.origin_transport_code ?? ""
+                                )}
                                 value={d.car}
                                 valueLabel={d.car_name}
                                 placeholder="ຄົ້ນຫາລົດ..."

@@ -322,6 +322,7 @@ export const Actions = {
   listDeliveryRoutes: deliveryRoute.listDeliveryRoutes,
   getDeliveryRoute: deliveryRoute.getDeliveryRoute,
   upsertDeliveryRoute: deliveryRoute.upsertDeliveryRoute,
+  listRouteStopSuggestions: deliveryRoute.listRouteStopSuggestions,
   deleteDeliveryRoute: deliveryRoute.deleteDeliveryRoute,
 
   // Delivery calendar (ປະຕິທິນຈັດສົ່ງ)
