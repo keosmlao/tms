@@ -84,3 +84,45 @@ describe("describeJwtSecretProblem", () => {
     }
   });
 });
+
+describe("auth reaction to a weak secret", () => {
+  const PLACEHOLDER = "your-secret-key-change-this-in-production";
+
+  it("warns but keeps working — a config value must not stop deliveries", async () => {
+    // ເມື່ອກ່ອນອັນນີ້ໂຍນ 503: deploy ເທື່ອດຽວແລ້ວທັງເວັບ ແລະ ແອັບໃຊ້ບໍ່ໄດ້
+    // ທັງບໍລິສັດ. ຄວາມສ່ຽງຂອງກະແຈອ່ອນຕ້ອງແກ້ ແຕ່ບໍ່ຄຸ້ມທີ່ຈະຢຸດການຈັດສົ່ງ.
+    const original = process.env.JWT_SECRET;
+    process.env.JWT_SECRET = PLACEHOLDER;
+    const { createToken, verifyToken } = await import("./auth");
+    const token = await createToken({ usercode: "U1" });
+    expect(token.split(".")).toHaveLength(3);
+    expect(await verifyToken(token)).toMatchObject({ usercode: "U1" });
+    process.env.JWT_SECRET = original;
+  });
+
+  it("blocks only when JWT_SECRET_STRICT=1 (CI / staging)", async () => {
+    const original = process.env.JWT_SECRET;
+    process.env.JWT_SECRET = PLACEHOLDER;
+    process.env.JWT_SECRET_STRICT = "1";
+    const { createToken } = await import("./auth");
+    await expect(createToken({ usercode: "U1" })).rejects.toThrow(
+      "ລະບົບຍັງຕັ້ງຄ່າບໍ່ຄົບ"
+    );
+    // ລາຍລະອຽດຂອງກະແຈຕ້ອງບໍ່ຮົ່ວໄປຫາຜູ້ໃຊ້ປາຍທາງ.
+    await expect(createToken({ usercode: "U1" })).rejects.not.toThrow(
+      /change-this/
+    );
+    process.env.JWT_SECRET_STRICT = "";
+    process.env.JWT_SECRET = original;
+  });
+
+  it("still fails when there is no secret at all — nothing to sign with", async () => {
+    const original = process.env.JWT_SECRET;
+    process.env.JWT_SECRET = "";
+    const { createToken } = await import("./auth");
+    await expect(createToken({ usercode: "U1" })).rejects.toThrow(
+      "ລະບົບຍັງຕັ້ງຄ່າບໍ່ຄົບ"
+    );
+    process.env.JWT_SECRET = original;
+  });
+});

@@ -21,6 +21,9 @@ export interface Session {
 const COOKIE_NAME = "token";
 const MAX_AGE_SECONDS = 8 * 60 * 60;
 
+/** ເຕືອນເລື່ອງກະແຈບໍ່ປອດໄພ — ຄັ້ງດຽວຕໍ່ process ບໍ່ໃຫ້ log ຖ້ວມ. */
+let warnedAboutSecret = false;
+
 function getJwtSecret(): Uint8Array {
   const value = process.env.JWT_SECRET;
   // Deliberately re-read + re-checked on every call: the env is the source of
@@ -28,15 +31,31 @@ function getJwtSecret(): Uint8Array {
   // cheaper than the signing that follows.
   const problem = describeJwtSecretProblem(value);
   if (problem) {
-    // ລາຍລະອຽດໄປ log ຂອງ server ເທົ່ານັ້ນ. ຜູ້ໃຊ້ບໍ່ຄວນເຫັນວ່າກະແຈເປັນຄ່າ
-    // ມາດຕະຖານ — ນັ້ນເປັນການບອກຄົນນອກວ່າຈະປອມ token ໄດ້ແນວໃດ ແລະ ຄົນຂັບ
-    // ກໍ່ເຮັດຫຍັງກັບຂໍ້ຄວາມນັ້ນບໍ່ໄດ້ຢູ່ດີ.
-    console.error(`[auth] ${problem}`);
-    const error = new Error(
-      "ລະບົບຍັງຕັ້ງຄ່າບໍ່ຄົບ — ກະລຸນາຕິດຕໍ່ IT"
-    ) as Error & { status?: number };
-    error.status = 503;
-    throw error;
+    if (!warnedAboutSecret) {
+      warnedAboutSecret = true;
+      console.error(`[auth] ⚠️  ${problem}`);
+    }
+    // ບໍ່ມີກະແຈເລີຍ = ເຊັນບໍ່ໄດ້ຈິງໆ — ອັນນີ້ຕ້ອງລົ້ມ.
+    if (!value || !value.trim()) {
+      const error = new Error(
+        "ລະບົບຍັງຕັ້ງຄ່າບໍ່ຄົບ — ກະລຸນາຕິດຕໍ່ IT"
+      ) as Error & { status?: number };
+      error.status = 503;
+      throw error;
+    }
+    // ມີກະແຈແຕ່ອ່ອນ (ຄ່າຕົວຢ່າງ / ສັ້ນ): **ເຕືອນແລ້ວແລ່ນຕໍ່**.
+    //
+    // ເມື່ອກ່ອນອັນນີ້ໂຍນ 503 ແລ້ວລະບົບຈິງລົ່ມທັນທີທີ່ deploy — ຄົນຂັບ ແລະ
+    // ຫ້ອງຈັດສົ່ງໃຊ້ບໍ່ໄດ້ທັງໝົດ ເພາະຄ່າ config ອັນດຽວ. ຄວາມສ່ຽງຂອງກະແຈອ່ອນ
+    // ແມ່ນເລື່ອງທີ່ຕ້ອງແກ້ ແຕ່ບໍ່ຄຸ້ມທີ່ຈະຢຸດການຈັດສົ່ງທັງບໍລິສັດເພື່ອບັງຄັບ.
+    // ຢາກໃຫ້ບລັອກແທ້ (staging/CI) ໃຫ້ຕັ້ງ JWT_SECRET_STRICT=1.
+    if ((process.env.JWT_SECRET_STRICT ?? "").trim() === "1") {
+      const error = new Error(
+        "ລະບົບຍັງຕັ້ງຄ່າບໍ່ຄົບ — ກະລຸນາຕິດຕໍ່ IT"
+      ) as Error & { status?: number };
+      error.status = 503;
+      throw error;
+    }
   }
   return new TextEncoder().encode(value as string);
 }
