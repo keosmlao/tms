@@ -443,10 +443,6 @@ async function notifyPickupVariance({ billNo, docNo, driverCode, variance }) {
         if (row?.code) codes.add(row.code);
       }
     }
-    // Never ping the driver about their own report.
-    codes.delete(String(driverCode ?? "").trim());
-    if (codes.size === 0) return;
-
     const { describePickupVariance } = require("../lib/pickup-variance");
     const detail = variance.lines
       .slice(0, 4)
@@ -467,17 +463,15 @@ async function notifyPickupVariance({ billNo, docNo, driverCode, variance }) {
       .filter(Boolean)
       .join("\n");
 
-    const { pushToEmployees, pushToDriver } = require("./push");
-    // ການກັ່ນຕອງຕາມ "ໃຜຮັບແຈ້ງເຕືອນຫຍັງ" ຢູ່ໃນ push.js ແລ້ວ (ອີງ data.type)
-    const recipients = Array.from(codes);
-    const data = { type: "pickup_variance", bill_no: bill, doc_no: doc };
-    await Promise.allSettled([
-      pushToEmployees(recipients, "⚠️ ເບີກເຄື່ອງບໍ່ຄົບຕາມຖ້ຽວ", body, data),
-      // Dispatchers who only have the driver app installed still get it.
-      ...recipients.map((code) =>
-        pushToDriver(code, "⚠️ ເບີກເຄື່ອງບໍ່ຄົບຕາມຖ້ຽວ", body, data)
-      ),
-    ]);
+    const { pushToTopic } = require("./push");
+    await pushToTopic({
+      candidates: codes,
+      title: "⚠️ ເບີກເຄື່ອງບໍ່ຄົບຕາມຖ້ຽວ",
+      body,
+      data: { type: "pickup_variance", bill_no: bill, doc_no: doc },
+      // Never ping the driver about their own report.
+      excludeCode: driverCode,
+    });
   } catch (err) {
     console.warn("[notify] pickup-variance failed:", err?.message ?? err);
   }
@@ -487,8 +481,8 @@ async function notifyPickupVariance({ billNo, docNo, driverCode, variance }) {
  * ຄົນຂັບແຈ້ງ "ສົ່ງສຳເລັດ" — ດັນແຈ້ງເຕືອນຫາຫ້ອງຈັດສົ່ງທັນທີ.
  *
  * ຜູ້ຮັບຄືຄົນດຽວກັບແຈ້ງເຕືອນເບີກເຄື່ອງບໍ່ຄົບ: ຄົນສ້າງຖ້ຽວ + ພະນັກງານສາຂາຕົ້ນທາງ
- * (ຍົກເວັ້ນຄົນຂັບເອງ). ສົ່ງທັງ pushToEmployees ແລະ pushToDriver ເພາະຫົວໜ້າບາງ
- * ຄົນລົງທະບຽນ token ໄວ້ໃນແອັບຄົນຂັບເທົ່ານັ້ນ.
+ * (ຍົກເວັ້ນຄົນຂັບເອງ) ບວກກັບຄົນທີ່ຕິກເປີດປະເພດນີ້ເອງ. `pushToTopic` ຍິງເຂົ້າ
+ * ທັງສອງແອັບ ເພາະຫົວໜ້າບາງຄົນລົງທະບຽນ token ໄວ້ໃນແອັບຄົນຂັບເທົ່ານັ້ນ.
  *
  * Best-effort ທັງໝົດ: ການແຈ້ງເຕືອນລົ້ມເຫຼວຕ້ອງບໍ່ເຮັດໃຫ້ການປິດບິນລົ້ມເຫຼວ —
  * ຜູ້ເອີ້ນຈຶ່ງເອີ້ນແບບ void ຫຼັງ COMMIT ແລ້ວ.
@@ -531,10 +525,6 @@ async function notifyBillDelivered({
         if (row?.code) codes.add(row.code);
       }
     }
-    // The driver just did this — no need to tell them.
-    codes.delete(String(driverCode ?? "").trim());
-    if (codes.size === 0) return;
-
     const amount = Number(collectedAmount ?? 0);
     const body = [
       `ບິນ ${bill}${job?.cust_name ? ` · ${job.cust_name}` : ""}`,
@@ -547,16 +537,17 @@ async function notifyBillDelivered({
       .filter(Boolean)
       .join("\n");
 
-    const { pushToEmployees, pushToDriver } = require("./push");
-    // ການກັ່ນຕອງຕາມ "ໃຜຮັບແຈ້ງເຕືອນຫຍັງ" ຢູ່ໃນ push.js ແລ້ວ (ອີງ data.type)
-    const recipients = Array.from(codes);
-    const title = fullyDelivered ? "✅ ສົ່ງສຳເລັດ" : "📦 ສົ່ງບາງສ່ວນ";
-    // bill_no lets the app open the POD proof for exactly this bill.
-    const data = { type: "bill_delivered", bill_no: bill, doc_no: doc };
-    await Promise.allSettled([
-      pushToEmployees(recipients, title, body, data),
-      ...recipients.map((code) => pushToDriver(code, title, body, data)),
-    ]);
+    // ຜູ້ຮັບ = ຜູ້ກ່ຽວຂ້ອງກັບຖ້ຽວ + ຄົນທີ່ຕິກເປີດ "ແຈ້ງສົ່ງສຳເລັດ" ເອງ.
+    const { pushToTopic } = require("./push");
+    await pushToTopic({
+      candidates: codes,
+      title: fullyDelivered ? "✅ ສົ່ງສຳເລັດ" : "📦 ສົ່ງບາງສ່ວນ",
+      body,
+      // bill_no lets the app open the POD proof for exactly this bill.
+      data: { type: "bill_delivered", bill_no: bill, doc_no: doc },
+      // ຄົນຂັບຫາກໍ່ກົດສົ່ງເອງ — ບໍ່ຕ້ອງເຕືອນຄືນ ນອກຈາກລາວຕິກເປີດເອງ.
+      excludeCode: driverCode,
+    });
   } catch (err) {
     console.warn("[notify] bill-delivered failed:", err?.message ?? err);
   }
@@ -857,7 +848,6 @@ async function notifyBillForwardedToBranch(billNo, branchCode, branchName) {
       [code]
     );
     const codes = recipients.map((r) => r.code).filter(Boolean);
-    if (codes.length === 0) return;
 
     const meta = await queryOne(
       `SELECT COALESCE(NULLIF(TRIM(c.name_1), ''), s.cust_code, '') AS cust_name
@@ -875,15 +865,15 @@ async function notifyBillForwardedToBranch(billNo, branchCode, branchName) {
     ]
       .filter(Boolean)
       .join("\n");
-    const data = { type: "bill_forwarded", bill_no: bill, branch_code: code };
-
     // Try both token tables (driver app + sales/web app); each no-ops cleanly
     // for recipients without a token.
-    const { pushToDriver, pushToEmployees } = require("./push");
-    await Promise.allSettled([
-      ...codes.map((c) => pushToDriver(c, title, body, data)),
-      pushToEmployees(codes, title, body, data),
-    ]);
+    const { pushToTopic } = require("./push");
+    await pushToTopic({
+      candidates: codes,
+      title,
+      body,
+      data: { type: "bill_forwarded", bill_no: bill, branch_code: code },
+    });
   } catch (err) {
     console.warn("[notify] forwarded-to-branch failed:", err?.message ?? err);
   }

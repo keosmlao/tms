@@ -5,7 +5,7 @@ const {
   branchFilterJob,
   ensureForwardBranchColumn,
 } = require("./helpers");
-const { pushToDriver } = require("./push");
+const { pushToTopic } = require("./push");
 
 async function getApproveList(session) {
   const scope = getBranchScope(session);
@@ -48,12 +48,15 @@ async function approveJob(session, docNo) {
       logisticDate ? `📅 ສົ່ງວັນທີ ${logisticDate}` : null,
       `✨ ພ້ອມຮັບຖ້ຽວແລ້ວ`,
     ].filter(Boolean);
-    void pushToDriver(
-      job.driver,
-      "✅ ຖ້ຽວຖືກອະນຸມັດແລ້ວ",
-      lines.join("\n"),
-      { type: "job_approved", doc_no: docNo }
-    );
+    // ຄົນຂັບ + ຄົນທີ່ຕິກເປີດ "ອະນຸມັດ / ຍົກເລີກ / ປິດຖ້ຽວ" ໄວ້ເອງ.
+    // ຫົວຂໍ້ເປັນກາງຢູ່ແລ້ວ ຈຶ່ງບໍ່ຕ້ອງມີສະບັບຜູ້ເຝົ້າເບິ່ງ.
+    void pushToTopic({
+      candidates: [job.driver],
+      title: "✅ ຖ້ຽວຖືກອະນຸມັດແລ້ວ",
+      body: lines.join("\n"),
+      data: { type: "job_approved", doc_no: docNo },
+      sales: false,
+    });
   }
 }
 

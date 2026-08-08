@@ -560,12 +560,16 @@ async function remindUnstartedDispatches({ minMinutesSincePickup = 5 } = {}) {
   let pushed = 0;
   for (const r of rows) {
     if (!r.driver) continue;
-    await pushToDriver(
-      r.driver,
-      "ກະລຸນາກົດເລີ່ມຈັດສົ່ງ",
-      `ທ່ານຍັງບໍ່ໄດ້ກົດເລີ່ມຈັດສົ່ງສຳລັບຖ້ຽວ ${r.doc_no} — ກະລຸນາກົດເລີ່ມຈັດສົ່ງກ່ອນຈຶ່ງດຳເນີນການຈັດສົ່ງ`,
-      { doc_no: r.doc_no, type: "dispatch_reminder" }
-    );
+    await pushToTopic({
+      candidates: [r.driver],
+      title: "ກະລຸນາກົດເລີ່ມຈັດສົ່ງ",
+      body: `ທ່ານຍັງບໍ່ໄດ້ກົດເລີ່ມຈັດສົ່ງສຳລັບຖ້ຽວ ${r.doc_no} — ກະລຸນາກົດເລີ່ມຈັດສົ່ງກ່ອນຈຶ່ງດຳເນີນການຈັດສົ່ງ`,
+      data: { doc_no: r.doc_no, type: "dispatch_reminder" },
+      // ຫົວໜ້າທີ່ຕິກເປີດ ຢາກຮູ້ວ່າ "ຖ້ຽວໃດຍັງບໍ່ອອກ" ບໍ່ແມ່ນຖືກສັ່ງໃຫ້ກົດເອງ.
+      observerTitle: "⏰ ຖ້ຽວຍັງບໍ່ໄດ້ອອກ",
+      observerBody: `ຖ້ຽວ ${r.doc_no} ເບີກເຄື່ອງແລ້ວ ແຕ່ຍັງບໍ່ໄດ້ກົດເລີ່ມຈັດສົ່ງ`,
+      sales: false,
+    });
     pushed += 1;
   }
   return { scanned: rows.length, pushed };
@@ -688,10 +692,84 @@ async function pushToEmployees(employeeCodes, title, body, data = {}) {
   }
 }
 
+/**
+ * ປະເພດທີ່ **ຫ້າມ** ກະຈາຍໃຫ້ຄົນທີ່ກົດເປີດເອງ.
+ *
+ * ແຊັດເປັນຂໍ້ຄວາມສ່ວນຕົວລະຫວ່າງສອງຄົນ (ຫຼື ໃນບິນໜຶ່ງ) — ຖ້າກະຈາຍຕາມການ
+ * ຕັ້ງຄ່າ ຈະກາຍເປັນໃຫ້ຄົນນອກອ່ານຂໍ້ຄວາມຄົນອື່ນ. ການຕັ້ງຄ່າ "ຂໍ້ຄວາມແຊັດ"
+ * ຈຶ່ງໃຊ້ໄດ້ພຽງແຕ່ **ປິດ** ຂອງຕົນເອງ ບໍ່ແມ່ນ **ເປີດ** ຮັບຂອງຄົນອື່ນ.
+ */
+const NEVER_FANOUT = new Set(["chat"]);
+
+/**
+ * ສົ່ງແຈ້ງເຕືອນຫາ **ຜູ້ກ່ຽວຂ້ອງກັບງານ + ຄົນທີ່ກົດເປີດປະເພດນີ້ເອງ**.
+ *
+ * ເປັນທາງດຽວທີ່ໜ້າ "ໃຜຮັບແຈ້ງເຕືອນຫຍັງ" ຈະມີຜົນຈິງທັງສອງທາງ. ກ່ອນໜ້ານີ້
+ * ຈຸດເອີ້ນຄິດຜູ້ຮັບຈາກງານເອງ ແລ້ວການຕັ້ງຄ່າພຽງແຕ່**ຕັດອອກ**ໄດ້ — ຄົນທີ່
+ * ຕິກເປີດແຕ່ບໍ່ກ່ຽວກັບຖ້ຽວນັ້ນຈຶ່ງບໍ່ເຄີຍໄດ້ຮັບຫຍັງ (ຢືນຢັນຈາກ push log:
+ * ຜູ້ຕິກເປີດ "ແຈ້ງສົ່ງສຳເລັດ" 15 ຄົນ ໄດ້ 0 ລາຍການ).
+ *
+ * ຂໍ້ຄວາມມີສອງສະບັບໄດ້: ຜູ້ກ່ຽວຂ້ອງໄດ້ [title]/[body] (ຂຽນເຖິງລາວໂດຍກົງ)
+ * ສ່ວນຜູ້ເຝົ້າເບິ່ງໄດ້ [observerTitle]/[observerBody]. ບໍ່ໃສ່ = ໃຊ້ອັນດຽວກັນ
+ * ເໝາະກັບຂໍ້ຄວາມທີ່ຂຽນເປັນກາງຢູ່ແລ້ວ ("ຖ້ຽວຖືກອະນຸມັດແລ້ວ").
+ *
+ * @param {object} o
+ * @param {Iterable<string>} o.candidates ຜູ້ຮັບທີ່ຄິດຈາກງານ
+ * @param {string} [o.excludeCode] ຜູ້ກໍ່ເຫດເອງ — ຕັດອອກ ນອກຈາກລາວຕິກເປີດເອງ
+ * @param {boolean} [o.tms=true]   ສົ່ງເຂົ້າແອັບຄົນຂັບ/TMS (ແລະ ບັນທຶກປະຫວັດ)
+ * @param {boolean} [o.sales=true] ສົ່ງເຂົ້າແອັບຝ່າຍຂາຍນຳ
+ */
+async function pushToTopic({
+  candidates = [],
+  title,
+  body,
+  data = {},
+  excludeCode = "",
+  observerTitle = "",
+  observerBody = "",
+  tms = true,
+  sales = true,
+}) {
+  const { mergeRecipients } = require("../lib/notify-recipients");
+  const core = mergeRecipients({ candidates, optIns: [], excludeCode });
+
+  let observers = [];
+  try {
+    const { topicForPushType } = require("../lib/notify-topics");
+    const topic = topicForPushType(data?.type);
+    if (topic && !NEVER_FANOUT.has(topic)) {
+      const { explicitOptIns } = require("./notify-prefs");
+      const optIns = await explicitOptIns(topic);
+      const already = new Set(core);
+      observers = mergeRecipients({ optIns, excludeCode }).filter(
+        (c) => !already.has(c)
+      );
+    }
+  } catch (err) {
+    // ຫາຜູ້ຕິກເປີດບໍ່ໄດ້ ບໍ່ຄວນເຮັດໃຫ້ຜູ້ກ່ຽວຂ້ອງກັບງານບໍ່ໄດ້ຮັບ.
+    console.warn("[push] opt-in fan-out failed:", err?.message ?? err);
+  }
+
+  const send = (codes, t, b) =>
+    codes.length === 0
+      ? Promise.resolve()
+      : Promise.allSettled([
+          ...(tms ? codes.map((c) => pushToDriver(c, t, b, data)) : []),
+          ...(sales ? [pushToEmployees(codes, t, b, data)] : []),
+        ]);
+
+  await Promise.allSettled([
+    send(core, title, body),
+    send(observers, observerTitle || title, observerBody || body),
+  ]);
+  return { core: core.length, observers: observers.length };
+}
+
 module.exports = {
   saveToken,
   deleteToken,
   pushToDriver,
+  pushToTopic,
   pushDiagnostics,
   listPushTargets,
   sendTestPush,

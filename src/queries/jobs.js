@@ -19,7 +19,7 @@ const {
   getRemainingSummaryMap,
   customerAreaSql,
 } = require("./helpers");
-const { pushToDriver } = require("./push");
+const { pushToTopic } = require("./push");
 const { notifyJobCreated, notifyJobCreatedToSales, notifyBillForwardedToBranch } = require("./notifications");
 const { recordAudit } = require("./audit-log");
 const { ensurePendingBillSchema } = require("./pending-bill");
@@ -424,12 +424,16 @@ async function createJob(session, data) {
       carName ? `🚚 ລົດ ${carName}` : null,
       `📦 ${billCount} ບິນ`,
     ].filter(Boolean);
-    void pushToDriver(
-      data.driver,
-      "🚚 ມີຖ້ຽວໃໝ່ໃຫ້ທ່ານ",
-      lines.join("\n"),
-      { type: "job_created", doc_no: docNo }
-    );
+    void pushToTopic({
+      candidates: [data.driver],
+      title: "🚚 ມີຖ້ຽວໃໝ່ໃຫ້ທ່ານ",
+      body: lines.join("\n"),
+      data: { type: "job_created", doc_no: docNo },
+      // "ໃຫ້ທ່ານ" ຖືກສະເພາະຄົນຂັບ — ຄົນທີ່ຕິກເປີດ "ຈັດຖ້ຽວໃຫ້ / ປ່ຽນຖ້ຽວ"
+      // ເປັນຜູ້ເຝົ້າເບິ່ງ ຈຶ່ງໃຊ້ຫົວຂໍ້ເປັນກາງ.
+      observerTitle: "🚚 ຈັດຖ້ຽວໃໝ່ແລ້ວ",
+      sales: false,
+    });
   }
 
   // Fire-and-forget: WhatsApp customers + LINE sales for every bill on the job.
@@ -647,12 +651,13 @@ async function addBillsToJob(docNo, bills) {
   }
 
   if (added > 0 && job.driver) {
-    void pushToDriver(
-      job.driver,
-      "📦 ມີບິນເພີ່ມໃນຖ້ຽວ",
-      `📋 ຖ້ຽວ ${docNo}\n➕ ເພີ່ມ ${added} ບິນ`,
-      { type: "bills_added", doc_no: docNo }
-    );
+    void pushToTopic({
+      candidates: [job.driver],
+      title: "📦 ມີບິນເພີ່ມໃນຖ້ຽວ",
+      body: `📋 ຖ້ຽວ ${docNo}\n➕ ເພີ່ມ ${added} ບິນ`,
+      data: { type: "bills_added", doc_no: docNo },
+      sales: false,
+    });
   }
 
   return { success: true, added };
@@ -701,14 +706,15 @@ async function deleteJob(docNo) {
     client.release();
   }
 
-  if (job?.driver) {
-    void pushToDriver(
-      job.driver,
-      "🗑️ ຖ້ຽວຖືກລຶບ",
-      `📋 ຖ້ຽວ ${docNo}\n⚠️ admin ໄດ້ລຶບຖ້ຽວນີ້ ບິນຈະກັບໄປຄິວ`,
-      { type: "job_deleted", doc_no: docNo }
-    );
-  }
+  // ບໍ່ມີເງື່ອນໄຂ `if (job?.driver)` ອີກ: ຖ້ຽວທີ່ຍັງບໍ່ມີຄົນຂັບກໍ່ຖືກລຶບໄດ້
+  // ແລະ ຄົນທີ່ຕິກເປີດ "ອະນຸມັດ / ຍົກເລີກ / ປິດຖ້ຽວ" ຄວນຮູ້ຄືກັນ.
+  void pushToTopic({
+    candidates: [job?.driver],
+    title: "🗑️ ຖ້ຽວຖືກລຶບ",
+    body: `📋 ຖ້ຽວ ${docNo}\n⚠️ admin ໄດ້ລຶບຖ້ຽວນີ້ ບິນຈະກັບໄປຄິວ`,
+    data: { type: "job_deleted", doc_no: docNo },
+    sales: false,
+  });
 }
 
 // Fetches the editable payload for an existing job. Throws if the job is no
@@ -1190,14 +1196,13 @@ async function updateJob(session, docNo, data) {
   }
 
   // Notify driver about the update
-  if (data.driver) {
-    void pushToDriver(
-      data.driver,
-      "📝 ຖ້ຽວຖືກປັບປຸງ",
-      `📋 ຖ້ຽວ ${docNo}\n♻️ admin ໄດ້ແກ້ໄຂຂໍ້ມູນຖ້ຽວ`,
-      { type: "job_updated", doc_no: docNo }
-    );
-  }
+  void pushToTopic({
+    candidates: [data.driver],
+    title: "📝 ຖ້ຽວຖືກປັບປຸງ",
+    body: `📋 ຖ້ຽວ ${docNo}\n♻️ admin ໄດ້ແກ້ໄຂຂໍ້ມູນຖ້ຽວ`,
+    data: { type: "job_updated", doc_no: docNo },
+    sales: false,
+  });
 
   return { doc_no: docNo };
 }
@@ -1218,14 +1223,13 @@ async function closeJob(session, docNo) {
      WHERE doc_no=$1 AND ${getFixedYearSqlFilter("doc_date")}`,
     [docNo, session.usercode]
   );
-  if (currentJob.driver) {
-    void pushToDriver(
-      currentJob.driver,
-      "✅ ຖ້ຽວຖືກປິດແລ້ວ",
-      `📋 ຖ້ຽວ ${docNo}\n🏁 admin ປິດຖ້ຽວສຳເລັດ`,
-      { type: "job_closed", doc_no: docNo }
-    );
-  }
+  void pushToTopic({
+    candidates: [currentJob.driver],
+    title: "✅ ຖ້ຽວຖືກປິດແລ້ວ",
+    body: `📋 ຖ້ຽວ ${docNo}\n🏁 admin ປິດຖ້ຽວສຳເລັດ`,
+    data: { type: "job_closed", doc_no: docNo },
+    sales: false,
+  });
 }
 
 async function getJobInit(session) {

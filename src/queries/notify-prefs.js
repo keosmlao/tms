@@ -149,6 +149,33 @@ async function filterByPrefs(topicKey, candidateCodes) {
 }
 
 /**
+ * ຄົນທີ່ **ກົດເປີດເອງ** ປະເພດນີ້ຢູ່ໜ້າ "ໃຜຮັບແຈ້ງເຕືອນຫຍັງ".
+ *
+ * ຕ່າງຈາກ [subscribersOf]: ອັນນີ້ນັບສະເພາະແຖວທີ່ມີຈິງ (enabled = true)
+ * ບໍ່ລວມຄົນທີ່ພຽງແຕ່ໄດ້ຄ່າເລີ່ມຕົ້ນເປັນ true — ຈຶ່ງເອົາໄປ **ເພີ່ມ** ໃສ່ຜູ້ຮັບ
+ * ໄດ້ໂດຍບໍ່ກາຍເປັນສົ່ງຫາຫົວໜ້າທຸກຄົນທຸກບິນ.
+ *
+ * ມີໄວ້ເພາະຈຸດເອີ້ນສ່ວນຫຼາຍຄິດຜູ້ຮັບຈາກງານ (ຜູ້ສ້າງຖ້ຽວ, ພະນັກງານສາຂາ) ແລ້ວ
+ * ໃຊ້ [filterByPrefs] ຕັດອອກເທົ່ານັ້ນ — ຄົນທີ່ກົດເປີດແຕ່ບໍ່ຢູ່ໃນສອງກຸ່ມນັ້ນ
+ * ຈຶ່ງບໍ່ເຄີຍໄດ້ຮັບຫຍັງເລີຍ ທັງທີ່ໜ້າຈໍບອກວ່າເປີດແລ້ວ.
+ */
+async function explicitOptIns(topicKey) {
+  if (!TOPIC_KEYS.has(topicKey)) return [];
+  try {
+    await ensureSchema();
+    const rows = await query(
+      `SELECT user_code FROM public.odg_tms_notify_prefs
+        WHERE topic = $1 AND enabled = true`,
+      [topicKey]
+    );
+    return (rows ?? []).map((r) => String(r.user_code)).filter(Boolean);
+  } catch (err) {
+    console.warn("[notify-prefs] opt-ins failed:", err?.message ?? err);
+    return [];
+  }
+}
+
+/**
  * ຜູ້ຮັບຂອງແຈ້ງເຕືອນແບບ **ກະຈາຍ** (ບໍ່ມີເຈົ້າຂອງງານຕາຍຕົວ) ເຊັ່ນ
  * "ການເຄື່ອນໄຫວໃນເວັບ" — ດຶງຈາກຄົນທີ່ເປີດປະເພດນີ້ໄວ້ເທົ່ານັ້ນ.
  */
@@ -170,5 +197,6 @@ module.exports = {
   savePrefs,
   defaultFor,
   filterByPrefs,
+  explicitOptIns,
   subscribersOf,
 };
