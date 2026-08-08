@@ -42,6 +42,7 @@ import {
   routeStops,
   validateRoute,
   type RouteStop,
+  normalizeCustomerSuggestion,
   type StopSuggestion,
 } from "@/lib/route-geometry";
 
@@ -131,10 +132,27 @@ export default function DeliveryRoutesPage() {
     void load();
     void (async () => {
       try {
-        const raw = (await Actions.listRouteStopSuggestions()) as Parameters<
-          typeof normalizeSuggestion
-        >[0][];
-        setSuggestions((raw ?? []).map(normalizeSuggestion));
+        // ສາຂາ + ຮ້ານທີ່ເຄີຍສົ່ງຈິງ. ດຶງພ້ອມກັນ ແລະ ຖ້າອັນໃດອັນໜຶ່ງລົ້ມ
+        // ອີກອັນຍັງໃຊ້ໄດ້ — ການແນະນຳເປັນຄວາມສະດວກ ບໍ່ແມ່ນເງື່ອນໄຂຈຳເປັນ.
+        const [branchRes, custRes] = await Promise.allSettled([
+          Actions.listRouteStopSuggestions(),
+          Actions.listCustomerStopSuggestions(),
+        ]);
+        const branches =
+          branchRes.status === "fulfilled"
+            ? ((branchRes.value ?? []) as Parameters<
+                typeof normalizeSuggestion
+              >[0][]).map(normalizeSuggestion)
+            : [];
+        const customers =
+          custRes.status === "fulfilled"
+            ? (
+                ((custRes.value as { stops?: unknown })?.stops ?? []) as Parameters<
+                  typeof normalizeCustomerSuggestion
+                >[0][]
+              ).map(normalizeCustomerSuggestion)
+            : [];
+        setSuggestions([...branches, ...customers]);
       } catch (e) {
         // Suggestions are a convenience — the page still works by hand.
         console.error(e);
@@ -709,6 +727,44 @@ function RouteEditor({
   );
   const stops = useMemo(() => routeStops(draft), [draft]);
   const problems = useMemo(() => validateRoute(draft), [draft]);
+  const [autoFilling, setAutoFilling] = useState(false);
+  const [autoFillNote, setAutoFillNote] = useState<string | null>(null);
+
+  /**
+   * ຕື່ມຈຸດຜ່ານຈາກປະຫວັດການສົ່ງຂອງເສັ້ນທາງນີ້.
+   *
+   * ບໍ່ທັບຂອງເກົ່າຖ້າມີຢູ່ແລ້ວ — ຄົນທີ່ປັກດ້ວຍມືມາແລ້ວບໍ່ຄວນເສຍວຽກ.
+   */
+  const autoFillWaypoints = async () => {
+    setAutoFilling(true);
+    setAutoFillNote(null);
+    try {
+      const res = (await Actions.suggestRouteWaypoints(draft.code)) as {
+        typical_stops: number;
+        stops: { name: string; lat: string; lng: string; visits: number }[];
+      };
+      const found = res?.stops ?? [];
+      if (found.length === 0) {
+        setAutoFillNote("ຍັງບໍ່ມີປະຫວັດການສົ່ງທີ່ມີພິກັດຢູ່ເສັ້ນທາງນີ້");
+        return;
+      }
+      patch({
+        waypoints: found.map((s) => ({
+          name: s.name,
+          lat: Number(s.lat),
+          lng: Number(s.lng),
+        })),
+      });
+      setAutoFillNote(
+        `ຕື່ມ ${found.length} ຈຸດ ຈາກລຳດັບການແວ່ຈິງ (ສະເລ່ຍ ${res.typical_stops} ຈຸດ/ຖ້ຽວ) — ກວດແລ້ວກົດບັນທຶກ`
+      );
+    } catch (e) {
+      setAutoFillNote(e instanceof Error ? e.message : "ດຶງບໍ່ສຳເລັດ");
+    } finally {
+      setAutoFilling(false);
+    }
+  };
+
   const suggestedKm = useMemo(() => routeDistanceKm(stops), [stops]);
 
   const patch = (partial: Partial<RouteRow>) =>
@@ -899,7 +955,23 @@ function RouteEditor({
                 >
                   <FaPlus size={9} /> ເພີ່ມຈຸດຜ່ານ
                 </button>
+                {/* ຈຸດຜ່ານສ່ວນຫຼາຍປັກດ້ວຍມືທີລະຈຸດ ຈຶ່ງບໍ່ມີໃຜປັກ — ເສັ້ນທາງ
+                    ທັງ 12 ອັນຈຶ່ງເປັນ 0 ໝຸດ. ອັນນີ້ຕື່ມໃຫ້ຈາກລຳດັບການແວ່ຈິງ. */}
+                <button
+                  type="button"
+                  disabled={autoFilling || !draft.code}
+                  onClick={() => void autoFillWaypoints()}
+                  className="inline-flex items-center gap-1 rounded-lg border border-teal-600 px-2.5 py-1.5 text-[10px] font-semibold text-teal-700 hover:bg-teal-50 disabled:opacity-50 dark:text-teal-300 dark:hover:bg-teal-900/30"
+                  title="ດຶງຈຸດຈາກລຳດັບການແວ່ຈິງຂອງຄົນຂັບໃນເສັ້ນທາງນີ້"
+                >
+                  {autoFilling ? "ກຳລັງດຶງ…" : "ໝາຍຈາກການສົ່ງຈິງ"}
+                </button>
               </div>
+              {autoFillNote && (
+                <p className="rounded-lg bg-teal-500/10 px-3 py-2 text-[10px] text-teal-700 dark:text-teal-300">
+                  {autoFillNote}
+                </p>
+              )}
 
               {draft.waypoints.length === 0 ? (
                 <p className="rounded-lg bg-slate-500/5 px-3 py-2 text-[11px] text-slate-400">
@@ -1310,7 +1382,7 @@ function StopNameInput({
       {showList && (
         <ul className="absolute left-0 right-0 top-full z-20 mt-1 max-h-56 overflow-y-auto rounded-lg border border-slate-200/60 bg-white shadow-lg dark:border-white/10 dark:bg-slate-800">
           <li className="px-3 pt-2 text-[9px] font-semibold uppercase tracking-wider text-slate-400">
-            ສາຂາທີ່ມີລົດຂົນສົ່ງ
+            ສາຂາ ແລະ ຮ້ານທີ່ເຄີຍສົ່ງຈິງ
           </li>
           {matches.map((item) => {
             const pinned = hasCoords(item);
@@ -1328,11 +1400,21 @@ function StopNameInput({
                   <FaMapMarkerAlt
                     size={10}
                     className={pinned ? "text-teal-500" : "text-slate-300"}
-                    title={pinned ? "ມີພິກັດ" : "ຍັງບໍ່ໄດ້ຕັ້ງພິກັດສາຂາ"}
+                    title={
+                      pinned
+                        ? item.kind === "customer"
+                          ? `ຈຸດສົ່ງຈິງ · ຫຼ້າສຸດ ${item.lastDelivered}`
+                          : "ພິກັດສາຂາ"
+                        : "ຍັງບໍ່ມີພິກັດ"
+                    }
                   />
                   <span className="min-w-0 flex-1 truncate">{item.name}</span>
+                  {/* ສອງປະເພດຕ້ອງແຍກອອກຈາກກັນດ້ວຍສາຍຕາ — ຕົວເລກ "12" ຢູ່ຂ້າງ
+                      ຊື່ບອກບໍ່ໄດ້ວ່າແມ່ນລົດ 12 ຄັນ ຫຼື ສົ່ງ 12 ຄັ້ງ. */}
                   <span className="shrink-0 text-[10px] text-slate-400">
-                    {item.carCount} ຄັນ
+                    {item.kind === "customer"
+                      ? `ສົ່ງ ${item.deliveryCount} ຄັ້ງ`
+                      : `${item.carCount} ຄັນ`}
                   </span>
                 </button>
               </li>

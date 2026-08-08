@@ -47,6 +47,7 @@ import {
   type PendingLocationDefaults,
 } from "@/components/pending-bill-location-dialog";
 import Chatter from "@/components/Chatter";
+import { PendingRoutePanel } from "@/components/pending-route-panel";
 import { printBillLocationQr } from "@/lib/print-bill-location-qr";
 // Ported from server actions: getBillProducts, getBillsPending, updateBillTransport
 
@@ -1285,6 +1286,10 @@ export default function BillsPendingClient() {
 
   return (
     <div className="space-y-5">
+      {/* ສາຍທີ່ແນະນຳ + ແຜນທີ່ — ຕອບ "ບິນນີ້ເຂົ້າສາຍໃດ" ແລະ "ມັນຢູ່ໃສ"
+          ໂດຍບໍ່ຕ້ອງເປີດບິນເທື່ອລະໃບ */}
+      <PendingRoutePanel billNos={filtered.map((b) => b.doc_no)} />
+
       {/* ── Header + filters (consolidated control card) ── */}
       <div className="glass rounded-xl overflow-hidden">
         {/* Title strip + summary + actions */}

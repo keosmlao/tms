@@ -12,6 +12,9 @@ import {
   routeStops,
   validateRoute,
   type RouteDraft,
+  normalizeCustomerSuggestion,
+  suggestionWeight,
+  type StopSuggestion,
 } from "./route-geometry";
 
 const VIENTIANE = { lat: 17.9757, lng: 102.6331 };
@@ -240,7 +243,17 @@ describe("normalizeSuggestion", () => {
       lat: 17.9757,
       lng: 102.6331,
       carCount: 4,
+      kind: "branch",
+      deliveryCount: 0,
+      lastDelivered: "",
     });
+  });
+
+  it("ສາຂາທີ່ພິກັດເປັນ 0,0 ຖືວ່າຍັງບໍ່ໄດ້ຕັ້ງ", () => {
+    // ຮູຮົ່ວອັນດຽວກັບຝັ່ງຮ້ານ — geofence ທີ່ຍັງບໍ່ໄດ້ຕັ້ງເກັບເປັນ "0".
+    const stop = normalizeSuggestion({ code: "09", lat: "0", lng: "0" });
+    expect(stop.lat).toBeNull();
+    expect(stop.lng).toBeNull();
   });
 
   it("leaves a branch with no geofence unpinned rather than at 0,0", () => {
@@ -270,11 +283,29 @@ describe("normalizeSuggestion", () => {
   });
 });
 
+/** ສ້າງຈຸດຈອດແບບສາຂາ — ໃຊ້ຮ່ວມກັນຫຼາຍ describe. */
+const branch = (
+  code: string,
+  name: string,
+  lat: number,
+  lng: number,
+  carCount: number
+): StopSuggestion => ({
+  code,
+  name,
+  lat,
+  lng,
+  carCount,
+  kind: "branch",
+  deliveryCount: 0,
+  lastDelivered: "",
+});
+
 describe("matchSuggestions", () => {
   const branches = [
-    { code: "01", name: "ສາງວຽງຈັນ", lat: 17.9, lng: 102.6, carCount: 12 },
-    { code: "02", name: "ສາຂາປາກເຊ", lat: 15.1, lng: 105.7, carCount: 3 },
-    { code: "03", name: "ສາຂາຫຼວງພະບາງ", lat: 19.8, lng: 102.1, carCount: 5 },
+    branch("01", "ສາງວຽງຈັນ", 17.9, 102.6, 12),
+    branch("02", "ສາຂາປາກເຊ", 15.1, 105.7, 3),
+    branch("03", "ສາຂາຫຼວງພະບາງ", 19.8, 102.1, 5),
   ];
 
   it("lists branches when nothing has been typed yet", () => {
@@ -311,5 +342,76 @@ describe("hasCoords", () => {
     expect(hasCoords({ lat: 17.9, lng: 102.6 })).toBe(true);
     expect(hasCoords({ lat: 17.9, lng: null })).toBe(false);
     expect(hasCoords({ lat: null, lng: null })).toBe(false);
+  });
+});
+
+describe("ຈຸດຈອດທີ່ແນະນຳຈາກການສົ່ງຈິງ", () => {
+  it("ອ່ານແຖວຈາກ server ເປັນຈຸດຮ້ານ", () => {
+    const stop = normalizeCustomerSuggestion({
+      code: "C001",
+      name: "ຮ້ານ ປິ່ນຄຳ (ທົ່ງຂັນຄຳ)",
+      lat: "17.975108",
+      lng: "102.607403",
+      delivery_count: 180,
+      last_delivered: "2026-08-07",
+    });
+    expect(stop.kind).toBe("customer");
+    expect(stop.lat).toBeCloseTo(17.975108, 5);
+    expect(stop.deliveryCount).toBe(180);
+    expect(stop.lastDelivered).toBe("2026-08-07");
+    expect(stop.carCount).toBe(0);
+  });
+
+  it("ພິກັດທີ່ອ່ານບໍ່ອອກ ຫຼື ນອກຂອບເຂດ ກາຍເປັນ null ບໍ່ແມ່ນ 0", () => {
+    // (0,0) ຢູ່ກາງມະຫາສະໝຸດ — ປັກໝຸດລົງນັ້ນຈະເຮັດໃຫ້ໄລຍະທາງຜິດມະຫາສານ.
+    for (const bad of ["", "abc", "0", "999"]) {
+      const stop = normalizeCustomerSuggestion({ lat: bad, lng: bad });
+      expect(stop.lat).toBeNull();
+      expect(stop.lng).toBeNull();
+    }
+  });
+
+  it("ຊ່ອງທີ່ຫາຍ ບໍ່ພັງ", () => {
+    const stop = normalizeCustomerSuggestion({});
+    expect(stop.code).toBe("");
+    expect(stop.deliveryCount).toBe(0);
+    expect(stop.kind).toBe("customer");
+  });
+
+  it("ສາຂາຂຶ້ນກ່ອນຮ້ານ ເຖິງຮ້ານຈະຖີ່ກວ່າ", () => {
+    // ເສັ້ນທາງເກືອບສະເໝີເລີ່ມ ຫຼື ຈົບຢູ່ສາຂາ — ຄົນຕັ້ງຄ່າຫາອັນນັ້ນກ່ອນ.
+    const shop = normalizeCustomerSuggestion({
+      code: "C1",
+      name: "ສາຂາຮ້ານດັງ",
+      lat: "17.9",
+      lng: "102.6",
+      delivery_count: 999,
+    });
+    const depot = branch("01", "ສາຂາວຽງຈັນ", 17.9, 102.6, 2);
+    expect(matchSuggestions([shop, depot], "ສາຂາ")[0].code).toBe("01");
+  });
+
+  it("ພາຍໃນປະເພດດຽວກັນ ອັນທີ່ໃຊ້ຫຼາຍກວ່າຂຶ້ນກ່ອນ", () => {
+    const often = normalizeCustomerSuggestion({
+      code: "A",
+      name: "ຮ້ານ ກ",
+      delivery_count: 50,
+    });
+    const rare = normalizeCustomerSuggestion({
+      code: "B",
+      name: "ຮ້ານ ຂ",
+      delivery_count: 2,
+    });
+    expect(matchSuggestions([rare, often], "ຮ້ານ").map((s) => s.code)).toEqual([
+      "A",
+      "B",
+    ]);
+  });
+
+  it("ນ້ຳໜັກຈັດລຳດັບ ອີງຄ່າທີ່ຖືກຕ້ອງຂອງແຕ່ລະປະເພດ", () => {
+    expect(suggestionWeight(branch("01", "ສາງ", 17.9, 102.6, 12))).toBe(12);
+    expect(
+      suggestionWeight(normalizeCustomerSuggestion({ delivery_count: 7 }))
+    ).toBe(7);
   });
 });

@@ -198,6 +198,40 @@ export interface StopSuggestion {
   lat: number | null;
   lng: number | null;
   carCount: number;
+  /** `branch` = ສາຂາທີ່ມີລົດຈອດ · `customer` = ຮ້ານທີ່ເຄີຍສົ່ງຈິງ. */
+  kind: "branch" | "customer";
+  /** ຈຳນວນຄັ້ງທີ່ສົ່ງສຳເລັດ (ສະເພາະ `customer`) — ໃຊ້ຈັດລຳດັບ. */
+  deliveryCount: number;
+  /** ວັນທີ່ສົ່ງຫຼ້າສຸດ "YYYY-MM-DD" (ສະເພາະ `customer`). */
+  lastDelivered: string;
+}
+
+/**
+ * ນ້ຳໜັກທີ່ໃຊ້ຈັດລຳດັບ — ສາຂາໃຊ້ຈຳນວນລົດ, ຮ້ານໃຊ້ຈຳນວນຄັ້ງທີ່ສົ່ງ.
+ *
+ * ສອງຢ່າງນີ້ບໍ່ໄດ້ທຽບກັນໂດຍກົງ ແຕ່ພາຍໃນປະເພດດຽວກັນ "ໃຊ້ຫຼາຍຂຶ້ນກ່ອນ"
+ * ຄືກັນ ຈຶ່ງລວມເປັນຄ່າດຽວໄດ້.
+ */
+export function suggestionWeight(item: StopSuggestion): number {
+  return item.kind === "customer" ? item.deliveryCount : item.carCount;
+}
+
+/**
+ * ຈຸດ (0,0) ຢູ່ກາງມະຫາສະໝຸດແອດແລນຕິກ ຫ່າງລາວ ~2,000 ກມ.
+ *
+ * ທາງເລກມັນເປັນພິກັດທີ່ຖືກຕ້ອງ (isValidLat(0) = true) ແຕ່ໃນລະບົບນີ້ມັນແປວ່າ
+ * "ຍັງບໍ່ໄດ້ຕັ້ງພິກັດ" ສະເໝີ. ປ່ອຍຜ່ານແລ້ວໄລຍະທາງຂອງເສັ້ນທາງຈະບານເປັນ
+ * ຫຼາຍພັນ ກມ ໂດຍທີ່ໜ້າຈໍບໍ່ໄດ້ບອກວ່າຜິດ.
+ */
+function coordPairOrNull(
+  lat: number | null,
+  lng: number | null
+): { lat: number | null; lng: number | null } {
+  const okLat = lat !== null && isValidLat(lat);
+  const okLng = lng !== null && isValidLng(lng);
+  if (!okLat || !okLng) return { lat: null, lng: null };
+  if (lat === 0 && lng === 0) return { lat: null, lng: null };
+  return { lat, lng };
 }
 
 /** Coerce one row off the wire (the query returns coordinates as text). */
@@ -208,14 +242,50 @@ export function normalizeSuggestion(raw: {
   lng?: unknown;
   car_count?: unknown;
 }): StopSuggestion {
-  const lat = parseCoordinate(String(raw.lat ?? ""));
-  const lng = parseCoordinate(String(raw.lng ?? ""));
+  const point = coordPairOrNull(
+    parseCoordinate(String(raw.lat ?? "")),
+    parseCoordinate(String(raw.lng ?? ""))
+  );
   return {
     code: String(raw.code ?? "").trim(),
     name: String(raw.name ?? "").trim(),
-    lat: isValidLat(lat) ? lat : null,
-    lng: isValidLng(lng) ? lng : null,
+    lat: point.lat,
+    lng: point.lng,
     carCount: Number(raw.car_count ?? 0) || 0,
+    kind: "branch",
+    deliveryCount: 0,
+    lastDelivered: "",
+  };
+}
+
+/**
+ * ຮ້ານທີ່ເຄີຍສົ່ງຈິງ ຈາກ `listCustomerStopSuggestions`.
+ *
+ * ພິກັດເປັນຄ່າມັດທະຍົມຂອງຈຸດປິດບິນ ຈຶ່ງເປັນບ່ອນທີ່ລົດໄປຮອດແທ້ ບໍ່ແມ່ນທີ່ຢູ່
+ * ໃນທະບຽນລູກຄ້າ. ຈຸດທີ່ອ່ານບໍ່ອອກຖືກປັດເປັນ null ຄືກັບສາຂາ ຈຶ່ງບໍ່ມີໂອກາດ
+ * ປັກໝຸດລົງ (0,0) ກາງມະຫາສະໝຸດ.
+ */
+export function normalizeCustomerSuggestion(raw: {
+  code?: unknown;
+  name?: unknown;
+  lat?: unknown;
+  lng?: unknown;
+  delivery_count?: unknown;
+  last_delivered?: unknown;
+}): StopSuggestion {
+  const point = coordPairOrNull(
+    parseCoordinate(String(raw.lat ?? "")),
+    parseCoordinate(String(raw.lng ?? ""))
+  );
+  return {
+    code: String(raw.code ?? "").trim(),
+    name: String(raw.name ?? "").trim(),
+    lat: point.lat,
+    lng: point.lng,
+    carCount: 0,
+    kind: "customer",
+    deliveryCount: Number(raw.delivery_count ?? 0) || 0,
+    lastDelivered: String(raw.last_delivered ?? "").trim(),
   };
 }
 
@@ -245,7 +315,9 @@ export function matchSuggestions(
   scored.sort(
     (a, b) =>
       a.rank - b.rank ||
-      b.item.carCount - a.item.carCount ||
+      // ສາຂາຂຶ້ນກ່ອນຮ້ານ: ເສັ້ນທາງເລີ່ມ/ຈົບຢູ່ສາຂາເກືອບສະເໝີ
+      (a.item.kind === b.item.kind ? 0 : a.item.kind === "branch" ? -1 : 1) ||
+      suggestionWeight(b.item) - suggestionWeight(a.item) ||
       a.item.name.localeCompare(b.item.name)
   );
   return scored.slice(0, limit).map((entry) => entry.item);

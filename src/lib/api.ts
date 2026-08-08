@@ -25,6 +25,7 @@ import * as presence from "@/actions/presence";
 import * as pushTest from "@/actions/push-test";
 import * as notifyPrefs from "@/actions/notify-prefs";
 import * as reports from "@/actions/reports";
+import * as routeAssign from "@/actions/route-assign";
 import * as routing from "@/actions/routing";
 import * as settings from "@/actions/settings";
 import * as thunjai from "@/actions/thunjai";
@@ -326,6 +327,11 @@ export const Actions = {
   getDeliveryRoute: deliveryRoute.getDeliveryRoute,
   upsertDeliveryRoute: deliveryRoute.upsertDeliveryRoute,
   listRouteStopSuggestions: deliveryRoute.listRouteStopSuggestions,
+  listCustomerStopSuggestions: deliveryRoute.listCustomerStopSuggestions,
+  suggestRouteWaypoints: deliveryRoute.suggestRouteWaypoints,
+  listRouteFootprints: deliveryRoute.listRouteFootprints,
+  getPendingRouteSuggestions: routeAssign.getPendingRouteSuggestions,
+  listFleetCapacity: routeAssign.listFleetCapacity,
   getDrivingRoute: routing.getDrivingRoute,
   getPushStatus: pushTest.getPushStatus,
   listPushTargets: pushTest.listPushTargets,

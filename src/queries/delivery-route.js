@@ -250,6 +250,79 @@ async function listRouteStopSuggestions() {
   );
 }
 
+/**
+ * ຮ້ານທີ່ **ເຄີຍສົ່ງຈິງ** ພ້ອມພິກັດ — ໃຊ້ແນະນຳຈຸດຈອດຂອງເສັ້ນທາງ.
+ *
+ * ພິກັດມາຈາກຈຸດທີ່ຄົນຂັບກົດປິດບິນ (`odg_tms_detail.lat_end/lng_end`) ບໍ່ແມ່ນ
+ * ທີ່ຢູ່ໃນທະບຽນລູກຄ້າ ຈຶ່ງເປັນຈຸດທີ່ລົດໄປຮອດແທ້.
+ *
+ * ສາມເລື່ອງທີ່ຕັ້ງໃຈ:
+ *
+ * 1. **ຈຳກັດ 90 ວັນ** — ບິນເກົ່າກວ່ານັ້ນສ່ວນຫຼາຍບໍ່ມີພິກັດ (ເລີ່ມເກັບ GPS
+ *    ພາຍຫຼັງ: ທັງໝົດ 72,933 ໃບມີພິກັດພຽງ 8,419 ແຕ່ 90 ວັນຫຼ້າສຸດມີເຖິງ 96.8%).
+ *    ດຶງທັງໝົດຈະໄດ້ພາບທີ່ຮ້ານປະຈຳຫາຍໄປ ໂດຍບໍ່ມີອາການບອກ.
+ *
+ * 2. **ໃຊ້ຄ່າມັດທະຍົມ (median) ບໍ່ແມ່ນຄ່າສະເລ່ຍ** — ຮ້ານໜຶ່ງມີຫຼາຍຈຸດຈາກຫຼາຍ
+ *    ຄັ້ງ ແລະ ບາງຄັ້ງຄົນຂັບກົດປິດບິນຕອນຂັບອອກໄປໄກແລ້ວ. ຄ່າສະເລ່ຍຖືກຈຸດຫຼົງ
+ *    ດຶງອອກນອກ ແຕ່ median ບໍ່ຫວັ່ນໄຫວ.
+ *
+ * 3. **lat/lng ເປັນ varchar ໃນ DB** — ຕ້ອງ cast ແລະ ກັນຄ່າ '' / '0' ອອກ
+ *    ບໍ່ດັ່ງນັ້ນຈະໄດ້ຈຸດ (0,0) ກາງມະຫາສະໝຸດປົນມາ.
+ */
+async function listCustomerStopSuggestions({ days = 90, limit = 2000 } = {}) {
+  const windowDays = Math.min(Math.max(Number(days) || 90, 1), 365);
+  const max = Math.min(Math.max(Number(limit) || 2000, 1), 5000);
+  const usable = (col) =>
+    `NULLIF(TRIM(d.${col}), '') IS NOT NULL
+     AND TRIM(d.${col}) ~ '^-?[0-9]+(\\.[0-9]+)?$'
+     AND TRIM(d.${col})::numeric <> 0`;
+
+  return query(
+    `WITH points AS (
+       SELECT
+         d.cust_code,
+         TRIM(d.lat_end)::numeric AS lat,
+         TRIM(d.lng_end)::numeric AS lng,
+         d.sent_end
+       FROM public.odg_tms_detail d
+       WHERE d.status = 1
+         AND d.sent_end > LOCALTIMESTAMP - ($1 || ' days')::interval
+         AND NULLIF(TRIM(d.cust_code), '') IS NOT NULL
+         AND ${usable("lat_end")}
+         AND ${usable("lng_end")}
+     )
+     SELECT
+       p.cust_code                                   AS code,
+       COALESCE(NULLIF(TRIM(c.name_1), ''), p.cust_code) AS name,
+       round(percentile_cont(0.5) WITHIN GROUP (ORDER BY p.lat)::numeric, 6)::text AS lat,
+       round(percentile_cont(0.5) WITHIN GROUP (ORDER BY p.lng)::numeric, 6)::text AS lng,
+       COUNT(*)::int                                 AS delivery_count,
+       to_char(MAX(p.sent_end), 'YYYY-MM-DD')        AS last_delivered
+     FROM points p
+     LEFT JOIN public.ar_customer c ON c.code = p.cust_code
+     GROUP BY p.cust_code, c.name_1
+     ORDER BY COUNT(*) DESC, name
+     LIMIT ${max + 1}`,
+    [String(windowDays)]
+  ).then((rows) => {
+    // ດຶງເກີນມາ 1 ແຖວເພື່ອຮູ້ວ່າຖືກຕັດບໍ — ຕັດງຽບໆແລ້ວໜ້າຈໍຈະເບິ່ງຄື
+    // "ມີເທົ່ານີ້" ທັງທີ່ຍັງມີຮ້ານອື່ນອີກ.
+    const truncated = (rows ?? []).length > max;
+    return {
+      days: windowDays,
+      truncated,
+      stops: (rows ?? []).slice(0, max).map((r) => ({
+        code: String(r.code ?? ""),
+        name: String(r.name ?? "").trim(),
+        lat: String(r.lat ?? ""),
+        lng: String(r.lng ?? ""),
+        delivery_count: Number(r.delivery_count ?? 0),
+        last_delivered: String(r.last_delivered ?? ""),
+      })),
+    };
+  });
+}
+
 module.exports = {
   ensureDeliveryRouteSchema,
   listDeliveryRoutes,
@@ -257,4 +330,5 @@ module.exports = {
   upsertDeliveryRoute,
   deleteDeliveryRoute,
   listRouteStopSuggestions,
+  listCustomerStopSuggestions,
 };
