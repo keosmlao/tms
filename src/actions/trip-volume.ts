@@ -103,6 +103,16 @@ export async function getTripDraftVolume(draftId: number) {
 /** ພື້ນທີ່ບັນທຸກຂອງ "ຖ້ຽວທີ່ສົ່ງອອກແລ້ວ". */
 export async function getTripVolume(docNo: string) {
   await requireSession();
+  return buildTripVolume(docNo);
+}
+
+/**
+ * ແກ່ນຂອງການຄິດພື້ນທີ່ບັນທຸກ ໂດຍບໍ່ກວດ session — ແຍກອອກມາເພື່ອໃຫ້ route
+ * handler (/api/reports/trip-volume ທີ່ ODGMGT ເອີ້ນ) ໃຊ້ໄດ້ ເພາະ route ນັ້ນ
+ * ກວດສິດດ້ວຍ REPORT_API_SECRET ແທນ cookie. ສູດຢູ່ບ່ອນດຽວ ທັງສອງທາງຈຶ່ງ
+ * ໄດ້ຕົວເລກດຽວກັນສະເໝີ.
+ */
+export async function buildTripVolume(docNo: string) {
   const [load, billRows] = await Promise.all([
     getTripLoad(docNo) as Promise<{ car: string; items: TripItem[] }>,
     getTripBillNames(docNo) as Promise<Array<{ bill_no: string; cust_name?: string }>>,
@@ -216,6 +226,16 @@ export interface TripVolumeSummary {
  */
 export async function getTripVolumesBulk(docNos: string[]) {
   await requireSession();
+  return buildTripVolumesBulk(docNos);
+}
+
+/**
+ * ແກ່ນຂອງການຄິດພື້ນທີ່ບັນທຸກ ໂດຍບໍ່ກວດ session — ແຍກອອກມາເພື່ອໃຫ້ route
+ * handler (/api/reports/trip-volume ທີ່ ODGMGT ເອີ້ນ) ໃຊ້ໄດ້ ເພາະ route ນັ້ນ
+ * ກວດສິດດ້ວຍ REPORT_API_SECRET ແທນ cookie. ສູດຢູ່ບ່ອນດຽວ ທັງສອງທາງຈຶ່ງ
+ * ໄດ້ຕົວເລກດຽວກັນສະເໝີ.
+ */
+export async function buildTripVolumesBulk(docNos: string[]) {
   const docs = Array.from(new Set((docNos ?? []).map((d) => String(d ?? "").trim()).filter(Boolean)));
   if (docs.length === 0) return {} as Record<string, TripVolumeSummary>;
 
@@ -437,6 +457,16 @@ export interface UtilizationRow {
  */
 export async function getUtilizationReport(dateFrom: string, dateTo: string) {
   await requireSession();
+  return buildUtilizationReport(dateFrom, dateTo);
+}
+
+/**
+ * ແກ່ນຂອງລາຍງານ ໂດຍບໍ່ກວດ session — ແຍກອອກມາເພື່ອໃຫ້ route handler
+ * (/api/reports/truck-utilization ທີ່ ODGMGT ເອີ້ນ) ໃຊ້ໄດ້ ເພາະ route ນັ້ນ
+ * ກວດສິດດ້ວຍ REPORT_API_SECRET ແທນ cookie ຂອງຜູ້ໃຊ້. ສູດຄິດໄລ່ຢູ່ບ່ອນດຽວ
+ * ທັງສອງທາງຈຶ່ງໄດ້ຕົວເລກດຽວກັນສະເໝີ.
+ */
+export async function buildUtilizationReport(dateFrom: string, dateTo: string) {
 
   const { trips, items } = (await getTripsInRange({ dateFrom, dateTo })) as {
     trips: Array<Record<string, unknown>>;
