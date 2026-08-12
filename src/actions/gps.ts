@@ -14,6 +14,8 @@ import {
   getCarsWithGps as svcGetCarsWithGps,
   probeGpsHistory as svcProbeGpsHistory,
 } from "@/queries/gps-usage.js";
+import { getFuelByCar as svcGetFuelByCar } from "@/queries/fuel.js";
+import { buildFuelEfficiency } from "@/lib/fuel-efficiency-service";
 
 const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
 
@@ -89,6 +91,28 @@ export async function getGpsUsageSummary(
 ) {
   await requireSession();
   return svcGetGpsUsageSummary(fromDate, toDate, carCode, opts);
+}
+
+/**
+ * ທຸກຢ່າງທີ່ໜ້າ GPS Monthly Summary ຕ້ອງການ ໃນການເອີ້ນຄັ້ງດຽວ.
+ *
+ * ⚠️ ຢ່າແຍກກັບຄືນເປັນຫຼາຍ action ແລ້ວໃຫ້ໜ້າເອີ້ນດ້ວຍ Promise.all — Next.js
+ * ຈັດຄິວ Server Action ໃຫ້ແລ່ນເທື່ອລະອັນ ຈຶ່ງບໍ່ຂະໜານແທ້ ແລະ requireSession()
+ * ຍິງ query ຫາ DB ຊ້ຳທຸກອັນ. ຢູ່ນີ້ກວດ session ເທື່ອດຽວ ແລ້ວ Promise.all
+ * ຝັ່ງ server ເຊິ່ງຂະໜານແທ້.
+ */
+export async function getGpsMonthlyOverview(
+  fromDate: string,
+  toDate: string,
+  windowDays = 30
+) {
+  const session = await requireSession();
+  const [rows, fuel, efficiency] = await Promise.all([
+    svcGetGpsUsageSummaryCached(fromDate, toDate),
+    svcGetFuelByCar({ fromDate, toDate, session }),
+    buildFuelEfficiency(session, toDate, windowDays),
+  ]);
+  return { rows, fuel, efficiency };
 }
 
 // Fast initial-render path: reads from DB cache only, no provider calls.

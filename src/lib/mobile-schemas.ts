@@ -6,6 +6,7 @@ import {
   NonEmptyString,
   OptionalString,
 } from "./validation";
+import { MAX_PLAUSIBLE_LITERS } from "./fuel-sanity";
 
 export const LoginSchema = z.object({
   username: NonEmptyString.max(64),
@@ -239,7 +240,10 @@ const FuelRefill = z.object({
   driver_name: OptionalString,
   car: OptionalString,
   doc_no: OptionalString,
-  liters: z.coerce.number().nonnegative().max(1000000),
+  // Capped at a real tank size, not an arbitrary big number: the old 1,000,000
+  // ceiling let drivers post the kip amount into the litres field. See
+  // lib/fuel-sanity.js.
+  liters: z.coerce.number().nonnegative().max(MAX_PLAUSIBLE_LITERS),
   amount: z.coerce.number().nonnegative().max(10000000000),
   odometer: z.coerce.number().nonnegative().max(10000000).nullish(),
   station: OptionalString,

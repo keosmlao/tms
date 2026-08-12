@@ -41,6 +41,15 @@ async function ensureSchemaInternal() {
   await safeDdl(
     `ALTER TABLE public.odg_tms_car ADD COLUMN IF NOT EXISTS imei character varying`
   );
+  // ⚠️ ໜຶ່ງອຸປະກອນ = ໜຶ່ງຄັນ. ບໍ່ມີຕົວກັນມາກ່ອນ ແລະ imei 867869060226974
+  // ຖືກຜູກໃສ່ທັງ ກບ 2608 ແລະ ກຍ4899 — ໜ້າສະຫຼຸບຈຶ່ງນັບໄລຍະທາງຂອງລົດຄັນນັ້ນ
+  // ສອງເທື່ອ (ວັດເມື່ອ 2026-08-12: ເກີນຈິງ 470 km ໃນເດືອນດຽວ).
+  // ຍົກເວັ້ນຄ່າຫວ່າງ/NULL ເພາະລົດທີ່ບໍ່ມີ tracker ມີໄດ້ຫຼາຍຄັນ.
+  await safeDdl(`
+    CREATE UNIQUE INDEX IF NOT EXISTS uq_odg_tms_car_imei
+    ON public.odg_tms_car (imei)
+    WHERE imei IS NOT NULL AND btrim(imei) <> ''
+  `);
   await safeDdl(`
     CREATE TABLE IF NOT EXISTS public.odg_tms_gps_daily (
       roworder BIGSERIAL PRIMARY KEY,
@@ -389,13 +398,26 @@ function normalizeGpsObjectRow(row) {
   );
   return {
     imei,
-    name: firstNonEmpty(row.name, row.objectName, row.carName, row.alias),
+    // ⚠️ /exporter/object/getList ໃຊ້ຊື່ຊ່ອງແບບ snake_case (license_plate_number,
+    // model) ເຊິ່ງບໍ່ໄດ້ຢູ່ໃນລາຍການເດີມ — ຜົນຄື ທຸກຄັນຄືນ name/plate ເປັນຄ່າຫວ່າງ
+    // ທັງທີ່ provider ສົ່ງມາຄົບ (ວັດເມື່ອ 2026-08-12: 28/28 ຄັນ ຫວ່າງໝົດ).
+    name: firstNonEmpty(
+      row.name,
+      row.objectName,
+      row.carName,
+      row.alias,
+      row.model
+    ),
     plate: firstNonEmpty(
       row.plate,
       row.licensePlate,
       row.carLicensePlate,
-      row.plateNo
+      row.plateNo,
+      row.license_plate_number
     ),
+    province: firstNonEmpty(row.license_plate_province),
+    model: firstNonEmpty(row.model),
+    chassis: firstNonEmpty(row.chassis),
     status: firstNonEmpty(row.status),
   };
 }
@@ -523,6 +545,9 @@ function mapHistoryRow(row) {
     lng: coords.lng,
     speed: Number(row.speed ?? row.velocity ?? row.spd ?? 0) || 0,
     heading: Number(row.heading ?? row.direction ?? row.course ?? 0) || 0,
+    // ລະດັບນ້ຳມັນ % — provider ສົ່ງມາໃນປະຫວັດຍ້ອນຫຼັງນຳ ຈຶ່ງດຶງເກັບໄດ້
+    // ໂດຍບໍ່ຕ້ອງລໍໃຫ້ worker ສະສົມເອງເປັນອາທິດ.
+    oil: row.oil ?? row.fuel ?? row.fuelLevel ?? null,
   };
 }
 
@@ -1320,11 +1345,14 @@ function fmtDateDdMmYyyy(ymd) {
   return `${m[3]}-${m[2]}-${m[1]}`;
 }
 
-// Fast path: aggregate from odg_tms_gps_realtime_log (populated by background worker).
-// Mirrors summarize()'s logic: 15-min gap cap, midSpeed > 3 threshold, haversine distance.
-async function aggregateDailyFromLogs(imeis, fromDate, toDate) {
-  if (!Array.isArray(imeis) || imeis.length === 0) return [];
-  const sql = `
+// Per-(car, day) stats straight from odg_tms_gps_realtime_log. Mirrors
+// summarize()'s logic: 15-min gap cap, midSpeed > 3 threshold, haversine.
+//
+// Exported as a string because gps-daily-rollup.js writes the very same
+// aggregation into odg_tms_gps_daily. Two copies of this SQL would drift, and
+// a rollup that disagrees with the live path is worse than no rollup.
+// Params: $1 imei[], $2 fromDate, $3 toDate.
+const DAILY_AGG_SQL = `
     WITH segs AS (
       SELECT
         imei,
@@ -1377,7 +1405,40 @@ async function aggregateDailyFromLogs(imeis, fromDate, toDate) {
     FROM segs
     GROUP BY imei, usage_date
     ORDER BY imei ASC, usage_date ASC`;
-  return query(sql, [imeis, fromDate, toDate]);
+
+async function aggregateDailyFromLogs(imeis, fromDate, toDate) {
+  if (!Array.isArray(imeis) || imeis.length === 0) return [];
+  return query(DAILY_AGG_SQL, [imeis, fromDate, toDate]);
+}
+
+/**
+ * ຄືກັນກັບ aggregateDailyFromLogs ແຕ່ອ່ານຈາກ odg_tms_gps_daily ທີ່ຄິດໄວ້ແລ້ວ.
+ *
+ * ການສະແກນຈຸດດິບ 1 ເດືອນ ໃຊ້ 5.6 ວິນາທີ ທຸກຄັ້ງທີ່ເປີດໜ້າ (ວັດ 2026-08-12)
+ * ທັງທີ່ຄຳຕອບບໍ່ປ່ຽນ. ຄືນຮູບແບບແຖວດຽວກັນ ຈຶ່ງສະຫຼັບແທນກັນໄດ້.
+ * first_time/last_time ບໍ່ໄດ້ເກັບໃນ rollup — ໜ້າສະຫຼຸບບໍ່ໄດ້ໃຊ້.
+ */
+async function aggregateDailyFromRollup(imeis, fromDate, toDate) {
+  if (!Array.isArray(imeis) || imeis.length === 0) return [];
+  return query(
+    `SELECT
+       imei,
+       to_char(usage_date, 'YYYY-MM-DD') AS usage_date,
+       COALESCE(points_count, 0)::int      AS points_count,
+       NULL::text                          AS first_time,
+       NULL::text                          AS last_time,
+       COALESCE(max_speed, 0)::float       AS max_speed,
+       COALESCE(avg_speed, 0)::float       AS avg_speed,
+       COALESCE(distance_km, 0)::float     AS distance_km,
+       COALESCE(moving_seconds, 0)::int    AS moving_seconds,
+       COALESCE(stopped_seconds, 0)::int   AS stopped_seconds
+     FROM public.odg_tms_gps_daily
+     WHERE imei = ANY($1)
+       AND usage_date >= $2::date
+       AND usage_date <= $3::date
+     ORDER BY imei ASC, usage_date ASC`,
+    [imeis, fromDate, toDate]
+  );
 }
 
 function daysFromRange(fromDate, toDate) {
@@ -1675,11 +1736,15 @@ async function getGpsUsageSummaryCached(fromDate, toDate, carCode) {
 
   const started = Date.now();
   const days = daysFromRange(range.fromDate, range.toDate);
-  const agg = await aggregateDailyFromLogs(
-    cars.map((c) => c.imei),
-    range.fromDate,
-    range.toDate
-  );
+  const imeis = cars.map((c) => c.imei);
+  // ອ່ານຈາກ rollup ກ່ອນ. ຖ້າຊ່ວງນັ້ນຍັງບໍ່ໄດ້ສະຫຼຸບ (ເຊັ່ນ ເດືອນເກົ່າກ່ອນ
+  // backfill) ຈຶ່ງຕົກລົງໄປສະແກນຈຸດດິບແບບເດີມ — ຊ້າແຕ່ບໍ່ໃຫ້ໜ້າວ່າງ.
+  let agg = await aggregateDailyFromRollup(imeis, range.fromDate, range.toDate);
+  let source = "rollup";
+  if (agg.length === 0) {
+    agg = await aggregateDailyFromLogs(imeis, range.fromDate, range.toDate);
+    source = "raw";
+  }
   const byImeiDate = new Map();
   for (const a of agg) byImeiDate.set(`${a.imei}|${a.usage_date}`, a);
 
@@ -1752,7 +1817,7 @@ async function getGpsUsageSummaryCached(fromDate, toDate, carCode) {
 
   const elapsed = Date.now() - started;
   console.log(
-    `[gps-usage] summary-cached cars=${cars.length} days=${days.length} elapsed=${elapsed}ms (DB only)`
+    `[gps-usage] summary-cached cars=${cars.length} days=${days.length} src=${source} elapsed=${elapsed}ms (DB only)`
   );
   return totals.sort((a, b) =>
     (a.car_name ?? "").localeCompare(b.car_name ?? "")
@@ -1966,6 +2031,7 @@ async function backfillGpsLog(fromDate, toDate, carCode, opts = {}) {
           heading: p.heading,
           recorded_at: p.recordedAt,
           address: "",
+          oil: p.oil,
         }));
         const ins = await insertLogRowsBatch(rows);
         carInserted += ins;
@@ -2093,4 +2159,6 @@ module.exports = {
   backfillGpsLog,
   getCarsWithGps,
   probeGpsHistory,
+  DAILY_AGG_SQL,
+  ensureSchema,
 };

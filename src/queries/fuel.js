@@ -1,5 +1,10 @@
 const { pool, query, queryOne } = require("../lib/db");
 const { getBranchScope } = require("./helpers");
+const {
+  MIN_PLAUSIBLE_LITERS,
+  MAX_PLAUSIBLE_LITERS,
+  describeFuelEntryProblem,
+} = require("../lib/fuel-sanity");
 
 const fuelCache = globalThis;
 
@@ -105,6 +110,10 @@ async function saveFuelRefill(payload, client) {
   if (liters === null && amount === null) {
     throw new Error("ກະລຸນາໃສ່ຈຳນວນລິດ ຫຼື ຈຳນວນເງິນ");
   }
+  // Last line of defence — the dialog and the mobile schema check this too, but
+  // this is the only path every refill goes through.
+  const problem = describeFuelEntryProblem(liters, amount);
+  if (problem) throw new Error(problem);
 
   const fuelDate = asNullableText(payload?.fuel_date);
   const sql = `
@@ -234,6 +243,60 @@ async function getFuelSummary({ fromDate, toDate, userCode, session } = {}) {
   return row ?? { entry_count: 0, total_liters: 0, total_amount: 0 };
 }
 
+// Liters/amount rolled up per car, so the GPS summary can divide its own
+// distance by them and get km/L. `odg_tms_fuel_log.car` is the car code when
+// the refill came from the web dialog, but the mobile app posts whatever the
+// job carried — sometimes the plate (name_1). The lateral resolves both to a
+// canonical code, preferring an exact code match.
+async function getFuelByCar({ fromDate, toDate, session } = {}) {
+  await ensureFuelSchema();
+  const params = [];
+  const where = [`f.car IS NOT NULL`, `btrim(f.car::text) <> ''`];
+  if (fromDate) {
+    params.push(fromDate);
+    where.push(`f.fuel_date >= $${params.length}::date`);
+  }
+  if (toDate) {
+    params.push(toDate);
+    where.push(`f.fuel_date <= $${params.length}::date`);
+  }
+  const scope = getBranchScope(session);
+  if (scope.scoped) {
+    params.push(scope.branches);
+    where.push(`(f.transport_code = ANY($${params.length}) OR f.transport_code IS NULL)`);
+  }
+
+  // Rows whose "liters" is really a kip amount are counted separately rather
+  // than summed — see lib/fuel-sanity.js. They still show in the fuel page's
+  // own list (nothing is hidden), they just can't be divided into a km/L.
+  params.push(MIN_PLAUSIBLE_LITERS, MAX_PLAUSIBLE_LITERS);
+  const minParam = `$${params.length - 1}`;
+  const maxParam = `$${params.length}`;
+  const plausible = `f.liters BETWEEN ${minParam} AND ${maxParam}`;
+
+  return query(
+    `SELECT
+       COALESCE(m.code::text, btrim(f.car::text)) AS car_code,
+       COALESCE(SUM(f.liters) FILTER (WHERE ${plausible}), 0)::float AS liters,
+       COALESCE(SUM(f.amount) FILTER (WHERE ${plausible}), 0)::float AS amount,
+       COUNT(*) FILTER (WHERE ${plausible})::int AS refills,
+       COUNT(*) FILTER (WHERE f.liters > ${maxParam})::int AS ignored_refills
+     FROM public.odg_tms_fuel_log f
+     LEFT JOIN LATERAL (
+       SELECT c.code
+       FROM public.odg_tms_car c
+       WHERE btrim(c.code::text) = btrim(f.car::text)
+          OR upper(btrim(c.name_1::text)) = upper(btrim(f.car::text))
+       ORDER BY (btrim(c.code::text) = btrim(f.car::text)) DESC
+       LIMIT 1
+     ) m ON TRUE
+     WHERE ${where.join(" AND ")}
+     GROUP BY 1
+     ORDER BY 2 DESC`,
+    params
+  );
+}
+
 async function getFuelImage(id) {
   await ensureFuelSchema();
   const row = await queryOne(
@@ -254,6 +317,7 @@ module.exports = {
   saveFuelRefill,
   getFuelLogs,
   getFuelSummary,
+  getFuelByCar,
   getFuelImage,
   deleteFuelLog,
 };

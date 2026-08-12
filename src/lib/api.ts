@@ -228,6 +228,7 @@ export const Actions = {
   syncGpsRange: gps.syncGpsRange,
   getGpsUsageSummary: gps.getGpsUsageSummary,
   getGpsUsageSummaryCached: gps.getGpsUsageSummaryCached,
+  getGpsMonthlyOverview: gps.getGpsMonthlyOverview,
   getGpsUsageDaily: gps.getGpsUsageDaily,
   getGpsUsageDailyCached: gps.getGpsUsageDailyCached,
   getGpsUsageTrack: gps.getGpsUsageTrack,
@@ -242,6 +243,8 @@ export const Actions = {
   // Fuel
   getFuelLogs: fuel.getFuelLogs,
   getFuelSummary: fuel.getFuelSummary,
+  getFuelByCar: fuel.getFuelByCar,
+  getFuelEfficiency: fuel.getFuelEfficiency,
   getFuelImage: fuel.getFuelImage,
   deleteFuelLog: fuel.deleteFuelLog,
   saveFuelRefill: fuel.saveFuelRefill,

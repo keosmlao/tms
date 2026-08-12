@@ -33,4 +33,16 @@ export async function register() {
       error instanceof Error ? error.message : error
     );
   }
+
+  // Rolls the raw trail up into per-day distance. Summing a month of raw pings
+  // at request time took 4.8–11.5s; from the rollup it is milliseconds.
+  try {
+    const { startWorker } = await import("@/queries/gps-daily-rollup.js");
+    startWorker();
+  } catch (error) {
+    console.error(
+      "[instrumentation] failed to start gps daily rollup worker:",
+      error instanceof Error ? error.message : error
+    );
+  }
 }

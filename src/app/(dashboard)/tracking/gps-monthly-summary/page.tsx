@@ -16,6 +16,13 @@ import {
 } from "react-icons/fa";
 import { Actions } from "@/lib/api";
 import {
+  fleetFuelStats,
+  fuelStatsForCar,
+  indexFuelByCar,
+  type CarFuelStats,
+  type FuelByCar,
+} from "@/lib/fuel-efficiency";
+import {
   FIXED_MONTH_MAX,
   FIXED_MONTH_MIN,
   getFixedTodayMonth,
@@ -39,6 +46,47 @@ interface GpsUsageSummary {
   avg_daily_km?: number;
   max_daily_km_date?: string;
   min_daily_km_date?: string;
+}
+
+// GPS distance + the refills logged for that car in the same month, plus its
+// trailing-window efficiency (null when the car has no rollup row).
+type SummaryRow = GpsUsageSummary & CarFuelStats & { eff: EfficiencyRow | null };
+
+// km/L is measured over a trailing window, not the calendar month: trucks
+// refuel every ~10 days, so mid-month most cars have no refill logged yet and
+// a month-based column reads "-" for nearly the whole fleet.
+const KM_PER_L_WINDOW_DAYS = 30;
+
+interface EfficiencyRow {
+  car_code: string;
+  car_name: string;
+  distance_km: number;
+  liters: number;
+  consumed_pct: number;
+  liters_per_percent: number | null;
+  capacity_estimated: boolean;
+  receipt_liters: number;
+  receipt_refills: number;
+  sensor_refills: number;
+  amount: number;
+  km_per_liter: number | null;
+  receipt_km_per_liter: number | null;
+  cost_per_km: number | null;
+}
+
+interface EfficiencyResult {
+  fromDate: string;
+  toDate: string;
+  days: number;
+  rows: EfficiencyRow[];
+  ignoredRefills: number;
+  fleetLitersPerPercent: number | null;
+  sensorCoverage: {
+    from_date: string | null;
+    to_date: string | null;
+    points: number;
+    cars: number;
+  };
 }
 
 function endOfMonth(monthly: string) {
@@ -76,7 +124,11 @@ function pct(value: number, digits = 1) {
   return `${n(value, digits)}%`;
 }
 
-function downloadCsv(rows: GpsUsageSummary[], monthly: string) {
+function fmtKmPerL(value: number | null) {
+  return value === null ? "-" : `${n(value, 2)} km/L`;
+}
+
+function downloadCsv(rows: SummaryRow[], monthly: string) {
   const header = [
     "ລົດ",
     "ລະຫັດລົດ",
@@ -93,6 +145,18 @@ function downloadCsv(rows: GpsUsageSummary[], monthly: string) {
     "Max daily km",
     "Min daily km",
     "GPS points",
+    "ນ້ຳມັນ (ລິດ)",
+    "ຄ່ານ້ຳມັນ",
+    "ຈຳນວນເຕີມ",
+    `km/L ເຂັມ (${KM_PER_L_WINDOW_DAYS} ວັນ)`,
+    `km/L ໃບບິນ (${KM_PER_L_WINDOW_DAYS} ວັນ)`,
+    "ຄັ້ງເຕີມ ເຂັມ",
+    "ຄັ້ງເຕີມ ໃບບິນ",
+    `ໄລຍະທາງ ${KM_PER_L_WINDOW_DAYS} ວັນ`,
+    `ລິດໃຊ້ໄປ (ເຂັມ) ${KM_PER_L_WINDOW_DAYS} ວັນ`,
+    `% ເຂັມລົງ ${KM_PER_L_WINDOW_DAYS} ວັນ`,
+    `ລິດຕາມໃບບິນ ${KM_PER_L_WINDOW_DAYS} ວັນ`,
+    "ການປັບທຽບຖັງ",
   ];
   const csvRows = rows.map((r) => {
     const utilization = r.days_count > 0 ? (r.active_days / r.days_count) * 100 : 0;
@@ -112,6 +176,18 @@ function downloadCsv(rows: GpsUsageSummary[], monthly: string) {
       n(r.max_daily_km ?? 0, 3),
       n(r.min_daily_km ?? 0, 3),
       r.points_count,
+      n(r.liters, 2),
+      n(r.fuel_amount, 0),
+      r.refills,
+      r.eff?.km_per_liter == null ? "" : n(r.eff.km_per_liter, 2),
+      r.eff?.receipt_km_per_liter == null ? "" : n(r.eff.receipt_km_per_liter, 2),
+      r.eff?.sensor_refills ?? 0,
+      r.eff?.receipt_refills ?? 0,
+      n(r.eff?.distance_km ?? 0, 1),
+      n(r.eff?.liters ?? 0, 2),
+      n(r.eff?.consumed_pct ?? 0, 1),
+      n(r.eff?.receipt_liters ?? 0, 2),
+      r.eff?.capacity_estimated ? "ປະມານ" : "ປັບທຽບແລ້ວ",
     ];
   });
   const lines = [header, ...csvRows]
@@ -131,6 +207,8 @@ function downloadCsv(rows: GpsUsageSummary[], monthly: string) {
 export default function GpsMonthlySummaryPage() {
   const [monthly, setMonthly] = useState(getFixedTodayMonth());
   const [rows, setRows] = useState<GpsUsageSummary[]>([]);
+  const [fuel, setFuel] = useState<FuelByCar[]>([]);
+  const [efficiency, setEfficiency] = useState<EfficiencyResult | null>(null);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState("");
@@ -142,8 +220,16 @@ export default function GpsMonthlySummaryPage() {
     setLoading(true);
     setError("");
     try {
-      const data = await Actions.getGpsUsageSummaryCached(fromDate, toDate);
-      setRows((data ?? []) as GpsUsageSummary[]);
+      // ການເອີ້ນຄັ້ງດຽວ — Next.js ຈັດຄິວ Server Action ໃຫ້ແລ່ນເທື່ອລະອັນ
+      // ຈຶ່ງບໍ່ຄວນເອີ້ນຫຼາຍອັນດ້ວຍ Promise.all ຢູ່ຝັ່ງນີ້.
+      const res = await Actions.getGpsMonthlyOverview(
+        fromDate,
+        toDate,
+        KM_PER_L_WINDOW_DAYS
+      );
+      setRows((res?.rows ?? []) as GpsUsageSummary[]);
+      setFuel((res?.fuel ?? []) as FuelByCar[]);
+      setEfficiency((res?.efficiency ?? null) as EfficiencyResult | null);
     } catch (err) {
       console.error(err);
       setError(err instanceof Error ? err.message : "ໂຫຼດຂໍ້ມູນ GPS ບໍ່ສຳເລັດ");
@@ -156,8 +242,14 @@ export default function GpsMonthlySummaryPage() {
     setRefreshing(true);
     setError("");
     try {
-      const data = await Actions.getGpsUsageSummary(fromDate, toDate, undefined, { fillMissing: true });
+      const [data, fuelRows, eff] = await Promise.all([
+        Actions.getGpsUsageSummary(fromDate, toDate, undefined, { fillMissing: true }),
+        Actions.getFuelByCar(fromDate, toDate),
+        Actions.getFuelEfficiency(toDate, KM_PER_L_WINDOW_DAYS),
+      ]);
       setRows((data ?? []) as GpsUsageSummary[]);
+      setFuel((fuelRows ?? []) as FuelByCar[]);
+      setEfficiency((eff ?? null) as EfficiencyResult | null);
     } catch (err) {
       console.error(err);
       setError(err instanceof Error ? err.message : "Sync GPS ບໍ່ສຳເລັດ");
@@ -171,10 +263,36 @@ export default function GpsMonthlySummaryPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [monthly]);
 
-  const sortedRows = useMemo(
-    () => [...rows].sort((a, b) => Number(b.distance_km || 0) - Number(a.distance_km || 0)),
-    [rows]
-  );
+  // km/L comes from the trailing window, keyed the same way as the month fuel
+  // so a car matches on either its code or its plate.
+  const efficiencyByKey = useMemo(() => {
+    const map = new Map<string, EfficiencyRow>();
+    for (const e of efficiency?.rows ?? []) {
+      for (const k of [e.car_code, e.car_name]) {
+        const key = String(k ?? "").trim().toUpperCase();
+        if (key && !map.has(key)) map.set(key, e);
+      }
+    }
+    return map;
+  }, [efficiency]);
+
+  const sortedRows = useMemo<SummaryRow[]>(() => {
+    const index = indexFuelByCar(fuel);
+    return rows
+      .map((row) => {
+        const codeKey = String(row.car_code ?? "").trim().toUpperCase();
+        const nameKey = String(row.car_name ?? "").trim().toUpperCase();
+        return {
+          ...row,
+          ...fuelStatsForCar(row, index),
+          eff:
+            (codeKey ? efficiencyByKey.get(codeKey) : undefined) ??
+            (nameKey ? efficiencyByKey.get(nameKey) : undefined) ??
+            null,
+        };
+      })
+      .sort((a, b) => Number(b.distance_km || 0) - Number(a.distance_km || 0));
+  }, [rows, fuel, efficiencyByKey]);
 
   const totals = useMemo(() => {
     const cars = rows.length;
@@ -205,6 +323,26 @@ export default function GpsMonthlySummaryPage() {
       avgSpeed,
     };
   }, [rows]);
+
+  // Fleet km/L over the window — same rule as per car: only cars that actually
+  // refuelled contribute, otherwise their distance inflates the ratio.
+  const fuelTotals = useMemo(
+    () =>
+      fleetFuelStats(
+        (efficiency?.rows ?? []).map((e) => ({
+          car_code: e.car_code,
+          distance_km: e.distance_km,
+          liters: e.liters,
+          fuel_amount: e.amount,
+          refills: e.receipt_refills,
+          km_per_liter: e.km_per_liter,
+          cost_per_km: e.cost_per_km,
+        }))
+      ),
+    [efficiency]
+  );
+
+  const ignoredRefills = efficiency?.ignoredRefills ?? 0;
 
   return (
     <div className="space-y-6">
@@ -259,17 +397,35 @@ export default function GpsMonthlySummaryPage() {
         </div>
       </section>
 
+      {ignoredRefills > 0 && (
+        <div className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm font-semibold text-amber-800 dark:border-amber-500/20 dark:bg-amber-500/10 dark:text-amber-200">
+          ຂ້າມ {ignoredRefills} ລາຍການເຕີມນ້ຳມັນ ທີ່ຊ່ອງລິດເບິ່ງຄືເປັນຈຳນວນເງິນ —
+          ບໍ່ໄດ້ນຳມາຄິດ km/L. ໃຫ້ແກ້ຢູ່ໜ້ານ້ຳມັນ.
+        </div>
+      )}
+
       {error && (
         <div className="rounded-xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm font-semibold text-rose-700 dark:border-rose-500/20 dark:bg-rose-500/10 dark:text-rose-300">
           {error}
         </div>
       )}
 
-      <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
+      <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-5">
         <MetricCard icon={<FaCarSide />} label="ລົດມີ GPS" value={`${totals.activeCars}/${totals.cars}`} hint={`ເດືອນ ${monthTitle(monthly)}`} tone="teal" />
         <MetricCard icon={<FaRoute />} label="Actual distance" value={fmtKm(totals.distance)} hint="ລວມລະຍະທາງ GPS" tone="sky" />
         <MetricCard icon={<FaClock />} label="Driving hours" value={fmtHours(totals.moving)} hint={`Idle/Stopped ${fmtHours(totals.stopped)}`} tone="emerald" />
         <MetricCard icon={<FaChartLine />} label="Utilization" value={pct(totals.utilization)} hint={`${n(totals.activeDays)} active days / ${n(totals.days)} days`} tone="amber" />
+        <MetricCard
+          icon={<FaGasPump />}
+          label={`ອັດຕາສະເລ່ຍນ້ຳມັນ · ເຂັມວັດແທກ ${KM_PER_L_WINDOW_DAYS} ວັນ`}
+          value={fuelTotals.kmPerLiter === null ? "-" : fmtKmPerL(fuelTotals.kmPerLiter)}
+          hint={
+            fuelTotals.kmPerLiter === null
+              ? "ຍັງບໍ່ມີຂໍ້ມູນເຂັມວັດແທກພຽງພໍ"
+              : `${n(fuelTotals.liters, 1)} ລິດ · ${fuelTotals.cars} ຄັນ · ${efficiency?.fromDate ?? ""} ຫາ ${efficiency?.toDate ?? ""}`
+          }
+          tone="rose"
+        />
       </div>
 
       <section className="rounded-2xl border border-slate-200 bg-white shadow-sm dark:border-slate-800 dark:bg-slate-900">
@@ -279,11 +435,26 @@ export default function GpsMonthlySummaryPage() {
             <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">
               ຂໍ້ມູນມາຈາກ GPS cache ຂອງ TMS: {fromDate} ຫາ {toDate}
             </p>
+            <p className="mt-0.5 text-xs text-slate-500 dark:text-slate-400">
+              km/L ຄິດຈາກ<strong> ເຂັມວັດແທກນ້ຳມັນຂອງ GPS</strong> ໃນ {KM_PER_L_WINDOW_DAYS} ວັນຫຼ້າສຸດ
+              ({efficiency?.fromDate ?? "…"} ຫາ {efficiency?.toDate ?? "…"}) — ບໍ່ຂຶ້ນກັບວ່າຄົນຂັບ
+              ບັນທຶກໃບບິນ ຫຼື ບໍ່. ຂະໜາດຖັງປັບທຽບຈາກໃບບິນຈິງຂອງແຕ່ລະຄັນ; ເຄື່ອງໝາຍ{" "}
+              <span className="text-amber-500">≈</span> ໝາຍວ່າຄັນນັ້ນຍັງບໍ່ມີໃບບິນໃຫ້ປັບທຽບ
+              ຈຶ່ງໃຊ້ຄ່າກາງຂອງກອງລົດ.
+            </p>
           </div>
           <div className="flex flex-wrap gap-2 text-xs">
             <Pill icon={<FaTachometerAlt />} label={`Avg speed ${n(totals.avgSpeed, 1)} km/h`} />
             <Pill icon={<FaTachometerAlt />} label={`Max speed ${n(totals.maxSpeed, 1)} km/h`} />
             <Pill icon={<FaMapMarkedAlt />} label={`${n(totals.points)} GPS points`} />
+            <Pill
+              icon={<FaGasPump />}
+              label={
+                fuelTotals.kmPerLiter === null
+                  ? "ບໍ່ມີຂໍ້ມູນນ້ຳມັນ"
+                  : `${n(fuelTotals.liters, 1)} ລິດ · ${n(fuelTotals.kmPerLiter, 2)} km/L`
+              }
+            />
           </div>
         </div>
 
@@ -301,7 +472,7 @@ export default function GpsMonthlySummaryPage() {
           </div>
         ) : (
           <div className="overflow-x-auto">
-            <table className="min-w-[1320px] w-full text-sm">
+            <table className="min-w-[1700px] w-full text-sm">
               <thead>
                 <tr className="border-b border-slate-200 bg-slate-50 text-left text-[10px] font-bold uppercase tracking-wider text-slate-500 dark:border-slate-800 dark:bg-slate-950/50 dark:text-slate-400">
                   <th className="px-4 py-3">ລົດ</th>
@@ -316,6 +487,20 @@ export default function GpsMonthlySummaryPage() {
                   <th className="px-4 py-3 text-right">Avg km/day</th>
                   <th className="px-4 py-3 text-right">Max daily</th>
                   <th className="px-4 py-3 text-right">Min daily</th>
+                  <th className="px-4 py-3 text-right">ໃບບິນ (L)</th>
+                  <th className="px-4 py-3 text-right">
+                    km/L ເຂັມ
+                    <span className="ml-1 font-medium normal-case text-slate-400">
+                      {KM_PER_L_WINDOW_DAYS} ວັນ
+                    </span>
+                  </th>
+                  <th className="px-4 py-3 text-right">
+                    km/L ໃບບິນ
+                    <span className="ml-1 font-medium normal-case text-slate-400">
+                      {KM_PER_L_WINDOW_DAYS} ວັນ
+                    </span>
+                  </th>
+                  <th className="px-4 py-3 text-right">ເຕີມ ເຂັມ/ບິນ</th>
                   <th className="px-4 py-3 text-right">GPS points</th>
                 </tr>
               </thead>
@@ -339,6 +524,52 @@ export default function GpsMonthlySummaryPage() {
                       <td className="px-4 py-3 text-right text-slate-600 dark:text-slate-300">{fmtKm(row.avg_daily_km ?? 0)}</td>
                       <td className="px-4 py-3 text-right text-slate-600 dark:text-slate-300">{fmtKm(row.max_daily_km ?? 0)}</td>
                       <td className="px-4 py-3 text-right text-slate-600 dark:text-slate-300">{fmtKm(row.min_daily_km ?? 0)}</td>
+                      <td className="px-4 py-3 text-right text-slate-600 dark:text-slate-300">
+                        {row.liters > 0 ? (
+                          <>
+                            <span className="font-semibold">{n(row.liters, 1)}</span>
+                            <span className="ml-1 text-xs text-slate-400">×{row.refills}</span>
+                          </>
+                        ) : (
+                          "-"
+                        )}
+                      </td>
+                      <td className="px-4 py-3 text-right font-bold text-rose-600 dark:text-rose-300">
+                        {row.eff?.km_per_liter == null ? (
+                          "-"
+                        ) : (
+                          <>
+                            {n(row.eff.km_per_liter, 2)}
+                            {row.eff.capacity_estimated && (
+                              <span
+                                className="ml-1 text-xs font-normal text-amber-500"
+                                title={`ຄັນນີ້ຍັງບໍ່ມີໃບບິນໃຫ້ປັບທຽບຂະໜາດຖັງ — ໃຊ້ຄ່າກາງຂອງກອງລົດແທນ (${n(row.eff.liters_per_percent ?? 0, 2)} ລິດ/1%). ຕົວເລກນີ້ເປັນຄ່າປະມານ.`}
+                              >
+                                ≈
+                              </span>
+                            )}
+                          </>
+                        )}
+                      </td>
+                      <td className="px-4 py-3 text-right text-slate-600 dark:text-slate-300">
+                        {row.eff?.receipt_km_per_liter == null
+                          ? "-"
+                          : n(row.eff.receipt_km_per_liter, 2)}
+                      </td>
+                      <td
+                        className={`px-4 py-3 text-right ${
+                          (row.eff?.sensor_refills ?? 0) > (row.eff?.receipt_refills ?? 0)
+                            ? "font-bold text-amber-600 dark:text-amber-400"
+                            : "text-slate-600 dark:text-slate-300"
+                        }`}
+                        title={
+                          (row.eff?.sensor_refills ?? 0) > (row.eff?.receipt_refills ?? 0)
+                            ? "ເຂັມກະໂດດຂຶ້ນຫຼາຍກວ່າໃບບິນທີ່ບັນທຶກ — ອາດມີການເຕີມທີ່ບໍ່ໄດ້ບັນທຶກ"
+                            : undefined
+                        }
+                      >
+                        {row.eff ? `${row.eff.sensor_refills}/${row.eff.receipt_refills}` : "-"}
+                      </td>
                       <td className="px-4 py-3 text-right text-slate-500">{n(row.points_count)}</td>
                     </tr>
                   );
@@ -363,9 +594,22 @@ export default function GpsMonthlySummaryPage() {
         <InfoPanel
           title="Fuel / Driver scoring"
           items={[
-            ["Fuel consumed (L)", "ຕ້ອງຕໍ່ຈາກໜ້ານ້ຳມັນ ຫຼື GPS fuel sensor"],
-            ["km/L", "Distance ÷ Fuel consumed"],
-            ["Fuel cost/km", "Fuel cost ÷ Distance"],
+            [
+              "Fuel consumed (L)",
+              `ຈາກໜ້ານ້ຳມັນ (odg_tms_fuel_log) ${KM_PER_L_WINDOW_DAYS} ວັນຫຼ້າສຸດ — ${n(fuelTotals.liters, 1)} ລິດ`,
+            ],
+            [
+              "km/L",
+              fuelTotals.kmPerLiter === null
+                ? "GPS distance ÷ ລິດທີ່ເຕີມ (ຍັງບໍ່ມີການເຕີມທີ່ບັນທຶກໄວ້)"
+                : `GPS distance ÷ ລິດທີ່ເຕີມ = ${n(fuelTotals.kmPerLiter, 2)} km/L (${n(fuelTotals.distance, 1)} km ÷ ${n(fuelTotals.liters, 1)} L)`,
+            ],
+            [
+              "Fuel cost/km",
+              fuelTotals.costPerKm === null
+                ? "ຄ່ານ້ຳມັນ ÷ Distance"
+                : `ຄ່ານ້ຳມັນ ÷ Distance = ${n(fuelTotals.costPerKm, 0)} /km`,
+            ],
             ["Driver safety score", "ຈະຄິດຈາກ speeding / harsh braking / rapid acceleration"],
             ["Route compliance", "ຈະຄິດຫຼັງຈາກມີ planned route distance"],
           ]}
@@ -387,13 +631,14 @@ function MetricCard({
   label: string;
   value: string;
   hint: string;
-  tone: "teal" | "sky" | "emerald" | "amber";
+  tone: "teal" | "sky" | "emerald" | "amber" | "rose";
 }) {
   const palette = {
     teal: "text-teal-600 bg-teal-500/10 dark:text-teal-300",
     sky: "text-sky-600 bg-sky-500/10 dark:text-sky-300",
     emerald: "text-emerald-600 bg-emerald-500/10 dark:text-emerald-300",
     amber: "text-amber-600 bg-amber-500/10 dark:text-amber-300",
+    rose: "text-rose-600 bg-rose-500/10 dark:text-rose-300",
   }[tone];
   return (
     <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm dark:border-slate-800 dark:bg-slate-900">

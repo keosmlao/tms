@@ -1,4 +1,5 @@
-const { pool, query, queryOne } = require("../lib/db");
+const { pool, query } = require("../lib/db");
+const { clampFuelPercent } = require("../lib/fuel-sanity");
 const { getGpsRealtimeAll } = require("./tracking");
 const {
   ensureSchema: ensureCurrentSchema,
@@ -34,6 +35,14 @@ async function ensureSchemaInternal() {
       address text,
       fetched_at timestamp without time zone NOT NULL DEFAULT LOCALTIMESTAMP(0)
     )
+  `);
+  // Fuel level (%) as reported by the tracker. `odg_tms_gps_current.oil` only
+  // ever holds the latest reading — it is overwritten every tick — so without
+  // this column there is no fuel history to detect siphoning, unlogged refills
+  // or idle burn from. Costs one more value on an INSERT we already make.
+  await safeDdl(`
+    ALTER TABLE public.odg_tms_gps_realtime_log
+    ADD COLUMN IF NOT EXISTS fuel_percent numeric
   `);
   await safeDdl(`
     CREATE INDEX IF NOT EXISTS idx_odg_tms_gps_realtime_log_imei_ts
@@ -74,40 +83,33 @@ function numOrNull(value) {
   return Number.isFinite(n) ? n : null;
 }
 
-async function getLastRecordedAt(imei) {
-  const row = await queryOne(
-    `SELECT to_char(recorded_at, 'YYYY-MM-DD HH24:MI:SS') AS recorded_at
-     FROM public.odg_tms_gps_realtime_log
-     WHERE imei = $1
-     ORDER BY recorded_at DESC NULLS LAST, roworder DESC
-     LIMIT 1`,
-    [imei]
-  );
-  return row?.recorded_at ?? null;
+const LOG_COLUMNS =
+  "imei, car_code, car_name, lat, lng, speed, heading, recorded_at, address, fuel_percent";
+const LOG_COLUMN_COUNT = 10;
+
+function logRowParams(r) {
+  return [
+    String(r.imei ?? "").trim(),
+    String(r.car_code ?? "").trim(),
+    String(r.car_name ?? "").trim(),
+    numOrNull(r.lat),
+    numOrNull(r.lng),
+    numOrNull(r.speed),
+    numOrNull(r.heading),
+    String(r.recorded_at ?? "").trim() || null,
+    String(r.address ?? "").trim() || null,
+    clampFuelPercent(r.fuel_percent ?? r.oil),
+  ];
 }
 
-async function insertLogRow(row) {
-  await pool.query(
-    `INSERT INTO public.odg_tms_gps_realtime_log (
-       imei, car_code, car_name, lat, lng, speed, heading,
-       recorded_at, address
-     ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)
-     ON CONFLICT (imei, recorded_at) DO NOTHING`,
-    [
-      String(row.imei ?? "").trim(),
-      String(row.car_code ?? "").trim(),
-      String(row.car_name ?? "").trim(),
-      numOrNull(row.lat),
-      numOrNull(row.lng),
-      numOrNull(row.speed),
-      numOrNull(row.heading),
-      String(row.recorded_at ?? "").trim() || null,
-      String(row.address ?? "").trim() || null,
-    ]
-  );
-}
-
-// Batch insert for backfill paths. Skips duplicates via unique index.
+/**
+ * One INSERT for every row, duplicates dropped by the (imei, recorded_at)
+ * unique index. Returns how many rows were actually new.
+ *
+ * The unique index is what makes this safe — callers do NOT need to check
+ * "has this ping already been stored?" first. A pre-check SELECT per car was
+ * how this used to work and it cost one round trip per car per tick.
+ */
 async function insertLogRowsBatch(rows) {
   if (!Array.isArray(rows) || rows.length === 0) return 0;
   await ensureSchema();
@@ -119,24 +121,15 @@ async function insertLogRowsBatch(rows) {
     const params = [];
     for (const r of batch) {
       const b = params.length;
-      values.push(
-        `($${b + 1},$${b + 2},$${b + 3},$${b + 4},$${b + 5},$${b + 6},$${b + 7},$${b + 8},$${b + 9})`
+      const slots = Array.from(
+        { length: LOG_COLUMN_COUNT },
+        (_, k) => `$${b + k + 1}`
       );
-      params.push(
-        String(r.imei ?? "").trim(),
-        String(r.car_code ?? "").trim(),
-        String(r.car_name ?? "").trim(),
-        numOrNull(r.lat),
-        numOrNull(r.lng),
-        numOrNull(r.speed),
-        numOrNull(r.heading),
-        String(r.recorded_at ?? "").trim() || null,
-        String(r.address ?? "").trim() || null
-      );
+      values.push(`(${slots.join(",")})`);
+      params.push(...logRowParams(r));
     }
     const res = await pool.query(
-      `INSERT INTO public.odg_tms_gps_realtime_log
-         (imei, car_code, car_name, lat, lng, speed, heading, recorded_at, address)
+      `INSERT INTO public.odg_tms_gps_realtime_log (${LOG_COLUMNS})
        VALUES ${values.join(",")}
        ON CONFLICT (imei, recorded_at) DO NOTHING`,
       params
@@ -169,6 +162,8 @@ async function runTick() {
     let currentOk = 0;
     let currentFail = 0;
     let currentStale = 0;
+
+    const toLog = [];
     for (const r of rows) {
       const imei = String(r.imei ?? "").trim();
       if (!imei) continue;
@@ -192,27 +187,26 @@ async function runTick() {
         }
       }
 
-      // Insert into history log only when recorded_at advances
-      try {
-        const recordedAt = String(r.recorded_at ?? "").trim();
-        if (!recordedAt) {
-          skipped++;
-          continue;
-        }
-        const lastTs = await getLastRecordedAt(imei);
-        if (lastTs && lastTs === recordedAt) {
-          skipped++;
-          continue;
-        }
-        await insertLogRow(r);
-        inserted++;
-      } catch (err) {
-        errors++;
-        console.error(
-          `[gps-realtime-log] insert failed imei=${imei}:`,
-          err?.message ?? err
-        );
+      // A ping with no timestamp can't be deduped or ordered — drop it.
+      if (!String(r.recorded_at ?? "").trim()) {
+        skipped++;
+        continue;
       }
+      toLog.push(r);
+    }
+
+    // One INSERT for the whole fleet instead of a SELECT + INSERT per car.
+    // Re-sent pings collide on (imei, recorded_at) and are skipped by the
+    // unique index, so `rowCount` is exactly the number of new pings.
+    try {
+      inserted = await insertLogRowsBatch(toLog);
+      skipped += toLog.length - inserted;
+    } catch (err) {
+      errors++;
+      console.error(
+        "[gps-realtime-log] batch insert failed:",
+        err?.message ?? err
+      );
     }
     // ຕື່ມຊື່ບ່ອນໃຫ້ຄັນທີ່ຍັງບໍ່ມີ — ຈຳກັດຕໍ່ຮອບ ເພື່ອບໍ່ໃຫ້ຍິງບໍລິການ
     // ພາຍນອກເກີນ 1 ຄັ້ງ/ວິນາທີ ຕາມກົດການໃຊ້ງານ
@@ -289,6 +283,7 @@ async function getLogRange(imei, fromDate, toDate) {
        COALESCE(heading, 0)::float AS heading,
        to_char(recorded_at, 'YYYY-MM-DD HH24:MI:SS') AS recorded_at,
        COALESCE(address, '') AS address,
+       fuel_percent::float AS fuel_percent,
        to_char(fetched_at, 'YYYY-MM-DD HH24:MI:SS') AS fetched_at
      FROM public.odg_tms_gps_realtime_log
      WHERE imei = $1

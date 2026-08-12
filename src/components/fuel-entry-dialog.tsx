@@ -16,6 +16,7 @@ import {
 } from "react-icons/fa";
 import { Actions } from "@/lib/api";
 import { getFixedTodayDate } from "@/lib/fixed-year";
+import { describeFuelEntryProblem } from "@/lib/fuel-sanity";
 
 interface Option {
   code: string;
@@ -295,6 +296,12 @@ export function FuelEntryDialog({
     }
     if ((litersN === null || litersN <= 0) && (amountN === null || amountN <= 0)) {
       setError("ກະລຸນາໃສ່ຈຳນວນລິດ ຫຼື ຈຳນວນເງິນ");
+      return;
+    }
+    // Catches the kip-in-the-litres-box mistake before it reaches the log.
+    const problem = describeFuelEntryProblem(litersN, amountN);
+    if (problem) {
+      setError(problem);
       return;
     }
 
