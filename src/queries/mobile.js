@@ -2178,6 +2178,7 @@ async function mobileJobAction(body) {
             odometer: body.odometer,
             station: asNullableText(body.station),
             note: asNullableText(body.note),
+            fuel_type: asNullableText(body.fuel_type),
             image_data: asNullableText(body.image_data ?? body.photo),
             lat,
             lng,

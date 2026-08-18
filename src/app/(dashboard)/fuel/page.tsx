@@ -9,6 +9,7 @@ import {
   FaImage,
   FaMoneyBillWave,
   FaPlus,
+  FaReceipt,
   FaSearch,
   FaSpinner,
   FaTimes,
@@ -32,6 +33,10 @@ import {
 } from "@/components/status-page-shell";
 import { Pagination, toNumber } from "@/components/status-page-helpers";
 import { FuelEntryDialog } from "@/components/fuel-entry-dialog";
+import {
+  FUEL_PAYMENT_TYPES,
+  fuelPaymentTypeLabel,
+} from "@/lib/fuel-payment-type";
 
 interface FuelLog {
   id: number;
@@ -45,6 +50,7 @@ interface FuelLog {
   odometer: number | string | null;
   station: string | null;
   note: string | null;
+  fuel_type: string | null;
   lat: string | null;
   lng: string | null;
   has_image: boolean;
@@ -58,6 +64,14 @@ const formatNumber = (n: number | string | null | undefined) => {
     minimumFractionDigits: 0,
     maximumFractionDigits: 2,
   });
+};
+
+// ສີປະຈຳແຕ່ລະປະເພດ — ໃຫ້ແຍກອອກຈາກກັນໄດ້ໄວໃນຕາຕະລາງ.
+const TYPE_TONE: Record<string, string> = {
+  ptt_voucher: "bg-sky-500/10 text-sky-700 dark:text-sky-300",
+  fuel_pass: "bg-violet-500/10 text-violet-700 dark:text-violet-300",
+  cash: "bg-emerald-500/10 text-emerald-700 dark:text-emerald-300",
+  other: "bg-slate-500/10 text-slate-600 dark:text-slate-300",
 };
 
 const dateLabel = (date: string) => {
@@ -109,6 +123,9 @@ export default function FuelPage() {
   const [toDate, setToDate] = useState(currentMonthRange().toDate);
   const [monthly, setMonthly] = useState(currentMonth);
   const [searchText, setSearchText] = useState("");
+  // ຕົວກອງປະເພດການເຕີມ — ກອງຢູ່ຝັ່ງ client ເພາະຂໍ້ມູນເດືອນນັ້ນໂຫຼດມາໝົດແລ້ວ,
+  // ຈຶ່ງມີຜົນທັງລາຍການລຸ່ມ ແລະ ລາຍງານເດືອນ (ລວມທັງ Excel) ພ້ອມກັນ.
+  const [typeFilter, setTypeFilter] = useState("");
   const [loading, setLoading] = useState(true);
   const [currentPage, setCurrentPage] = useState(1);
   const [photoOpen, setPhotoOpen] = useState<{
@@ -143,15 +160,28 @@ export default function FuelPage() {
 
   const filtered = useMemo(() => {
     const k = searchText.trim().toLowerCase();
-    if (!k) return logs;
-    return logs.filter((r) =>
-      [r.driver_name, r.user_code, r.car, r.station, r.doc_no, r.note]
+    const byType = typeFilter
+      ? logs.filter((r) => r.fuel_type === typeFilter)
+      : logs;
+    if (!k) return byType;
+    return byType.filter((r) =>
+      [
+        r.driver_name,
+        r.user_code,
+        r.car,
+        r.station,
+        r.doc_no,
+        r.note,
+        fuelPaymentTypeLabel(r.fuel_type),
+      ]
         .filter(Boolean)
         .join(" ")
         .toLowerCase()
         .includes(k)
     );
-  }, [logs, searchText]);
+  }, [logs, searchText, typeFilter]);
+
+  const typeLabel = typeFilter ? fuelPaymentTypeLabel(typeFilter) : "ທຸກປະເພດ";
 
   const summary = useMemo(
     () =>
@@ -292,7 +322,7 @@ export default function FuelPage() {
     ];
     const sheet = XLSX.utils.aoa_to_sheet([
       [monthTitle(monthly)],
-      ["ວັນທີໃສ່ນ້ຳມັນ PTT"],
+      [`ວັນທີໃສ່ນ້ຳມັນ — ${typeLabel}`],
       header,
       ...rows,
       totalRow,
@@ -407,6 +437,27 @@ export default function FuelPage() {
               className="w-full px-3 py-2 glass-input rounded-lg text-xs text-slate-700 dark:text-slate-200 transition-all"
             />
           </div>
+          <div className="min-w-[190px]">
+            <label className="block text-xs font-medium text-slate-600 dark:text-slate-300 mb-1.5">
+              <FaReceipt className="inline mr-1.5 text-slate-400" size={11} />
+              ປະເພດການເຕີມ
+            </label>
+            <select
+              value={typeFilter}
+              onChange={(e) => {
+                setTypeFilter(e.target.value);
+                setCurrentPage(1);
+              }}
+              className="w-full glass-input rounded-lg px-3 py-2 text-xs text-slate-700 dark:text-slate-200"
+            >
+              <option value="">ທຸກປະເພດ</option>
+              {FUEL_PAYMENT_TYPES.map((t) => (
+                <option key={t.code} value={t.code}>
+                  {t.label}
+                </option>
+              ))}
+            </select>
+          </div>
           <button
             type="submit"
             className="px-5 py-2 rounded-lg bg-teal-700 hover:bg-teal-800 text-white text-xs font-semibold transition-colors disabled:opacity-50"
@@ -461,7 +512,7 @@ export default function FuelPage() {
               {monthTitle(monthly)}
             </p>
             <p className="text-[11px] text-slate-500 dark:text-slate-400">
-              ສັງລວມຕາມລົດ ແລະ ວັນທີໃສ່ນ້ຳມັນ PTT
+              ສັງລວມຕາມລົດ ແລະ ວັນທີໃສ່ນ້ຳມັນ — {typeLabel}
             </p>
           </div>
           <div className="flex flex-wrap items-center gap-2 text-[11px]">
@@ -561,6 +612,7 @@ export default function FuelPage() {
                   <tr className="bg-white/30 dark:bg-white/5 border-b border-slate-200/30 dark:border-white/5">
                     <th className="px-4 py-3 text-left font-semibold text-slate-600 dark:text-slate-300">ວັນທີ</th>
                     <th className="px-4 py-3 text-left font-semibold text-slate-600 dark:text-slate-300">ຄົນຂັບ / ລົດ</th>
+                    <th className="px-4 py-3 text-left font-semibold text-slate-600 dark:text-slate-300">ປະເພດ</th>
                     <th className="px-4 py-3 text-right font-semibold text-slate-600 dark:text-slate-300">ລິດ</th>
                     <th className="px-4 py-3 text-right font-semibold text-slate-600 dark:text-slate-300">ຍອດເງິນ</th>
                     <th className="px-4 py-3 text-left font-semibold text-slate-600 dark:text-slate-300">ສະຖານີ / ຫມາຍເຫດ</th>
@@ -595,6 +647,19 @@ export default function FuelPage() {
                             <p className="text-[10px] text-slate-400">{r.doc_no}</p>
                           )}
                         </div>
+                      </td>
+                      <td className="px-4 py-3">
+                        {r.fuel_type ? (
+                          <span
+                            className={`inline-block rounded-full px-2 py-0.5 text-[10px] font-semibold whitespace-nowrap ${
+                              TYPE_TONE[r.fuel_type] ?? TYPE_TONE.other
+                            }`}
+                          >
+                            {fuelPaymentTypeLabel(r.fuel_type)}
+                          </span>
+                        ) : (
+                          <span className="text-slate-300">-</span>
+                        )}
                       </td>
                       <td className="px-4 py-3 text-right">
                         <span className="font-bold text-amber-600 dark:text-amber-400">

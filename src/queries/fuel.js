@@ -5,6 +5,7 @@ const {
   MAX_PLAUSIBLE_LITERS,
   describeFuelEntryProblem,
 } = require("../lib/fuel-sanity");
+const { normalizeFuelPaymentType } = require("../lib/fuel-payment-type");
 
 const fuelCache = globalThis;
 
@@ -51,6 +52,12 @@ async function ensureFuelSchemaInternal(db) {
   await safeDdl(db, `
     ALTER TABLE public.odg_tms_fuel_log
     ADD COLUMN IF NOT EXISTS transport_code character varying
+  `);
+  // ປະເພດການເຕີມນ້ຳມັນ (ຂຽນບົງ PTT / ນ້ຳມັນພັສ / ເງິນສົດ / ອື່ນໆ).
+  // NULL = ແຖວເກົ່າ ທີ່ບັນທຶກກ່ອນມີຖັນນີ້ — ບໍ່ຖືວ່າເປັນປະເພດໃດ.
+  await safeDdl(db, `
+    ALTER TABLE public.odg_tms_fuel_log
+    ADD COLUMN IF NOT EXISTS fuel_type character varying
   `);
   await safeDdl(db, `
     CREATE INDEX IF NOT EXISTS idx_odg_tms_fuel_log_date
@@ -119,10 +126,10 @@ async function saveFuelRefill(payload, client) {
   const sql = `
     INSERT INTO public.odg_tms_fuel_log
       (fuel_date, user_code, driver_name, car, doc_no, liters, amount, odometer,
-       station, note, image_data, lat, lng, transport_code)
+       station, note, image_data, lat, lng, transport_code, fuel_type)
     VALUES (
       COALESCE($1::date, CURRENT_DATE),
-      $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14
+      $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15
     )
     RETURNING id
   `;
@@ -141,12 +148,13 @@ async function saveFuelRefill(payload, client) {
     asNullableText(payload?.lat),
     asNullableText(payload?.lng),
     asNullableText(payload?.transport_code),
+    normalizeFuelPaymentType(payload?.fuel_type),
   ];
   const result = await db.query(sql, params);
   return { success: true, id: result.rows[0]?.id ?? null };
 }
 
-async function getFuelLogs({ fromDate, toDate, search, userCode, session } = {}) {
+async function getFuelLogs({ fromDate, toDate, search, userCode, fuelType, session } = {}) {
   await ensureFuelSchema();
 
   const params = [];
@@ -171,6 +179,11 @@ async function getFuelLogs({ fromDate, toDate, search, userCode, session } = {})
   if (scope.scoped) {
     params.push(scope.branches);
     where.push(`(transport_code = ANY($${params.length}) OR transport_code IS NULL)`);
+  }
+  const wantedType = normalizeFuelPaymentType(fuelType);
+  if (wantedType) {
+    params.push(wantedType);
+    where.push(`fuel_type = $${params.length}`);
   }
   if (search) {
     params.push(`%${search}%`);
@@ -197,6 +210,7 @@ async function getFuelLogs({ fromDate, toDate, search, userCode, session } = {})
        odometer,
        station,
        note,
+       fuel_type,
        lat,
        lng,
        (image_data IS NOT NULL AND image_data <> '') AS has_image,
@@ -209,7 +223,7 @@ async function getFuelLogs({ fromDate, toDate, search, userCode, session } = {})
   return rows;
 }
 
-async function getFuelSummary({ fromDate, toDate, userCode, session } = {}) {
+async function getFuelSummary({ fromDate, toDate, userCode, fuelType, session } = {}) {
   await ensureFuelSchema();
   const params = [];
   const where = [];
@@ -224,6 +238,11 @@ async function getFuelSummary({ fromDate, toDate, userCode, session } = {}) {
   if (userCode) {
     params.push(userCode);
     where.push(`user_code = $${params.length}`);
+  }
+  const summaryType = normalizeFuelPaymentType(fuelType);
+  if (summaryType) {
+    params.push(summaryType);
+    where.push(`fuel_type = $${params.length}`);
   }
   const scope = getBranchScope(session);
   if (scope.scoped) {

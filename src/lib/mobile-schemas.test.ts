@@ -59,6 +59,38 @@ describe("JobActionSchema", () => {
     expect(out).toMatchObject({ liters: 10.5, amount: 200000 });
   });
 
+  it("fuel_refill accepts a known fuel_type and rejects an unknown one", () => {
+    expect(
+      JobActionSchema.parse({
+        action: "fuel_refill",
+        user_code: "U1",
+        liters: 10,
+        amount: 200000,
+        fuel_type: "ptt_voucher",
+      })
+    ).toMatchObject({ fuel_type: "ptt_voucher" });
+
+    expect(() =>
+      JobActionSchema.parse({
+        action: "fuel_refill",
+        user_code: "U1",
+        liters: 10,
+        amount: 200000,
+        fuel_type: "credit_card",
+      })
+    ).toThrow();
+  });
+
+  it("fuel_refill stays valid when the app omits fuel_type", () => {
+    const out = JobActionSchema.parse({
+      action: "fuel_refill",
+      user_code: "U1",
+      liters: 10,
+      amount: 200000,
+    });
+    expect(out).toMatchObject({ action: "fuel_refill" });
+  });
+
   it("validates 'tracking_status' branch", () => {
     expect(
       JobActionSchema.parse({

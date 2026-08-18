@@ -7,6 +7,7 @@ import {
   FaChevronDown,
   FaGasPump,
   FaMoneyBillWave,
+  FaReceipt,
   FaSearch,
   FaSpinner,
   FaTimes,
@@ -17,6 +18,7 @@ import {
 import { Actions } from "@/lib/api";
 import { getFixedTodayDate } from "@/lib/fixed-year";
 import { describeFuelEntryProblem } from "@/lib/fuel-sanity";
+import { FUEL_PAYMENT_TYPES } from "@/lib/fuel-payment-type";
 
 interface Option {
   code: string;
@@ -222,6 +224,9 @@ export function FuelEntryDialog({
   const [fuelDate, setFuelDate] = useState(getFixedTodayDate());
   const [driverCode, setDriverCode] = useState("");
   const [carCode, setCarCode] = useState("");
+  // ຄ່າຕັ້ງຕົ້ນເປັນການຂຽນບົງ PTT ເພາະເປັນຊ່ອງທາງທີ່ໃຊ້ຫຼາຍທີ່ສຸດ —
+  // ປ່ຽນໄດ້ທຸກຄັ້ງກ່ອນບັນທຶກ.
+  const [fuelType, setFuelType] = useState<string>(FUEL_PAYMENT_TYPES[0].code);
   const [liters, setLiters] = useState("");
   const [amount, setAmount] = useState("");
   const [odometer, setOdometer] = useState("");
@@ -247,6 +252,7 @@ export function FuelEntryDialog({
     setFuelDate(getFixedTodayDate());
     setDriverCode("");
     setCarCode("");
+    setFuelType(FUEL_PAYMENT_TYPES[0].code);
     setLiters("");
     setAmount("");
     setOdometer("");
@@ -314,6 +320,7 @@ export function FuelEntryDialog({
         user_code: driverCode || undefined,
         driver_name: driver?.name_1 || undefined,
         car: carCode || undefined,
+        fuel_type: fuelType || undefined,
         liters: litersN ?? undefined,
         amount: amountN ?? undefined,
         odometer: odometer ? Number(odometer) : undefined,
@@ -401,6 +408,24 @@ export function FuelEntryDialog({
               placeholder="-- ເລືອກ --"
               disabled={loadingMaster}
             />
+          </div>
+
+          <div>
+            <label className="block text-xs font-medium text-slate-600 dark:text-slate-300 mb-1.5">
+              <FaReceipt className="inline mr-1.5 text-slate-400" size={11} />
+              ປະເພດການເຕີມນ້ຳມັນ
+            </label>
+            <select
+              value={fuelType}
+              onChange={(e) => setFuelType(e.target.value)}
+              className="w-full glass-input rounded-lg px-3 py-2 text-xs text-slate-700 dark:text-slate-200"
+            >
+              {FUEL_PAYMENT_TYPES.map((t) => (
+                <option key={t.code} value={t.code}>
+                  {t.label}
+                </option>
+              ))}
+            </select>
           </div>
 
           <div className="grid grid-cols-2 gap-3">

@@ -7,6 +7,7 @@ import {
   OptionalString,
 } from "./validation";
 import { MAX_PLAUSIBLE_LITERS } from "./fuel-sanity";
+import { FUEL_PAYMENT_TYPE_CODES } from "./fuel-payment-type";
 
 export const LoginSchema = z.object({
   username: NonEmptyString.max(64),
@@ -254,6 +255,9 @@ const FuelRefill = z.object({
   odometer: z.coerce.number().nonnegative().max(10000000).nullish(),
   station: OptionalString,
   note: OptionalString,
+  // ປະເພດການເຕີມ (ຂຽນບົງ PTT / ນ້ຳມັນພັສ / ເງິນສົດ / ອື່ນໆ). ບໍ່ບັງຄັບ ເພາະ
+  // ແອັບຮຸ່ນເກົ່າຍັງບໍ່ສົ່ງມາ — ແຖວນັ້ນເກັບເປັນ NULL.
+  fuel_type: z.enum(FUEL_PAYMENT_TYPE_CODES).nullish(),
   image_data: DataUri,
   lat: LatLng,
   lng: LatLng,

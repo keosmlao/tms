@@ -970,6 +970,13 @@ components:
         odometer: { type: number }
         station: { type: string }
         note: { type: string }
+        fuel_type:
+          type: string
+          nullable: true
+          enum: [ptt_voucher, fuel_pass, cash, other]
+          description: >-
+            ປະເພດການເຕີມນ້ຳມັນ — ຂຽນບົງ PTT / ນ້ຳມັນພັສ / ຈ່າຍເງິນສົດ / ອື່ນໆ.
+            Optional; omitted (or null) by older app builds and stored as NULL.
         image_data: { type: string }
         lat: { type: string }
         lng: { type: string }

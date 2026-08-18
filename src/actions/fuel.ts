@@ -21,6 +21,8 @@ export interface FuelLogFilter {
   toDate?: string;
   search?: string;
   userCode?: string;
+  /** ປະເພດການເຕີມນ້ຳມັນ — ຫວ່າງ = ທຸກປະເພດ. ເບິ່ງ @/lib/fuel-payment-type */
+  fuelType?: string;
 }
 
 export async function getFuelLogs(filter: FuelLogFilter = {}) {
@@ -75,6 +77,7 @@ export interface FuelRefillInput {
   odometer?: number | string;
   station?: string;
   note?: string;
+  fuel_type?: string;
   image_data?: string;
   lat?: string;
   lng?: string;
