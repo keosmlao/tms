@@ -70,6 +70,14 @@ export async function getBillRemainingItemsByWarehouse(billNo: string) {
   return svcGetBillRemainingItemsByWarehouse(billNo);
 }
 
+// Branch legs of a multi-warehouse bill (goods in another branch's warehouse,
+// dispatched by that branch) — for the "ແຍກໄປສາຂາ …" note on the create-trip page.
+export async function getBillBranchLegs(billNo: string) {
+  await requireSession();
+  const { getBranchLegsForBill } = await import("@/queries/branch-leg.js");
+  return getBranchLegsForBill(billNo);
+}
+
 export async function searchManualPendingBills(q: string) {
   await requireSession();
   return svcSearchManualPendingBills(q);
@@ -192,7 +200,7 @@ export async function dispatchBillRemainingByBranch(input: {
 export async function removeManualPendingBill(billNo: string) {
   const s = await requireSession();
   const { recordAudit } = await import("@/queries/audit-log.js");
-  const result = await svcRemoveManualPendingBill(billNo);
+  const result = await svcRemoveManualPendingBill(billNo, s.usercode);
   await recordAudit({
     action: "pending_bill.remove_manual",
     entityType: "bill",

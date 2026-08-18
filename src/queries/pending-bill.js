@@ -143,12 +143,26 @@ async function ensurePendingBillSchemaInternal(db) {
     ALTER TABLE public.odg_tms_custom_bill
     ADD COLUMN IF NOT EXISTS parent_bill_no character varying
   `);
+  // A branch leg the dispatcher removed from the queue ("home branch delivers
+  // everything after all"). The row is kept as a tombstone: the auto-planner
+  // (queries/branch-leg.js) keys on the PK, so deleting it would just make the
+  // leg reappear on the next sync. Cancelled legs give their items back to the
+  // parent bill and are ignored everywhere else.
+  await safeDdl(db, `
+    ALTER TABLE public.odg_tms_custom_bill
+    ADD COLUMN IF NOT EXISTS leg_cancelled_at timestamp without time zone
+  `);
+  await safeDdl(db, `
+    CREATE INDEX IF NOT EXISTS idx_odg_tms_custom_bill_parent
+    ON public.odg_tms_custom_bill (parent_bill_no)
+    WHERE parent_bill_no IS NOT NULL
+  `);
 }
 
 // Bump the cache version whenever the DDL changes so existing dev/prod
 // processes re-run the ALTER TABLE migrations on next call (the global cache
 // otherwise persists across hot-reloads).
-const PENDING_BILL_SCHEMA_VERSION = "v9_custom_bill_parent";
+const PENDING_BILL_SCHEMA_VERSION = "v10_branch_leg_cancel";
 
 async function ensurePendingBillSchema() {
   const readyKey = `__tmsPendingBillSchemaReady_${PENDING_BILL_SCHEMA_VERSION}`;

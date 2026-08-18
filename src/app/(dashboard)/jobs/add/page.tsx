@@ -54,6 +54,20 @@ interface WarehouseItem {
   unit_code: string;
 }
 
+// A branch leg of a multi-warehouse bill: the goods in another branch's
+// warehouse, split off as `${bill}#${branch}` and dispatched by THAT branch
+// (queries/branch-leg.js). Shown so the home dispatcher knows why those items
+// are no longer offered here.
+interface BranchLeg {
+  bill_no: string;
+  transport_code: string;
+  transport_name: string;
+  remark: string;
+  scheduled_date_display: string | null;
+  on_open_trip: boolean;
+  delivered: boolean;
+}
+
 export interface AvailableBill {
   doc_no: string;
   doc_date: string;
@@ -551,6 +565,7 @@ export default function AddJobClient({
     return {};
   });
   const [warehouseItemsByNo, setWarehouseItemsByNo] = useState<Record<string, WarehouseItem[]>>({});
+  const [branchLegsByNo, setBranchLegsByNo] = useState<Record<string, BranchLeg[]>>({});
   // Bill currently open in the "ຈັດຖ້ຽວທີ່ເຫຼືອຕາມສາຂາ" split dialog.
   const [splitBillNo, setSplitBillNo] = useState<string | null>(null);
   const [loadingBillNo, setLoadingBillNo] = useState<string | null>(null);
@@ -745,12 +760,15 @@ export default function AddJobClient({
     if (billProductsByNo[billNo]) return billProductsByNo[billNo];
     setLoadingBillNo(billNo);
     try {
-      const [products, whItems] = await Promise.all([
+      const [products, whItems, legs] = await Promise.all([
         Actions.getAvailableBillProducts(billNo) as Promise<Product[]>,
         Actions.getBillItemsByWarehouse(billNo) as Promise<WarehouseItem[]>,
+        // Legs are informational — never let a failure here block the items.
+        (Actions.getBillBranchLegs(billNo) as Promise<BranchLeg[]>).catch(() => [] as BranchLeg[]),
       ]);
       setBillProductsByNo((current) => ({ ...current, [billNo]: products }));
       setWarehouseItemsByNo((current) => ({ ...current, [billNo]: whItems }));
+      setBranchLegsByNo((current) => ({ ...current, [billNo]: legs }));
       return products;
     } finally {
       setLoadingBillNo(null);
@@ -1578,6 +1596,7 @@ export default function AddJobClient({
                     }
                     products={billProductsByNo[billNo]}
                     warehouseItems={warehouseItemsByNo[billNo]}
+                    branchLegs={branchLegsByNo[billNo]}
                     loading={loadingBillNo === billNo}
                     ensureProducts={() => void ensureBillProducts(billNo)}
                     dragging={draggedBillNo === billNo}
@@ -1913,6 +1932,7 @@ function InJobCard({
   setExpanded,
   products,
   warehouseItems,
+  branchLegs,
   loading,
   ensureProducts,
   dragging,
@@ -1937,6 +1957,7 @@ function InJobCard({
   setExpanded: () => void;
   products: Product[] | undefined;
   warehouseItems: WarehouseItem[] | undefined;
+  branchLegs: BranchLeg[] | undefined;
   loading: boolean;
   ensureProducts: () => void;
   dragging: boolean;
@@ -2113,16 +2134,22 @@ function InJobCard({
           ) : products.length === 0 ? (
             <p className="py-3 text-center text-xs text-slate-500">ບໍ່ມີສິນຄ້າ</p>
           ) : (() => {
-            // Build warehouse → item codes map for grouping UI
+            // Build warehouse → item codes map for grouping UI. Only warehouses
+            // that still have items on offer here count: a warehouse whose goods
+            // were split off to another branch's leg (or already delivered) is
+            // no longer this trip's concern.
+            const offeredCodes = new Set(products.map((p) => p.item_code));
             const whGroups = new Map<string, { wh_name: string; itemCodes: Set<string> }>();
             if (warehouseItems) {
               for (const w of warehouseItems) {
+                if (!offeredCodes.has(w.item_code)) continue;
                 if (!whGroups.has(w.wh_code)) {
                   whGroups.set(w.wh_code, { wh_name: w.wh_name, itemCodes: new Set() });
                 }
                 whGroups.get(w.wh_code)!.itemCodes.add(w.item_code);
               }
             }
+            const activeLegs = (branchLegs ?? []).filter((leg) => !leg.delivered);
             // item_code → first warehouse name (for badge display)
             const itemWhName = new Map<string, string>();
             for (const [, g] of whGroups) {
@@ -2133,6 +2160,29 @@ function InJobCard({
             const multiWarehouse = whGroups.size > 1;
             return (
               <div className="space-y-1.5">
+                {activeLegs.length > 0 && (
+                  <div className="mb-2 rounded border border-sky-200 bg-sky-50 px-2.5 py-2 text-[10px] dark:border-sky-900 dark:bg-sky-950/30">
+                    <p className="mb-1 font-bold text-sky-700 dark:text-sky-300">
+                      🔀 ສ່ວນທີ່ຢູ່ສາງສາຂາອື່ນ ແຍກໃຫ້ສາຂານັ້ນຈັດເອງແລ້ວ — ບໍ່ສະແດງຢູ່ນີ້
+                    </p>
+                    <ul className="space-y-0.5 text-sky-800 dark:text-sky-200">
+                      {activeLegs.map((leg) => (
+                        <li key={leg.bill_no} className="flex flex-wrap items-center gap-1">
+                          <span className="font-mono font-bold">{leg.bill_no}</span>
+                          <span>→ {leg.transport_name || leg.transport_code}</span>
+                          {leg.remark && <span className="text-sky-600 dark:text-sky-400">· {leg.remark}</span>}
+                          <span className="rounded bg-white/70 px-1 font-semibold dark:bg-slate-900/60">
+                            {leg.on_open_trip
+                              ? "ຢູ່ໃນຖ້ຽວແລ້ວ"
+                              : leg.scheduled_date_display
+                                ? `ນັດ ${leg.scheduled_date_display}`
+                                : "ລໍຖ້າສາຂານັ້ນນັດວັນ"}
+                          </span>
+                        </li>
+                      ))}
+                    </ul>
+                  </div>
+                )}
                 {multiWarehouse && (
                   <div className="mb-2 rounded border border-amber-200 bg-amber-50 px-2.5 py-2 dark:border-amber-900 dark:bg-amber-950/30">
                     <p className="mb-1.5 text-[10px] font-bold text-amber-700 dark:text-amber-300">

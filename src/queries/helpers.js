@@ -163,8 +163,43 @@ const ensureTmsDetailItemTable = once(async () => {
   };
 });
 
+// ── Branch legs: items handed to another branch ────────────────────────────
+// A multi-warehouse bill whose warehouses sit in different delivery branches is
+// fanned out into "branch legs" — odg_tms_custom_bill rows with parent_bill_no
+// = the sale bill, one per foreign branch (see queries/branch-leg.js). The leg
+// OWNS its items, so the parent must stop offering them; otherwise the home
+// branch and the leg's branch could both dispatch the same goods. Every
+// remaining-qty formula below subtracts this. Cancelled legs (tombstones) give
+// their items back.
+function splitOffCteSql(billMatchSql) {
+  return `split_off AS (
+      SELECT cb.parent_bill_no AS bill_no,
+             TRIM(li->>'item_code') AS item_code,
+             COALESCE(SUM(
+               CASE WHEN (li->>'qty') ~ '^-?[0-9]+(\\.[0-9]+)?$'
+                    THEN (li->>'qty')::numeric ELSE 0 END
+             ), 0)::numeric AS split_qty
+      FROM public.odg_tms_custom_bill cb
+      CROSS JOIN LATERAL jsonb_array_elements(cb.items) AS li
+      WHERE ${billMatchSql}
+        AND cb.parent_bill_no IS NOT NULL
+        AND cb.leg_cancelled_at IS NULL
+        AND jsonb_typeof(cb.items) = 'array'
+      GROUP BY cb.parent_bill_no, TRIM(li->>'item_code')
+    )`;
+}
+
+// odg_tms_custom_bill (+ leg_cancelled_at) is owned by pending-bill.js; make
+// sure it exists before the split_off CTE references it. Memoised after the
+// first call, so this is a no-op on the hot path.
+async function ensureBranchLegSchema() {
+  const { ensurePendingBillSchema } = require("./pending-bill");
+  await ensurePendingBillSchema();
+}
+
 async function getRemainingBillProducts(billNo) {
   await ensureTmsDetailItemTable();
+  await ensureBranchLegSchema();
   // Items become "available for re-dispatch" once the prior delivery attempt
   // is finished (status=1 done, status=2 cancelled). Active attempts
   // (status NULL/0/3) lock their selected_qty so the same items can't get
@@ -227,7 +262,8 @@ async function getRemainingBillProducts(billNo) {
       WHERE rd.ref_doc_no = $1
         AND rd.item_code NOT LIKE '97%'
       GROUP BY rd.item_code
-    )
+    ),
+    ${splitOffCteSql("cb.parent_bill_no = $1")}
     SELECT
       bi.item_code,
       bi.item_name,
@@ -235,7 +271,8 @@ async function getRemainingBillProducts(billNo) {
         bi.total_qty
         - COALESCE(al.locked_qty, 0)
         - COALESCE(dl.delivered_qty, 0)
-        - COALESCE(rt.returned_qty, 0),
+        - COALESCE(rt.returned_qty, 0)
+        - COALESCE(so.split_qty, 0),
         0
       )::numeric AS qty,
       bi.unit_code
@@ -243,11 +280,13 @@ async function getRemainingBillProducts(billNo) {
     LEFT JOIN active_locked al ON al.item_code = bi.item_code
     LEFT JOIN delivered dl ON dl.item_code = bi.item_code
     LEFT JOIN returned rt ON rt.item_code = bi.item_code
+    LEFT JOIN split_off so ON so.item_code = bi.item_code
     WHERE GREATEST(
       bi.total_qty
       - COALESCE(al.locked_qty, 0)
       - COALESCE(dl.delivered_qty, 0)
-      - COALESCE(rt.returned_qty, 0),
+      - COALESCE(rt.returned_qty, 0)
+      - COALESCE(so.split_qty, 0),
       0
     ) > 0
     ORDER BY bi.item_code`,
@@ -292,6 +331,7 @@ async function getBillsWithErpDetail(billNos) {
 // (advisory-locked) transaction.
 async function getRemainingBillProductsMap(billNos) {
   await ensureTmsDetailItemTable();
+  await ensureBranchLegSchema();
   const map = new Map();
   if (!Array.isArray(billNos) || billNos.length === 0) return map;
 
@@ -345,7 +385,8 @@ async function getRemainingBillProductsMap(billNos) {
       WHERE rd.ref_doc_no = ANY($1::varchar[])
         AND rd.item_code NOT LIKE '97%'
       GROUP BY rd.ref_doc_no, rd.item_code
-    )
+    ),
+    ${splitOffCteSql("cb.parent_bill_no = ANY($1::varchar[])")}
     SELECT
       bi.bill_no,
       bi.item_code,
@@ -355,18 +396,21 @@ async function getRemainingBillProductsMap(billNos) {
         bi.total_qty
         - COALESCE(al.locked_qty, 0)
         - COALESCE(dl.delivered_qty, 0)
-        - COALESCE(rt.returned_qty, 0),
+        - COALESCE(rt.returned_qty, 0)
+        - COALESCE(so.split_qty, 0),
         0
       )::numeric AS qty
     FROM bill_items bi
     LEFT JOIN active_locked al ON al.bill_no = bi.bill_no AND al.item_code = bi.item_code
     LEFT JOIN delivered dl ON dl.bill_no = bi.bill_no AND dl.item_code = bi.item_code
     LEFT JOIN returned rt ON rt.bill_no = bi.bill_no AND rt.item_code = bi.item_code
+    LEFT JOIN split_off so ON so.bill_no = bi.bill_no AND so.item_code = bi.item_code
     WHERE GREATEST(
       bi.total_qty
       - COALESCE(al.locked_qty, 0)
       - COALESCE(dl.delivered_qty, 0)
-      - COALESCE(rt.returned_qty, 0),
+      - COALESCE(rt.returned_qty, 0)
+      - COALESCE(so.split_qty, 0),
       0
     ) > 0
     ORDER BY bi.bill_no, bi.item_code`,
@@ -465,6 +509,7 @@ async function getRemainingSummaryMap(billNos) {
 
 async function getRemainingSummaryMapUncached(billNos) {
   await ensureTmsDetailItemTable();
+  await ensureBranchLegSchema();
   if (billNos.length === 0) return new Map();
 
   // Active attempts lock the items (selected_qty), finished attempts only
@@ -539,7 +584,8 @@ async function getRemainingSummaryMapUncached(billNos) {
       INNER JOIN ic_trans r ON r.doc_no = rd.doc_no AND r.trans_flag = 48
       WHERE rd.item_code NOT LIKE '97%'
       GROUP BY rd.ref_doc_no, rd.item_code
-    )
+    ),
+    ${splitOffCteSql("cb.parent_bill_no IN (SELECT bill_no FROM targets)")}
     SELECT
       bi.bill_no,
       COUNT(*) FILTER (
@@ -547,7 +593,8 @@ async function getRemainingSummaryMapUncached(billNos) {
           bi.total_qty
           - COALESCE(al.locked_qty, 0)
           - COALESCE(dl.delivered_qty, 0)
-          - COALESCE(rt.returned_qty, 0),
+          - COALESCE(rt.returned_qty, 0)
+          - COALESCE(so.split_qty, 0),
           0
         ) > 0
       )::int AS remaining_count,
@@ -556,13 +603,15 @@ async function getRemainingSummaryMapUncached(billNos) {
           bi.total_qty
           - COALESCE(al.locked_qty, 0)
           - COALESCE(dl.delivered_qty, 0)
-          - COALESCE(rt.returned_qty, 0),
+          - COALESCE(rt.returned_qty, 0)
+          - COALESCE(so.split_qty, 0),
           0
         )), 0
       )::numeric AS remaining_qty_total,
-      -- "Total" is net of returns (returned goods aren't to be delivered);
+      -- "Total" is net of returns (returned goods aren't to be delivered) and
+      -- of items handed to a branch leg (another branch delivers those);
       -- delivered = what already went out on finished attempts.
-      COALESCE(SUM(GREATEST(bi.total_qty - COALESCE(rt.returned_qty, 0), 0)), 0)::numeric AS total_qty_total,
+      COALESCE(SUM(GREATEST(bi.total_qty - COALESCE(rt.returned_qty, 0) - COALESCE(so.split_qty, 0), 0)), 0)::numeric AS total_qty_total,
       COALESCE(SUM(COALESCE(dl.delivered_qty, 0)), 0)::numeric AS delivered_qty_total
     FROM bill_items bi
     LEFT JOIN active_locked al
@@ -571,6 +620,8 @@ async function getRemainingSummaryMapUncached(billNos) {
       ON dl.bill_no = bi.bill_no AND dl.item_code = bi.item_code
     LEFT JOIN returned rt
       ON rt.bill_no = bi.bill_no AND rt.item_code = bi.item_code
+    LEFT JOIN split_off so
+      ON so.bill_no = bi.bill_no AND so.item_code = bi.item_code
     GROUP BY bi.bill_no`,
     [billNos]
   );
@@ -642,6 +693,7 @@ const {
 // common 1-item-1-warehouse case; documented so callers don't over-trust the
 // per-warehouse split of a multi-warehouse item.
 async function getBillRemainingItemsByWarehouse(billNo) {
+  await ensureBranchLegSchema();
   const rows = await query(
     `WITH erp AS (
        SELECT
@@ -663,7 +715,8 @@ async function getBillRemainingItemsByWarehouse(billNo) {
        WHERE i.bill_no = $1
          AND COALESCE(det.status, 0) <> 2
        GROUP BY i.item_code
-     )
+     ),
+     ${splitOffCteSql("cb.parent_bill_no = $1")}
      SELECT
        erp.wh_code,
        COALESCE(w.name_1, NULLIF(erp.wh_code, ''), 'ບໍ່ລະບຸສາງ') AS wh_name,
@@ -672,11 +725,14 @@ async function getBillRemainingItemsByWarehouse(billNo) {
        erp.item_name,
        erp.unit_code,
        erp.erp_qty,
-       COALESCE(p.placed_qty, 0)::numeric AS placed_qty,
-       GREATEST(erp.erp_qty - COALESCE(p.placed_qty, 0), 0)::numeric AS remaining_qty
+       -- placed = on a trip OR already handed to a branch leg (either way it
+       -- is no longer this bill's to give out again)
+       (COALESCE(p.placed_qty, 0) + COALESCE(so.split_qty, 0))::numeric AS placed_qty,
+       GREATEST(erp.erp_qty - COALESCE(p.placed_qty, 0) - COALESCE(so.split_qty, 0), 0)::numeric AS remaining_qty
      FROM erp
      LEFT JOIN public.ic_warehouse w ON w.code = NULLIF(erp.wh_code, '')
      LEFT JOIN placed p ON p.item_code = erp.item_code
+     LEFT JOIN split_off so ON so.item_code = erp.item_code
      ORDER BY erp.wh_code, erp.item_code`,
     [billNo]
   );

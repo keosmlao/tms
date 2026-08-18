@@ -36,3 +36,37 @@ export interface RemainingWarehouseGroup {
 export declare function groupRemainingItemsByWarehouse(
   rows: RemainingWarehouseRow[]
 ): RemainingWarehouseGroup[];
+
+export declare const DELIVERY_BRANCH_CODES: string[];
+
+export interface BranchLegLine {
+  doc_no: string;
+  home_transport_code: string;
+  wh_code: string;
+  wh_name?: string;
+  branch_stock: string;
+  item_code: string;
+  item_name?: string;
+  unit_code?: string;
+  erp_qty: number | string;
+  placed_qty?: number | string;
+  returned_qty?: number | string;
+}
+
+export interface BranchLegItem {
+  item_code: string;
+  item_name: string;
+  unit_code: string;
+  qty: number;
+}
+
+export interface BranchLegPlan {
+  parent_bill_no: string;
+  transport_code: string;
+  wh_labels: string[];
+  items: BranchLegItem[];
+}
+
+export declare function planBranchLegs(lines: BranchLegLine[]): BranchLegPlan[];
+
+export declare function branchLegBillNo(parentBillNo: string, transportCode: string): string;

@@ -121,6 +121,7 @@ export const Actions = {
   getAvailableBillProducts: bills.getAvailableBillProducts,
   getBillItemsByWarehouse: bills.getBillItemsByWarehouse,
   getBillRemainingItemsByWarehouse: bills.getBillRemainingItemsByWarehouse,
+  getBillBranchLegs: bills.getBillBranchLegs,
   dispatchBillRemainingByBranch: bills.dispatchBillRemainingByBranch,
   searchManualPendingBills: bills.searchManualPendingBills,
   addManualPendingBill: bills.addManualPendingBill,

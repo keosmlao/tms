@@ -25,6 +25,7 @@ const {
   getBillRemainingItemsByWarehouse,
   readPendingListCache,
   writePendingListCache,
+  invalidateRemainingSummary,
 } = require("./helpers");
 
 // Only surface bills that the department head has scheduled — i.e. both
@@ -57,8 +58,16 @@ const CUSTOM_SOURCE_TYPE = "custom";
 // delivery branches: 02-0001 ໂອດ້ຽນ/ຂົວຫຼວງ · 02-0002 ດອນຕິ້ວ · 02-0003 ປາກເຊ.
 // Every other transport code — customer self-pickup (02-0004), ThunJai
 // (02-0005), technician-pickup (02-0006), and any other branch — is handled
-// outside this queue and must NOT appear here.
-const DELIVERY_BRANCH_CODES = ["02-0001", "02-0002", "02-0003"];
+// outside this queue and must NOT appear here. (Shared with the branch-leg
+// planner in lib/warehouse-branch.js so legs only ever target these queues.)
+const { DELIVERY_BRANCH_CODES } = require("../lib/warehouse-branch");
+// Multi-warehouse bills spanning several branches are fanned out into one
+// "branch leg" per foreign branch — see queries/branch-leg.js.
+const {
+  syncMultiBranchBillLegs,
+  getBranchLegsForBills,
+  cancelBranchLeg,
+} = require("./branch-leg");
 function deliveryBranchListSql() {
   return DELIVERY_BRANCH_CODES.map((c) => `'${c}'`).join(", ");
 }
@@ -420,20 +429,33 @@ async function dispatchBillRemainingByBranch(session, billNo, branches) {
     // Idempotency (decision C): never re-split the same branch — the sub-bill_no
     // is deterministic, so a prior split would collide on the PK anyway.
     const existing = await queryOne(
-      `SELECT bill_no FROM public.odg_tms_custom_bill WHERE bill_no = $1`,
+      `SELECT bill_no, leg_cancelled_at FROM public.odg_tms_custom_bill WHERE bill_no = $1`,
       [subBillNo]
     );
-    if (existing) {
+    if (existing && !existing.leg_cancelled_at) {
       throw new Error(`ບິນ ${bill} ຖືກແຍກໄປສາຂາ ${branchNameByCode.get(branch)} ແລ້ວ`);
     }
     const whLabel = [...group.whLabels].filter(Boolean).join(", ");
     const remark = `ແຍກຈາກບິນ ${bill}${whLabel ? ` · ${whLabel}` : ""}`;
-    await queryOne(
-      `INSERT INTO public.odg_tms_custom_bill (bill_no, cust_name, telephone, items, remark, created_by, parent_bill_no)
-       VALUES ($1, $2, $3, $4::jsonb, $5, $6, $7)
-       RETURNING bill_no`,
-      [subBillNo, custName, telephone, JSON.stringify(group.items), remark, userCode, bill]
-    );
+    if (existing) {
+      // A leg the dispatcher had cancelled (tombstone) — revive it with the
+      // freshly chosen items instead of tripping over the PK.
+      await queryOne(
+        `UPDATE public.odg_tms_custom_bill
+         SET cust_name = $2, telephone = $3, items = $4::jsonb, remark = $5,
+             created_by = $6, leg_cancelled_at = NULL, created_at = LOCALTIMESTAMP(0)
+         WHERE bill_no = $1
+         RETURNING bill_no`,
+        [subBillNo, custName, telephone, JSON.stringify(group.items), remark, userCode]
+      );
+    } else {
+      await queryOne(
+        `INSERT INTO public.odg_tms_custom_bill (bill_no, cust_name, telephone, items, remark, created_by, parent_bill_no)
+         VALUES ($1, $2, $3, $4::jsonb, $5, $6, $7)
+         RETURNING bill_no`,
+        [subBillNo, custName, telephone, JSON.stringify(group.items), remark, userCode, bill]
+      );
+    }
     await upsertPendingBillSchedule({
       billNo: subBillNo,
       scheduledDate: group.scheduled_date,
@@ -451,12 +473,18 @@ async function dispatchBillRemainingByBranch(session, billNo, branches) {
       item_count: group.items.length,
     });
   }
+  // The parent just handed items to its legs — refresh its cached counts.
+  invalidateRemainingSummary([bill]);
   return { success: true, parent_bill_no: bill, created };
 }
 
 async function getAvailableBillsWithProducts(session) {
   await ensurePendingBillSchema();
   await ensureForwardBranchColumn();
+  // Make sure every multi-branch bill has its legs before the home branch
+  // builds a trip from it — otherwise it would still be offered the foreign
+  // warehouse's items. Throttled; a no-op almost every call.
+  await syncMultiBranchBillLegs();
   const scope = getBranchScope(session);
   const [shipmentBills, manualBills] = await Promise.all([
     query(
@@ -522,6 +550,8 @@ async function getAvailableBillsWithProducts(session) {
 async function getAvailableBills(session, scheduledDate) {
   await ensurePendingBillSchema();
   await ensureForwardBranchColumn();
+  // Legs first (throttled no-op most calls) — see getAvailableBillsWithProducts.
+  await syncMultiBranchBillLegs();
   const scope = getBranchScope(session);
   const day = coerceDateToFixedYear(
     typeof scheduledDate === "string" && /^\d{4}-\d{2}-\d{2}$/.test(scheduledDate.trim())
@@ -781,7 +811,11 @@ async function addManualPendingBill({ billNo, scheduledDate, deliveryRoundCode, 
   return { success: true };
 }
 
-async function removeManualPendingBill(billNo) {
+/**
+ * @param {string} billNo
+ * @param {string | null | undefined} [userCode]
+ */
+async function removeManualPendingBill(billNo, userCode = null) {
   const code = String(billNo ?? "").trim();
   if (!code) throw new Error("bill_no is required");
   await ensurePendingBillSchema();
@@ -801,6 +835,13 @@ async function removeManualPendingBill(billNo) {
   );
   if (!icBill && !customBill && serviceBill.length === 0) {
     throw new Error("Bill not found in ic_trans trans_flag 56/72/44/48, odservice.tb_product or odg_tms_custom_bill");
+  }
+  // A branch leg is not deleted but tombstoned (leg_cancelled_at) — deleting
+  // it would just make the auto-planner recreate it, and its items must flow
+  // back to the parent bill so the home branch delivers them.
+  if (customBill) {
+    const cancelled = await cancelBranchLeg(code, userCode);
+    if (cancelled.success) return { success: true, parent_bill_no: cancelled.parent_bill_no };
   }
   await query(
     `DELETE FROM public.odg_tms_pending_bill WHERE bill_no = $1`,
@@ -1068,11 +1109,73 @@ async function getManualPendingRowsForPending(
                   COALESCE(cb.remark, '') as sales_remark,
                   NULL::int as source_trans_flag
            FROM public.odg_tms_custom_bill cb
-           WHERE cb.bill_no = ANY($1::varchar[])`,
+           WHERE cb.bill_no = ANY($1::varchar[])
+             -- branch legs are listed by the dedicated query below (they must
+             -- show even before they are scheduled), so skip them here
+             AND cb.parent_bill_no IS NULL`,
           [nonIcDocNos]
         ),
       ]);
+  // Branch legs (queries/branch-leg.js): a foreign branch's share of a
+  // multi-warehouse sale bill. Unlike hand-typed custom bills they enter this
+  // queue UNSCHEDULED — the receiving branch sets date/round here exactly as it
+  // would for an ERP bill — so they are keyed off the pending row's
+  // transport_code, not off readySchedules. Fully dispatched / on-trip legs are
+  // dropped later by the same remaining-count + active-dispatch filters as
+  // every other row.
+  const legDocFilter = docNos ? `AND cb.bill_no = ANY($${params.length + 1}::varchar[])` : "";
+  const legRows = await query(
+    `SELECT
+      ${idsOnly ? `cb.bill_no as doc_no, '${CUSTOM_SOURCE_TYPE}' as source_type` : `cb.bill_no as doc_no,
+      to_char(cb.created_at,'DD-MM-YYYY') as doc_date,
+      '' as cust_code,
+      cb.cust_name,
+      cb.cust_name as transport_name,
+      COALESCE(cb.telephone, '') as cust_phone,
+      COALESCE(cb.remark, '') as sales_remark,
+      to_char(pb.scheduled_date,'YYYY-MM-DD') as send_date,
+      to_char(pb.scheduled_date,'DD-MM-YYYY') as send_date_display,
+      COALESCE(pb.transport_code, '') as transport_code,
+      COALESCE(NULLIF(TRIM(tt.name_1), ''), NULLIF(TRIM(pb.transport_code), ''), '') as transport,
+      to_char(COALESCE(cb.created_at, pb.updated_at, LOCALTIMESTAMP(0)),'DD-MM-YYYY HH24:MI') as time_open,
+      now() - COALESCE(cb.created_at, pb.updated_at, LOCALTIMESTAMP(0)) as time_use,
+      cb.parent_bill_no,
+      NULL::int as source_trans_flag`}
+     FROM public.odg_tms_custom_bill cb
+     INNER JOIN public.odg_tms_pending_bill pb ON pb.bill_no = cb.bill_no
+     LEFT JOIN transport_type tt ON tt.code = pb.transport_code
+     WHERE cb.parent_bill_no IS NOT NULL
+       AND cb.leg_cancelled_at IS NULL
+       AND (pb.scheduled_date IS NULL OR pb.scheduled_date::date BETWEEN $1::date AND $2::date)
+       ${transportWhere}
+       ${legDocFilter}
+     ORDER BY cb.created_at ASC`,
+    docNos ? [...params, docNos] : params
+  );
   const scheduleMap = new Map(readySchedules.map((row) => [row.bill_no, row]));
+  const legPendingRows = idsOnly
+    ? legRows
+    : legRows.map((row) => ({
+        doc_no: row.doc_no,
+        doc_date: row.doc_date,
+        cust_code: row.cust_code,
+        cust_name: row.cust_name,
+        transport_name: row.transport_name,
+        cust_phone: row.cust_phone,
+        sales_remark: row.sales_remark,
+        send_date: row.send_date ?? null,
+        send_date_display: row.send_date_display ?? null,
+        sale: "",
+        department: "ແຍກສາຂາ",
+        transport_code: row.transport_code ?? "",
+        transport: row.transport ?? "",
+        time_open: row.time_open ?? "",
+        time_use: row.time_use ?? null,
+        manual_pending_bill: true,
+        source_trans_flag: row.source_trans_flag,
+        source_type: CUSTOM_SOURCE_TYPE,
+        parent_bill_no: row.parent_bill_no,
+      }));
   const serviceRows = serviceBaseRows.map((row) => {
     const sched = scheduleMap.get(row.doc_no);
     return {
@@ -1116,7 +1219,7 @@ async function getManualPendingRowsForPending(
       source_type: CUSTOM_SOURCE_TYPE,
     };
   });
-  return [...icRows, ...serviceRows, ...customPendingRows];
+  return [...icRows, ...serviceRows, ...customPendingRows, ...legPendingRows];
 }
 
 async function getBillsPending(session, fromDate, toDate, transportCode) {
@@ -1134,6 +1237,10 @@ async function getBillsPending(session, fromDate, toDate, transportCode) {
   ]);
   const cached = readPendingListCache(cacheKey);
   if (cached) return cached;
+  // Fan out any new multi-branch bill into its branch legs BEFORE listing, so
+  // the foreign branch sees its leg on the same load the home branch sees the
+  // parent (throttled per process — see branch-leg.js).
+  await syncMultiBranchBillLegs();
   // A branch-scoped user sees only their assigned branch SET; an unscoped user
   // honours the UI's transportCode filter ("all" → the three delivery branches,
   // else a single chosen branch). Match on the effective transport (pending
@@ -1402,7 +1509,7 @@ async function getBillsPending(session, fromDate, toDate, transportCode) {
   const keptBillNos = keptRaw.map((bill) => bill.doc_no);
 
   // ຈັງຫວະ 2 — ຂໍ້ມູນປະກອບ ສະເພາະບິນທີ່ຜ່ານການຄັດ
-  const [cancelledRows, scheduleMap, rescheduleCountMap, todoMap, sentRoundRows] =
+  const [cancelledRows, scheduleMap, rescheduleCountMap, todoMap, sentRoundRows, branchLegMap] =
     await Promise.all([
     query(
       `SELECT DISTINCT ON (d.bill_no)
@@ -1437,7 +1544,9 @@ async function getBillsPending(session, fromDate, toDate, transportCode) {
        WHERE bill_no = ANY($1::varchar[]) AND COALESCE(status, 0) = 1
        GROUP BY bill_no`,
       [keptBillNos]
-    )
+    ),
+    // ບິນແມ່ທີ່ຖືກແຍກໄປສາຂາອື່ນ — ສະແດງປ້າຍ "ແຍກໄປ …" ໃຫ້ສາຂາເຈົ້າຂອງຮູ້
+    getBranchLegsForBills(keptBillNos),
   ]);
 
   const sentRoundMap = new Map(
@@ -1540,6 +1649,11 @@ async function getBillsPending(session, fromDate, toDate, transportCode) {
         planned_lat: sched?.planned_lat ?? "",
         planned_lng: sched?.planned_lng ?? "",
         is_pos_settled: isPosSettled,
+        // Parent of one or more branch legs (goods in another branch's
+        // warehouse, dispatched by that branch). Legs themselves carry
+        // parent_bill_no instead.
+        branch_legs: branchLegMap.get(bill.doc_no) ?? [],
+        parent_bill_no: bill.parent_bill_no ?? "",
       };
     })
     // Service bills (tb_product) can be re-delivered for repeat servicing,

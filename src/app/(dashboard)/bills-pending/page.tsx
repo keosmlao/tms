@@ -132,6 +132,18 @@ export interface Bill {
   forward_from_transport_code?: string;
   forward_from_transport_name?: string;
   forwarded_at?: string;
+  // Multi-warehouse bill spanning several branches: the parent row lists the
+  // legs handed to other branches; a leg row names its parent instead.
+  branch_legs?: Array<{
+    bill_no: string;
+    transport_code: string;
+    transport_name: string;
+    remark?: string;
+    scheduled_date_display?: string | null;
+    on_open_trip?: boolean;
+    delivered?: boolean;
+  }>;
+  parent_bill_no?: string;
 }
 
 interface DeliveryRound {
@@ -1101,7 +1113,13 @@ export default function BillsPendingClient() {
   };
 
   const removeManualBill = async (billNo: string) => {
-    if (!window.confirm(`ລົບ ${billNo} ອອກຈາກລາຍການລໍຖ້າຈັດຖ້ຽວ?`)) return;
+    // A branch leg ("BILL#02-xxxx") is not deleted — its items go back to the
+    // parent bill so the home branch delivers them.
+    const isLeg = billNo.includes("#");
+    const prompt = isLeg
+      ? `ຄືນ ${billNo} ໃຫ້ບິນແມ່ — ສາຂາຕົ້ນທາງຈະຈັດສົ່ງສ່ວນນີ້ເອງ?`
+      : `ລົບ ${billNo} ອອກຈາກລາຍການລໍຖ້າຈັດຖ້ຽວ?`;
+    if (!window.confirm(prompt)) return;
     setRemovingManualBillNo(billNo);
     try {
       await Actions.removeManualPendingBill(billNo);
@@ -1109,6 +1127,7 @@ export default function BillsPendingClient() {
       setDrawerBill((current) => (current?.doc_no === billNo ? null : current));
     } catch (e) {
       console.error(e);
+      window.alert(e instanceof Error ? e.message : String(e));
     } finally {
       setRemovingManualBillNo(null);
     }
@@ -1749,7 +1768,30 @@ export default function BillsPendingClient() {
                                     </span>
                                     {bill.is_pos_settled && <span className={NEUTRAL_BADGE}>POS</span>}
                                     {bill.partial_delivery && <span className={NEUTRAL_BADGE}>ທະຍອຍ</span>}
-                                    {bill.manual_pending_bill && <span className={NEUTRAL_BADGE}>ພິເສດ</span>}
+                                    {bill.manual_pending_bill && !bill.parent_bill_no && <span className={NEUTRAL_BADGE}>ພິເສດ</span>}
+                                    {bill.parent_bill_no && (
+                                      <span
+                                        className={NEUTRAL_BADGE}
+                                        title={`ສ່ວນຂອງບິນ ${bill.parent_bill_no} ທີ່ຢູ່ສາງສາຂານີ້ — ສາຂານີ້ນັດວັນ ແລະ ຈັດຖ້ຽວເອງ`}
+                                      >
+                                        🔀 ຈາກ {bill.parent_bill_no}
+                                      </span>
+                                    )}
+                                    {(bill.branch_legs?.length ?? 0) > 0 && (
+                                      <span
+                                        className={NEUTRAL_BADGE}
+                                        title={(bill.branch_legs ?? [])
+                                          .map(
+                                            (leg) =>
+                                              `${leg.bill_no} → ${leg.transport_name || leg.transport_code}${
+                                                leg.on_open_trip ? " (ຢູ່ໃນຖ້ຽວ)" : leg.scheduled_date_display ? ` (ນັດ ${leg.scheduled_date_display})` : " (ລໍຖ້ານັດວັນ)"
+                                              }`
+                                          )
+                                          .join("\n")}
+                                      >
+                                        🔀 ແຍກໄປ {(bill.branch_legs ?? []).map((leg) => leg.transport_name || leg.transport_code).join(", ")}
+                                      </span>
+                                    )}
                                     {bill.incoming_forwarded && (
                                       <span
                                         className={NEUTRAL_BADGE}
@@ -3135,7 +3177,7 @@ function RowActionsMenu({
           className="flex w-full items-center gap-2 rounded px-2 py-1.5 text-left text-[11px] font-medium text-rose-600 transition-colors hover:bg-rose-500/10 disabled:opacity-50 dark:text-rose-400"
         >
           {removing ? <FaSpinner size={10} className="shrink-0 animate-spin" /> : <FaTrash size={10} className="shrink-0" />}
-          ລົບອອກຈາກລາຍການ
+          {bill.parent_bill_no ? "ຄືນໃຫ້ບິນແມ່ (ສາຂາຕົ້ນທາງຈັດເອງ)" : "ລົບອອກຈາກລາຍການ"}
         </button>
       )}
     </div>
