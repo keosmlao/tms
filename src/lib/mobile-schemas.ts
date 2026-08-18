@@ -146,9 +146,15 @@ const CompleteBill = z.object({
   lng: LatLng,
   lat_end: LatLng,
   lng_end: LatLng,
-  // COD (Module B) — cash/transfer collected at delivery (optional).
+  // COD (ເກັບເງິນປາຍທາງ) — ບັງຄັບເມື່ອບິນນັ້ນເປັນ COD; ກົດການກວດຢູ່
+  // lib/cod.js validateCodCollection (ຝັ່ງ server ເປັນຜູ້ຕັດສິນ ເພາະ
+  // ຍອດທີ່ຕ້ອງເກັບມາຈາກ DB ບໍ່ແມ່ນຈາກແອັບ).
   collected_amount: z.coerce.number().nonnegative().max(10000000000).nullish(),
-  payment_method: OptionalString, // cash | transfer | none
+  payment_method: z.enum(["cash", "transfer", "mixed", "none"]).nullish(),
+  // ເລກສະລິບ/ອ້າງອີງ ຕອນຊຳລະແບບໂອນ
+  cod_reference: OptionalString,
+  // ເຫດຜົນ ຕອນເກັບບໍ່ຄົບ / ເກີນ
+  cod_variance_reason: OptionalString,
 });
 const ReturnBill = z.object({
   action: z.literal("return_bill"),

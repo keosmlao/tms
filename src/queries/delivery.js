@@ -167,6 +167,48 @@ async function ensureDeliveryWorkflowSchemaInternal(db) {
     ADD COLUMN IF NOT EXISTS collected_at timestamp without time zone
   `);
 
+  // ເລກອ້າງອີງ / ເລກສະລິບ ຕອນລູກຄ້າຈ່າຍແບບໂອນ — ບັງຄັບເມື່ອ payment_method
+  // ເປັນ transfer/mixed (ເບິ່ງ validateCodCollection ໃນ lib/cod.js) ຈຶ່ງກວດ
+  // ຄືນກັບ statement ທະນາຄານໄດ້.
+  await safeDdl(db, `
+    ALTER TABLE public.odg_tms_detail
+    ADD COLUMN IF NOT EXISTS cod_reference character varying
+  `);
+  // ເຫດຜົນຕອນເກັບບໍ່ຄົບ/ເກີນ — ບັງຄັບໃສ່ ບໍ່ດັ່ງນັ້ນເງິນຂາດຈະບໍ່ມີຄຳອະທິບາຍ
+  await safeDdl(db, `
+    ALTER TABLE public.odg_tms_detail
+    ADD COLUMN IF NOT EXISTS cod_variance_reason character varying
+  `);
+  // ດັດສະນີສຳລັບໜ້າກະທົບຍອດເງິນ — ບິນ COD ທີ່ຍັງບໍ່ໄດ້ມອບເງິນ
+  await safeDdl(db, `
+    CREATE INDEX IF NOT EXISTS idx_odg_tms_detail_cod
+    ON public.odg_tms_detail (doc_no)
+    WHERE COALESCE(cod_amount, 0) > 0
+  `);
+
+  // ── ມອບເງິນ COD ໃຫ້ການເງິນ (cash handover) ──
+  // ຄົນຂັບເກັບເງິນມາແລ້ວຕ້ອງມອບໃຫ້ການເງິນ/ແຄັດເຊຍ. 1 ແຖວ = 1 ຄັ້ງທີ່ມອບ ຕໍ່ 1
+  // ຖ້ຽວ, ບັນທຶກຍອດທີ່ນັບໄດ້ຈິງ (counted_amount) ທຽບກັບຍອດທີ່ລະບົບຄິດໄດ້
+  // (expected_amount) ຕອນມອບ — ຕ່າງກັນເມື່ອໃດຕ້ອງມີເຫດຜົນ. ໜຶ່ງຖ້ຽວມອບໄດ້
+  // ຄັ້ງດຽວ (UNIQUE doc_no) — ຖ້າມອບຜິດ ໃຫ້ລົບແລ້ວມອບໃໝ່.
+  await safeDdl(db, `
+    CREATE TABLE IF NOT EXISTS public.odg_tms_cod_handover (
+      id serial PRIMARY KEY,
+      doc_no character varying NOT NULL UNIQUE,
+      driver_code character varying,
+      expected_amount numeric NOT NULL DEFAULT 0,
+      counted_amount numeric NOT NULL DEFAULT 0,
+      variance_reason character varying,
+      remark text,
+      received_by character varying,
+      received_at timestamp without time zone DEFAULT LOCALTIMESTAMP(0)
+    )
+  `);
+  await safeDdl(db, `
+    CREATE INDEX IF NOT EXISTS idx_odg_tms_cod_handover_received
+    ON public.odg_tms_cod_handover (received_at DESC)
+  `);
+
   // ── Failed-delivery reason + reschedule (Module D) ──
   // cancel_reason_code = standardized code (no_one|refused|wrong_addr|...) set
   // on cancel; reschedule_date = a new delivery date when the driver defers a
@@ -351,26 +393,26 @@ async function ensureDeliveryWorkflowSchema(client) {
   // this short-circuit each mobile API request was re-running ~10 DDL
   // statements, which can stall under concurrent load while ALTER TABLE waits
   // for an ACCESS EXCLUSIVE lock.
-  if (deliveryCache.__tmsDeliverySchemaReady_v9) return;
+  if (deliveryCache.__tmsDeliverySchemaReady_v10) return;
 
   const isSharedPool = !client || client === pool;
   if (!isSharedPool) {
     await ensureDeliveryWorkflowSchemaInternal(client);
-    deliveryCache.__tmsDeliverySchemaReady_v9 = true;
+    deliveryCache.__tmsDeliverySchemaReady_v10 = true;
     return;
   }
 
-  if (!deliveryCache.__tmsDeliverySchemaPromise_v9) {
-    deliveryCache.__tmsDeliverySchemaPromise_v9 = ensureDeliveryWorkflowSchemaInternal(pool)
+  if (!deliveryCache.__tmsDeliverySchemaPromise_v10) {
+    deliveryCache.__tmsDeliverySchemaPromise_v10 = ensureDeliveryWorkflowSchemaInternal(pool)
       .then(() => {
-        deliveryCache.__tmsDeliverySchemaReady_v9 = true;
+        deliveryCache.__tmsDeliverySchemaReady_v10 = true;
       })
       .catch((err) => {
-        deliveryCache.__tmsDeliverySchemaPromise_v9 = null;
+        deliveryCache.__tmsDeliverySchemaPromise_v10 = null;
         throw err;
       });
   }
-  await deliveryCache.__tmsDeliverySchemaPromise_v9;
+  await deliveryCache.__tmsDeliverySchemaPromise_v10;
 }
 
 async function ensureJobDeliveryItems(docNo, client) {

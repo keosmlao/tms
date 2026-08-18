@@ -32,6 +32,7 @@ import {
   FaAngleDoubleRight,
   FaClock,
   FaCheckCircle,
+  FaCoins,
   FaStickyNote,
   FaInbox,
   FaMapMarkerAlt,
@@ -107,6 +108,7 @@ const navSections: NavSection[] = [
       { label: "ບິນເບີກບໍ່ຄົບ", href: "/bills-pickup-variance", icon: <FaExclamationTriangle size={13} /> },
       { label: "ຄົນຂັບປິດງານ", href: "/jobs/closed-by-driver", icon: <FaClipboardCheck size={13} /> },
       { label: "ປິດສຳເລັດແລ້ວ", href: "/jobs/closed", icon: <FaCheckCircle size={13} /> },
+      { label: "ກະທົບຍອດເງິນ COD", href: "/cod", icon: <FaCoins size={13} /> },
     ],
   },
   {
@@ -125,6 +127,7 @@ const navSections: NavSection[] = [
       { label: "ສົ່ງສຳເລັດ/ວັນ", href: "/reports/delivered-daily", icon: <FaFileInvoice size={13} /> },
       { label: "ຍົກເລີກ/ວັນ", href: "/reports/cancelled-daily", icon: <FaFileInvoice size={13} /> },
       { label: "ຕາມຄົນຂັບ", href: "/reports/by-driver", icon: <FaUserTie size={13} /> },
+      { label: "COD ຕາມຄົນຂັບ", href: "/reports/cod", icon: <FaCoins size={13} /> },
       { label: "ຕາມລົດ", href: "/reports/by-car", icon: <FaTruck size={13} /> },
       { label: "ຕາມບິນ", href: "/reports/by-bill", icon: <FaFileInvoice size={13} /> },
       { label: "ນຳໃຊ້ລົດ/ເດືອນ", href: "/reports/monthly-car", icon: <FaChartLine size={13} /> },

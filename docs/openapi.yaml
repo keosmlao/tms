@@ -860,6 +860,27 @@ components:
         lng: { type: string }
         lat_end: { type: string }
         lng_end: { type: string }
+        collected_amount:
+          type: number
+          minimum: 0
+          nullable: true
+          description: >
+            ເງິນທີ່ເກັບໄດ້ຈິງ (ກີບ). ບັງຄັບເມື່ອບິນນັ້ນເປັນ COD
+            (cod_amount > 0 ໃນ GET /api/mobile/bills); ຫ້າມສົ່ງມາເມື່ອບໍ່ແມ່ນ COD.
+            ຍອດທີ່ຕ້ອງເກັບຕັດສິນຢູ່ຝັ່ງ server ຈາກ ERP — ສົ່ງມາຈາກແອັບບໍ່ໄດ້.
+        payment_method:
+          type: string
+          enum: [cash, transfer, mixed, none]
+          nullable: true
+          description: >
+            ວິທີຊຳລະ. ບັງຄັບເມື່ອບິນເປັນ COD.
+            cash=ເງິນສົດ · transfer=ໂອນ · mixed=ສົດ+ໂອນ · none=ບໍ່ໄດ້ເກັບ.
+        cod_reference:
+          type: string
+          description: ເລກສະລິບ/ອ້າງອີງ — ບັງຄັບເມື່ອ payment_method ເປັນ transfer ຫຼື mixed.
+        cod_variance_reason:
+          type: string
+          description: ເຫດຜົນ — ບັງຄັບເມື່ອ collected_amount ບໍ່ເທົ່າ cod_amount (ເກັບຂາດ ຫຼື ເກີນ).
     CancelBillAction:
       type: object
       required: [action, bill_no]

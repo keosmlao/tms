@@ -9,6 +9,7 @@ const { ensureChatterSchema } = require("./chatter");
 const { isChatterAdmin } = require("../lib/chatter-helpers");
 const { getBranchScope, branchFilterJob } = require("./helpers");
 const { getFixedYearSqlFilter } = require("../lib/fixed-year");
+const { paymentMethodLabel } = require("../lib/cod");
 
 // Optional fallback recipient when the bill's sale_code has no line_id mapped.
 // Set to a LINE groupId / userId of the OA admin so updates aren't lost.
@@ -493,6 +494,8 @@ async function notifyBillDelivered({
   driverCode,
   fullyDelivered = true,
   collectedAmount = 0,
+  paymentMethod = null,
+  codShortfall = 0,
 }) {
   try {
     const bill = String(billNo ?? "").trim();
@@ -531,7 +534,13 @@ async function notifyBillDelivered({
       job?.driver_name ? `ຄົນຂັບ ${job.driver_name} · ຖ້ຽວ ${doc}` : `ຖ້ຽວ ${doc}`,
       job?.closed_time ? `ເວລາ ${job.closed_time}` : "",
       Number.isFinite(amount) && amount > 0
-        ? `ເກັບເງິນ ${amount.toLocaleString("en-US")} ກີບ`
+        ? `ເກັບເງິນ ${amount.toLocaleString("en-US")} ກີບ${
+            paymentMethodLabel(paymentMethod) ? ` (${paymentMethodLabel(paymentMethod)})` : ""
+          }`
+        : "",
+      // ເກັບບໍ່ຄົບ = ເລື່ອງທີ່ຫ້ອງການເງິນຕ້ອງຮູ້ທັນທີ ບໍ່ແມ່ນລໍຖ້າກະທົບຍອດທ້າຍວັນ
+      Number(codShortfall) > 0
+        ? `⚠️ ເກັບຂາດ ${Number(codShortfall).toLocaleString("en-US")} ກີບ`
         : "",
     ]
       .filter(Boolean)

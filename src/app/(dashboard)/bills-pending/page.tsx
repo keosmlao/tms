@@ -144,6 +144,8 @@ export interface Bill {
     delivered?: boolean;
   }>;
   parent_bill_no?: string;
+  // ບິນເກັບເງິນປາຍທາງ (ERP doc_format_code ຂຶ້ນຕົ້ນ 'COD') — ຍອດທີ່ຄົນຂັບຕ້ອງເກັບ
+  cod_amount?: number;
 }
 
 interface DeliveryRound {
@@ -1767,6 +1769,14 @@ export default function BillsPendingClient() {
                                       {bill.doc_no}
                                     </span>
                                     {bill.is_pos_settled && <span className={NEUTRAL_BADGE}>POS</span>}
+                                    {Number(bill.cod_amount ?? 0) > 0 && (
+                                      <span
+                                        className="shrink-0 whitespace-nowrap rounded bg-amber-100 px-1.5 py-0.5 text-[10px] font-bold text-amber-700 dark:bg-amber-950/40 dark:text-amber-300"
+                                        title={`ເກັບເງິນປາຍທາງ ${Number(bill.cod_amount).toLocaleString("en-US")} ກີບ — ຄົນຂັບຕ້ອງເກັບເງິນຕອນສົ່ງ`}
+                                      >
+                                        💰 COD {Number(bill.cod_amount).toLocaleString("en-US")}
+                                      </span>
+                                    )}
                                     {bill.partial_delivery && <span className={NEUTRAL_BADGE}>ທະຍອຍ</span>}
                                     {bill.manual_pending_bill && !bill.parent_bill_no && <span className={NEUTRAL_BADGE}>ພິເສດ</span>}
                                     {bill.parent_bill_no && (

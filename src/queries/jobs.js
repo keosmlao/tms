@@ -353,6 +353,13 @@ async function createJob(session, data) {
       }
     }
 
+    // ຄັດຍອດ COD ຈາກ ERP ມາໃສ່ແຖວຈັດສົ່ງ ພາຍໃນ transaction ດຽວກັນ ຈຶ່ງບໍ່ມີ
+    // ຊ່ວງທີ່ຄົນຂັບເປີດແອັບແລ້ວເຫັນ "ຕ້ອງເກັບ 0 ກີບ" ໃນບິນ COD.
+    if (billNos.length > 0) {
+      const { syncCodAmounts } = require("./cod");
+      await syncCodAmounts(billNos, client);
+    }
+
     // Remove the dispatched bills from the available / pending pool so they
     // don't reappear in the bill search / job-init lists. createJob previously
     // relied only on the selected_qty reservation, which getJobInit/searchBills
@@ -505,6 +512,8 @@ async function addBillsToJob(docNo, bills) {
   const billNos = Array.from(new Set(billsToAdd.map((b) => String(b.bill_no)))).sort();
 
   let added = 0;
+  // ບິນທີ່ເພີ່ມສຳເລັດ — ໃຊ້ຄັດຍອດ COD ຕອນທ້າຍ transaction
+  const codBillNos = [];
   const client = await pool.connect();
   try {
     await client.query("BEGIN");
@@ -630,6 +639,13 @@ async function addBillsToJob(docNo, bills) {
         [billNo]
       );
       added += 1;
+      codBillNos.push(billNo);
+    }
+
+    // ຍອດ COD ຂອງບິນທີ່ຫາກໍເພີ່ມ (ເບິ່ງເຫດຜົນທີ່ createJob)
+    if (codBillNos.length > 0) {
+      const { syncCodAmounts } = require("./cod");
+      await syncCodAmounts(codBillNos, client);
     }
 
     // Refresh the bill count cached on the job header so list pages show it.
@@ -1160,6 +1176,15 @@ async function updateJob(session, docNo, data) {
          WHERE doc_no=$1 AND ${getFixedYearSqlFilter("doc_date")}`,
         [bill.bill_no]
       );
+    }
+
+    // ຍອດ COD ຂອງບິນຊຸດໃໝ່ຫຼັງແກ້ຖ້ຽວ (ເບິ່ງເຫດຜົນທີ່ createJob)
+    {
+      const codBillNos = normalizedBills.map((b) => b.bill_no).filter(Boolean);
+      if (codBillNos.length > 0) {
+        const { syncCodAmounts } = require("./cod");
+        await syncCodAmounts(codBillNos, client);
+      }
     }
 
     // Workers

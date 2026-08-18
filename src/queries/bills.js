@@ -61,6 +61,8 @@ const CUSTOM_SOURCE_TYPE = "custom";
 // outside this queue and must NOT appear here. (Shared with the branch-leg
 // planner in lib/warehouse-branch.js so legs only ever target these queues.)
 const { DELIVERY_BRANCH_CODES } = require("../lib/warehouse-branch");
+// ບິນເກັບເງິນປາຍທາງ — ນິຍາມດຽວກັບຊັ້ນ COD (queries/cod.js)
+const { codDocFormatSql } = require("./cod");
 // Multi-warehouse bills spanning several branches are fanned out into one
 // "branch leg" per foreign branch — see queries/branch-leg.js.
 const {
@@ -1271,6 +1273,10 @@ async function getBillsPending(session, fromDate, toDate, transportCode) {
         to_char(b.send_date,'YYYY-MM-DD') as send_date,
         to_char(b.send_date,'DD-MM-YYYY') as send_date_display,
         COALESCE(b.doc_format_code, '') as source_format,
+        -- COD (ເກັບເງິນປາຍທາງ): ERP ໝາຍໄວ້ດ້ວຍ doc_format_code ຂຶ້ນຕົ້ນ 'COD'
+        -- ແລະ ຍອດທີ່ຕ້ອງເກັບ = total_amount (ເບິ່ງ lib/cod.js). ສະແດງໃຫ້ຄົນ
+        -- ຈັດຖ້ຽວຮູ້ຕັ້ງແຕ່ຢູ່ຄິວ ວ່າບິນນີ້ຄົນຂັບຕ້ອງເກັບເງິນ.
+        CASE WHEN ${codDocFormatSql("b")} THEN COALESCE(b.total_amount, 0) ELSE 0 END as cod_amount,
         COALESCE(NULLIF(TRIM(oe.fullname_lo), ''), NULLIF(TRIM(oe.nickname), ''), b.sale_code) as sale,
         COALESCE(NULLIF(TRIM(oe.mobile), ''), '') as salesperson_phone,
         COALESCE(NULLIF(TRIM(oe.line_id), ''), '') as salesperson_line,
@@ -1575,7 +1581,16 @@ async function getBillsPending(session, fromDate, toDate, transportCode) {
       // day so dispatchers don't see freshly-paid bills sitting in the call
       // queue. The auto-defaults only apply when admin hasn't manually touched
       // the bill (no odg_tms_pending_bill row) — any explicit override wins.
-      const isPosSettled = (bill.source_format ?? "").trim() === "CAKAP";
+      // ⚠️ ເຄີຍທຽບກັບ 'CAKAP' ຊຶ່ງ **ບໍ່ມີໃນຂໍ້ມູນເລີຍ** (ກວດ ic_trans ທັງໝົດ
+      // ໄດ້ 0 ແຖວ) ຈຶ່ງບໍ່ເຄີຍເປັນ true — ບິນ POS ບໍ່ເຄີຍຖືກເລື່ອນຂ້າມດ່ານໂທ.
+      // ລະຫັດຈິງຂອງ "ບິນຂາຍ SPOS" (erp_doc_format) ຄື 'SPOS'.
+      //
+      // ຈຳກັດໄວ້ແຄບໆ ທີ່ SPOS ຢ່າງດຽວໂດຍເຈດຕະນາ: ໃບຂາຍເງິນສົດ CA… ກໍຈ່າຍທີ່
+      // ເຄົາເຕີຄືກັນ ແຕ່ມັນເປັນເຄິ່ງໜຶ່ງຂອງຄິວ — ເປີດໃຫ້ທັງໝົດຈະເຮັດໃຫ້ບິນ
+      // ຫຼາຍຮ້ອຍໃບກະໂດດເປັນ "ພ້ອມຮັບ" ເອງ ໂດຍບໍ່ມີໃຜໂທຫາລູກຄ້າ. ຖ້າຢາກໄດ້
+      // ແບບນັ້ນ ໃຫ້ເປັນການຕັດສິນໃຈຂອງທີມຈັດສົ່ງ ບໍ່ແມ່ນຜົນພ້ອຍຂອງການແກ້ບັກ.
+      const sourceFormat = (bill.source_format ?? "").trim().toUpperCase();
+      const isPosSettled = sourceFormat === "SPOS";
       // Default delivery date is the bill's send_date from ic_trans; admins can
       // override it via odg_tms_pending_bill when reschedule is needed.
       const effectiveDate = sched?.scheduled_date ?? bill.send_date ?? null;
@@ -1649,6 +1664,7 @@ async function getBillsPending(session, fromDate, toDate, transportCode) {
         planned_lat: sched?.planned_lat ?? "",
         planned_lng: sched?.planned_lng ?? "",
         is_pos_settled: isPosSettled,
+        cod_amount: Number(bill.cod_amount ?? 0),
         // Parent of one or more branch legs (goods in another branch's
         // warehouse, dispatched by that branch). Legs themselves carry
         // parent_bill_no instead.

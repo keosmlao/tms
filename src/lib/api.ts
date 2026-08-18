@@ -9,6 +9,7 @@ import * as deliveryRoute from "@/actions/delivery-route";
 import * as deliveryCalendar from "@/actions/delivery-calendar";
 import * as carType from "@/actions/car-type";
 import * as chatter from "@/actions/chatter";
+import * as cod from "@/actions/cod";
 import * as fuel from "@/actions/fuel";
 import * as geofence from "@/actions/geofence";
 import * as gps from "@/actions/gps";
@@ -122,6 +123,13 @@ export const Actions = {
   getBillItemsByWarehouse: bills.getBillItemsByWarehouse,
   getBillRemainingItemsByWarehouse: bills.getBillRemainingItemsByWarehouse,
   getBillBranchLegs: bills.getBillBranchLegs,
+
+  // COD (ເກັບເງິນປາຍທາງ)
+  getCodReconciliation: cod.getCodReconciliation,
+  getTripCodSummary: cod.getTripCodSummary,
+  getCodByDriver: cod.getCodByDriver,
+  recordCodHandover: cod.recordCodHandover,
+  deleteCodHandover: cod.deleteCodHandover,
   dispatchBillRemainingByBranch: bills.dispatchBillRemainingByBranch,
   searchManualPendingBills: bills.searchManualPendingBills,
   addManualPendingBill: bills.addManualPendingBill,

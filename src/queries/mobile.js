@@ -20,6 +20,8 @@ const {
   getFixedYearSqlFilter,
 } = require("../lib/fixed-year");
 const { getLaoToday } = require("../lib/lao-date");
+// COD (ເກັບເງິນປາຍທາງ) — ກົດການກວດຢູ່ໃນ lib ບໍລິສຸດ ຈຶ່ງ unit-test ໄດ້
+const { validateCodCollection } = require("../lib/cod");
 const {
   effectivePickupCodeSql,
   customerAreaSql,
@@ -205,7 +207,23 @@ async function mobileJobsList(driverId, date, options = {}) {
         COUNT(*) FILTER (WHERE COALESCE(d.status, 0) = 1)::int AS completed_bill_count,
         COUNT(*) FILTER (WHERE COALESCE(d.status, 0) = 2)::int AS cancelled_bill_count,
         MIN(d.recipt_job) AS received_at,
-        MIN(d.sent_start) FILTER (WHERE d.sent_start IS NOT NULL) AS first_bill_started_at
+        MIN(d.sent_start) FILTER (WHERE d.sent_start IS NOT NULL) AS first_bill_started_at,
+        -- COD (ເກັບເງິນປາຍທາງ): ຄົນຂັບຕ້ອງເຫັນຢູ່ບັດຖ້ຽວວ່າຖ້ຽວນີ້ຕ້ອງເກັບເງິນ
+        -- ເທົ່າໃດ ແລະ ຕ້ອງມອບເງິນສົດຄືນເທົ່າໃດ ໂດຍບໍ່ຕ້ອງເປີດເບິ່ງທຸກບິນ.
+        -- ບິນຍົກເລີກ (status=2) ບໍ່ນັບ — ບໍ່ໄດ້ສົ່ງກໍ່ບໍ່ມີເງິນ.
+        SUM(CASE WHEN COALESCE(d.status, 0) <> 2 THEN COALESCE(d.cod_amount, 0) ELSE 0 END)::numeric AS cod_expected,
+        SUM(CASE WHEN COALESCE(d.status, 0) <> 2 THEN COALESCE(d.collected_amount, 0) ELSE 0 END)::numeric AS cod_collected,
+        SUM(CASE WHEN COALESCE(d.status, 0) <> 2 AND COALESCE(d.payment_method, '') <> 'transfer'
+                 THEN COALESCE(d.collected_amount, 0) ELSE 0 END)::numeric AS cod_cash,
+        COUNT(*) FILTER (
+          WHERE COALESCE(d.status, 0) <> 2
+            AND COALESCE(d.cod_amount, 0) > 0
+        )::int AS cod_bill_count,
+        COUNT(*) FILTER (
+          WHERE COALESCE(d.status, 0) <> 2
+            AND COALESCE(d.cod_amount, 0) > 0
+            AND d.collected_at IS NULL
+        )::int AS cod_pending_count
       FROM public.odg_tms_detail d
       WHERE ${getFixedYearSqlFilter("d.doc_date")}
       GROUP BY d.doc_no
@@ -257,6 +275,12 @@ async function mobileJobsList(driverId, date, options = {}) {
       COALESCE(bs.inprogress_bill_count, 0) as inprogress_bill_count,
       COALESCE(bs.completed_bill_count, 0) as completed_bill_count,
       COALESCE(bs.cancelled_bill_count, 0) as cancelled_bill_count,
+      -- COD ຕໍ່ຖ້ຽວ (ເບິ່ງ bill_summary): cod_cash = ເງິນສົດທີ່ຄົນຂັບຕ້ອງມອບຄືນ
+      COALESCE(bs.cod_bill_count, 0) as cod_bill_count,
+      COALESCE(bs.cod_expected, 0) as cod_expected,
+      COALESCE(bs.cod_collected, 0) as cod_collected,
+      COALESCE(bs.cod_cash, 0) as cod_cash,
+      COALESCE(bs.cod_pending_count, 0) as cod_pending_count,
       COALESCE(ns.next_stop_name, '') as next_stop_name,
       -- ໄລຍະເສັ້ນຊື່ (ກມ) ຈາກລົດຫາຈຸດຕໍ່ໄປ. ວ່າງ = ຂາດພິກັດຝ່າຍໃດຝ່າຍໜຶ່ງ
       -- → ຈໍບໍ່ສະແດງ ດີກວ່າສະແດງ 0 ໃຫ້ເຂົ້າໃຈຜິດວ່າຮອດແລ້ວ.
@@ -409,7 +433,18 @@ async function mobileJobsListAll({
         COUNT(*) FILTER (WHERE COALESCE(d.status, 0) = 1)::int AS completed_bill_count,
         COUNT(*) FILTER (WHERE COALESCE(d.status, 0) = 2)::int AS cancelled_bill_count,
         MIN(d.recipt_job) AS received_at,
-        MIN(d.sent_start) FILTER (WHERE d.sent_start IS NOT NULL) AS first_bill_started_at
+        MIN(d.sent_start) FILTER (WHERE d.sent_start IS NOT NULL) AS first_bill_started_at,
+        -- COD ຕໍ່ຖ້ຽວ — ຕ້ອງກົງກັບ CTE ຢູ່ mobileJobsList ແປະໆ
+        SUM(CASE WHEN COALESCE(d.status, 0) <> 2 THEN COALESCE(d.cod_amount, 0) ELSE 0 END)::numeric AS cod_expected,
+        SUM(CASE WHEN COALESCE(d.status, 0) <> 2 THEN COALESCE(d.collected_amount, 0) ELSE 0 END)::numeric AS cod_collected,
+        SUM(CASE WHEN COALESCE(d.status, 0) <> 2 AND COALESCE(d.payment_method, '') <> 'transfer'
+                 THEN COALESCE(d.collected_amount, 0) ELSE 0 END)::numeric AS cod_cash,
+        COUNT(*) FILTER (
+          WHERE COALESCE(d.status, 0) <> 2 AND COALESCE(d.cod_amount, 0) > 0
+        )::int AS cod_bill_count,
+        COUNT(*) FILTER (
+          WHERE COALESCE(d.status, 0) <> 2 AND COALESCE(d.cod_amount, 0) > 0 AND d.collected_at IS NULL
+        )::int AS cod_pending_count
       FROM public.odg_tms_detail d
       INNER JOIN candidate_jobs cj ON cj.doc_no = d.doc_no
       WHERE ${getFixedYearSqlFilter("d.doc_date")}
@@ -425,6 +460,12 @@ async function mobileJobsListAll({
       COALESCE(bs.inprogress_bill_count, 0) as inprogress_bill_count,
       COALESCE(bs.completed_bill_count, 0) as completed_bill_count,
       COALESCE(bs.cancelled_bill_count, 0) as cancelled_bill_count,
+      -- COD ຕໍ່ຖ້ຽວ (ເບິ່ງ bill_summary): cod_cash = ເງິນສົດທີ່ຄົນຂັບຕ້ອງມອບຄືນ
+      COALESCE(bs.cod_bill_count, 0) as cod_bill_count,
+      COALESCE(bs.cod_expected, 0) as cod_expected,
+      COALESCE(bs.cod_collected, 0) as cod_collected,
+      COALESCE(bs.cod_cash, 0) as cod_cash,
+      COALESCE(bs.cod_pending_count, 0) as cod_pending_count,
       COALESCE(to_char(bs.received_at,'DD-MM-YYYY HH24:MI'), '-') as received_at,
       COALESCE(to_char(a.dispatch_started_at,'DD-MM-YYYY HH24:MI'), '-') as dispatch_started_at,
       COALESCE(a.miles_start, '') as miles_start,
@@ -1528,21 +1569,51 @@ async function mobileJobAction(body) {
           );
         }
 
-        // COD (Module B): record cash/transfer collected at delivery, if sent.
-        const collectedAmount =
-          body.collected_amount != null && `${body.collected_amount}` !== ""
-            ? Number(body.collected_amount)
-            : null;
-        if (collectedAmount !== null && !Number.isNaN(collectedAmount)) {
+        // ── COD (ເກັບເງິນປາຍທາງ) ──
+        // ຍອດທີ່ຕ້ອງເກັບອ່ານຈາກ DB ບໍ່ແມ່ນຈາກແອັບ — ຄົນຂັບຈຶ່ງແກ້ຍອດເອງບໍ່ໄດ້.
+        // ກົດການກວດທັງໝົດຢູ່ lib/cod.js (unit-tested); ຖ້າບໍ່ຜ່ານ ໂຍນ 400 ອອກ
+        // ໄປ ແລ້ວ transaction ທັງກ້ອນ rollback — ບິນຈຶ່ງບໍ່ຖືກປິດເຄິ່ງທາງ.
+        const codRow = (
+          await client.query(
+            `SELECT COALESCE(cod_amount, 0)::numeric AS cod_amount
+             FROM public.odg_tms_detail
+             WHERE bill_no = $1 AND doc_no = $2 AND ${getFixedYearSqlFilter("doc_date")}`,
+            [billNo, currentDocNo]
+          )
+        ).rows[0];
+        const codCheck = validateCodCollection({
+          codAmount: codRow?.cod_amount,
+          collectedAmount: body.collected_amount,
+          paymentMethod: body.payment_method,
+          reference: body.cod_reference,
+          varianceReason: body.cod_variance_reason,
+        });
+        if (!codCheck.ok) {
+          const err = new Error(codCheck.error);
+          err.status = 400;
+          throw err;
+        }
+        const codValue = codCheck.value;
+        if (codValue.status !== "not_required") {
           await client.query(
             `UPDATE public.odg_tms_detail
              SET collected_amount = $2,
-                 payment_method = COALESCE($3, payment_method),
+                 payment_method = $3,
+                 cod_reference = $4,
+                 cod_variance_reason = $5,
                  collected_at = LOCALTIMESTAMP(0)
-             WHERE bill_no = $1 AND doc_no = $4 AND ${getFixedYearSqlFilter("doc_date")}`,
-            [billNo, collectedAmount, asNullableText(body.payment_method), currentDocNo]
+             WHERE bill_no = $1 AND doc_no = $6 AND ${getFixedYearSqlFilter("doc_date")}`,
+            [
+              billNo,
+              codValue.collected_amount,
+              codValue.payment_method,
+              codValue.reference,
+              codValue.variance_reason,
+              currentDocNo,
+            ]
           );
         }
+        const collectedAmount = codValue.collected_amount;
 
         const remainingItems = Number(summaryAfterDeliver?.remaining_item_count ?? 0);
         const remainingQty = Number(summaryAfterDeliver?.remaining_qty_total ?? 0);
@@ -1561,6 +1632,8 @@ async function mobileJobAction(body) {
           driverCode: driverId,
           fullyDelivered,
           collectedAmount,
+          paymentMethod: codValue.payment_method,
+          codShortfall: codValue.status === "short" ? -codValue.variance : 0,
         });
         return {
           success: true,
@@ -1875,6 +1948,8 @@ async function mobileJobAction(body) {
                cancel_reason_code = NULL,
                collected_amount = NULL,
                payment_method = NULL,
+               cod_reference = NULL,
+               cod_variance_reason = NULL,
                collected_at = NULL
            WHERE bill_no = $1 AND doc_no = $2 AND ${getFixedYearSqlFilter("doc_date")}`,
           [billNo, currentDocNo]
@@ -2278,6 +2353,8 @@ async function mobileBills({ docNo, billNo, type, driverId, isSupervisor }) {
         COALESCE(a.cod_amount, 0) as cod_amount,
         a.collected_amount as collected_amount,
         COALESCE(a.payment_method, '') as payment_method,
+        COALESCE(a.cod_reference, '') as cod_reference,
+        COALESCE(a.cod_variance_reason, '') as cod_variance_reason,
         COALESCE(a.cancel_reason_code, '') as cancel_reason_code,
         COALESCE(to_char(a.reschedule_date,'DD-MM-YYYY'), '') as reschedule_date,
         COALESCE(a.remark, '') as remark,
