@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import {
   FaCalendar,
   FaSearch,
@@ -18,7 +18,7 @@ import { exportToExcel } from "@/lib/excel-export";
 import { FaTimes } from "react-icons/fa";
 
 // Daily transport ledger split by sale department:
-//   ຄ້າງສົ່ງຍົກມາ + ເປີດບິນໃນວັນ − ຈັດສົ່ງໃນວັນ = ຄົງເຫຼືອ
+//   ຄ້າງສົ່ງຍົກມາ + ເປີດບິນໃນວັນ − ຈັດສົ່ງໃນວັນ − ປິດດ້ວຍທາງອື່ນ = ຄົງເຫຼືອ
 // Each bucket carries both a bill count and a product quantity.
 // See getReportDailyDepartment in src/queries/reports.js.
 interface DeptRow {
@@ -27,10 +27,13 @@ interface DeptRow {
   carry_bills: number;
   opened_bills: number;
   delivered_bills: number;
+  /** ບິນທີ່ອອກຈາກຍອດໂດຍບໍ່ໄດ້ສົ່ງ — ຄືນຜ່ານໃບຫຼຸດໜີ້ ຫຼື ຖືກປິດຢູ່ ERP */
+  closed_other_bills: number;
   remaining_bills: number;
   carry_qty: number;
   opened_qty: number;
   delivered_qty: number;
+  closed_other_qty: number;
   remaining_qty: number;
 }
 
@@ -70,25 +73,57 @@ export default function DailyDepartmentReport() {
   const [drillLoading, setDrillLoading] = useState(false);
   const [data, setData] = useState<DeptData | null>(null);
   const [loading, setLoading] = useState(true);
+  // ເວລາທີ່ຕົວເລກຊຸດນີ້ຖືກດຶງມາ — ຍອດ "ຈັດສົ່ງໃນວັນ" ເພີ່ມຂຶ້ນຕະຫຼອດວັນ ຈຶ່ງຕ້ອງ
+  // ບອກໃຫ້ຊັດວ່າສິ່ງທີ່ເຫັນຢູ່ແມ່ນພາບຂອງເວລາໃດ ບໍ່ດັ່ງນັ້ນເປີດ tab ຄາໄວ້ແລ້ວ
+  // ອ່ານຕອນແລງ ຈະເຂົ້າໃຈວ່າຕົວເລກຄ້າງ.
+  const [fetchedAt, setFetchedAt] = useState<string>("");
 
   // salesOnly is read at call time so the checkbox can refetch immediately
   // without waiting for the state to land in a re-render.
-  const fetchData = (onlySales = salesOnly, branch = transportCode) => {
-    setLoading(true);
-    Actions.getReportDailyDepartment(fromDate, toDate, onlySales, branch)
-      .then((d) => {
-        const result = d as DeptData;
-        setData(result);
-        if (Array.isArray(result.branchOptions)) setBranchOptions(result.branchOptions);
-      })
-      .catch(console.error)
-      .finally(() => setLoading(false));
-  };
+  const fetchData = useCallback(
+    (
+      onlySales = salesOnly,
+      branch = transportCode,
+      from = fromDate,
+      to = toDate
+    ) => {
+      setLoading(true);
+      Actions.getReportDailyDepartment(from, to, onlySales, branch)
+        .then((d) => {
+          const result = d as DeptData;
+          setData(result);
+          setFetchedAt(
+            new Date().toLocaleTimeString("en-GB", {
+              hour: "2-digit",
+              minute: "2-digit",
+              second: "2-digit",
+            })
+          );
+          if (Array.isArray(result.branchOptions)) setBranchOptions(result.branchOptions);
+        })
+        .catch(console.error)
+        .finally(() => setLoading(false));
+    },
+    [salesOnly, transportCode, fromDate, toDate]
+  );
 
+  // ປ່ຽນວັນທີແລ້ວດຶງໃໝ່ເອງ — ກ່ອນນີ້ຫົວຕາຕະລາງປ່ຽນເປັນວັນໃໝ່ ແຕ່ຕົວເລກຍັງເປັນ
+  // ຂອງເກົ່າຈົນກວ່າຈະກົດ "ຄົ້ນຫາ". ຫ່ວງ 350ms ເພາະສອງຊ່ອງມັກປ່ຽນຕິດກັນ.
+  const firstLoad = useRef(true);
   useEffect(() => {
-    fetchData();
+    if (firstLoad.current) {
+      firstLoad.current = false;
+      fetchData(salesOnly, transportCode, fromDate, toDate);
+      return;
+    }
+    const timer = setTimeout(
+      () => fetchData(salesOnly, transportCode, fromDate, toDate),
+      350
+    );
+    return () => clearTimeout(timer);
+    // ຕິດຕາມສະເພາະວັນທີ — ສາຂາ ແລະ ຕິກ "ສະເພາະຝ່າຍຂາຍ" ດຶງເອງຢູ່ແລ້ວຕອນປ່ຽນ
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [fromDate, toDate]);
 
   const openDrill = (
     dept: string,
@@ -161,6 +196,8 @@ export default function DailyDepartmentReport() {
       { key: "opened_qty", header: "ເປີດບິນໃນວັນ (ສິນຄ້າ)", width: 18 },
       { key: "delivered_bills", header: "ຈັດສົ່ງໃນວັນ (ບິນ)", width: 16 },
       { key: "delivered_qty", header: "ຈັດສົ່ງໃນວັນ (ສິນຄ້າ)", width: 18 },
+      { key: "closed_other_bills", header: "ປິດດ້ວຍທາງອື່ນ (ບິນ)", width: 18 },
+      { key: "closed_other_qty", header: "ປິດດ້ວຍທາງອື່ນ (ສິນຄ້າ)", width: 20 },
       { key: "remaining_bills", header: "ຄົງເຫຼືອ (ບິນ)", width: 14 },
       { key: "remaining_qty", header: "ຄົງເຫຼືອ (ສິນຄ້າ)", width: 16 },
     ]);
@@ -178,7 +215,10 @@ export default function DailyDepartmentReport() {
             ລາຍງານປະຈຳວັນຂົນສົ່ງ (ແຍກຕາມພະແນກຂາຍ)
           </h1>
           <p className="text-xs text-slate-500 dark:text-slate-400">
-            ຄ້າງສົ່ງຍົກມາ + ເປີດບິນໃນວັນ − ຈັດສົ່ງໃນວັນ = ຄົງເຫຼືອ (ນັບທັງບິນ ແລະ ຈຳນວນສິນຄ້າ)
+            ຄ້າງສົ່ງຍົກມາ + ເປີດບິນໃນວັນ − ຈັດສົ່ງໃນວັນ − ປິດດ້ວຍທາງອື່ນ = ຄົງເຫຼືອ (ນັບທັງບິນ ແລະ ຈຳນວນສິນຄ້າ)
+            {fetchedAt && (
+              <span className="ml-2 text-slate-400">· ອັບເດດເວລາ {fetchedAt}</span>
+            )}
           </p>
         </div>
       </div>
@@ -312,6 +352,14 @@ export default function DailyDepartmentReport() {
               accent="text-emerald-600 dark:text-emerald-400"
             />
             <SummaryCard
+              label="ປິດດ້ວຍທາງອື່ນ"
+              bills={data.total.closed_other_bills}
+              qty={data.total.closed_other_qty}
+              icon={<FaFileInvoice />}
+              iconBg="bg-slate-500/10 text-slate-600 dark:text-slate-300"
+              accent="text-slate-600 dark:text-slate-300"
+            />
+            <SummaryCard
               label="ຄົງເຫຼືອ"
               bills={data.total.remaining_bills}
               qty={data.total.remaining_qty}
@@ -343,9 +391,12 @@ export default function DailyDepartmentReport() {
                     <th colSpan={2} className="px-4 py-2 text-center font-semibold text-amber-600 dark:text-amber-400 border-l border-slate-200/30 dark:border-white/5">ຄ້າງສົ່ງຍົກມາ</th>
                     <th colSpan={2} className="px-4 py-2 text-center font-semibold text-sky-600 dark:text-sky-400 border-l border-slate-200/30 dark:border-white/5">ເປີດບິນໃນວັນ</th>
                     <th colSpan={2} className="px-4 py-2 text-center font-semibold text-emerald-600 dark:text-emerald-400 border-l border-slate-200/30 dark:border-white/5">ຈັດສົ່ງໃນວັນ</th>
+                    <th colSpan={2} className="px-4 py-2 text-center font-semibold text-slate-500 dark:text-slate-300 border-l border-slate-200/30 dark:border-white/5" title="ບິນທີ່ອອກຈາກຍອດໂດຍບໍ່ໄດ້ສົ່ງ — ຄືນຜ່ານໃບຫຼຸດໜີ້ ຫຼື ຖືກປິດຢູ່ ERP">ປິດດ້ວຍທາງອື່ນ</th>
                     <th colSpan={2} className="px-4 py-2 text-center font-semibold text-rose-600 dark:text-rose-400 border-l border-slate-200/30 dark:border-white/5">ຄົງເຫຼືອ</th>
                   </tr>
                   <tr className="bg-white/30 dark:bg-white/5 border-b border-slate-200/30 dark:border-white/5 text-[11px] text-slate-500 dark:text-slate-400">
+                    <th className="px-3 py-1.5 text-right font-medium border-l border-slate-200/30 dark:border-white/5">ບິນ</th>
+                    <th className="px-3 py-1.5 text-right font-medium">ສິນຄ້າ</th>
                     <th className="px-3 py-1.5 text-right font-medium border-l border-slate-200/30 dark:border-white/5">ບິນ</th>
                     <th className="px-3 py-1.5 text-right font-medium">ສິນຄ້າ</th>
                     <th className="px-3 py-1.5 text-right font-medium border-l border-slate-200/30 dark:border-white/5">ບິນ</th>
@@ -380,6 +431,8 @@ export default function DailyDepartmentReport() {
                         <button type="button" onClick={() => openDrill(d.department, "delivered", `ຈັດສົ່ງ · ${d.department}`)} className="cursor-pointer underline decoration-dotted underline-offset-2 hover:opacity-70">{fmt(d.delivered_bills)}</button>
                       </td>
                       <td className="px-3 py-3 text-right tabular-nums text-emerald-700/70 dark:text-emerald-400/70">{fmt(d.delivered_qty)}</td>
+                      <td className="px-3 py-3 text-right tabular-nums text-slate-600 dark:text-slate-300 border-l border-slate-200/20 dark:border-white/5">{fmt(d.closed_other_bills)}</td>
+                      <td className="px-3 py-3 text-right tabular-nums text-slate-500 dark:text-slate-400">{fmt(d.closed_other_qty)}</td>
                       <td className="px-3 py-3 text-right tabular-nums font-semibold text-rose-700 dark:text-rose-400 border-l border-slate-200/20 dark:border-white/5">
                         <button type="button" onClick={() => openDrill(d.department, "remaining", `ຄົງເຫຼືອ · ${d.department}`)} className="cursor-pointer underline decoration-dotted underline-offset-2 hover:opacity-70">{fmt(d.remaining_bills)}</button>
                       </td>
@@ -394,6 +447,8 @@ export default function DailyDepartmentReport() {
                     <td className="px-3 py-3 text-right tabular-nums text-sky-700/70 dark:text-sky-400/70">{fmt(data.total.opened_qty)}</td>
                     <td className="px-3 py-3 text-right tabular-nums text-emerald-700 dark:text-emerald-400 border-l border-slate-200/20 dark:border-white/5">{fmt(data.total.delivered_bills)}</td>
                     <td className="px-3 py-3 text-right tabular-nums text-emerald-700/70 dark:text-emerald-400/70">{fmt(data.total.delivered_qty)}</td>
+                    <td className="px-3 py-3 text-right tabular-nums text-slate-600 dark:text-slate-300 border-l border-slate-200/20 dark:border-white/5">{fmt(data.total.closed_other_bills)}</td>
+                    <td className="px-3 py-3 text-right tabular-nums text-slate-500 dark:text-slate-400">{fmt(data.total.closed_other_qty)}</td>
                     <td className="px-3 py-3 text-right tabular-nums text-rose-700 dark:text-rose-400 border-l border-slate-200/20 dark:border-white/5">{fmt(data.total.remaining_bills)}</td>
                     <td className="px-3 py-3 text-right tabular-nums text-rose-700/70 dark:text-rose-400/70">{fmt(data.total.remaining_qty)}</td>
                   </tr>

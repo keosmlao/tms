@@ -14,9 +14,9 @@ import {
   FaTimesCircle,
 } from "react-icons/fa";
 import {
-  FIXED_MONTH_MAX,
-  FIXED_MONTH_MIN,
-  getFixedTodayMonth,
+  FIXED_YEAR_END,
+  FIXED_YEAR_START,
+  getFixedTodayDate,
 } from "@/lib/fixed-year";
 import { Actions } from "@/lib/api";
 import { exportToExcel } from "@/lib/excel-export";
@@ -37,13 +37,6 @@ const MONTH_NAMES = [
   "ມັງກອນ", "ກຸມພາ", "ມີນາ", "ເມສາ", "ພຶດສະພາ", "ມິຖຸນາ",
   "ກໍລະກົດ", "ສິງຫາ", "ກັນຍາ", "ຕຸລາ", "ພະຈິກ", "ທັນວາ",
 ];
-
-function monthText(month: string) {
-  const [year, monthPart] = (month ?? "").split("-");
-  const index = Number(monthPart) - 1;
-  if (index < 0 || index >= MONTH_NAMES.length) return month || "-";
-  return `${MONTH_NAMES[index]} ${year}`;
-}
 
 function numberText(value: number) {
   return (Number(value) || 0).toLocaleString("en-US");
@@ -275,8 +268,23 @@ function BreakdownTable<T extends DeliveryPerfBucket>({
   );
 }
 
+/** ວັນທຳອິດຂອງເດືອນທີ່ວັນນັ້ນຢູ່ */
+function startOfMonthDate(date: string) {
+  return `${date.slice(0, 7)}-01`;
+}
+
+/** "2026-08-19" → "19 ສິງຫາ 2026" */
+function dateText(date: string) {
+  const [year, monthPart, day] = (date ?? "").split("-");
+  const index = Number(monthPart) - 1;
+  if (index < 0 || index >= MONTH_NAMES.length) return date || "-";
+  return `${Number(day)} ${MONTH_NAMES[index]} ${year}`;
+}
+
 export default function DeliveryPerformancePage() {
-  const [month, setMonth] = useState(getFixedTodayMonth());
+  // ຄ່າເລີ່ມຕົ້ນ: ວັນທີ 1 ຂອງເດືອນນີ້ → ມື້ນີ້ (ຄືກັນກັບໜ້າ /reports/bi)
+  const [fromDate, setFromDate] = useState(() => startOfMonthDate(getFixedTodayDate()));
+  const [toDate, setToDate] = useState(() => getFixedTodayDate());
   const [report, setReport] = useState<DeliveryPerfReport>(EMPTY_PERF_REPORT);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
@@ -286,7 +294,7 @@ export default function DeliveryPerformancePage() {
   const loadReport = useCallback(() => {
     setLoading(true);
     setError("");
-    Actions.getDeliveryPerformance(month)
+    Actions.getDeliveryPerformance(fromDate, toDate)
       .then((result) => setReport((result as DeliveryPerfReport) ?? EMPTY_PERF_REPORT))
       .catch((loadError) => {
         console.error(loadError);
@@ -294,7 +302,7 @@ export default function DeliveryPerformancePage() {
         setError("ບໍ່ສາມາດໂຫຼດລາຍງານໄດ້");
       })
       .finally(() => setLoading(false));
-  }, [month]);
+  }, [fromDate, toDate]);
 
   useEffect(() => {
     loadReport();
@@ -352,7 +360,7 @@ export default function DeliveryPerformancePage() {
       ...departments.map((d) => toRow(`ພະແນກ · ${d.department_name}`, d)),
     ];
 
-    exportToExcel(`delivery-performance-${month}`, rows, [
+    exportToExcel(`delivery-performance-${fromDate}_to_${toDate}`, rows, [
       { key: "branch_name", header: "ສາຂາ / ພະແນກ", width: 28 },
       { key: "carry_in", header: "ຍອດຍົກມາ", width: 11 },
       { key: "opened", header: "ເປີດບິນໃນເດືອນ", width: 14 },
@@ -399,7 +407,10 @@ export default function DeliveryPerformancePage() {
               ປະສິດທິພາບການຈັດສົ່ງ
             </p>
             <h1 className="mt-1 text-2xl font-bold text-slate-950 dark:text-white">
-              ລາຍງານປະສິດທິພາບການຈັດສົ່ງ · {monthText(report.month || month)}
+              ລາຍງານປະສິດທິພາບການຈັດສົ່ງ ·{" "}
+              {fromDate === toDate
+                ? dateText(fromDate)
+                : `${dateText(fromDate)} – ${dateText(toDate)}`}
             </h1>
             <p className="mt-1 text-sm text-slate-500 dark:text-slate-400">
               ຍອດຍົກມາ · ເປີດບິນໃນເດືອນ · ຍອດຍົກໄປ ພ້ອມຊັ້ນເວລານຳສົ່ງ ແລະ ຄຸນນະພາບການສົ່ງ
@@ -416,15 +427,34 @@ export default function DeliveryPerformancePage() {
             <label>
               <span className="mb-1 flex items-center gap-2 text-[11px] font-semibold text-slate-600 dark:text-slate-300">
                 <FaCalendarAlt size={11} className="text-slate-400" />
-                ເລືອກເດືອນ
+                ແຕ່ວັນ
               </span>
               <input
-                type="month"
-                value={month}
-                min={FIXED_MONTH_MIN}
-                max={FIXED_MONTH_MAX}
-                onChange={(event) => setMonth(event.target.value)}
-                className="glass-input h-9 w-full rounded-lg px-3 text-xs sm:w-48"
+                type="date"
+                value={fromDate}
+                min={FIXED_YEAR_START}
+                max={FIXED_YEAR_END}
+                onChange={(event) => {
+                  const value = event.target.value;
+                  if (!value) return;
+                  setFromDate(value);
+                  if (value > toDate) setToDate(value);
+                }}
+                className="glass-input h-9 w-full rounded-lg px-3 text-xs sm:w-40"
+              />
+            </label>
+            <label>
+              <span className="mb-1 flex items-center gap-2 text-[11px] font-semibold text-slate-600 dark:text-slate-300">
+                <FaCalendarAlt size={11} className="text-slate-400" />
+                ຫາວັນ
+              </span>
+              <input
+                type="date"
+                value={toDate}
+                min={fromDate}
+                max={FIXED_YEAR_END}
+                onChange={(event) => event.target.value && setToDate(event.target.value)}
+                className="glass-input h-9 w-full rounded-lg px-3 text-xs sm:w-40"
               />
             </label>
             <button
@@ -639,14 +669,14 @@ export default function DeliveryPerformancePage() {
 
       {!loading && !hasData && (
         <p className="rounded-lg border border-slate-200 bg-white px-4 py-10 text-center text-sm font-semibold text-slate-400 dark:border-slate-800 dark:bg-slate-900/70">
-          ບໍ່ມີຂໍ້ມູນໃນເດືອນ {monthText(month)}
+          ບໍ່ມີຂໍ້ມູນໃນຊ່ວງທີ່ເລືອກ
         </p>
       )}
 
       <section className="rounded-lg border border-slate-200 bg-slate-50/60 px-4 py-3 text-[10px] leading-relaxed text-slate-500 dark:border-slate-800 dark:bg-slate-950/20 dark:text-slate-400">
         <p className="mb-1 text-[11px] font-bold text-slate-600 dark:text-slate-300">ນິຍາມທີ່ໃຊ້</p>
         <p>
-          • ນັບສະເພາະບິນທີ່ 3 ສາຂາຂົນສົ່ງເປັນຄົນຈັດສົ່ງ (ໂອດ່ຽນ · ດອນຕິ້ວ · ປາກເຊ) ພາຍໃນປີ {FIXED_MONTH_MIN.slice(0, 4)}.
+          • ນັບສະເພາະບິນທີ່ 3 ສາຂາຂົນສົ່ງເປັນຄົນຈັດສົ່ງ (ໂອດ່ຽນ · ດອນຕິ້ວ · ປາກເຊ) ພາຍໃນປີ {FIXED_YEAR_START.slice(0, 4)}.
           ສາຂາເຈົ້າຂອງບິນຖືເອົາ <b>ສາຂາຂອງຖ້ຽວທີ່ສົ່ງສຳເລັດ</b> ເປັນຫຼັກ, ບິນທີ່ຍັງບໍ່ທັນຈັດຖ້ຽວຈຶ່ງໃຊ້ສາຂາທີ່ຜູ້ຈັດມອບໝາຍ.
           ຈຶ່ງລວມທັງບິນມື/ບິນໂອນທີ່ບໍ່ມີແຖວໃນ ERP ແລະ ບິນທີ່ຖືກໂອນຂ້າມສາຂາ.
         </p>
@@ -660,16 +690,16 @@ export default function DeliveryPerformancePage() {
           ແລະ ຕົງກັບ tile &quot;ຄ້າງສົ່ງ&quot; ໃນໜ້າຫຼັກ.
         </p>
         <p>
-          • ⚠️ ຍອດຍົກໄປ<b>ຂອງເດືອນທີ່ຜ່ານມາເປັນຄ່າປະມານ</b>: ຄິດຈາກສະພາບປັດຈຸບັນແລ້ວຍ້ອນກັບດ້ວຍ
+          • ⚠️ ຍອດຍົກໄປ<b>ຂອງຊ່ວງທີ່ຜ່ານມາເປັນຄ່າປະມານ</b>: ຄິດຈາກສະພາບປັດຈຸບັນແລ້ວຍ້ອນກັບດ້ວຍ
           ວັນສົ່ງສຳເລັດ ແລະ ວັນໃບຫຼຸດໜີ້. ບິນທີ່ຖືກປິດຢູ່ ERP ໂດຍບໍ່ມີໃບຫຼຸດໜີ້ບອກວັນທີ່ແທ້ບໍ່ໄດ້
-          ເພາະ ERP ບໍ່ເກັບປະຫວັດ. ເດືອນປັດຈຸບັນຖືກຕ້ອງ 100%.
+          ເພາະ ERP ບໍ່ເກັບປະຫວັດ. ຊ່ວງທີ່ຈົບລົງທີ່ມື້ນີ້ຖືກຕ້ອງ 100%.
         </p>
         <p>
           • ບິນທີ່ຄືນສິນຄ້າ (ໃບຫຼຸດໜີ້) ຫຼື ຖືກປິດຢູ່ ERP ໂດຍບໍ່ໄດ້ສົ່ງ ຈະຖືກຫັກອອກຈາກຍອດຄ້າງ
-          ໃນເດືອນທີ່ເກີດເຫດ ແຕ່ບໍ່ນັບເປັນ &quot;ສົ່ງສຳເລັດ&quot; — ຍອດ ຍົກມາ + ເປີດ − ສຳເລັດ ຈຶ່ງບໍ່ເທົ່າ ຍົກໄປ ພໍດີ.
+          ໃນຊ່ວງທີ່ເກີດເຫດ ແຕ່ບໍ່ນັບເປັນ &quot;ສົ່ງສຳເລັດ&quot; — ຍອດ ຍົກມາ + ເປີດ − ສຳເລັດ ຈຶ່ງບໍ່ເທົ່າ ຍົກໄປ ພໍດີ.
         </p>
         <p>• ບິນລໍຈັດຖ້ຽວນັບສະເພາະບິນຂາຍ (trans_flag 44) ຄືກັບໜ້າ &quot;ບິນລໍຈັດຖ້ຽວ&quot; — ຕັດເອກະສານ RWSO/SRH ທີ່ບໍ່ແມ່ນວຽກຈັດສົ່ງອອກ.</p>
-        <p>• ບິນທີ່ເປີດກ່ອນປີ {FIXED_MONTH_MIN.slice(0, 4)} ບໍ່ຢູ່ໃນຍອດຍົກມາ ເພາະລະບົບຕຶງການກັ່ນຕອງໄວ້ທີ່ປີນີ້.</p>
+        <p>• ບິນທີ່ເປີດກ່ອນປີ {FIXED_YEAR_START.slice(0, 4)} ບໍ່ຢູ່ໃນຍອດຍົກມາ ເພາະລະບົບຕຶງການກັ່ນຕອງໄວ້ທີ່ປີນີ້.</p>
       </section>
     </div>
   );

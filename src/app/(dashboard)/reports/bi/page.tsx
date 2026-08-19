@@ -14,6 +14,7 @@ import {
   FaMoneyBillWave,
   FaRoad,
   FaRoute,
+  FaFileExcel,
   FaSpinner,
   FaSyncAlt,
   FaTruck,
@@ -21,13 +22,16 @@ import {
   FaWarehouse,
 } from "react-icons/fa";
 import { Actions } from "@/lib/api";
+import { exportSheets } from "@/lib/excel-export";
 import {
-  FIXED_MONTH_MAX,
-  FIXED_MONTH_MIN,
-  getFixedTodayMonth,
+  FIXED_YEAR_END,
+  FIXED_YEAR_START,
+  getFixedTodayDate,
 } from "@/lib/fixed-year";
+import { addDays } from "@/lib/lao-date";
 import { deliveryPerfRates } from "@/lib/delivery-performance";
 import { fuelPaymentTypeLabel } from "@/lib/fuel-payment-type";
+import { tripCostTypeLabel } from "@/lib/trip-cost-type";
 import type { BiDashboard } from "@/actions/bi-dashboard";
 import type { DeliveryPerfReport } from "@/lib/delivery-performance";
 
@@ -60,15 +64,205 @@ function monthText(month: string) {
   return index >= 0 && index < 12 ? `${MONTH_NAMES[index]} ${year}` : month || "—";
 }
 
-function monthOptions() {
-  const out: string[] = [];
-  const [minYear, minMonth] = FIXED_MONTH_MIN.split("-").map(Number);
-  const [, maxMonth] = FIXED_MONTH_MAX.split("-").map(Number);
-  for (let m = minMonth; m <= maxMonth; m += 1) {
-    out.push(`${minYear}-${String(m).padStart(2, "0")}`);
-  }
-  return out;
+/** "2026-08-19" → "19 ສິງຫາ 2026" */
+function dateText(date: string) {
+  const [year, month, day] = (date ?? "").split("-");
+  const index = Number(month) - 1;
+  return index >= 0 && index < 12 ? `${Number(day)} ${MONTH_NAMES[index]} ${year}` : date || "—";
 }
+
+/**
+ * ດຶງລາຍງານທັງໜ້າອອກເປັນ Excel — 1 ແຖບຕໍ່ 1 ຕາຕະລາງ.
+ *
+ * ຜູ້ບໍລິຫານຕ້ອງເອົາຕົວເລກໄປປະຊຸມ ຈຶ່ງຕ້ອງອອກໄດ້ທັງຊຸດ ບໍ່ແມ່ນ copy ເທື່ອລະຊ່ອງ.
+ * ຄ່າທີ່ອອກເປັນຕົວເລກດິບ (ບໍ່ຈັດຮູບແບບ) ເພື່ອໃຫ້ Excel ຄິດຕໍ່ໄດ້.
+ */
+function exportDashboard(data: BiDashboard) {
+  const round1 = (v: number) => Math.round((Number(v) || 0) * 10) / 10;
+  const c = data.current;
+  // ແຕ່ລະແຖບມີຮູບແຖວຕ່າງກັນ ຈຶ່ງຕ້ອງບອກ generic ເອງ ບໍ່ດັ່ງນັ້ນ TS ຈະຖືເອົາ
+  // ຮູບແຖວຂອງແຖບທຳອິດເປັນຂອງທຸກແຖບ
+  exportSheets<Record<string, unknown>>(`bi_${data.from}_to_${data.to}${data.carCode ? `_${data.carCode}` : ""}`, [
+    {
+      name: "ສະຫຼຸບ",
+      rows: [
+        { k: "ຊ່ວງ", v: `${data.from} → ${data.to}` },
+        { k: "ລົດທີ່ກັ່ນຕອງ", v: data.carCode || "ທຸກຄັນ" },
+        { k: "ຖ້ຽວທັງໝົດ", v: c.trips.trips },
+        { k: "ຈຸດສົ່ງສຳເລັດ", v: c.delivery.drops },
+        { k: "ບິນ", v: c.delivery.bills },
+        { k: "ສົ່ງທັນເວລາ (%)", v: round1(c.delivery.on_time_pct) },
+        { k: "ຈຸດສົ່ງຊ້າ", v: c.delivery.late },
+        { k: "ບິນທີ່ຖືກເລື່ອນນັດ", v: c.delivery.rescheduled_bills },
+        { k: "ໄລຍະທາງ (ກມ)", v: Math.round(c.km) },
+        { k: "ຄ່ານ້ຳມັນ (ກີບ)", v: Math.round(c.fuel.amount) },
+        { k: "ຄ່ານ້ຳມັນ/ຖ້ຽວ (ກີບ)", v: Math.round(c.cost_per_trip) },
+        { k: "ຄ່ານ້ຳມັນ/ກມ (ກີບ)", v: Math.round(c.cost_per_km) },
+        { k: "ຖ້ຽວໜຶ່ງ (ຊມ, ກາງ)", v: round1(data.timing.median_trip_hours) },
+        { k: "ຢູ່ໜ້າຮ້ານ (ນາທີ, ກາງ)", v: Math.round(data.timing.median_stop_minutes) },
+        { k: "COD ຕ້ອງເກັບ (ກີບ)", v: Math.round(data.cod.expected) },
+        { k: "COD ບັນທຶກວ່າເກັບ (ກີບ)", v: Math.round(data.cod.collected) },
+      ],
+      columns: [
+        { key: "k", header: "ລາຍການ", width: 30 },
+        { key: "v", header: "ຄ່າ", width: 22 },
+      ],
+    },
+    {
+      name: "ລາຍວັນ",
+      rows: data.daily.map((d) => ({ ...d, km: Math.round(d.km), fuel: Math.round(d.fuel) })),
+      columns: [
+        { key: "day", header: "ວັນທີ", width: 13 },
+        { key: "trips", header: "ຖ້ຽວ", width: 9 },
+        { key: "drops", header: "ຈຸດສົ່ງ", width: 10 },
+        { key: "km", header: "ກມ", width: 10 },
+        { key: "fuel", header: "ຄ່ານ້ຳມັນ", width: 14 },
+      ],
+    },
+    {
+      name: "ຄົນຂັບ",
+      rows: data.drivers.map((d) => ({
+        ...d,
+        drops_per_trip: round1(d.drops_per_trip),
+        on_time_pct: d.on_time_pct == null ? "" : round1(d.on_time_pct),
+      })),
+      columns: [
+        { key: "name", header: "ຄົນຂັບ", width: 26 },
+        { key: "trips", header: "ຖ້ຽວ", width: 9 },
+        { key: "drops", header: "ຈຸດສົ່ງ", width: 10 },
+        { key: "drops_per_trip", header: "ຈຸດ/ຖ້ຽວ", width: 11 },
+        { key: "cancelled", header: "ຍົກເລີກ", width: 10 },
+        { key: "on_time_pct", header: "ທັນເວລາ (%)", width: 13 },
+      ],
+    },
+    {
+      name: "ສາຂາ",
+      rows: data.branches.map((b) => ({
+        ...b,
+        on_time_pct: b.on_time_pct == null ? "" : round1(b.on_time_pct),
+      })),
+      columns: [
+        { key: "branch_name", header: "ສາຂາ", width: 24 },
+        { key: "trips", header: "ຖ້ຽວ", width: 9 },
+        { key: "cars", header: "ລົດ", width: 8 },
+        { key: "drops", header: "ຈຸດສົ່ງ", width: 10 },
+        { key: "on_time_pct", header: "ທັນເວລາ (%)", width: 13 },
+      ],
+    },
+    {
+      name: "ສາຍທາງ",
+      rows: data.routes.map((r) => ({
+        ...r,
+        route_km: round1(r.route_km),
+        drops_per_trip: round1(r.drops_per_trip),
+        on_time_pct: r.on_time_pct == null ? "" : round1(r.on_time_pct),
+      })),
+      columns: [
+        { key: "route_code", header: "ລະຫັດ", width: 12 },
+        { key: "route_name", header: "ຊື່ສາຍ", width: 28 },
+        { key: "trips", header: "ຖ້ຽວ", width: 9 },
+        { key: "drops", header: "ຈຸດສົ່ງ", width: 10 },
+        { key: "drops_per_trip", header: "ຈຸດ/ຖ້ຽວ", width: 11 },
+        { key: "route_km", header: "ກມ/ຖ້ຽວ", width: 11 },
+        { key: "cancelled", header: "ຍົກເລີກ", width: 10 },
+        { key: "on_time_pct", header: "ທັນເວລາ (%)", width: 13 },
+      ],
+    },
+    {
+      name: "ລູກຄ້າ",
+      rows: data.customers,
+      columns: [
+        { key: "customer", header: "ລູກຄ້າ", width: 34 },
+        { key: "drops", header: "ຈຸດສົ່ງ", width: 10 },
+        { key: "bills", header: "ບິນ", width: 9 },
+        { key: "late", header: "ຊ້າ", width: 9 },
+      ],
+    },
+    {
+      name: "ນ້ຳມັນລາຍຄັນ",
+      rows: data.fuelByCar.map((f) => ({
+        ...f,
+        distance_km: Math.round(f.distance_km),
+        liters: round1(f.liters),
+        amount: Math.round(f.amount),
+        km_per_liter: f.km_per_liter == null ? "" : round1(f.km_per_liter),
+        cost_per_km: f.cost_per_km == null ? "" : Math.round(f.cost_per_km),
+      })),
+      columns: [
+        { key: "car_name", header: "ລົດ", width: 16 },
+        { key: "trips", header: "ຖ້ຽວ", width: 9 },
+        { key: "distance_km", header: "ກມ", width: 10 },
+        { key: "liters", header: "ລິດ", width: 10 },
+        { key: "amount", header: "ຄ່ານ້ຳມັນ", width: 14 },
+        { key: "km_per_liter", header: "ກມ/ລິດ", width: 11 },
+        { key: "cost_per_km", header: "ກີບ/ກມ", width: 11 },
+      ],
+    },
+    {
+      name: "ຄວາມໄວ",
+      rows: data.fleetActivity.map((f) => ({
+        ...f,
+        km: Math.round(f.km),
+        moving_hours: round1(f.moving_hours),
+        max_speed: Math.round(f.max_speed),
+        avg_daily_max_speed: Math.round(f.avg_daily_max_speed),
+        km_per_hour: f.km_per_hour == null ? "" : Math.round(f.km_per_hour),
+      })),
+      columns: [
+        { key: "car_name", header: "ລົດ", width: 16 },
+        { key: "active_days", header: "ວັນທີ່ແລ່ນ", width: 12 },
+        { key: "km", header: "ກມ", width: 10 },
+        { key: "moving_hours", header: "ຊມ ຂັບ", width: 11 },
+        { key: "max_speed", header: "ໄວສູງສຸດ", width: 12 },
+        { key: "avg_daily_max_speed", header: "ສະເລ່ຍໄວສູງສຸດ/ວັນ", width: 20 },
+        { key: "km_per_hour", header: "ກມ/ຊມ", width: 11 },
+      ],
+    },
+  ]);
+}
+
+/** "2026-08-19" → "19/08 ພຸດ" — ສັ້ນພໍໃສ່ຕາຕະລາງລາຍວັນ */
+function dayText(day: string) {
+  const [year, month, date] = day.split("-").map(Number);
+  if (!year || !month || !date) return day;
+  // ນັບມື້ຂອງອາທິດດ້ວຍ Date.UTC ລ້ວນໆ — ບໍ່ແຕະ TZ ຂອງ browser
+  const dow = new Date(Date.UTC(year, month - 1, date)).getUTCDay();
+  return `${String(date).padStart(2, "0")}/${String(month).padStart(2, "0")} ${DOW_NAMES[(dow + 6) % 7]}`;
+}
+
+/** ປ້າຍຊ່ວງ — ວັນດຽວກັນບໍ່ຕ້ອງຂຽນ 2 ເທື່ອ */
+function rangeText(from: string, to: string) {
+  return from === to ? dateText(from) : `${dateText(from)} – ${dateText(to)}`;
+}
+
+/** ວັນທຳອິດຂອງເດືອນທີ່ວັນນັ້ນຢູ່ — ຄ່າເລີ່ມຕົ້ນຂອງຊ່ອງ "ຈາກວັນທີ" */
+function startOfMonthDate(date: string) {
+  return `${date.slice(0, 7)}-01`;
+}
+
+/** ບີບວັນທີໃຫ້ຢູ່ໃນປີທີ່ລະບົບຕັ້ງໄວ້ — preset ຢູ່ຂອບປີຈຶ່ງບໍ່ຫຼຸດອອກນອກ */
+function clampToFixedYear(date: string) {
+  if (date < FIXED_YEAR_START) return FIXED_YEAR_START;
+  if (date > FIXED_YEAR_END) return FIXED_YEAR_END;
+  return date;
+}
+
+/** ປຸ່ມຊ່ວງທີ່ໃຊ້ເລື້ອຍ — ຄິດຈາກ "ມື້ນີ້" ຂອງລາວ ບໍ່ແມ່ນໂມງ browser */
+const RANGE_PRESETS: Array<{
+  label: string;
+  range: (today: string) => { from: string; to: string };
+}> = [
+  { label: "ມື້ນີ້", range: (t) => ({ from: t, to: t }) },
+  { label: "7 ວັນ", range: (t) => ({ from: clampToFixedYear(addDays(t, -6)), to: t }) },
+  { label: "ເດືອນນີ້", range: (t) => ({ from: startOfMonthDate(t), to: t }) },
+  {
+    label: "ເດືອນກ່ອນ",
+    range: (t) => {
+      const end = clampToFixedYear(addDays(startOfMonthDate(t), -1));
+      return { from: clampToFixedYear(startOfMonthDate(end)), to: end };
+    },
+  },
+];
 
 // ── ຊິ້ນສ່ວນທີ່ໃຊ້ຊ້ຳ ─────────────────────────────────────────────────────
 
@@ -108,7 +302,60 @@ function Section({
   );
 }
 
-/** ປ່ຽນແປງທຽບເດືອນກ່ອນ. higherIsBetter ຕັດສິນວ່າ ຂຶ້ນ = ດີ ຫຼື ຂຶ້ນ = ຮ້າຍ. */
+/**
+ * ກ່ອງ "ຂໍ້ມູນທີ່ຍັງບໍ່ຄົບ" — ບອກວ່າຕົວເລກຂ້າງເທິງຂາດຫຍັງໄປ ກ່ອນຜູ້ອ່ານຈະເຊື່ອມັນ.
+ * ບໍ່ມີຊ່ອງຫວ່າງ = ບໍ່ສະແດງກ່ອງນີ້ເລີຍ ຈຶ່ງບໍ່ລົບກວນເມື່ອຂໍ້ມູນຄົບ.
+ */
+function DataQualityBox({ dq }: { dq: BiDashboard["dataQuality"] }) {
+  const lines: React.ReactNode[] = [];
+  for (const c of dq.trips_without_gps) {
+    lines.push(
+      <li key={`nogps-${c.car_name}`}>
+        <strong>{c.car_name}</strong> ອອກ {n(c.trips)} ຖ້ຽວ ແຕ່ GPS ບໍ່ບັນທຶກໄລຍະທາງເລີຍ
+        {c.has_imei ? " (ຜູກ imei ໄວ້ແລ້ວ ແຕ່ເຄື່ອງບໍ່ສົ່ງຂໍ້ມູນ)" : " (ຍັງບໍ່ໄດ້ຜູກ imei)"} —
+        ໄລຍະທາງກອງລົດ ແລະ ກມ/ຖ້ຽວ ຈຶ່ງຕ່ຳກວ່າຄວາມຈິງ
+      </li>
+    );
+  }
+  for (const c of dq.gps_without_trips) {
+    lines.push(
+      <li key={`notrip-${c.car_name}`}>
+        <strong>{c.car_name}</strong> ແລ່ນ {n(c.km)} ກມ ແຕ່ບໍ່ມີໃບຈັດຖ້ຽວເລີຍໃນຊ່ວງນີ້
+      </li>
+    );
+  }
+  if (dq.cars_without_branch.length > 0) {
+    const amount = dq.cars_without_branch.reduce((sum, c) => sum + c.amount, 0);
+    lines.push(
+      <li key="nobranch">
+        ພາຫະນະ {n(dq.cars_without_branch.length)} ຄັນ ຕື່ມນ້ຳມັນ {kip(amount)} ກີບ ແຕ່ບໍ່ໄດ້ຜູກສາຂາ
+        ຈຶ່ງ<strong>ບໍ່ຢູ່ໃນຍອດຄ່ານ້ຳມັນຂ້າງເທິງ</strong> — {dq.cars_without_branch.map((c) => c.car_name).join(", ")}.
+        ຖ້າແມ່ນລົດຂົນສົ່ງ ໃຫ້ຜູກສາຂາຢູ່ໜ້າ “ຂໍ້ມູນລົດ”; ຖ້າບໍ່ແມ່ນ (Forklift, ລົດພະນັກງານ,
+        ລົດຂອງໜ່ວຍງານອື່ນ) ປະໄວ້ແບບນີ້ຖືກຕ້ອງແລ້ວ — ລາຍການນີ້ພຽງບອກໃຫ້ຮູ້ວ່າເງິນສ່ວນນີ້ຢູ່ນອກລາຍງານ.
+      </li>
+    );
+  }
+  if (dq.unapproved_jobs > 0) {
+    lines.push(
+      <li key="unapproved">
+        ໃບຈັດຖ້ຽວ {n(dq.unapproved_jobs)} ໃບ ຍັງລໍອະນຸມັດ — ບໍ່ຖືກນັບຢູ່ບ່ອນໃດໃນລາຍງານນີ້
+      </li>
+    );
+  }
+  if (lines.length === 0) return null;
+  return (
+    <div className="mt-2 rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 dark:border-amber-900/60 dark:bg-amber-500/10">
+      <p className="mb-1 flex items-center gap-1.5 text-[11px] font-bold text-amber-800 dark:text-amber-300">
+        <FaExclamationTriangle size={11} /> ຂໍ້ມູນທີ່ຍັງບໍ່ຄົບ ({lines.length} ຂໍ້)
+      </p>
+      <ul className="list-disc space-y-0.5 pl-4 text-[10.5px] leading-relaxed text-amber-900/90 dark:text-amber-200/90">
+        {lines}
+      </ul>
+    </div>
+  );
+}
+
+/** ປ່ຽນແປງທຽບຊ່ວງກ່ອນໜ້າ (ຍາວເທົ່າກັນ). higherIsBetter ຕັດສິນວ່າ ຂຶ້ນ = ດີ ຫຼື ຂຶ້ນ = ຮ້າຍ. */
 function Delta({
   current,
   previous,
@@ -121,7 +368,7 @@ function Delta({
   suffix?: string;
 }) {
   if (!Number.isFinite(previous) || previous === 0) {
-    return <span className="text-[10px] text-slate-400">ບໍ່ມີເດືອນກ່ອນໃຫ້ທຽບ</span>;
+    return <span className="text-[10px] text-slate-400">ບໍ່ມີຊ່ວງກ່ອນໃຫ້ທຽບ</span>;
   }
   const change = ((current - previous) / Math.abs(previous)) * 100;
   const flat = Math.abs(change) < 0.05;
@@ -133,7 +380,7 @@ function Delta({
       : "text-rose-600 dark:text-rose-400";
   return (
     <span className={`text-[10px] font-semibold tabular-nums ${tone}`}>
-      {flat ? "▬" : change > 0 ? "▲" : "▼"} {Math.abs(change).toFixed(1)}%{suffix} ທຽບເດືອນກ່ອນ
+      {flat ? "▬" : change > 0 ? "▲" : "▼"} {Math.abs(change).toFixed(1)}%{suffix} ທຽບຊ່ວງກ່ອນ
     </span>
   );
 }
@@ -410,7 +657,10 @@ const FLOW = [
 ];
 
 export default function BiDashboardPage() {
-  const [month, setMonth] = useState(getFixedTodayMonth());
+  // ຄ່າເລີ່ມຕົ້ນ: ວັນທີ 1 ຂອງເດືອນນີ້ → ມື້ນີ້
+  const today = getFixedTodayDate();
+  const [from, setFrom] = useState(() => startOfMonthDate(getFixedTodayDate()));
+  const [to, setTo] = useState(() => getFixedTodayDate());
   const [carCode, setCarCode] = useState("");
   const [data, setData] = useState<BiDashboard | null>(null);
   const [status, setStatus] = useState<DeliveryPerfReport | null>(null);
@@ -421,13 +671,13 @@ export default function BiDashboardPage() {
   // ພາກ ② ຖາມແຍກ ເພາະ query ຂອງມັນໃຊ້ເວລາ ~12 ວິນາທີ. Server action ແລ່ນ
   // ເທື່ອລະອັນຢູ່ແລ້ວ ຈຶ່ງຍິງອັນໄວກ່ອນ — ໜ້າຈໍຂຶ້ນພາຍໃນ 1 ວິນາທີ ແລ້ວພາກ ②
   // ຈຶ່ງຕື່ມເຂົ້າມາທີ່ຫຼັງ ແທນທີ່ຈະຄ້າງຂາວທັງໜ້າ.
-  const load = useCallback(async (target: string, car: string) => {
+  const load = useCallback(async (dateFrom: string, dateTo: string, car: string) => {
     setLoading(true);
     setStatusLoading(!car);
     setError(null);
     setStatus(null);
     try {
-      setData((await Actions.getBiDashboard(target, car)) as BiDashboard);
+      setData((await Actions.getBiDashboard(dateFrom, dateTo, car)) as BiDashboard);
     } catch (e) {
       console.error(e);
       setError(e instanceof Error ? e.message : "ໂຫຼດຂໍ້ມູນບໍ່ສຳເລັດ");
@@ -440,7 +690,7 @@ export default function BiDashboardPage() {
     // ບໍ່ຍິງມັນເລີຍ (ປະຢັດ ~12 ວິນາທີ) ແລະ ໜ້າຈໍບອກແທນວ່າເປັນຫຍັງ.
     if (car) return;
     try {
-      setStatus((await Actions.getBiDeliveryStatus(target)) as DeliveryPerfReport);
+      setStatus((await Actions.getBiDeliveryStatus(dateFrom, dateTo)) as DeliveryPerfReport);
     } catch (e) {
       console.error(e);
     } finally {
@@ -448,16 +698,18 @@ export default function BiDashboardPage() {
     }
   }, []);
 
+  // ຊ່ອງວັນທີມັກປ່ຽນເປັນຄູ່ (ແຕ່ວັນ ແລ້ວ ຫາວັນ) ແລະ ພາກ ② ໃຊ້ເວລາຫຼາຍວິນາທີ —
+  // ຖ້າຍິງທັນທີທຸກຄັ້ງຈະໄດ້ 2 ຮອບຊ້ອນກັນ ຈຶ່ງລໍໃຫ້ຢຸດປ່ຽນກ່ອນ.
   useEffect(() => {
-    void load(month, carCode);
-  }, [load, month, carCode]);
+    const timer = setTimeout(() => void load(from, to, carCode), 350);
+    return () => clearTimeout(timer);
+  }, [load, from, to, carCode]);
 
   const rates = useMemo(
     () => (status ? deliveryPerfRates(status.overall) : null),
     [status]
   );
 
-  const months = useMemo(() => monthOptions(), []);
   const selectedCar = useMemo(
     () => data?.cars.find((c) => c.code === data.carCode) ?? null,
     [data]
@@ -475,23 +727,67 @@ export default function BiDashboardPage() {
               ພາບລວມການຂົນສົ່ງ
             </h1>
             <p className="text-[11px] text-slate-400">
-              ຕິດຕາມການຂົນສົ່ງຄົບທຸກມິຕິ — {monthText(month)}
+              ຕິດຕາມການຂົນສົ່ງຄົບທຸກມິຕິ — {rangeText(from, to)}
               {selectedCar ? ` · ${selectedCar.name}` : " · ທຸກຄັນ"}
             </p>
           </div>
         </div>
         <div className="flex flex-wrap items-center gap-2">
-          <select
-            value={month}
-            onChange={(e) => setMonth(e.target.value)}
-            className="rounded-lg border border-slate-300 bg-white px-2.5 py-1.5 text-xs text-slate-700 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200"
-          >
-            {months.map((m) => (
-              <option key={m} value={m}>
-                {monthText(m)}
-              </option>
-            ))}
-          </select>
+          <div className="flex items-center gap-1.5">
+            <input
+              type="date"
+              value={from}
+              min={FIXED_YEAR_START}
+              max={FIXED_YEAR_END}
+              // ເລືອກວັນເລີ່ມທີ່ຫຼັງວັນສິ້ນສຸດ → ດຶງວັນສິ້ນສຸດຕາມໄປ ບໍ່ໃຫ້ຊ່ວງກັບຫົວ
+              onChange={(e) => {
+                const value = e.target.value;
+                if (!value) return;
+                setFrom(value);
+                if (value > to) setTo(value);
+              }}
+              title="ແຕ່ວັນ"
+              className="rounded-lg border border-slate-300 bg-white px-2.5 py-1.5 text-xs text-slate-700 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200"
+            />
+            <span className="text-[11px] text-slate-400">ຫາ</span>
+            <input
+              type="date"
+              value={to}
+              min={from}
+              max={FIXED_YEAR_END}
+              onChange={(e) => {
+                const value = e.target.value;
+                if (!value) return;
+                setTo(value);
+                if (value < from) setFrom(value);
+              }}
+              title="ຫາວັນ"
+              className="rounded-lg border border-slate-300 bg-white px-2.5 py-1.5 text-xs text-slate-700 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200"
+            />
+          </div>
+          <div className="flex items-center gap-1">
+            {RANGE_PRESETS.map((preset) => {
+              const range = preset.range(today);
+              const active = range.from === from && range.to === to;
+              return (
+                <button
+                  key={preset.label}
+                  type="button"
+                  onClick={() => {
+                    setFrom(range.from);
+                    setTo(range.to);
+                  }}
+                  className={`rounded-lg border px-2 py-1.5 text-[11px] font-semibold ${
+                    active
+                      ? "border-teal-500 bg-teal-50 text-teal-700 dark:bg-teal-500/10 dark:text-teal-300"
+                      : "border-slate-300 text-slate-600 hover:bg-slate-50 dark:border-slate-700 dark:text-slate-300 dark:hover:bg-slate-800"
+                  }`}
+                >
+                  {preset.label}
+                </button>
+              );
+            })}
+          </div>
           <select
             value={carCode}
             onChange={(e) => setCarCode(e.target.value)}
@@ -517,7 +813,15 @@ export default function BiDashboardPage() {
           )}
           <button
             type="button"
-            onClick={() => void load(month, carCode)}
+            onClick={() => data && exportDashboard(data)}
+            disabled={loading || !data}
+            className="flex items-center gap-1.5 rounded-lg border border-slate-300 px-3 py-1.5 text-xs font-semibold text-slate-600 hover:bg-slate-50 disabled:opacity-50 dark:border-slate-700 dark:text-slate-300 dark:hover:bg-slate-800"
+          >
+            <FaFileExcel /> Excel
+          </button>
+          <button
+            type="button"
+            onClick={() => void load(from, to, carCode)}
             disabled={loading}
             className="flex items-center gap-1.5 rounded-lg bg-teal-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-teal-700 disabled:opacity-50"
           >
@@ -578,10 +882,11 @@ function DashboardBody({
   statusLoading: boolean;
   loading: boolean;
 }) {
-  const { current, previous, exceptions, vehicles, load, targets } = data;
+  const { current, previous, exceptions, vehicles, load, targets, timing, cod } = data;
+  const maxDailyTrips = Math.max(1, ...data.daily.map((d) => d.trips));
   const overall = status?.overall ?? null;
-  // ເດືອນທີ່ກຳລັງແລ່ນຢູ່ ຍັງບໍ່ຄົບວັນ ຈຶ່ງທຽບກັບເດືອນເຕັມບໍ່ໄດ້ຊື່ໆ
-  const isPartialMonth = data.month === getFixedTodayMonth();
+  // ຊ່ວງທີ່ລາກມາຮອດມື້ນີ້ ຍັງບໍ່ຈົບວັນ — ຊ່ວງກ່ອນໜ້າຈົບແລ້ວ ຈຶ່ງທຽບກັນບໍ່ຊື່ໆ
+  const isPartialPeriod = data.to >= getFixedTodayDate();
   // ພາກທີ່ນັບຢູ່ລະດັບ "ບິນ" (② ແລະ ອັນດັບໃນ ③) ບໍ່ມີມິຕິລົດ ຈຶ່ງກັ່ນຕອງບໍ່ໄດ້
   const carFiltered = Boolean(data.carCode);
   const carName = data.cars.find((c) => c.code === data.carCode)?.name ?? data.carCode;
@@ -589,7 +894,7 @@ function DashboardBody({
   const statusSlices: Slice[] = overall
     ? [
         { label: "ສົ່ງເຖິງລູກຄ້າແລ້ວ", value: overall.delivered, color: C.good },
-        { label: "ຍັງຄ້າງສົ່ງ (ຍົກໄປເດືອນໜ້າ)", value: overall.carry_out, color: C.info },
+        { label: "ຍັງຄ້າງສົ່ງ (ຍົກໄປຊ່ວງໜ້າ)", value: overall.carry_out, color: C.info },
         { label: "ປິດດ້ວຍທາງອື່ນ (ຄືນສິນຄ້າ / ປິດທີ່ ERP)", value: overall.closed_other, color: C.warn },
         { label: "ມີການຍົກເລີກການສົ່ງ", value: overall.cancelled_bills, color: C.bad },
       ]
@@ -616,13 +921,16 @@ function DashboardBody({
     .sort((a, b) => b.value - a.value)
     .slice(0, 5);
 
+  // ສະເພາະພະແນກສາຍງານຂາຍ ແລະ ຕ້ອງມີບິນພໍສົມຄວນ — ບໍ່ດັ່ງນັ້ນພະແນກທີ່ເປີດບິນ
+  // 1–2 ໃບ (ບັນຊີ, ສຳນັກງານ) ຈະຂຶ້ນ 100% ນຳໜ້າພະແນກຂາຍທີ່ສົ່ງຫຼາຍຮ້ອຍບິນ
+  const MIN_DEPT_BILLS = 10;
   const deptBars = [...(status?.departments ?? [])]
+    .filter((d) => d.is_sales && d.delivered >= MIN_DEPT_BILLS)
     .map((d) => ({
       label: d.department_name,
       value: d.delivered > 0 ? (d.from_open.le_24h / d.delivered) * 100 : 0,
       delivered: d.delivered,
     }))
-    .filter((d) => d.delivered > 0)
     .sort((a, b) => b.value - a.value)
     .slice(0, 5);
 
@@ -656,7 +964,7 @@ function DashboardBody({
     },
     {
       label: "ຄ່ານ້ຳມັນ/ຖ້ຽວ (ກີບ)",
-      target: null,
+      target: targets.cost_per_trip,
       unit: "ກີບ",
       value: current.cost_per_trip,
       prev: previous.cost_per_trip,
@@ -665,7 +973,7 @@ function DashboardBody({
     },
     {
       label: "ຄ່ານ້ຳມັນ/ກມ (ກີບ)",
-      target: null,
+      target: targets.cost_per_km,
       unit: "ກີບ",
       value: current.cost_per_km,
       prev: previous.cost_per_km,
@@ -674,7 +982,7 @@ function DashboardBody({
     },
     {
       label: "ອັດຕາໃຊ້ພື້ນທີ່ບັນທຸກ (%)",
-      target: null,
+      target: targets.load_pct,
       unit: "%",
       value: load?.avg_pct ?? 0,
       prev: 0,
@@ -686,7 +994,12 @@ function DashboardBody({
   return (
     <div className={loading ? "space-y-4 opacity-60 transition-opacity" : "space-y-4"}>
       {/* ① ສະຫຼຸບ KPI */}
-      <Section index={1} title="ສະຫຼຸບ KPI" subtitle={`ເດືອນ ${monthText(data.month)} ທຽບກັບເດືອນກ່ອນ`} icon={<FaChartLine />}>
+      <Section
+        index={1}
+        title="ສະຫຼຸບ KPI"
+        subtitle={`${rangeText(data.from, data.to)} · ${n(vehicles.days)} ວັນ — ທຽບກັບຊ່ວງກ່ອນໜ້າທີ່ຍາວເທົ່າກັນ`}
+        icon={<FaChartLine />}
+      >
         <div className="grid grid-cols-2 gap-2.5 md:grid-cols-3 xl:grid-cols-6">
           <KpiTile
             label="ຖ້ຽວທັງໝົດ"
@@ -745,22 +1058,54 @@ function DashboardBody({
             }
           />
         </div>
-        {isPartialMonth && (
+        {isPartialPeriod && (
           <Note>
-            ເດືອນນີ້ <strong>ຍັງບໍ່ທັນຄົບເດືອນ</strong> — ຊ່ອງ “ທຽບເດືອນກ່ອນ” ຈຶ່ງທຽບເດືອນທີ່ຍັງບໍ່ຈົບ
-            ກັບເດືອນເຕັມ ແລະ ຈະຕິດລົບເປັນທຳມະດາ. ຢາກທຽບໃຫ້ຍຸດຕິທຳ ໃຫ້ເລືອກເດືອນທີ່ຈົບແລ້ວ.
+            ຊ່ວງນີ້ <strong>ລວມມື້ນີ້ທີ່ຍັງບໍ່ຈົບວັນ</strong> — ຊ່ອງ “ທຽບຊ່ວງກ່ອນ” ຈຶ່ງທຽບວັນທີ່ຍັງເຮັດ
+            ວຽກຄ້າງຢູ່ ກັບວັນທີ່ຈົບແລ້ວ ແລະ ຈະຕິດລົບເປັນທຳມະດາ. ຢາກທຽບໃຫ້ຍຸດຕິທຳ ໃຫ້ຕັ້ງວັນສິ້ນສຸດເປັນມື້ວານ.
           </Note>
         )}
+        <DataQualityBox dq={data.dataQuality} />
+        {data.otherCost.by_type.length > 0 && (
+          <div className="mt-2">
+            <p className="mb-1 text-[10.5px] font-semibold text-slate-500 dark:text-slate-400">
+              ຕົ້ນທຶນອື່ນ ແຍກຕາມປະເພດ
+            </p>
+            <ul className="space-y-1.5">
+              {data.otherCost.by_type.map((t) => (
+                <BarRow
+                  key={t.cost_type}
+                  label={tripCostTypeLabel(t.cost_type)}
+                  value={t.amount}
+                  max={Math.max(1, ...data.otherCost.by_type.map((x) => x.amount))}
+                  display={kip(t.amount)}
+                  color={C.warn}
+                />
+              ))}
+            </ul>
+          </div>
+        )}
         <Note>
-          ຕົ້ນທຶນທີ່ສະແດງ ນັບສະເພາະ <strong>ຄ່ານ້ຳມັນ</strong> ທີ່ບັນທຶກໃນລະບົບ —
-          ຄ່າແຮງຄົນຂັບ, ຄ່າຜ່ານທາງ, ຄ່າສ້ອມແປງ ແລະ ຄ່າຈ້າງລົດນອກ ຍັງບໍ່ມີບ່ອນເກັບ
-          ໃນ TMS ຈຶ່ງບໍ່ໄດ້ຄິດເຂົ້າ. ຕົວເລກນີ້ຈຶ່ງເປັນ “ຕົ້ນທຶນຂັ້ນຕ່ຳ” ບໍ່ແມ່ນຕົ້ນທຶນເຕັມ.
+          {data.otherCost.total > 0 ? (
+            <>
+              ຕົ້ນທຶນເຕັມ = ຄ່ານ້ຳມັນ {kip(current.fuel.amount)} + ຕົ້ນທຶນອື່ນ{" "}
+              {kip(data.otherCost.total)} ={" "}
+              <strong>{kip(data.costTotal)} ກີບ</strong> ({kip(data.costPerTripTotal)} ກີບ/ຖ້ຽວ ·{" "}
+              {kip(data.costPerKmTotal)} ກີບ/ກມ). ຊ່ອງ KPI ຂ້າງເທິງຍັງສະແດງສະເພາະຄ່ານ້ຳມັນ
+              ເພື່ອໃຫ້ທຽບກັບຊ່ວງເກົ່າໄດ້.
+            </>
+          ) : (
+            <>
+              ຕົ້ນທຶນທີ່ສະແດງ ນັບສະເພາະ <strong>ຄ່ານ້ຳມັນ</strong> — ຄ່າແຮງຄົນຂັບ, ຄ່າຜ່ານທາງ,
+              ຄ່າສ້ອມແປງ ແລະ ຄ່າຈ້າງລົດນອກ ຍັງບໍ່ມີໃຜບັນທຶກໃນຊ່ວງນີ້. ບັນທຶກໄດ້ຢູ່ໜ້າ
+              “ຕົ້ນທຶນຂົນສົ່ງ” (/costs) ແລ້ວຕົວເລກຈະມາລວມຢູ່ນີ້ເອງ.
+            </>
+          )}
         </Note>
       </Section>
 
       <div className="grid gap-4 xl:grid-cols-3">
         {/* ② ສະຖານະການຈັດສົ່ງ */}
-        <Section index={2} title="ສະຖານະການຈັດສົ່ງ" subtitle="ບິນທີ່ຢູ່ໃນມືເດືອນນີ້ (ຍົກມາ + ເປີດໃໝ່)" icon={<FaBoxOpen />}>
+        <Section index={2} title="ສະຖານະການຈັດສົ່ງ" subtitle="ບິນທີ່ຢູ່ໃນມືໃນຊ່ວງນີ້ (ຍົກມາ + ເປີດໃໝ່)" icon={<FaBoxOpen />}>
           {overall && rates ? (
             <>
               <Donut slices={statusSlices} centerValue={n(overall.handled)} centerLabel="ບິນໃນມື" />
@@ -792,7 +1137,7 @@ function DashboardBody({
               ) : statusLoading ? (
                 <>
                   <FaSpinner className="animate-spin text-base" />
-                  ກຳລັງຄິດຍອດບິນທັງເດືອນ… (ໃຊ້ເວລາປະມານ 10 ວິນາທີ)
+                  ກຳລັງຄິດຍອດບິນທັງຊ່ວງ… (ໃຊ້ເວລາປະມານ 10 ວິນາທີ)
                 </>
               ) : (
                 "ໂຫຼດສະຖານະການຈັດສົ່ງບໍ່ສຳເລັດ"
@@ -805,7 +1150,7 @@ function DashboardBody({
         <Section
           index={3}
           title="ອັດຕາສົ່ງທັນເວລາ"
-          subtitle="ສົ່ງສຳເລັດພາຍໃນວັນນັດ ÷ ຈຸດສົ່ງທີ່ມີວັນນັດ"
+          subtitle="ສົ່ງສຳເລັດພາຍໃນວັນນັດ ຄັ້ງທຳອິດ ÷ ຈຸດສົ່ງທີ່ມີວັນນັດ"
           icon={<FaClock />}
         >
           <div className="flex items-baseline gap-2">
@@ -816,6 +1161,22 @@ function DashboardBody({
               {n(current.delivery.on_time)} / {n(current.delivery.drops - current.delivery.no_due)} ຈຸດສົ່ງ
             </span>
           </div>
+          {/* ວັດຈາກນັດເດີມ ບໍ່ແມ່ນນັດທີ່ຖືກຂຽນທັບຕອນຈັດຖ້ຽວ — ບອກຖານການວັດ
+              ແລະ ຈຳນວນການເລື່ອນນັດໄວ້ນຳ ເພາະສອງອັນນີ້ອ່ານຄູ່ກັນຈຶ່ງມີຄວາມໝາຍ */}
+          <p className="mt-1.5 rounded-lg bg-slate-50 px-2 py-1.5 text-[10.5px] leading-relaxed text-slate-500 dark:bg-slate-800/60 dark:text-slate-400">
+            ວັດຈາກ <strong>ວັນນັດຄັ້ງທຳອິດ</strong> ທີ່ຜູ້ຈັດຕັ້ງໄວ້ (ປະຫວັດເລີ່ມ 4 ມິຖຸນາ 2026) —
+            ບໍ່ແມ່ນວັນນັດປັດຈຸບັນ ເຊິ່ງຖືກຂຽນທັບຕອນຈັດຖ້ຽວ ຈຶ່ງມັກກາຍເປັນວັນດຽວກັບວັນສົ່ງ.
+            {" "}ວັດຈາກນັດເດີມໄດ້ {n(current.delivery.from_first_promise)} /{" "}
+            {n(current.delivery.drops)} ຈຸດສົ່ງ.
+            {current.delivery.rescheduled_bills > 0 && (
+              <>
+                {" · "}
+                <strong>{n(current.delivery.rescheduled_bills)} ບິນ</strong> ຖືກເລື່ອນນັດຢ່າງໜ້ອຍ 1 ຄັ້ງ
+                {current.delivery.bills > 0 &&
+                  ` (${((current.delivery.rescheduled_bills / current.delivery.bills) * 100).toFixed(1)}%)`}
+              </>
+            )}
+          </p>
           <div className="mt-2">
             <p className="mb-1 text-[10.5px] font-semibold text-slate-500 dark:text-slate-400">
               ສາຂາ — ສົ່ງພາຍໃນ 24 ຊມ ນັບແຕ່ເປີດບິນ
@@ -833,7 +1194,7 @@ function DashboardBody({
           </div>
           <div className="mt-2.5">
             <p className="mb-1 text-[10.5px] font-semibold text-slate-500 dark:text-slate-400">
-              ພະແນກຜູ້ເປີດບິນ — ສົ່ງພາຍໃນ 24 ຊມ
+              ພະແນກຂາຍຜູ້ເປີດບິນ — ສົ່ງພາຍໃນ 24 ຊມ (ຢ່າງໜ້ອຍ {MIN_DEPT_BILLS} ບິນ)
             </p>
             <ul className="space-y-1.5">
               {deptBars.length === 0 && (
@@ -849,7 +1210,7 @@ function DashboardBody({
         </Section>
 
         {/* ④ ຖ້ຽວ ແລະ ສາຍທາງ */}
-        <Section index={4} title="ຖ້ຽວ ແລະ ສາຍທາງ" subtitle="ຖ້ຽວທີ່ອະນຸມັດແລ້ວໃນເດືອນ" icon={<FaRoute />}>
+        <Section index={4} title="ຖ້ຽວ ແລະ ສາຍທາງ" subtitle="ຖ້ຽວທີ່ອະນຸມັດແລ້ວໃນຊ່ວງນີ້" icon={<FaRoute />}>
           <div className="grid grid-cols-2 gap-2 text-[11px]">
             {[
               { label: "ຖ້ຽວທັງໝົດ", value: n(current.trips.trips), icon: <FaTruck /> },
@@ -887,8 +1248,304 @@ function DashboardBody({
         </Section>
       </div>
 
+      {/* ⑤ ເວລາ ແລະ ເງິນເກັບປາຍທາງ */}
+      <div className="grid gap-4 xl:grid-cols-2">
+        <Section
+          index={5}
+          title="ເວລາທີ່ໃຊ້ໄປ"
+          subtitle="ຄວາມຍາວຂອງຖ້ຽວ ແລະ ເວລາຢູ່ໜ້າຮ້ານລູກຄ້າ"
+          icon={<FaClock />}
+        >
+          <div className="grid grid-cols-2 gap-2 text-[11px] sm:grid-cols-4">
+            {[
+              {
+                label: "ຖ້ຽວໜຶ່ງ (ກາງ)",
+                value: timing.median_trip_hours > 0 ? `${n1(timing.median_trip_hours)} ຊມ` : "—",
+              },
+              {
+                label: "ຖ້ຽວໜຶ່ງ (ສະເລ່ຍ)",
+                value: timing.avg_trip_hours > 0 ? `${n1(timing.avg_trip_hours)} ຊມ` : "—",
+              },
+              {
+                label: "ຢູ່ໜ້າຮ້ານ (ກາງ)",
+                value: timing.median_stop_minutes > 0 ? `${n(timing.median_stop_minutes)} ນາທີ` : "—",
+              },
+              {
+                label: "ຢູ່ໜ້າຮ້ານ (p90)",
+                value: timing.p90_stop_minutes > 0 ? `${n(timing.p90_stop_minutes)} ນາທີ` : "—",
+              },
+            ].map((t) => (
+              <div key={t.label} className="rounded-lg bg-slate-50 px-2.5 py-1.5 dark:bg-slate-800/70">
+                <p className="text-slate-400">{t.label}</p>
+                <p className="font-bold tabular-nums text-slate-800 dark:text-slate-100">{t.value}</p>
+              </div>
+            ))}
+          </div>
+          <p className="mt-3 mb-1 text-[10.5px] font-semibold text-slate-500 dark:text-slate-400">
+            ຊົ່ວໂມງທີ່ອອກລົດ
+          </p>
+          {timing.dispatch_hours.length > 0 ? (
+            <ColumnChart
+              data={timing.dispatch_hours.map((h) => ({ label: `${h.hour}`, value: h.trips }))}
+            />
+          ) : (
+            <p className="py-4 text-center text-[11px] text-slate-400">ບໍ່ມີເວລາອອກລົດໃນຊ່ວງນີ້</p>
+          )}
+          <p className="mt-1 text-[10px] leading-relaxed text-slate-400">
+            ຖ້ຽວ = ຈາກກົດອອກລົດ ຫາ ປິດງານ ({n(timing.trips_measured)}/{n(timing.trips)} ຖ້ຽວມີເວລາຄົບ) ·
+            ໜ້າຮ້ານ = ຈາກ check-in ຫາ ກົດສຳເລັດ ({n(timing.drops_measured)}/{n(timing.drops)} ຈຸດ).
+            ຖ້າ p90 ສູງຜິດປົກກະຕິ ໃຫ້ກວດວ່າຄົນຂັບ check-in ແຕ່ຫົວແຖວແລ້ວຄ່ອຍທະຍອຍປິດ ຫຼືບໍ່.
+          </p>
+        </Section>
+
+        <Section
+          index={6}
+          title="ເງິນເກັບປາຍທາງ (COD)"
+          subtitle="ຍອດທີ່ຕ້ອງເກັບ ທຽບກັບຍອດທີ່ບັນທຶກວ່າເກັບແລ້ວ"
+          icon={<FaMoneyBillWave />}
+        >
+          {cod.drops === 0 ? (
+            <p className="py-8 text-center text-[11px] text-slate-400">ບໍ່ມີຈຸດສົ່ງທີ່ມີ COD ໃນຊ່ວງນີ້</p>
+          ) : (
+            <>
+              <div className="grid grid-cols-2 gap-2 text-[11px]">
+                <div className="rounded-lg bg-slate-50 px-2.5 py-1.5 dark:bg-slate-800/70">
+                  <p className="text-slate-400">ຕ້ອງເກັບ · {n(cod.drops)} ຈຸດ</p>
+                  <p className="font-bold tabular-nums text-slate-800 dark:text-slate-100">
+                    {kip(cod.expected)} ກີບ
+                  </p>
+                </div>
+                <div className="rounded-lg bg-slate-50 px-2.5 py-1.5 dark:bg-slate-800/70">
+                  <p className="text-slate-400">ບັນທຶກວ່າເກັບແລ້ວ</p>
+                  <p className="font-bold tabular-nums" style={{ color: C.good }}>
+                    {kip(cod.collected)} ກີບ
+                  </p>
+                </div>
+              </div>
+              <ul className="mt-2 space-y-1.5">
+                <BarRow
+                  label="ບັນທຶກແລ້ວ"
+                  value={cod.collected_pct}
+                  max={100}
+                  display={pct(cod.collected_pct)}
+                  color={cod.collected_pct >= 90 ? C.good : C.bad}
+                />
+              </ul>
+              <div className="mt-2 grid grid-cols-2 gap-2 text-[11px]">
+                <div className="rounded-lg bg-slate-50 px-2.5 py-1.5 dark:bg-slate-800/70">
+                  <p className="text-slate-400">ຈຸດທີ່ບໍ່ມີການບັນທຶກ</p>
+                  <p className="font-bold tabular-nums" style={{ color: C.bad }}>
+                    {n(cod.unrecorded_drops)} ຈຸດ · {kip(cod.unrecorded_amount)} ກີບ
+                  </p>
+                </div>
+                <div className="rounded-lg bg-slate-50 px-2.5 py-1.5 dark:bg-slate-800/70">
+                  <p className="text-slate-400">ເກັບໄດ້ໜ້ອຍກວ່າຍອດ</p>
+                  <p className="font-bold tabular-nums text-slate-800 dark:text-slate-100">
+                    {n(cod.short_drops)} ຈຸດ
+                  </p>
+                </div>
+              </div>
+              <Note>
+                ຕົວເລກນີ້ອ່ານໄດ້ 2 ທາງ — ເງິນຍັງບໍ່ໄດ້ເກັບ ຫຼື ເກັບແລ້ວແຕ່ຄົນຂັບບໍ່ໄດ້ບັນທຶກໃນແອັບ.
+                ຕາຕະລາງມອບເງິນ (odg_tms_cod_handover) ຍັງບໍ່ມີແຖວໃດເລີຍ ຈຶ່ງຍັງກວດຄູ່ບໍ່ໄດ້.
+              </Note>
+            </>
+          )}
+        </Section>
+      </div>
+
+      {/* ⑦ ເສັ້ນເວລາລາຍວັນ */}
+      <Section
+        index={7}
+        title="ແຕ່ລະວັນໃນຊ່ວງນີ້"
+        subtitle="ຖ້ຽວ · ຈຸດສົ່ງ · ກມ · ຄ່ານ້ຳມັນ ຕາມວັນຈິງ"
+        icon={<FaChartLine />}
+      >
+        <div className="overflow-x-auto">
+          <table className="w-full min-w-[560px] text-[11px]">
+            <thead>
+              <tr className="border-b border-slate-200 text-left text-slate-500 dark:border-slate-800 dark:text-slate-400">
+                <th className="py-1.5 pr-2 font-semibold">ວັນທີ</th>
+                <th className="py-1.5 pr-2 font-semibold">ຖ້ຽວ</th>
+                <th className="py-1.5 pr-2 text-right font-semibold">ຖ້ຽວ</th>
+                <th className="py-1.5 pr-2 text-right font-semibold">ຈຸດສົ່ງ</th>
+                <th className="py-1.5 pr-2 text-right font-semibold">ກມ</th>
+                <th className="py-1.5 text-right font-semibold">ຄ່ານ້ຳມັນ</th>
+              </tr>
+            </thead>
+            <tbody>
+              {data.daily.map((d) => (
+                <tr key={d.day} className="border-b border-slate-100 last:border-0 dark:border-slate-800/60">
+                  <td className="py-1.5 pr-2 whitespace-nowrap text-slate-700 dark:text-slate-200">
+                    {dayText(d.day)}
+                  </td>
+                  <td className="py-1.5 pr-2">
+                    <span className="block h-2 rounded-full" style={{
+                      width: `${Math.max(2, (d.trips / maxDailyTrips) * 100)}%`,
+                      background: d.trips === 0 ? C.muted : C.info,
+                    }} />
+                  </td>
+                  <td className="py-1.5 pr-2 text-right font-semibold tabular-nums text-slate-800 dark:text-slate-100">{n(d.trips)}</td>
+                  <td className="py-1.5 pr-2 text-right tabular-nums text-slate-600 dark:text-slate-300">{n(d.drops)}</td>
+                  <td className="py-1.5 pr-2 text-right tabular-nums text-slate-600 dark:text-slate-300">{n(d.km)}</td>
+                  <td className="py-1.5 text-right tabular-nums text-slate-600 dark:text-slate-300">{kip(d.fuel)}</td>
+                </tr>
+              ))}
+              {data.daily.length === 0 && (
+                <tr><td colSpan={6} className="py-6 text-center text-slate-400">ບໍ່ມີຂໍ້ມູນໃນຊ່ວງນີ້</td></tr>
+              )}
+            </tbody>
+          </table>
+        </div>
+      </Section>
+
+      {/* ⑧ ຄົນຂັບ ແລະ ⑨ ສາຂາ */}
+      <div className="grid gap-4 xl:grid-cols-2">
+        <Section index={8} title="ຄົນຂັບ" subtitle="ຮຽງຕາມຈຳນວນຖ້ຽວ — ສູງສຸດ 12 ຄົນ" icon={<FaTruck />}>
+          <div className="overflow-x-auto">
+            <table className="w-full min-w-[420px] text-[11px]">
+              <thead>
+                <tr className="border-b border-slate-200 text-left text-slate-500 dark:border-slate-800 dark:text-slate-400">
+                  <th className="py-1.5 pr-2 font-semibold">ຊື່</th>
+                  <th className="py-1.5 pr-2 text-right font-semibold">ຖ້ຽວ</th>
+                  <th className="py-1.5 pr-2 text-right font-semibold">ຈຸດສົ່ງ</th>
+                  <th className="py-1.5 pr-2 text-right font-semibold">ຈຸດ/ຖ້ຽວ</th>
+                  <th className="py-1.5 pr-2 text-right font-semibold">ຍົກເລີກ</th>
+                  <th className="py-1.5 text-right font-semibold">ທັນເວລາ</th>
+                </tr>
+              </thead>
+              <tbody>
+                {data.drivers.map((d) => (
+                  <tr key={d.code} className="border-b border-slate-100 last:border-0 dark:border-slate-800/60">
+                    <td className="py-1.5 pr-2 text-slate-700 dark:text-slate-200">{d.name}</td>
+                    <td className="py-1.5 pr-2 text-right font-semibold tabular-nums text-slate-800 dark:text-slate-100">{n(d.trips)}</td>
+                    <td className="py-1.5 pr-2 text-right tabular-nums text-slate-600 dark:text-slate-300">{n(d.drops)}</td>
+                    <td className="py-1.5 pr-2 text-right tabular-nums text-slate-600 dark:text-slate-300">{n1(d.drops_per_trip)}</td>
+                    <td className="py-1.5 pr-2 text-right tabular-nums text-slate-600 dark:text-slate-300">{n(d.cancelled)}</td>
+                    <td className="py-1.5 text-right font-semibold tabular-nums" style={{
+                      color: d.on_time_pct == null ? undefined : d.on_time_pct >= 95 ? C.good : d.on_time_pct >= 85 ? C.warn : C.bad,
+                    }}>{pct(d.on_time_pct)}</td>
+                  </tr>
+                ))}
+                {data.drivers.length === 0 && (
+                  <tr><td colSpan={6} className="py-6 text-center text-slate-400">ບໍ່ມີຄົນຂັບທີ່ອອກຖ້ຽວໃນຊ່ວງນີ້</td></tr>
+                )}
+              </tbody>
+            </table>
+          </div>
+        </Section>
+
+        <Section
+          index={9}
+          title="ສາຂາ"
+          subtitle={`${n(data.branches.length)} ສາຂາທີ່ບັນຊີນີ້ເຫັນໄດ້`}
+          icon={<FaWarehouse />}
+        >
+          <div className="overflow-x-auto">
+            <table className="w-full min-w-[420px] text-[11px]">
+              <thead>
+                <tr className="border-b border-slate-200 text-left text-slate-500 dark:border-slate-800 dark:text-slate-400">
+                  <th className="py-1.5 pr-2 font-semibold">ສາຂາ</th>
+                  <th className="py-1.5 pr-2 text-right font-semibold">ຖ້ຽວ</th>
+                  <th className="py-1.5 pr-2 text-right font-semibold">ລົດ</th>
+                  <th className="py-1.5 pr-2 text-right font-semibold">ຈຸດສົ່ງ</th>
+                  <th className="py-1.5 text-right font-semibold">ທັນເວລາ</th>
+                </tr>
+              </thead>
+              <tbody>
+                {data.branches.map((b) => (
+                  <tr key={b.branch_code} className="border-b border-slate-100 last:border-0 dark:border-slate-800/60">
+                    <td className="py-1.5 pr-2 text-slate-700 dark:text-slate-200">{b.branch_name}</td>
+                    <td className="py-1.5 pr-2 text-right font-semibold tabular-nums text-slate-800 dark:text-slate-100">{n(b.trips)}</td>
+                    <td className="py-1.5 pr-2 text-right tabular-nums text-slate-600 dark:text-slate-300">{n(b.cars)}</td>
+                    <td className="py-1.5 pr-2 text-right tabular-nums text-slate-600 dark:text-slate-300">{n(b.drops)}</td>
+                    <td className="py-1.5 text-right tabular-nums text-slate-600 dark:text-slate-300">{pct(b.on_time_pct)}</td>
+                  </tr>
+                ))}
+                {data.branches.length === 0 && (
+                  <tr><td colSpan={5} className="py-6 text-center text-slate-400">ບໍ່ມີຂໍ້ມູນ</td></tr>
+                )}
+              </tbody>
+            </table>
+          </div>
+          <Note>
+            ລາຍງານນີ້ນັບສະເພາະສາຂາທີ່ບັນຊີຂອງທ່ານມີສິດເບິ່ງ — ຢາກເຫັນທຸກສາຂາ
+            ຕ້ອງເອົາການຜູກສາຂາ (branch_codes) ຂອງບັນຊີອອກ ຫຼື ເພີ່ມສາຂາທີ່ຂາດເຂົ້າໄປ.
+          </Note>
+        </Section>
+      </div>
+
+      {/* ⑩ ລູກຄ້າ ແລະ ⑪ ຄວາມໄວ */}
+      <div className="grid gap-4 xl:grid-cols-2">
+        <Section index={10} title="ລູກຄ້າທີ່ສົ່ງຫຼາຍທີ່ສຸດ" subtitle="10 ອັນດັບ ຕາມຈຳນວນຈຸດສົ່ງ" icon={<FaBoxOpen />}>
+          <div className="overflow-x-auto">
+            <table className="w-full min-w-[420px] text-[11px]">
+              <thead>
+                <tr className="border-b border-slate-200 text-left text-slate-500 dark:border-slate-800 dark:text-slate-400">
+                  <th className="py-1.5 pr-2 font-semibold">ລູກຄ້າ</th>
+                  <th className="py-1.5 pr-2 text-right font-semibold">ຈຸດສົ່ງ</th>
+                  <th className="py-1.5 pr-2 text-right font-semibold">ບິນ</th>
+                  <th className="py-1.5 text-right font-semibold">ຊ້າ</th>
+                </tr>
+              </thead>
+              <tbody>
+                {data.customers.map((c) => (
+                  <tr key={c.customer} className="border-b border-slate-100 last:border-0 dark:border-slate-800/60">
+                    <td className="py-1.5 pr-2 max-w-[220px] truncate text-slate-700 dark:text-slate-200" title={c.customer}>{c.customer}</td>
+                    <td className="py-1.5 pr-2 text-right font-semibold tabular-nums text-slate-800 dark:text-slate-100">{n(c.drops)}</td>
+                    <td className="py-1.5 pr-2 text-right tabular-nums text-slate-600 dark:text-slate-300">{n(c.bills)}</td>
+                    <td className="py-1.5 text-right tabular-nums font-semibold" style={{ color: c.late > 0 ? C.bad : undefined }}>{n(c.late)}</td>
+                  </tr>
+                ))}
+                {data.customers.length === 0 && (
+                  <tr><td colSpan={4} className="py-6 text-center text-slate-400">ບໍ່ມີຂໍ້ມູນ</td></tr>
+                )}
+              </tbody>
+            </table>
+          </div>
+        </Section>
+
+        <Section index={11} title="ຄວາມໄວ ແລະ ຊົ່ວໂມງຂັບ" subtitle="ຈາກ rollup GPS — ຮຽງຕາມຄວາມໄວສູງສຸດ" icon={<FaRoad />}>
+          <div className="overflow-x-auto">
+            <table className="w-full min-w-[460px] text-[11px]">
+              <thead>
+                <tr className="border-b border-slate-200 text-left text-slate-500 dark:border-slate-800 dark:text-slate-400">
+                  <th className="py-1.5 pr-2 font-semibold">ລົດ</th>
+                  <th className="py-1.5 pr-2 text-right font-semibold">ໄວສູງສຸດ</th>
+                  <th className="py-1.5 pr-2 text-right font-semibold">ສະເລ່ຍໄວສູງສຸດ/ວັນ</th>
+                  <th className="py-1.5 pr-2 text-right font-semibold">ຊມ ຂັບ</th>
+                  <th className="py-1.5 text-right font-semibold">ກມ/ຊມ</th>
+                </tr>
+              </thead>
+              <tbody>
+                {data.fleetActivity.map((f) => (
+                  <tr key={f.car_name} className="border-b border-slate-100 last:border-0 dark:border-slate-800/60">
+                    <td className="py-1.5 pr-2 text-slate-700 dark:text-slate-200">{f.car_name}</td>
+                    <td className="py-1.5 pr-2 text-right font-semibold tabular-nums" style={{
+                      color: f.max_speed >= 90 ? C.bad : f.max_speed >= 80 ? C.warn : undefined,
+                    }}>{n(f.max_speed)}</td>
+                    <td className="py-1.5 pr-2 text-right tabular-nums text-slate-600 dark:text-slate-300">{n(f.avg_daily_max_speed)}</td>
+                    <td className="py-1.5 pr-2 text-right tabular-nums text-slate-600 dark:text-slate-300">{n1(f.moving_hours)}</td>
+                    <td className="py-1.5 text-right tabular-nums text-slate-600 dark:text-slate-300">
+                      {f.km_per_hour == null ? "—" : n(f.km_per_hour)}
+                    </td>
+                  </tr>
+                ))}
+                {data.fleetActivity.length === 0 && (
+                  <tr><td colSpan={5} className="py-6 text-center text-slate-400">ບໍ່ມີຂໍ້ມູນ GPS ໃນຊ່ວງນີ້</td></tr>
+                )}
+              </tbody>
+            </table>
+          </div>
+          <Note>
+            ຄວາມໄວມາຈາກຄ່າສູງສຸດຂອງແຕ່ລະວັນໃນ rollup GPS — ໃຊ້ເປັນສັນຍານເຝົ້າລະວັງ
+            ບໍ່ແມ່ນຫຼັກຖານລົງໂທດ ເພາະ 1 ຈຸດ ping ຜິດພາດກໍ່ດັນຄ່າສູງສຸດຂຶ້ນໄດ້.
+          </Note>
+        </Section>
+      </div>
+
       {/* ④ (ຕໍ່) ຕາຕະລາງສາຍທາງ */}
-      <Section index={4} title="ສາຍທາງທີ່ໃຊ້ຫຼາຍທີ່ສຸດ" subtitle="8 ອັນດັບທຳອິດຂອງເດືອນ" icon={<FaRoute />}>
+      <Section index={12} title="ສາຍທາງທີ່ໃຊ້ຫຼາຍທີ່ສຸດ" subtitle="8 ອັນດັບທຳອິດຂອງຊ່ວງນີ້" icon={<FaRoute />}>
         <div className="overflow-x-auto">
           <table className="w-full min-w-[560px] text-[11px]">
             <thead>
@@ -907,7 +1564,7 @@ function DashboardBody({
               {data.routes.length === 0 && (
                 <tr>
                   <td colSpan={8} className="py-4 text-center text-slate-400">
-                    ບໍ່ມີຖ້ຽວໃນເດືອນນີ້
+                    ບໍ່ມີຖ້ຽວໃນຊ່ວງນີ້
                   </td>
                 </tr>
               )}
@@ -939,7 +1596,7 @@ function DashboardBody({
       <div className="grid gap-4 xl:grid-cols-3">
         {/* ⑤ ການໃຊ້ລົດ */}
         <Section
-          index={5}
+          index={13}
           title={carFiltered ? `ການໃຊ້ລົດ · ${carName}` : "ການໃຊ້ລົດຂົນສົ່ງ"}
           subtitle={carFiltered ? "ສະເພາະຄັນທີ່ເລືອກ" : "ນັບສະເພາະລົດທີ່ສັງກັດສາຂາຂົນສົ່ງ"}
           icon={<FaTruck />}
@@ -949,7 +1606,7 @@ function DashboardBody({
               ? [
                   { label: "ຖ້ຽວ", value: current.trips.trips, unit: "ຖ້ຽວ", color: "text-slate-800 dark:text-slate-100" },
                   { label: "ວັນທີ່ອອກຖ້ຽວ", value: vehicles.car_days, unit: "ວັນ", color: "text-emerald-600 dark:text-emerald-400" },
-                  { label: "ວັນທີ່ຈອດ", value: Math.max(0, vehicles.days_in_month - vehicles.car_days), unit: "ວັນ", color: "text-slate-400" },
+                  { label: "ວັນທີ່ຈອດ", value: Math.max(0, vehicles.days - vehicles.car_days), unit: "ວັນ", color: "text-slate-400" },
                 ]
               : [
                   { label: "ລົດຂົນສົ່ງ", value: vehicles.total_cars, unit: "ຄັນ", color: "text-slate-800 dark:text-slate-100" },
@@ -969,8 +1626,8 @@ function DashboardBody({
               value={vehicles.utilization_pct}
               caption={
                 carFiltered
-                  ? `${carName} ອອກຖ້ຽວ ${n(vehicles.car_days)} ວັນ ຈາກ ${vehicles.days_in_month} ວັນ`
-                  : `${n(vehicles.car_days)} ວັນ-ຄັນ ທີ່ມີຖ້ຽວ ÷ (${n(vehicles.total_cars)} ຄັນ × ${vehicles.days_in_month} ວັນ)`
+                  ? `${carName} ອອກຖ້ຽວ ${n(vehicles.car_days)} ວັນ ຈາກ ${vehicles.days} ວັນ`
+                  : `${n(vehicles.car_days)} ວັນ-ຄັນ ທີ່ມີຖ້ຽວ ÷ (${n(vehicles.total_cars)} ຄັນ × ${vehicles.days} ວັນ)`
               }
               color={C.info}
             />
@@ -999,7 +1656,7 @@ function DashboardBody({
 
         {/* ⑥ ການໃຊ້ພື້ນທີ່ບັນທຸກ */}
         <Section
-          index={6}
+          index={14}
           title="ການໃຊ້ພື້ນທີ່ບັນທຸກ"
           subtitle="ປະລິມາດສິນຄ້າ ທຽບຄວາມຈຸຕູ້ (ມ³)"
           icon={<FaTruckLoading />}
@@ -1010,7 +1667,7 @@ function DashboardBody({
               caption={
                 load
                   ? `ສະເລ່ຍຈາກ ${n(load.scored)} ຖ້ຽວ ທີ່ຄິດໄດ້ (ຈາກ ${n(load.total)} ຖ້ຽວ)`
-                  : "ບໍ່ມີຖ້ຽວທີ່ຄິດໄດ້ໃນເດືອນນີ້"
+                  : "ບໍ່ມີຖ້ຽວທີ່ຄິດໄດ້ໃນຊ່ວງນີ້"
               }
               color={C.warn}
             />
@@ -1053,11 +1710,11 @@ function DashboardBody({
         </Section>
 
         {/* ⑦ ຕົ້ນທຶນຂົນສົ່ງ */}
-        <Section index={7} title="ຕົ້ນທຶນຂົນສົ່ງ" subtitle="ຄ່ານ້ຳມັນທີ່ບັນທຶກໃນລະບົບ" icon={<FaMoneyBillWave />}>
+        <Section index={15} title="ຕົ້ນທຶນຂົນສົ່ງ" subtitle="ຄ່ານ້ຳມັນທີ່ບັນທຶກໃນລະບົບ" icon={<FaMoneyBillWave />}>
           {current.fuel.amount > 0 ? (
             <Donut slices={fuelSlices} centerValue={n(current.fuel.amount / 1_000_000)} centerLabel="ລ້ານກີບ" />
           ) : (
-            <p className="py-6 text-center text-[11px] text-slate-400">ບໍ່ມີການບັນທຶກຄ່ານ້ຳມັນໃນເດືອນນີ້</p>
+            <p className="py-6 text-center text-[11px] text-slate-400">ບໍ່ມີການບັນທຶກຄ່ານ້ຳມັນໃນຊ່ວງນີ້</p>
           )}
           <div className="mt-3 grid grid-cols-3 gap-2 text-center text-[11px]">
             {[
@@ -1093,7 +1750,7 @@ function DashboardBody({
 
       <div className="grid gap-4 xl:grid-cols-2">
         {/* ⑧ ປະສິດທິພາບນ້ຳມັນ */}
-        <Section index={8} title="ປະສິດທິພາບການໃຊ້ນ້ຳມັນ" subtitle="ລົດຂົນສົ່ງລາຍຄັນ — ໄລຍະທາງ GPS ÷ ລິດທີ່ຕື່ມ" icon={<FaGasPump />}>
+        <Section index={16} title="ປະສິດທິພາບການໃຊ້ນ້ຳມັນ" subtitle="ລົດຂົນສົ່ງລາຍຄັນ — ໄລຍະທາງ GPS ÷ ລິດທີ່ຕື່ມ" icon={<FaGasPump />}>
           <div className="overflow-x-auto">
             <table className="w-full min-w-[480px] text-[11px]">
               <thead>
@@ -1151,12 +1808,12 @@ function DashboardBody({
           </div>
           <Note>
             ຕົວເລກ ກມ/ລິດ ຍັງບໍ່ໄດ້ຮັບການຢືນຢັນ — ໄລຍະທາງມາຈາກ GPS ແຕ່ລິດມາຈາກໃບບິນ
-            ຈຶ່ງອາດຄາດເຄື່ອນຖ້າຕື່ມນ້ຳມັນຂ້າມເດືອນ ຫຼື ຕື່ມໃສ່ລົດຄັນອື່ນ.
+            ຈຶ່ງອາດຄາດເຄື່ອນຖ້າຕື່ມນ້ຳມັນຂ້າມຊ່ວງ ຫຼື ຕື່ມໃສ່ລົດຄັນອື່ນ.
           </Note>
         </Section>
 
         {/* ⑨ ຄວາມຜິດປົກກະຕິ */}
-        <Section index={9} title="ຄວາມຊັກຊ້າ ແລະ ຄວາມຜິດປົກກະຕິ" subtitle={`ຈາກ ${n(exceptions.legs)} ຄັ້ງການສົ່ງໃນເດືອນ`} icon={<FaExclamationTriangle />}>
+        <Section index={17} title="ຄວາມຊັກຊ້າ ແລະ ຄວາມຜິດປົກກະຕິ" subtitle={`ຈາກ ${n(exceptions.legs)} ຄັ້ງການສົ່ງໃນຊ່ວງນີ້`} icon={<FaExclamationTriangle />}>
           <div className="flex flex-wrap items-center gap-4">
             <div className="min-w-[190px] flex-1">
               <ul className="space-y-2">
@@ -1188,7 +1845,7 @@ function DashboardBody({
           </p>
           <ul className="space-y-1.5">
             {exceptions.reasons.length === 0 && (
-              <li className="text-[11px] text-slate-400">ບໍ່ມີການສົ່ງທີ່ບໍ່ສຳເລັດໃນເດືອນນີ້</li>
+              <li className="text-[11px] text-slate-400">ບໍ່ມີການສົ່ງທີ່ບໍ່ສຳເລັດໃນຊ່ວງນີ້</li>
             )}
             {exceptions.reasons.map((r) => (
               <BarRow
@@ -1205,7 +1862,7 @@ function DashboardBody({
       </div>
 
       {/* ⑩ ແນວໂນ້ມ ແລະ ເປົ້າໝາຍ */}
-      <Section index={10} title="ແນວໂນ້ມ ແລະ ເປົ້າໝາຍ" subtitle={`ອັດຕາສົ່ງທັນເວລາ ລາຍເດືອນ ປີ ${data.month.slice(0, 4)}`} icon={<FaChartLine />}>
+      <Section index={18} title="ແນວໂນ້ມ ແລະ ເປົ້າໝາຍ" subtitle={`ອັດຕາສົ່ງທັນເວລາ ລາຍເດືອນ ປີ ${data.from.slice(0, 4)}`} icon={<FaChartLine />}>
         <div className="grid gap-4 lg:grid-cols-2">
           <div>
             <TrendLine points={trendPoints} target={targets.on_time_rate} />
@@ -1221,8 +1878,8 @@ function DashboardBody({
                 <tr className="border-b border-slate-200 text-left text-slate-500 dark:border-slate-800 dark:text-slate-400">
                   <th className="py-1.5 pr-2 font-semibold">ຕົວຊີ້ວັດ</th>
                   <th className="py-1.5 pr-2 text-right font-semibold">ເປົ້າໝາຍ</th>
-                  <th className="py-1.5 pr-2 text-right font-semibold">ເດືອນນີ້</th>
-                  <th className="py-1.5 text-right font-semibold">ທຽບເດືອນກ່ອນ</th>
+                  <th className="py-1.5 pr-2 text-right font-semibold">ຊ່ວງນີ້</th>
+                  <th className="py-1.5 text-right font-semibold">ທຽບຊ່ວງກ່ອນ</th>
                 </tr>
               </thead>
               <tbody>
@@ -1230,13 +1887,24 @@ function DashboardBody({
                   <tr key={row.label} className="border-b border-slate-100 last:border-0 dark:border-slate-800/70">
                     <td className="py-1.5 pr-2 text-slate-700 dark:text-slate-200">{row.label}</td>
                     <td className="py-1.5 pr-2 text-right tabular-nums text-slate-400">
-                      {row.target == null ? "—" : `${row.target}${row.unit === "%" ? "%" : ""}`}
+                      {row.target == null
+                        ? "—"
+                        : row.unit === "%"
+                          ? `${row.target}%`
+                          : kip(row.target)}
                     </td>
                     <td
                       className="py-1.5 pr-2 text-right font-semibold tabular-nums"
                       style={
                         row.target != null
-                          ? { color: row.value >= row.target ? C.good : C.bad }
+                          ? {
+                              color:
+                                (row.higherIsBetter
+                                  ? row.value >= row.target
+                                  : row.value <= row.target)
+                                  ? C.good
+                                  : C.bad,
+                            }
                           : undefined
                       }
                     >

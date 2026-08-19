@@ -33,6 +33,7 @@ import * as settings from "@/actions/settings";
 import * as thunjai from "@/actions/thunjai";
 import * as tracking from "@/actions/tracking";
 import * as tripDraft from "@/actions/trip-draft";
+import * as tripCost from "@/actions/trip-cost";
 import * as tripVolume from "@/actions/trip-volume";
 
 export const Actions = {
@@ -265,6 +266,11 @@ export const Actions = {
   getFuelImage: fuel.getFuelImage,
   deleteFuelLog: fuel.deleteFuelLog,
   saveFuelRefill: fuel.saveFuelRefill,
+
+  // ຕົ້ນທຶນຂົນສົ່ງ ນອກເໜືອຈາກຄ່ານ້ຳມັນ
+  listTripCosts: tripCost.listTripCosts,
+  saveTripCost: tripCost.saveTripCost,
+  deleteTripCost: tripCost.deleteTripCost,
 
   // Settings (notification test mode etc.)
   getNotifySettings: settings.getNotifySettings,

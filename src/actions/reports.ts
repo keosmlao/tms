@@ -92,10 +92,15 @@ export async function getMonthlyDeliveryKpi(monthly: string) {
   return svcGetMonthlyDeliveryKpi(s, monthly);
 }
 
-// ລາຍງານປະສິດທິພາບການຈັດສົ່ງ (ຍອດຍົກມາ/ຍົກໄປ + ຊັ້ນເວລານຳສົ່ງ) ຂອງເດືອນ
-export async function getDeliveryPerformance(monthly: string) {
+// ລາຍງານປະສິດທິພາບການຈັດສົ່ງ (ຍອດຍົກມາ/ຍົກໄປ + ຊັ້ນເວລານຳສົ່ງ).
+// ຮັບໄດ້ 2 ແບບ: "YYYY-MM" (ເດືອນເຕັມ, ຜູ້ຮຽກເກົ່າ) ຫຼື ຊ່ວງວັນທີ from→to.
+export async function getDeliveryPerformance(monthly: string, toDate?: string) {
   const s = await requireSession();
-  return svcGetDeliveryPerformance(s, monthly);
+  const period =
+    toDate && /^\d{4}-\d{2}-\d{2}$/.test(monthly)
+      ? { from: monthly, to: toDate }
+      : monthly;
+  return svcGetDeliveryPerformance(s, period);
 }
 
 export async function getReportPendingDaily(fromDate: string, toDate: string) {

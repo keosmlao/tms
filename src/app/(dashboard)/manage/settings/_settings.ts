@@ -15,6 +15,9 @@ export interface NotifySettings {
   "kpi.target_on_time_rate": string;
   "kpi.target_avg_delivery_minutes": string;
   "kpi.target_avg_close_minutes": string;
+  "kpi.target_cost_per_km": string;
+  "kpi.target_cost_per_trip": string;
+  "kpi.target_load_pct": string;
   "kpi.alert_enabled": string;
   "kpi.alert_line_to": string;
   "fleet.alert_enabled": string;
@@ -43,6 +46,9 @@ export const EMPTY_SETTINGS: NotifySettings = {
   "kpi.target_on_time_rate": "90",
   "kpi.target_avg_delivery_minutes": "120",
   "kpi.target_avg_close_minutes": "30",
+  "kpi.target_cost_per_km": "",
+  "kpi.target_cost_per_trip": "",
+  "kpi.target_load_pct": "",
   "kpi.alert_enabled": "0",
   "kpi.alert_line_to": "",
   "fleet.alert_enabled": "0",

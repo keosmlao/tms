@@ -33,6 +33,9 @@ const NOTIFY_KEYS = [
   "kpi.target_on_time_rate",
   "kpi.target_avg_delivery_minutes",
   "kpi.target_avg_close_minutes",
+  "kpi.target_cost_per_km",
+  "kpi.target_cost_per_trip",
+  "kpi.target_load_pct",
   // KPI alert: when yesterday's KPI is below target, send LINE message to this
   // user/group. Empty = disabled.
   "kpi.alert_enabled",
@@ -63,6 +66,9 @@ export interface NotifySettings {
   "kpi.target_on_time_rate": string;
   "kpi.target_avg_delivery_minutes": string;
   "kpi.target_avg_close_minutes": string;
+  "kpi.target_cost_per_km": string;
+  "kpi.target_cost_per_trip": string;
+  "kpi.target_load_pct": string;
   "kpi.alert_enabled": string;
   "kpi.alert_line_to": string;
   "fleet.alert_enabled": string;

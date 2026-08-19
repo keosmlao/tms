@@ -41,6 +41,9 @@ export default function KpiSettingsPage() {
         "kpi.target_on_time_rate": clampInt(data["kpi.target_on_time_rate"], 0, 100),
         "kpi.target_avg_delivery_minutes": clampInt(data["kpi.target_avg_delivery_minutes"], 0, 1440),
         "kpi.target_avg_close_minutes": clampInt(data["kpi.target_avg_close_minutes"], 0, 1440),
+        "kpi.target_cost_per_km": clampInt(data["kpi.target_cost_per_km"], 0, 10_000_000),
+        "kpi.target_cost_per_trip": clampInt(data["kpi.target_cost_per_trip"], 0, 100_000_000),
+        "kpi.target_load_pct": clampInt(data["kpi.target_load_pct"], 0, 100),
         "kpi.alert_enabled": data["kpi.alert_enabled"],
         "kpi.alert_line_to": data["kpi.alert_line_to"],
       });
@@ -83,6 +86,30 @@ export default function KpiSettingsPage() {
               value={data["kpi.target_on_time_rate"]}
               onChange={(v) => setData((d) => ({ ...d, "kpi.target_on_time_rate": v.replace(/\D/g, "").slice(0, 3) }))}
               placeholder="90"
+              icon={<FaChartLine />}
+            />
+            <Field
+              label="ຄ່ານ້ຳມັນ/ກມ ເປົ້າໝາຍ (ກີບ)"
+              hint="ຕົ້ນທຶນນ້ຳມັນຕໍ່ 1 ກມ ທີ່ຮັບໄດ້. ວ່າງໄວ້ = ບໍ່ຕັ້ງເປົ້າ. ຕົວຢ່າງ 4000"
+              value={data["kpi.target_cost_per_km"]}
+              onChange={(v) => setData((d) => ({ ...d, "kpi.target_cost_per_km": v.replace(/\D/g, "").slice(0, 8) }))}
+              placeholder="4000"
+              icon={<FaChartLine />}
+            />
+            <Field
+              label="ຄ່ານ້ຳມັນ/ຖ້ຽວ ເປົ້າໝາຍ (ກີບ)"
+              hint="ຕົ້ນທຶນນ້ຳມັນສະເລ່ຍຕໍ່ 1 ຖ້ຽວ. ວ່າງໄວ້ = ບໍ່ຕັ້ງເປົ້າ. ຕົວຢ່າງ 220000"
+              value={data["kpi.target_cost_per_trip"]}
+              onChange={(v) => setData((d) => ({ ...d, "kpi.target_cost_per_trip": v.replace(/\D/g, "").slice(0, 9) }))}
+              placeholder="220000"
+              icon={<FaChartLine />}
+            />
+            <Field
+              label="ອັດຕາໃຊ້ພື້ນທີ່ບັນທຸກ ເປົ້າໝາຍ (%)"
+              hint="ສັດສ່ວນປະລິມາດສິນຄ້າຕໍ່ຄວາມຈຸຕູ້. ຄ່າ 0–100. ຕົວຢ່າງ 70"
+              value={data["kpi.target_load_pct"]}
+              onChange={(v) => setData((d) => ({ ...d, "kpi.target_load_pct": v.replace(/\D/g, "").slice(0, 3) }))}
+              placeholder="70"
               icon={<FaChartLine />}
             />
             <Field

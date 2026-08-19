@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import {
   FaCalendar,
   FaSearch,
@@ -27,10 +27,13 @@ interface BranchRow {
   carry_bills: number;
   opened_bills: number;
   delivered_bills: number;
+  /** ບິນທີ່ອອກຈາກຍອດໂດຍບໍ່ໄດ້ສົ່ງ — ຄືນຜ່ານໃບຫຼຸດໜີ້ ຫຼື ຖືກປິດຢູ່ ERP */
+  closed_other_bills: number;
   remaining_bills: number;
   carry_qty: number;
   opened_qty: number;
   delivered_qty: number;
+  closed_other_qty: number;
   remaining_qty: number;
   /** ບິນທີ່ຈັດຖ້ຽວແລ້ວແຕ່ຍັງບໍ່ຮອດມືລູກຄ້າ — ຢູ່ນອກ ຄົງເຫຼືອ */
   dispatched_bills: number;
@@ -149,34 +152,61 @@ export default function DailyActivityReport({ mode }: { mode: Mode }) {
       .finally(() => setDrillLoading(false));
   };
 
-  const fetchData = () => {
-    setLoading(true);
-    Actions.getReportDailyActivity(fromDate, toDate)
-      .then((d) => setData(d as ActivityData))
-      .catch(console.error)
-      .finally(() => setLoading(false));
-  };
+  // ເວລາທີ່ຕົວເລກຊຸດນີ້ຖືກດຶງມາ — ຍອດຈັດສົ່ງເພີ່ມຂຶ້ນຕະຫຼອດວັນ ຈຶ່ງຕ້ອງບອກວ່າ
+  // ສິ່ງທີ່ເຫັນແມ່ນພາບຂອງເວລາໃດ
+  const [fetchedAt, setFetchedAt] = useState("");
 
+  const fetchData = useCallback(
+    (from = fromDate, to = toDate) => {
+      setLoading(true);
+      Actions.getReportDailyActivity(from, to)
+        .then((d) => {
+          setData(d as ActivityData);
+          setFetchedAt(
+            new Date().toLocaleTimeString("en-GB", {
+              hour: "2-digit",
+              minute: "2-digit",
+              second: "2-digit",
+            })
+          );
+        })
+        .catch(console.error)
+        .finally(() => setLoading(false));
+    },
+    [fromDate, toDate]
+  );
+
+  // ປ່ຽນວັນທີແລ້ວດຶງໃໝ່ເອງ — ກ່ອນນີ້ຕ້ອງກົດ "ຄົ້ນຫາ" ບໍ່ດັ່ງນັ້ນຫົວຕາຕະລາງປ່ຽນ
+  // ແຕ່ຕົວເລກຍັງເປັນຂອງເກົ່າ. ຫ່ວງ 350ms ເພາະສອງຊ່ອງມັກປ່ຽນຕິດກັນ.
+  const firstLoad = useRef(true);
   useEffect(() => {
-    fetchData();
+    if (firstLoad.current) {
+      firstLoad.current = false;
+      fetchData(fromDate, toDate);
+      return;
+    }
+    const timer = setTimeout(() => fetchData(fromDate, toDate), 350);
+    return () => clearTimeout(timer);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [fromDate, toDate]);
 
   const isBill = mode === "bill";
   const unit = isBill ? "ບິນ" : "ສິນຄ້າ";
   const pick = (
     r: BranchRow | ActivityData["total"],
-    key: "carry" | "opened" | "delivered" | "remaining"
+    key: "carry" | "opened" | "delivered" | "closed_other" | "remaining"
   ): number => {
     if (isBill) {
       return key === "carry" ? r.carry_bills
         : key === "opened" ? r.opened_bills
         : key === "delivered" ? r.delivered_bills
+        : key === "closed_other" ? r.closed_other_bills
         : r.remaining_bills;
     }
     return key === "carry" ? r.carry_qty
       : key === "opened" ? r.opened_qty
       : key === "delivered" ? r.delivered_qty
+      : key === "closed_other" ? r.closed_other_qty
       : r.remaining_qty;
   };
 
@@ -258,7 +288,7 @@ export default function DailyActivityReport({ mode }: { mode: Mode }) {
       ) : (
         <>
           {/* Summary cards */}
-          <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
+          <div className="grid grid-cols-2 lg:grid-cols-5 gap-3">
             <SummaryCard
               label="ຍອດຍົກມາ (ຄ້າງສົ່ງ)"
               value={pick(data.total, "carry")}
@@ -282,6 +312,14 @@ export default function DailyActivityReport({ mode }: { mode: Mode }) {
               icon={<FaTruck />}
               iconBg="bg-emerald-500/10 text-emerald-600 dark:text-emerald-400"
               accent="text-emerald-600 dark:text-emerald-400"
+            />
+            <SummaryCard
+              label="ປິດດ້ວຍທາງອື່ນ"
+              value={pick(data.total, "closed_other")}
+              unit={unit}
+              icon={<FaFileInvoice />}
+              iconBg="bg-slate-500/10 text-slate-600 dark:text-slate-300"
+              accent="text-slate-600 dark:text-slate-300"
             />
             <SummaryCard
               label="ຄົງເຫຼືອ"
@@ -329,6 +367,7 @@ export default function DailyActivityReport({ mode }: { mode: Mode }) {
               <p className="text-xs font-semibold text-slate-700 dark:text-slate-200">ແຍກຕາມສາຂາ</p>
               <p className="text-[11px] text-slate-400">
                 {data.fromDate} → {data.toDate} · ກົດຕົວເລກເພື່ອເບິ່ງລາຍການບິນ
+                {fetchedAt && <span className="ml-2">· ອັບເດດເວລາ {fetchedAt}</span>}
               </p>
             </div>
             <div className="overflow-x-auto">
@@ -339,6 +378,7 @@ export default function DailyActivityReport({ mode }: { mode: Mode }) {
                     <th className="px-4 py-3 text-right font-semibold text-amber-600 dark:text-amber-400">ຍອດຍົກມາ</th>
                     <th className="px-4 py-3 text-right font-semibold text-sky-600 dark:text-sky-400">ເປີດບິນ</th>
                     <th className="px-4 py-3 text-right font-semibold text-emerald-600 dark:text-emerald-400">ຈັດສົ່ງ</th>
+                    <th className="px-4 py-3 text-right font-semibold text-slate-500 dark:text-slate-300" title="ບິນທີ່ອອກຈາກຍອດໂດຍບໍ່ໄດ້ສົ່ງ — ຄືນຜ່ານໃບຫຼຸດໜີ້ ຫຼື ຖືກປິດຢູ່ ERP">ປິດດ້ວຍທາງອື່ນ</th>
                     <th className="px-4 py-3 text-right font-semibold text-rose-600 dark:text-rose-400">ຄົງເຫຼືອ</th>
                   </tr>
                 </thead>
@@ -354,7 +394,7 @@ export default function DailyActivityReport({ mode }: { mode: Mode }) {
                         <FaTruck size={10} className="text-slate-400" />
                         {b.branch_name}
                       </td>
-                      <td className="px-4 py-3 text-right tabular-nums text-amber-700 dark:text-amber-400" title="ຄິດຈາກ ຄົງເຫຼືອ + ຈັດສົ່ງ − ເປີດບິນ (ບໍ່ມີລາຍການບິນຂອງຕົນເອງ)">
+                      <td className="px-4 py-3 text-right tabular-nums text-amber-700 dark:text-amber-400" title="ບິນທີ່ຍັງຄ້າງຢູ່ຕອນເລີ່ມຊ່ວງ (ບໍ່ມີລາຍການບິນຂອງຕົນເອງ)">
                         {fmt(pick(b, "carry"))}
                       </td>
                       <td className="px-4 py-3 text-right tabular-nums text-sky-700 dark:text-sky-400">
@@ -366,6 +406,9 @@ export default function DailyActivityReport({ mode }: { mode: Mode }) {
                         <button type="button" onClick={() => openDrill(b, "delivered", `ຈັດສົ່ງ · ${b.branch_name}`)} className="cursor-pointer underline decoration-dotted underline-offset-2 hover:opacity-70">
                           {fmt(pick(b, "delivered"))}
                         </button>
+                      </td>
+                      <td className="px-4 py-3 text-right tabular-nums text-slate-600 dark:text-slate-300">
+                        {fmt(pick(b, "closed_other"))}
                       </td>
                       <td className="px-4 py-3 text-right tabular-nums font-semibold text-rose-700 dark:text-rose-400">
                         <button type="button" onClick={() => openDrill(b, "remaining", `ຄົງເຫຼືອ · ${b.branch_name}`)} className="cursor-pointer underline decoration-dotted underline-offset-2 hover:opacity-70">
@@ -379,6 +422,7 @@ export default function DailyActivityReport({ mode }: { mode: Mode }) {
                     <td className="px-4 py-3 text-right tabular-nums text-amber-700 dark:text-amber-400">{fmt(pick(data.total, "carry"))}</td>
                     <td className="px-4 py-3 text-right tabular-nums text-sky-700 dark:text-sky-400">{fmt(pick(data.total, "opened"))}</td>
                     <td className="px-4 py-3 text-right tabular-nums text-emerald-700 dark:text-emerald-400">{fmt(pick(data.total, "delivered"))}</td>
+                    <td className="px-4 py-3 text-right tabular-nums text-slate-600 dark:text-slate-300">{fmt(pick(data.total, "closed_other"))}</td>
                     <td className="px-4 py-3 text-right tabular-nums text-rose-700 dark:text-rose-400">{fmt(pick(data.total, "remaining"))}</td>
                   </tr>
                 </tbody>

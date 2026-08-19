@@ -75,10 +75,17 @@ export type DeliveryPerfBranch = DeliveryPerfBucket & {
 export type DeliveryPerfDepartment = DeliveryPerfBucket & {
   department_code: string;
   department_name: string;
+  /** ຢູ່ສາຍງານຂາຍ (division 200) ຫຼືບໍ່ — ພະແນກອື່ນເປີດບິນໄດ້ ແຕ່ບໍ່ແມ່ນເຈົ້າຂອງວຽກຂົນສົ່ງ */
+  is_sales: boolean;
 };
 
 export type DeliveryPerfReport = {
+  /** ເດືອນ "YYYY-MM" ຫຼື ປ້າຍຊ່ວງ "from..to" ແລ້ວແຕ່ຜູ້ຮຽກສົ່ງມາແບບໃດ */
   month: string;
+  /** ວັນທຳອິດຂອງຊ່ວງ (YYYY-MM-DD) */
+  from: string;
+  /** ວັນສຸດທ້າຍຂອງຊ່ວງ ລວມມື້ນັ້ນນຳ (YYYY-MM-DD) */
+  to: string;
   overall: DeliveryPerfBucket;
   branches: DeliveryPerfBranch[];
   /** ແຍກຕາມພະແນກຂອງພະນັກງານຂາຍທີ່ເປີດບິນ */
@@ -107,6 +114,8 @@ export const EMPTY_PERF_BUCKET: DeliveryPerfBucket = {
 
 export const EMPTY_PERF_REPORT: DeliveryPerfReport = {
   month: "",
+  from: "",
+  to: "",
   overall: EMPTY_PERF_BUCKET,
   branches: [],
   departments: [],

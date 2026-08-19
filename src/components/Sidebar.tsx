@@ -48,6 +48,7 @@ import {
   FaRulerCombined,
   FaBoxOpen,
   FaCamera,
+  FaMoneyBillWave,
 } from "react-icons/fa";
 
 interface NavItem {
@@ -138,11 +139,12 @@ const navSections: NavSection[] = [
     ],
   },
   {
-    title: "ນ້ຳມັນ",
+    title: "ນ້ຳມັນ ແລະ ຕົ້ນທຶນ",
     icon: <FaGasPump size={16} />,
     key: "fuel",
     items: [
       { label: "ບັນທຶກເຕີມນ້ຳມັນ", href: "/fuel", icon: <FaGasPump size={13} /> },
+      { label: "ຕົ້ນທຶນອື່ນ (ຄົນຂັບ/ຜ່ານທາງ/ສ້ອມແປງ)", href: "/costs", icon: <FaMoneyBillWave size={13} /> },
     ],
   },
   {

@@ -1,5 +1,6 @@
 const { query, queryOne } = require("../lib/db");
 const { getFixedYearSqlFilter } = require("../lib/fixed-year");
+const { addDays } = require("../lib/lao-date");
 const {
   customerAreaSql,
   billOpenedAtSql,
@@ -1035,13 +1036,12 @@ async function getReportDailyActivity(session, fromDate, toDate) {
     ? scope.branchListSql
     : MONTHLY_DELIVERY_BRANCH_CODES.map((c) => `'${c}'`).join(", ");
 
-  // ── ຄົງເຫຼືອ / ຄ້າງສົ່ງ : reuse the canonical pending list so the number is
-  // byte-for-byte the same as the bills-pending page (pending as of toDate). ──
+  // ── ບິນທີ່ຍັງຄ້າງ "ຢູ່ຕອນນີ້" ຈາກລາຍການ canonical ──
+  // ໃຊ້ເປັນຈຸດຢືນຂອງບັນຊີ ບໍ່ແມ່ນຄຳຕອບຂອງຊ່ອງ ຄົງເຫຼືອ ໂດຍກົງ: ບິນທີ່ບໍ່ຢູ່ໃນ
+  // ລາຍການນີ້ແລ້ວ ຖືວ່າອອກຈາກຍອດ ແລ້ວຄ່ອຍລົງວັນທີວ່າອອກຕອນໃດ ຈຶ່ງເລືອກວັນທີ
+  // ຫຍັງກໍ່ໄດ້ຄຳຕອບຂອງວັນນັ້ນຈິງ (ນິຍາມດຽວກັບ getDeliveryPerformance).
   const { getBillsPending, getDispatchedBillsSummary } = require("./bills.js");
   const { FIXED_YEAR_START, FIXED_YEAR_END } = require("../lib/fixed-year");
-  // Full-year window = exactly what the bills-pending page passes, so the count
-  // equals the page's current "ຄ້າງສົ່ງ" total (e.g. 86) regardless of the
-  // report's date filter — pending is a "right now" figure, not date-sliced.
   const [pending, dispatched] = await Promise.all([
     getBillsPending(session, FIXED_YEAR_START, FIXED_YEAR_END, "all"),
     // ບິນທີ່ຈັດຖ້ຽວແລ້ວແຕ່ຍັງບໍ່ຮອດມືລູກຄ້າ — ບໍ່ຢູ່ໃນ ຄົງເຫຼືອ ເພາະ ERP ຕັ້ງ
@@ -1049,20 +1049,18 @@ async function getReportDailyActivity(session, fromDate, toDate) {
     // ໂດຍທີ່ຍັງບໍ່ໄດ້ສົ່ງ — ສະແດງແຍກໄວ້ ຈຶ່ງບໍ່ຫາຍໄປງຽບໆ.
     getDispatchedBillsSummary(session),
   ]);
-  const pendingRows = (pending && pending.trans) || [];
   const dispatchedByBranch = new Map(
     (dispatched.byBranch || []).map((r) => [String(r.branch_code || "").trim(), r])
   );
-  const pendingByBranch = new Map();
-  for (const row of pendingRows) {
-    const code = (row.transport_code || "").trim();
-    const cur = pendingByBranch.get(code) || { bills: 0, qty: 0 };
-    cur.bills += 1;
-    cur.qty += Number(row.remaining_qty_total ?? 0);
-    pendingByBranch.set(code, cur);
-  }
+  const outstandingNow = Array.from(
+    new Set(
+      ((pending && pending.trans) || [])
+        .map((row) => (row && row.doc_no ? String(row.doc_no) : ""))
+        .filter(Boolean)
+    )
+  );
 
-  // ── ເປີດບິນ + ຈັດສົ່ງ per branch (sale bills with deliverable goods) ──
+  // ── ບັນຊີເຄື່ອນໄຫວຄົບ 5 ຊ່ອງ ຕໍ່ສາຂາ ──
   const flowRows = await query(
     `WITH sale_bills AS (
       SELECT a.doc_no,
@@ -1100,8 +1098,9 @@ async function getReportDailyActivity(session, fromDate, toDate) {
         AND d.bill_no IN (SELECT doc_no FROM sale_bills)
       GROUP BY d.bill_no
     ),
-    del_units AS (
-      SELECT item.bill_no,
+    -- ຈຳນວນສິນຄ້າທີ່ມອບຈິງ ແຍກຕາມວັນທີ່ຖ້ຽວນັ້ນສົ່ງສຳເລັດ (ບິນທະຍອຍສົ່ງ)
+    del_units_day AS (
+      SELECT item.bill_no, det.sent_end::date AS sent_on,
              SUM(CASE WHEN COALESCE(item.delivered_qty, 0) = 0
                       THEN COALESCE(item.selected_qty, 0)
                       ELSE COALESCE(item.delivered_qty, 0) END)::numeric AS units
@@ -1111,28 +1110,82 @@ async function getReportDailyActivity(session, fromDate, toDate) {
       WHERE COALESCE(det.status, 0) = 1
         AND NULLIF(TRIM(det.forward_transport_code), '') IS NULL
         AND item.bill_no IN (SELECT doc_no FROM sale_bills)
-      GROUP BY item.bill_no
+      GROUP BY item.bill_no, det.sent_end::date
+    ),
+    del_units AS (
+      SELECT bill_no,
+             COALESCE(SUM(units), 0) AS units_all,
+             COALESCE(SUM(units) FILTER (WHERE sent_on < $1::date), 0) AS units_before,
+             COALESCE(SUM(units) FILTER (WHERE sent_on >= $1::date AND sent_on <= $2::date), 0) AS units_in,
+             COALESCE(SUM(units) FILTER (WHERE sent_on <= $2::date), 0) AS units_to_end
+      FROM del_units_day
+      GROUP BY bill_no
+    ),
+    outstanding AS (
+      SELECT DISTINCT o.bill_no FROM unnest($3::varchar[]) AS o(bill_no)
+    ),
+    credit AS (
+      SELECT rd.ref_doc_no AS bill_no, MIN(r.doc_date)::date AS credited_on
+      FROM ic_trans_detail rd
+      JOIN ic_trans r ON r.doc_no = rd.doc_no AND r.trans_flag = 48
+      WHERE rd.ref_doc_no IN (SELECT doc_no FROM sale_bills)
+      GROUP BY rd.ref_doc_no
     ),
     calc AS (
       SELECT sb.branch_code, sb.doc_date,
              GREATEST(COALESCE(bi.total_qty, 0) - COALESCE(rt.returned_qty, 0), 0)::numeric AS net_total,
-             dd.last_sent_end::date AS completion_date,
-             COALESCE(du.units, 0)::numeric AS delivered_units
+             -- ບິນທີ່ຍັງຄ້າງຢູ່ຕອນນີ້ ຍັງບໍ່ອອກຈາກຍອດ ເຖິງມີບາງຖ້ຽວສົ່ງໄປແລ້ວ
+             CASE WHEN on_now.bill_no IS NOT NULL THEN NULL
+                  ELSE dd.last_sent_end::date END AS completion_date,
+             -- ອອກຈາກຍອດໂດຍບໍ່ໄດ້ສົ່ງ: ວັນໃບຫຼຸດໜີ້ ຫຼື ວັນເປີດບິນ
+             CASE WHEN on_now.bill_no IS NOT NULL THEN NULL
+                  WHEN dd.last_sent_end IS NOT NULL THEN NULL
+                  ELSE COALESCE(cr.credited_on, sb.doc_date) END AS closed_other_date,
+             COALESCE(du.units_all, 0)::numeric AS units_all,
+             COALESCE(du.units_before, 0)::numeric AS units_before,
+             COALESCE(du.units_in, 0)::numeric AS units_in,
+             COALESCE(du.units_to_end, 0)::numeric AS units_to_end
       FROM sale_bills sb
       LEFT JOIN bill_items bi ON bi.bill_no = sb.doc_no
       LEFT JOIN returned rt ON rt.bill_no = sb.doc_no
       LEFT JOIN del_dates dd ON dd.bill_no = sb.doc_no
       LEFT JOIN del_units du ON du.bill_no = sb.doc_no
+      LEFT JOIN outstanding on_now ON on_now.bill_no = sb.doc_no
+      LEFT JOIN credit cr ON cr.bill_no = sb.doc_no
+    ),
+    -- ຍົກມາ + ເປີດບິນ − ຈັດສົ່ງ − ປິດດ້ວຍທາງອື່ນ = ຄົງເຫຼືອ (ລົງຕົວທັງບິນ ແລະ ສິນຄ້າ)
+    flags AS (
+      SELECT branch_code, net_total,
+        units_in AS sent_units,
+        (net_total - units_before) AS carry_units,
+        (net_total - units_to_end) AS open_units,
+        (net_total - units_all) AS writeoff_units,
+        (doc_date >= $1::date AND doc_date <= $2::date) AS is_opened,
+        (completion_date >= $1::date AND completion_date <= $2::date) AS is_delivered,
+        (closed_other_date >= $1::date AND closed_other_date <= $2::date) AS is_closed_other,
+        (doc_date < $1::date
+          AND (completion_date IS NULL OR completion_date >= $1::date)
+          AND (closed_other_date IS NULL OR closed_other_date >= $1::date)) AS is_carry_in,
+        (doc_date <= $2::date
+          AND (completion_date IS NULL OR completion_date > $2::date)
+          AND (closed_other_date IS NULL OR closed_other_date > $2::date)) AS is_remaining
+      FROM calc
+      WHERE net_total > 0
     )
     SELECT branch_code,
-      COUNT(*) FILTER (WHERE doc_date BETWEEN $1::date AND $2::date)::int AS opened_bills,
-      COALESCE(SUM(net_total) FILTER (WHERE doc_date BETWEEN $1::date AND $2::date), 0)::numeric AS opened_qty,
-      COUNT(*) FILTER (WHERE completion_date BETWEEN $1::date AND $2::date)::int AS delivered_bills,
-      COALESCE(SUM(LEAST(delivered_units, net_total)) FILTER (WHERE completion_date BETWEEN $1::date AND $2::date), 0)::numeric AS delivered_qty
-    FROM calc
-    WHERE net_total > 0
+      COUNT(*) FILTER (WHERE is_carry_in)::int AS carry_bills,
+      COALESCE(SUM(carry_units) FILTER (WHERE is_carry_in), 0)::numeric AS carry_qty,
+      COUNT(*) FILTER (WHERE is_opened)::int AS opened_bills,
+      COALESCE(SUM(net_total) FILTER (WHERE is_opened), 0)::numeric AS opened_qty,
+      COUNT(*) FILTER (WHERE is_delivered)::int AS delivered_bills,
+      COALESCE(SUM(sent_units), 0)::numeric AS delivered_qty,
+      COUNT(*) FILTER (WHERE is_closed_other)::int AS closed_other_bills,
+      COALESCE(SUM(writeoff_units) FILTER (WHERE is_closed_other OR is_delivered), 0)::numeric AS closed_other_qty,
+      COUNT(*) FILTER (WHERE is_remaining)::int AS remaining_bills,
+      COALESCE(SUM(open_units) FILTER (WHERE is_remaining), 0)::numeric AS remaining_qty
+    FROM flags
     GROUP BY branch_code`,
-    [fromDate, toDate]
+    [fromDate, toDate, outstandingNow]
   );
   const flowByBranch = new Map(flowRows.map((r) => [r.branch_code, r]));
 
@@ -1150,50 +1203,37 @@ async function getReportDailyActivity(session, fromDate, toDate) {
 
   const build = (code) => {
     const f = flowByBranch.get(code);
-    const p = pendingByBranch.get(code) || { bills: 0, qty: 0 };
-    const openedBills = Number(f?.opened_bills ?? 0);
-    const deliveredBills = Number(f?.delivered_bills ?? 0);
-    const remainingBills = Number(p.bills);
-    const openedQty = Number(f?.opened_qty ?? 0);
-    const deliveredQty = Number(f?.delivered_qty ?? 0);
-    const remainingQty = Number(p.qty);
+    const num = (key) => Number(f?.[key] ?? 0);
     return {
       branch_code: code,
       branch_name: nameMap.get(code) ?? MONTHLY_DELIVERY_BRANCH_NAMES[code] ?? code,
-      // ຍອດຍົກມາ derived so the ledger balances with the canonical ຄົງເຫຼືອ.
-      carry_bills: remainingBills + deliveredBills - openedBills,
-      opened_bills: openedBills,
-      delivered_bills: deliveredBills,
-      remaining_bills: remainingBills,
-      carry_qty: remainingQty + deliveredQty - openedQty,
-      opened_qty: openedQty,
-      delivered_qty: deliveredQty,
-      remaining_qty: remainingQty,
+      carry_bills: num("carry_bills"),
+      opened_bills: num("opened_bills"),
+      delivered_bills: num("delivered_bills"),
+      closed_other_bills: num("closed_other_bills"),
+      remaining_bills: num("remaining_bills"),
+      carry_qty: num("carry_qty"),
+      opened_qty: num("opened_qty"),
+      delivered_qty: num("delivered_qty"),
+      closed_other_qty: num("closed_other_qty"),
+      remaining_qty: num("remaining_qty"),
       // ນອກເໜືອຈາກ ຄົງເຫຼືອ — ບໍ່ເອົາເຂົ້າສົມຜົນ ຈຶ່ງບໍ່ກະທົບຍອດເກົ່າ
       dispatched_bills: Number(dispatchedByBranch.get(code)?.bills ?? 0),
       dispatched_ahead: Number(dispatchedByBranch.get(code)?.scheduled_ahead ?? 0),
     };
   };
   const branches = codes.map((code) => build(code));
+  const ACTIVITY_TOTAL_KEYS = [
+    "carry_bills", "opened_bills", "delivered_bills", "closed_other_bills", "remaining_bills",
+    "carry_qty", "opened_qty", "delivered_qty", "closed_other_qty", "remaining_qty",
+    "dispatched_bills", "dispatched_ahead",
+  ];
   const total = branches.reduce(
     (acc, b) => {
-      acc.carry_bills += b.carry_bills;
-      acc.opened_bills += b.opened_bills;
-      acc.delivered_bills += b.delivered_bills;
-      acc.remaining_bills += b.remaining_bills;
-      acc.carry_qty += b.carry_qty;
-      acc.opened_qty += b.opened_qty;
-      acc.delivered_qty += b.delivered_qty;
-      acc.remaining_qty += b.remaining_qty;
-      acc.dispatched_bills += b.dispatched_bills;
-      acc.dispatched_ahead += b.dispatched_ahead;
+      for (const key of ACTIVITY_TOTAL_KEYS) acc[key] += b[key];
       return acc;
     },
-    {
-      carry_bills: 0, opened_bills: 0, delivered_bills: 0, remaining_bills: 0,
-      carry_qty: 0, opened_qty: 0, delivered_qty: 0, remaining_qty: 0,
-      dispatched_bills: 0, dispatched_ahead: 0,
-    }
+    Object.fromEntries(ACTIVITY_TOTAL_KEYS.map((key) => [key, 0]))
   );
   return { fromDate, toDate, branches, total };
 }
@@ -1254,28 +1294,24 @@ async function getReportDailyDepartment(
       .filter((r) => r.division_code === SALES_DIVISION_CODE)
       .map((r) => r.name)
   );
-  const isIncluded = (name) => !salesOnly || salesNames.has(name);
 
-  // ── ຄົງເຫຼືອ / ຄ້າງສົ່ງ : canonical pending list, grouped by department ──
+  // ── ບິນທີ່ຍັງຄ້າງ "ຢູ່ຕອນນີ້" ຈາກລາຍການ canonical ──
+  // ໃຊ້ເປັນຈຸດຢືນ (anchor) ຂອງບັນຊີ ບໍ່ແມ່ນເປັນຄຳຕອບຂອງຊ່ອງ ຄົງເຫຼືອ ໂດຍກົງ:
+  // ບິນທີ່ບໍ່ຢູ່ໃນລາຍການນີ້ແລ້ວ ຖືວ່າ "ອອກຈາກຍອດແລ້ວ" ແລ້ວຄ່ອຍລົງວັນທີວ່າ
+  // ອອກຕອນໃດ (ວັນສົ່ງສຳເລັດ ຫຼື ວັນໃບຫຼຸດໜີ້) — ນິຍາມດຽວກັບ
+  // getDeliveryPerformance ຈຶ່ງເລືອກວັນທີຫຍັງກໍ່ໄດ້ຄຳຕອບຂອງວັນນັ້ນຈິງ.
   const { getBillsPending } = require("./bills.js");
   const { FIXED_YEAR_START, FIXED_YEAR_END } = require("../lib/fixed-year");
   const pending = await getBillsPending(session, FIXED_YEAR_START, FIXED_YEAR_END, "all");
-  const pendingRows = (pending && pending.trans) || [];
-  const pendingByDept = new Map();
-  for (const row of pendingRows) {
-    // The pending list is session-scoped, not filtered by the picked branch —
-    // apply the same ສາຂາ filter the flow query uses, or ຄົງເຫຼືອ would keep
-    // counting every branch while ເປີດບິນ / ຈັດສົ່ງ show only one.
-    if (selectedBranch && (row.transport_code || "").trim() !== selectedBranch) continue;
-    const dept = (row.department && String(row.department).trim()) || UNASSIGNED_DEPARTMENT;
-    if (!isIncluded(dept)) continue;
-    const cur = pendingByDept.get(dept) || { bills: 0, qty: 0 };
-    cur.bills += 1;
-    cur.qty += Number(row.remaining_qty_total ?? 0);
-    pendingByDept.set(dept, cur);
-  }
+  const outstandingNow = Array.from(
+    new Set(
+      ((pending && pending.trans) || [])
+        .map((row) => (row && row.doc_no ? String(row.doc_no) : ""))
+        .filter(Boolean)
+    )
+  );
 
-  // ── ເປີດບິນ + ຈັດສົ່ງ per department ──
+  // ── ບັນຊີເຄື່ອນໄຫວຄົບ 5 ຊ່ອງ ຕໍ່ພະແນກ ──
   const flowRows = await query(
     `WITH sale_bills AS (
       SELECT a.doc_no,
@@ -1320,8 +1356,10 @@ async function getReportDailyDepartment(
         AND d.bill_no IN (SELECT doc_no FROM sale_bills)
       GROUP BY d.bill_no
     ),
-    del_units AS (
-      SELECT item.bill_no,
+    -- ຈຳນວນສິນຄ້າທີ່ມອບຈິງ ແຍກຕາມ "ວັນທີ່ຖ້ຽວນັ້ນສົ່ງສຳເລັດ" — ບິນທະຍອຍສົ່ງ
+    -- ຈຶ່ງລົງຍອດຢູ່ວັນທີ່ສົ່ງແທ້ ບໍ່ແມ່ນລວມກ້ອນດຽວຢູ່ວັນທີ່ບິນປິດ
+    del_units_day AS (
+      SELECT item.bill_no, det.sent_end::date AS sent_on,
              SUM(CASE WHEN COALESCE(item.delivered_qty, 0) = 0
                       THEN COALESCE(item.selected_qty, 0)
                       ELSE COALESCE(item.delivered_qty, 0) END)::numeric AS units
@@ -1331,28 +1369,92 @@ async function getReportDailyDepartment(
       WHERE COALESCE(det.status, 0) = 1
         AND NULLIF(TRIM(det.forward_transport_code), '') IS NULL
         AND item.bill_no IN (SELECT doc_no FROM sale_bills)
-      GROUP BY item.bill_no
+      GROUP BY item.bill_no, det.sent_end::date
+    ),
+    del_units AS (
+      SELECT bill_no,
+             COALESCE(SUM(units), 0) AS units_all,
+             COALESCE(SUM(units) FILTER (WHERE sent_on < $1::date), 0) AS units_before,
+             COALESCE(SUM(units) FILTER (WHERE sent_on >= $1::date AND sent_on <= $2::date), 0) AS units_in,
+             COALESCE(SUM(units) FILTER (WHERE sent_on <= $2::date), 0) AS units_to_end
+      FROM del_units_day
+      GROUP BY bill_no
+    ),
+    outstanding AS (
+      SELECT DISTINCT o.bill_no FROM unnest($3::varchar[]) AS o(bill_no)
+    ),
+    -- ບິນທີ່ຖືກຄືນຜ່ານໃບຫຼຸດໜີ້ (trans_flag = 48) — ໃຊ້ເປັນວັນທີ່ "ອອກຈາກຍອດ"
+    -- ຂອງບິນທີ່ບໍ່ເຄີຍມີການສົ່ງສຳເລັດເລີຍ
+    credit AS (
+      SELECT rd.ref_doc_no AS bill_no, MIN(r.doc_date)::date AS credited_on
+      FROM ic_trans_detail rd
+      JOIN ic_trans r ON r.doc_no = rd.doc_no AND r.trans_flag = 48
+      WHERE rd.ref_doc_no IN (SELECT doc_no FROM sale_bills)
+      GROUP BY rd.ref_doc_no
     ),
     calc AS (
       SELECT sb.department, sb.doc_date,
              GREATEST(COALESCE(bi.total_qty, 0) - COALESCE(rt.returned_qty, 0), 0)::numeric AS net_total,
-             dd.last_sent_end::date AS completion_date,
-             COALESCE(du.units, 0)::numeric AS delivered_units
+             -- ບິນທີ່ຍັງຄ້າງຢູ່ຕອນນີ້ ຍັງບໍ່ອອກຈາກຍອດ ຈຶ່ງບໍ່ມີວັນສຳເລັດ ເຖິງວ່າ
+             -- ຈະມີບາງຖ້ຽວສົ່ງໄປແລ້ວ (ບິນທະຍອຍສົ່ງ) — ບໍ່ດັ່ງນັ້ນມັນຈະຫາຍ
+             -- ອອກຈາກ ຄົງເຫຼືອ ທັງທີ່ຍັງມີເຄື່ອງຄ້າງສົ່ງ
+             CASE WHEN on_now.bill_no IS NOT NULL THEN NULL
+                  ELSE dd.last_sent_end::date END AS completion_date,
+             -- ອອກຈາກຍອດໂດຍບໍ່ໄດ້ສົ່ງ: ວັນໃບຫຼຸດໜີ້ ຫຼື ຖ້າບໍ່ມີ ກໍ່ນັບແຕ່ວັນເປີດບິນ
+             -- (ERP ບໍ່ເກັບປະຫວັດການປິດບິນ ຈຶ່ງບອກວັນທີ່ແທ້ບໍ່ໄດ້)
+             CASE WHEN on_now.bill_no IS NOT NULL THEN NULL
+                  WHEN dd.last_sent_end IS NOT NULL THEN NULL
+                  ELSE COALESCE(cr.credited_on, sb.doc_date) END AS closed_other_date,
+             COALESCE(du.units_all, 0)::numeric AS units_all,
+             COALESCE(du.units_before, 0)::numeric AS units_before,
+             COALESCE(du.units_in, 0)::numeric AS units_in,
+             COALESCE(du.units_to_end, 0)::numeric AS units_to_end
       FROM sale_bills sb
       LEFT JOIN bill_items bi ON bi.bill_no = sb.doc_no
       LEFT JOIN returned rt ON rt.bill_no = sb.doc_no
       LEFT JOIN del_dates dd ON dd.bill_no = sb.doc_no
       LEFT JOIN del_units du ON du.bill_no = sb.doc_no
+      LEFT JOIN outstanding on_now ON on_now.bill_no = sb.doc_no
+      LEFT JOIN credit cr ON cr.bill_no = sb.doc_no
+    ),
+    -- ບິນອອກຈາກຍອດໄດ້ 2 ທາງເທົ່ານັ້ນ ແລະ ບໍ່ຊ້ອນກັນ ຈຶ່ງໄດ້ສົມຜົນ
+    --   ຍົກມາ + ເປີດບິນ − ຈັດສົ່ງ − ປິດດ້ວຍທາງອື່ນ = ຄົງເຫຼືອ
+    flags AS (
+      SELECT department, net_total,
+        -- ໜ່ວຍຂອງບັນຊີນີ້ແມ່ນ "ສິນຄ້າທີ່ຍັງຕ້ອງສົ່ງ": ບິນເຂົ້າມາດ້ວຍຈຳນວນສຸດທິ,
+        -- ຫຼຸດລົງທຸກຄັ້ງທີ່ສົ່ງ ແລະ ສ່ວນທີ່ເຫຼືອຄ້າງຕອນບິນອອກຈາກຍອດ ຖືເປັນ
+        -- "ປິດດ້ວຍທາງອື່ນ" ຈຶ່ງບວກລົບແລ້ວລົງຕົວທັງຝັ່ງບິນ ແລະ ຝັ່ງສິນຄ້າ.
+        units_in AS sent_units,
+        (net_total - units_before) AS carry_units,
+        (net_total - units_to_end) AS open_units,
+        (net_total - units_all) AS writeoff_units,
+        (doc_date >= $1::date AND doc_date <= $2::date) AS is_opened,
+        (completion_date >= $1::date AND completion_date <= $2::date) AS is_delivered,
+        (closed_other_date >= $1::date AND closed_other_date <= $2::date) AS is_closed_other,
+        (doc_date < $1::date
+          AND (completion_date IS NULL OR completion_date >= $1::date)
+          AND (closed_other_date IS NULL OR closed_other_date >= $1::date)) AS is_carry_in,
+        (doc_date <= $2::date
+          AND (completion_date IS NULL OR completion_date > $2::date)
+          AND (closed_other_date IS NULL OR closed_other_date > $2::date)) AS is_remaining
+      FROM calc
+      WHERE net_total > 0
     )
     SELECT department,
-      COUNT(*) FILTER (WHERE doc_date BETWEEN $1::date AND $2::date)::int AS opened_bills,
-      COALESCE(SUM(net_total) FILTER (WHERE doc_date BETWEEN $1::date AND $2::date), 0)::numeric AS opened_qty,
-      COUNT(*) FILTER (WHERE completion_date BETWEEN $1::date AND $2::date)::int AS delivered_bills,
-      COALESCE(SUM(LEAST(delivered_units, net_total)) FILTER (WHERE completion_date BETWEEN $1::date AND $2::date), 0)::numeric AS delivered_qty
-    FROM calc
-    WHERE net_total > 0
+      COUNT(*) FILTER (WHERE is_carry_in)::int AS carry_bills,
+      COALESCE(SUM(carry_units) FILTER (WHERE is_carry_in), 0)::numeric AS carry_qty,
+      COUNT(*) FILTER (WHERE is_opened)::int AS opened_bills,
+      COALESCE(SUM(net_total) FILTER (WHERE is_opened), 0)::numeric AS opened_qty,
+      COUNT(*) FILTER (WHERE is_delivered)::int AS delivered_bills,
+      -- ນັບສິນຄ້າທີ່ມອບໃນຊ່ວງນີ້ຂອງທຸກບິນ ລວມບິນທີ່ຍັງບໍ່ປິດ (ທະຍອຍສົ່ງ)
+      COALESCE(SUM(sent_units), 0)::numeric AS delivered_qty,
+      COUNT(*) FILTER (WHERE is_closed_other)::int AS closed_other_bills,
+      COALESCE(SUM(writeoff_units) FILTER (WHERE is_closed_other OR is_delivered), 0)::numeric AS closed_other_qty,
+      COUNT(*) FILTER (WHERE is_remaining)::int AS remaining_bills,
+      COALESCE(SUM(open_units) FILTER (WHERE is_remaining), 0)::numeric AS remaining_qty
+    FROM flags
     GROUP BY department`,
-    [fromDate, toDate]
+    [fromDate, toDate, outstandingNow]
   );
   const flowByDept = new Map(flowRows.map((r) => [r.department, r]));
 
@@ -1361,11 +1463,7 @@ async function getReportDailyDepartment(
   // sale department is listed even when it had no movement at all, so the
   // reader can see the zero rather than wonder whether it was dropped.
   const names = Array.from(
-    new Set([
-      ...(salesOnly ? salesNames : []),
-      ...flowByDept.keys(),
-      ...pendingByDept.keys(),
-    ])
+    new Set([...(salesOnly ? salesNames : []), ...flowByDept.keys()])
   ).sort((a, b) => {
     const ca = codeByName.get(a) ?? "zzz";
     const cb = codeByName.get(b) ?? "zzz";
@@ -1374,43 +1472,33 @@ async function getReportDailyDepartment(
 
   const departments = names.map((name) => {
     const f = flowByDept.get(name);
-    const p = pendingByDept.get(name) || { bills: 0, qty: 0 };
-    const openedBills = Number(f?.opened_bills ?? 0);
-    const deliveredBills = Number(f?.delivered_bills ?? 0);
-    const remainingBills = Number(p.bills);
-    const openedQty = Number(f?.opened_qty ?? 0);
-    const deliveredQty = Number(f?.delivered_qty ?? 0);
-    const remainingQty = Number(p.qty);
+    const num = (key) => Number(f?.[key] ?? 0);
     return {
       department: name,
       department_code: codeByName.get(name) ?? "",
-      carry_bills: remainingBills + deliveredBills - openedBills,
-      opened_bills: openedBills,
-      delivered_bills: deliveredBills,
-      remaining_bills: remainingBills,
-      carry_qty: remainingQty + deliveredQty - openedQty,
-      opened_qty: openedQty,
-      delivered_qty: deliveredQty,
-      remaining_qty: remainingQty,
+      carry_bills: num("carry_bills"),
+      opened_bills: num("opened_bills"),
+      delivered_bills: num("delivered_bills"),
+      closed_other_bills: num("closed_other_bills"),
+      remaining_bills: num("remaining_bills"),
+      carry_qty: num("carry_qty"),
+      opened_qty: num("opened_qty"),
+      delivered_qty: num("delivered_qty"),
+      closed_other_qty: num("closed_other_qty"),
+      remaining_qty: num("remaining_qty"),
     };
   });
 
+  const TOTAL_KEYS = [
+    "carry_bills", "opened_bills", "delivered_bills", "closed_other_bills", "remaining_bills",
+    "carry_qty", "opened_qty", "delivered_qty", "closed_other_qty", "remaining_qty",
+  ];
   const total = departments.reduce(
     (acc, d) => {
-      acc.carry_bills += d.carry_bills;
-      acc.opened_bills += d.opened_bills;
-      acc.delivered_bills += d.delivered_bills;
-      acc.remaining_bills += d.remaining_bills;
-      acc.carry_qty += d.carry_qty;
-      acc.opened_qty += d.opened_qty;
-      acc.delivered_qty += d.delivered_qty;
-      acc.remaining_qty += d.remaining_qty;
+      for (const key of TOTAL_KEYS) acc[key] += d[key];
       return acc;
     },
-    {
-      carry_bills: 0, opened_bills: 0, delivered_bills: 0, remaining_bills: 0,
-      carry_qty: 0, opened_qty: 0, delivered_qty: 0, remaining_qty: 0,
-    }
+    Object.fromEntries(TOTAL_KEYS.map((key) => [key, 0]))
   );
   // Branch picker options come from the query itself so the dropdown can never
   // offer a branch this report (or this user) doesn't cover.
@@ -1700,16 +1788,40 @@ async function getOutstandingBillNos() {
   return Array.from(set);
 }
 
-async function getDeliveryPerformance(session, monthly) {
+/**
+ * ຂອບເວລາຂອງລາຍງານ — ຮັບໄດ້ 2 ແບບ ເພື່ອໃຫ້ 2 ໜ້າໃຊ້ query ອັນດຽວກັນ:
+ *   "YYYY-MM"     ໜຶ່ງເດືອນເຕັມ (ໜ້າ /reports/delivery-performance, Dashboard)
+ *   { from, to }  ຊ່ວງວັນທີ ລວມວັນທ້າຍ (ໜ້າ /reports/bi)
+ */
+function deliveryPeriodBounds(period) {
+  if (period && typeof period === "object" && period.from && period.to) {
+    const from = String(period.from).slice(0, 10);
+    const to = String(period.to).slice(0, 10);
+    return { start: from, next: addDays(to, 1), from, to, label: `${from}..${to}` };
+  }
+  const month = String(period ?? "");
+  const next = getNextMonthStart(month);
+  return { start: `${month}-01`, next, from: `${month}-01`, to: addDays(next, -1), label: month };
+}
+
+async function getDeliveryPerformance(session, period) {
   const scope = getBranchScope(session);
-  const monthStart = `${monthly}-01`;
-  const nextMonthStart = getNextMonthStart(monthly);
+  const bounds = deliveryPeriodBounds(period);
+  const monthStart = bounds.start;
+  const nextMonthStart = bounds.next;
   // ຜູ້ໃຊ້ທີ່ຜູກກັບສາຂາ ເຫັນສະເພາະສາຂາຕົນ ແຕ່ບໍ່ເກີນ 3 ສາຂາ KPI
   const visibleBranches = scope.scoped
     ? MONTHLY_DELIVERY_BRANCH_CODES.filter((code) => scope.branches.includes(code))
     : MONTHLY_DELIVERY_BRANCH_CODES;
   if (visibleBranches.length === 0) {
-    return { month: monthly, overall: emptyPerfBucket(), branches: [], departments: [] };
+    return {
+      month: bounds.label,
+      from: bounds.from,
+      to: bounds.to,
+      overall: emptyPerfBucket(),
+      branches: [],
+      departments: [],
+    };
   }
   const branchCodeSql = visibleBranches.map((code) => `'${code}'`).join(",");
   const yearFilter = getFixedYearSqlFilter("d.doc_date");
@@ -1801,12 +1913,17 @@ async function getDeliveryPerformance(session, monthly) {
        SELECT
          b.bill_no,
          b.branch_code,
-         COALESCE(NULLIF(TRIM(sale_u.department::text), ''), 'unknown') AS department_code,
+         -- ພະແນກເອົາຈາກທະບຽນຂອງ TMS (odg_employee → odg_department) ບ່ອນດຽວກັບ
+         -- ລາຍງານ "ປະຈຳວັນ/ພະແນກ" ຈຶ່ງໄດ້ຊື່ ແລະ ສາຍງານ (division) ຊຸດດຽວກັນ.
+         -- ຝ່າຍ ERP (erp_user/erp_department_list) ໃຫ້ພະແນກທີ່ບໍ່ແມ່ນຝ່າຍຂາຍ
+         -- ນຳ (ບັນຊີ, HR) ເຊິ່ງບໍ່ແມ່ນເຈົ້າຂອງບິນຂົນສົ່ງ.
+         COALESCE(NULLIF(TRIM(oe.department_code::text), ''), 'unknown') AS department_code,
          COALESCE(
-           NULLIF(TRIM(dep.name_1::text), ''),
-           NULLIF(TRIM(sale_u.department::text), ''),
+           NULLIF(TRIM(od.department_name_lo::text), ''),
+           NULLIF(TRIM(oe.department_code::text), ''),
            'ບໍ່ລະບຸພະແນກ'
          ) AS department_name,
+         COALESCE(NULLIF(TRIM(od.division_code::text), ''), '') AS division_code,
          -- ເວລາເປີດບິນ: ic_trans (ເວລາລາວ) → ວັນທີ shipment → ວັນສ້າງບິນມື
          -- → ວັນຂອງຖ້ຽວທຳອິດ (ບິນໂອນທີ່ບໍ່ມີເອກະສານ ERP ເລີຍ)
          COALESCE(
@@ -1850,8 +1967,8 @@ async function getDeliveryPerformance(session, monthly) {
          WHERE tt.doc_no = b.bill_no ORDER BY tt.doc_date, tt.doc_time LIMIT 1
        ) t ON true
        -- ພະແນກຂອງພະນັກງານຂາຍທີ່ເປີດບິນ (ນິຍາມດຽວກັບ KPI ບໍລິຫານການຈັດສົ່ງ)
-       LEFT JOIN erp_user sale_u ON sale_u.code = t.sale_code
-       LEFT JOIN erp_department_list dep ON dep.code = sale_u.department
+       LEFT JOIN public.odg_employee oe ON oe.employee_code = t.sale_code
+       LEFT JOIN public.odg_department od ON od.department_code = oe.department_code
        LEFT JOIN public.ic_trans_shipment s ON s.doc_no = b.bill_no
        LEFT JOIN public.odg_tms_custom_bill cb ON cb.bill_no = b.bill_no
        LEFT JOIN resched rs ON rs.bill_no = b.bill_no
@@ -1909,6 +2026,7 @@ async function getDeliveryPerformance(session, monthly) {
        branch_code,
        department_code,
        MAX(department_name) AS department_name,
+       MAX(division_code) AS division_code,
        COUNT(*) FILTER (WHERE is_carry_in)::int AS carry_in,
        COUNT(*) FILTER (WHERE is_opened)::int AS opened,
        COUNT(*) FILTER (WHERE is_delivered)::int AS delivered,
@@ -1994,12 +2112,22 @@ async function getDeliveryPerformance(session, monthly) {
     .map((r) => ({
       department_code: String(r.department_code || "").trim() || "unknown",
       department_name: String(r.department_name || "").trim() || "ບໍ່ລະບຸພະແນກ",
+      // '200' = ສາຍງານຂາຍ — ພະແນກນອກສາຍນີ້ (ບັນຊີ, HR, ໄອທີ) ເປີດບິນໄດ້ແຕ່
+      // ບໍ່ແມ່ນເຈົ້າຂອງວຽກຂົນສົ່ງ ຈຶ່ງໃຫ້ໜ້າຈໍເລືອກເອົາເອງວ່າຈະສະແດງບໍ່
+      is_sales: String(r.division_code || "").trim() === "200",
       ...toPerfBucket(r),
     }))
     // ພະແນກທີ່ຮັບຜິດຊອບບິນຫຼາຍສຸດຂຶ້ນກ່ອນ
     .sort((a, b) => b.handled - a.handled || a.department_name.localeCompare(b.department_name));
 
-  return { month: monthly, overall: toPerfBucket(overallRow), branches, departments };
+  return {
+    month: bounds.label,
+    from: bounds.from,
+    to: bounds.to,
+    overall: toPerfBucket(overallRow),
+    branches,
+    departments,
+  };
 }
 
 module.exports = {
