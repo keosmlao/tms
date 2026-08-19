@@ -3,6 +3,7 @@ import * as approve from "@/actions/approve";
 import * as auditLog from "@/actions/audit-log";
 import * as billShipment from "@/actions/bill-shipment";
 import * as bills from "@/actions/bills";
+import * as biDashboard from "@/actions/bi-dashboard";
 import * as dashboard from "@/actions/dashboard";
 import * as deliveryRound from "@/actions/delivery-round";
 import * as deliveryRoute from "@/actions/delivery-route";
@@ -43,6 +44,10 @@ export const Actions = {
   getDashboardPending: dashboard.getDashboardPending,
   getDashboardActivity: dashboard.getDashboardActivity,
   getDriverLeaderboard: dashboard.getDriverLeaderboard,
+
+  // ພາບລວມການຂົນສົ່ງ 1 ໜ້າຈໍ (/reports/bi)
+  getBiDashboard: biDashboard.getBiDashboard,
+  getBiDeliveryStatus: biDashboard.getBiDeliveryStatus,
 
   // Audit log
   getAuditLog: auditLog.getAuditLog,
