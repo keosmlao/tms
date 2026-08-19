@@ -129,6 +129,7 @@ const navSections: NavSection[] = [
       { label: "ຕາມຄົນຂັບ", href: "/reports/by-driver", icon: <FaUserTie size={13} /> },
       { label: "COD ຕາມຄົນຂັບ", href: "/reports/cod", icon: <FaCoins size={13} /> },
       { label: "ຕາມລົດ", href: "/reports/by-car", icon: <FaTruck size={13} /> },
+      { label: "ຕາມຖ້ຽວ", href: "/reports/by-trip", icon: <FaRoute size={13} /> },
       { label: "ຕາມບິນ", href: "/reports/by-bill", icon: <FaFileInvoice size={13} /> },
       { label: "ນຳໃຊ້ລົດ/ເດືອນ", href: "/reports/monthly-car", icon: <FaChartLine size={13} /> },
       { label: "ຄົນຂັບ/ເດືອນ", href: "/reports/monthly-driver", icon: <FaChartLine size={13} /> },

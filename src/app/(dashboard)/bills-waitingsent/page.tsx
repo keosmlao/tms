@@ -5,6 +5,7 @@ import Link from "next/link";
 import {
   FaBoxOpen,
   FaBroadcastTower,
+  FaCalendarAlt,
   FaCheckCircle,
   FaChevronDown,
   FaChevronRight,
@@ -97,6 +98,8 @@ export interface WaitingSentJob {
   delivery_round_code?: string;
   delivery_round_name?: string;
   delivery_round_time_label?: string;
+  /** ບວກ = ຍັງເຫຼືອອີກ n ມື້ຈຶ່ງຮອດວັນອອກລົດ, 0 = ວັນນີ້, ລົບ = ເລີຍກຳນົດ n ມື້ */
+  days_to_logistic?: number | null;
 }
 
 export interface WaitingSentBillDetail {
@@ -212,6 +215,36 @@ function getJobState(job: WaitingSentJob) {
   };
 }
 
+// ຖ້ຽວທີ່ຈັດໄວ້ລ່ວງໜ້າ ຍັງບໍ່ຮອດວັນອອກລົດ — ບໍ່ແມ່ນຖ້ຽວຄ້າງ. ຄິວນີ້ເອົາທັງສອງ
+// ແບບມາລວມກັນ ຈຶ່ງຕ້ອງມີປ້າຍແຍກ ບໍ່ດັ່ງນັ້ນການຈັດຖ້ຽວລ່ວງໜ້າຈະອ່ານເປັນຄ້າງສົ່ງ.
+function getScheduleTone(days: number | null | undefined) {
+  if (days === null || days === undefined) return null;
+  const d = Number(days);
+  if (!Number.isFinite(d)) return null;
+  if (d > 0) {
+    return {
+      label: d === 1 ? "ອີກ 1 ມື້" : `ອີກ ${d} ມື້`,
+      title: "ຈັດຖ້ຽວລ່ວງໜ້າ — ຍັງບໍ່ຮອດວັນອອກລົດ",
+      className: "bg-slate-500/10 text-slate-600 dark:text-slate-300",
+    };
+  }
+  if (d === 0) {
+    return {
+      label: "ວັນນີ້",
+      title: "ຮອດວັນອອກລົດແລ້ວ",
+      className: "bg-sky-500/10 text-sky-600 dark:text-sky-400",
+    };
+  }
+  const late = Math.abs(d);
+  return {
+    label: late === 1 ? "ເລີຍ 1 ມື້" : `ເລີຍ ${late} ມື້`,
+    title: "ເລີຍວັນອອກລົດແລ້ວ",
+    className: late >= 3
+      ? "bg-rose-500/10 text-rose-600 dark:text-rose-400"
+      : "bg-amber-500/10 text-amber-600 dark:text-amber-400",
+  };
+}
+
 function getBillPhaseStyle(phase: string) {
   switch (phase) {
     case "inprogress":
@@ -301,9 +334,14 @@ export default function BillsWaitingSentClient({
         result.waiting += toNumber(job.waiting_bill_count);
         result.inprogress += toNumber(job.inprogress_bill_count);
         result.completed += toNumber(job.completed_bill_count);
+        const days = job.days_to_logistic;
+        if (typeof days === "number") {
+          if (days > 0) result.scheduled += 1;
+          else if (days < 0) result.overdue += 1;
+        }
         return result;
       },
-      { jobs: 0, waiting: 0, inprogress: 0, completed: 0 }
+      { jobs: 0, waiting: 0, inprogress: 0, completed: 0, scheduled: 0, overdue: 0 }
     );
   }, [filteredJobs]);
 
@@ -377,7 +415,9 @@ export default function BillsWaitingSentClient({
 
       <StatusStatGrid
         stats={[
-          { label: "ຖ້ຽວທີ່ຍັງຄ້າງ", value: summary.jobs, icon: <FaClipboardCheck />, tone: "slate" },
+          { label: "ຖ້ຽວທັງໝົດໃນຄິວ", value: summary.jobs, icon: <FaClipboardCheck />, tone: "slate" },
+          { label: "ຈັດລ່ວງໜ້າ (ຍັງບໍ່ຮອດວັນ)", value: summary.scheduled, icon: <FaCalendarAlt />, tone: "slate" },
+          { label: "ເລີຍວັນອອກລົດ", value: summary.overdue, icon: <FaClock />, tone: "amber" },
           { label: "ບິນທີ່ລໍຖ້າສົ່ງ", value: summary.waiting, icon: <FaClock />, tone: "amber" },
           { label: "ບິນກຳລັງຈັດສົ່ງ", value: summary.inprogress, icon: <FaRoute />, tone: "sky" },
           { label: "ສົ່ງແລ້ວໃນຖ້ຽວຄ້າງ", value: summary.completed, icon: <FaCheckCircle />, tone: "emerald" },
@@ -526,7 +566,21 @@ export default function BillsWaitingSentClient({
                           </td>
                           <td className="px-4 py-3 text-slate-600">
                             <div className="space-y-1">
-                              <p>{job.date_logistic}</p>
+                              <div className="flex flex-wrap items-center gap-1.5">
+                                <p>{job.date_logistic}</p>
+                                {(() => {
+                                  const tone = getScheduleTone(job.days_to_logistic);
+                                  if (!tone) return null;
+                                  return (
+                                    <span
+                                      title={tone.title}
+                                      className={`inline-flex items-center rounded-full px-1.5 py-0.5 text-[10px] font-semibold whitespace-nowrap ${tone.className}`}
+                                    >
+                                      {tone.label}
+                                    </span>
+                                  );
+                                })()}
+                              </div>
                               <p className="text-[11px] text-slate-400">
                                 ສ້າງ {job.created_at}
                               </p>

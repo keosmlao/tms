@@ -6,6 +6,8 @@ import {
   getReportByDriver as svcGetReportByDriver,
   getReportByCar as svcGetReportByCar,
   getReportByBill as svcGetReportByBill,
+  getReportByTrip as svcGetReportByTrip,
+  getReportTripBills as svcGetReportTripBills,
   getReportMonthlyCar as svcGetReportMonthlyCar,
   getReportMonthlyDriver as svcGetReportMonthlyDriver,
   getReportMonthlyDelivery as svcGetReportMonthlyDelivery,
@@ -21,9 +23,14 @@ import {
   getAttemptDeliveryItems as svcGetAttemptDeliveryItems,
 } from "@/queries/reports.js";
 
-export async function getReportDaily(fromDate: string, toDate: string) {
+// dateField: "logistic" = ກັ່ນຕອງດ້ວຍວັນຈັດສົ່ງ, "dispatch" = ດ້ວຍວັນຈັດຖ້ຽວ
+export async function getReportDaily(
+  fromDate: string,
+  toDate: string,
+  dateField: "logistic" | "dispatch" = "logistic"
+) {
   const s = await requireSession();
-  return svcGetReportDaily(s, fromDate, toDate);
+  return svcGetReportDaily(s, fromDate, toDate, dateField);
 }
 
 export async function getReportByDriver(
@@ -47,6 +54,22 @@ export async function getReportByCar(
 export async function getReportByBill(fromDate: string, toDate: string) {
   const s = await requireSession();
   return svcGetReportByBill(s, fromDate, toDate);
+}
+
+// ລາຍງານຕາມຖ້ຽວ — ໜຶ່ງແຖວຕໍ່ໜຶ່ງຖ້ຽວ ພ້ອມສະຫຼຸບບິນ, ເວລາ ແລະ ໄລຍະທາງ.
+export async function getReportByTrip(
+  fromDate: string,
+  toDate: string,
+  filters: { carId?: string; driverId?: string; roundCode?: string } = {}
+) {
+  const s = await requireSession();
+  return svcGetReportByTrip(s, fromDate, toDate, filters);
+}
+
+// ບິນທັງໝົດຂອງໜຶ່ງຖ້ຽວ (drill-down ຂອງລາຍງານຕາມຖ້ຽວ).
+export async function getReportTripBills(docNo: string) {
+  await requireSession();
+  return svcGetReportTripBills(docNo);
 }
 
 export async function getReportMonthlyCar(monthly: string) {

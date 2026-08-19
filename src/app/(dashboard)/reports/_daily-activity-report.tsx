@@ -32,6 +32,10 @@ interface BranchRow {
   opened_qty: number;
   delivered_qty: number;
   remaining_qty: number;
+  /** ບິນທີ່ຈັດຖ້ຽວແລ້ວແຕ່ຍັງບໍ່ຮອດມືລູກຄ້າ — ຢູ່ນອກ ຄົງເຫຼືອ */
+  dispatched_bills: number;
+  /** ໃນນັ້ນ ຖ້ຽວທີ່ຈັດໄວ້ລ່ວງໜ້າ ຍັງບໍ່ຮອດວັນອອກລົດ */
+  dispatched_ahead: number;
 }
 
 // One bill behind a figure — the drill-down opened by clicking a number.
@@ -288,6 +292,36 @@ export default function DailyActivityReport({ mode }: { mode: Mode }) {
               accent="text-rose-600 dark:text-rose-400"
             />
           </div>
+
+          {/* ບິນທີ່ຈັດຖ້ຽວແລ້ວຢູ່ນອກສົມຜົນຂ້າງເທິງ — ERP ຕັດມັນອອກຈາກ ຄົງເຫຼືອ
+              ຕັ້ງແຕ່ວັນຈັດຖ້ຽວ ບໍ່ແມ່ນວັນສົ່ງ ຈຶ່ງຕ້ອງບອກໄວ້ ບໍ່ດັ່ງນັ້ນຈັດຖ້ຽວ
+              ລ່ວງໜ້າຈະເບິ່ງຄືວ່າຍອດຄ້າງຫຼຸດລົງທັງທີ່ຍັງບໍ່ໄດ້ສົ່ງ. */}
+          {data.total.dispatched_bills > 0 && (
+            <div className="glass rounded-lg px-4 py-3 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs">
+              <span className="inline-flex items-center gap-1.5 font-semibold text-slate-700 dark:text-slate-200">
+                <FaTruck className="text-sky-500" size={12} />
+                ຈັດຖ້ຽວແລ້ວ ລໍສົ່ງ
+              </span>
+              <span className="rounded-full bg-sky-500/10 px-2 py-0.5 font-bold tabular-nums text-sky-600 dark:text-sky-400">
+                {data.total.dispatched_bills.toLocaleString("en-US")} ບິນ
+              </span>
+              {data.total.dispatched_ahead > 0 && (
+                <span className="rounded-full bg-slate-500/10 px-2 py-0.5 font-bold tabular-nums text-slate-600 dark:text-slate-300">
+                  ໃນນັ້ນຈັດລ່ວງໜ້າ {data.total.dispatched_ahead.toLocaleString("en-US")} ບິນ
+                </span>
+              )}
+              <span className="text-slate-500 dark:text-slate-400">
+                ບໍ່ນັບໃນ ຄົງເຫຼືອ ຂ້າງເທິງ (ERP ຕັດອອກຕັ້ງແຕ່ວັນຈັດຖ້ຽວ)
+                {isBill ? (
+                  <>
+                    {" — "}ຄົງເຫຼືອ {data.total.remaining_bills.toLocaleString("en-US")} +{" "}
+                    {data.total.dispatched_bills.toLocaleString("en-US")} = ຍັງບໍ່ຮອດມືລູກຄ້າ{" "}
+                    {(data.total.remaining_bills + data.total.dispatched_bills).toLocaleString("en-US")} ບິນ
+                  </>
+                ) : null}
+              </span>
+            </div>
+          )}
 
           {/* Per-branch breakdown */}
           <div className="glass rounded-lg overflow-hidden">

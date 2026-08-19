@@ -14,10 +14,32 @@ const {
 // ບໍ່ໄດ້ (ບິນທີ່ເປີດຫຼັງ 17:00 ຈະຖືກນັບເປັນມື້ຖັດໄປ).
 const BILL_OPENED_AT = billOpenedAtSql("t", "s.doc_date::timestamp");
 
-async function getReportDaily(session, fromDate, toDate) {
+// dateField ເລືອກໄດ້ວ່າຊ່ວງວັນທີກັ່ນຕອງດ້ວຍວັນໃດ:
+//   "logistic" (ຄ່າເລີ່ມຕົ້ນ) = ວັນທີຈັດສົ່ງ ຂອງຖ້ຽວ
+//   "dispatch"              = ວັນທີ/ເວລາ ທີ່ຜູ້ຈັດຖ້ຽວສ້າງໃບງານ
+// ສອງອັນນີ້ບໍ່ຕົງກັນເມື່ອຈັດຖ້ຽວລ່ວງໜ້າ — ວັດແລ້ວ 152/3,759 ຖ້ຽວຂອງປີນີ້.
+// ໃຊ້ create_date_time_now ບໍ່ແມ່ນ doc_date ເພາະນັ້ນຄືຄ່າທີ່ຖັນ "ວັນທີຈັດຖ້ຽວ"
+// ສະແດງ — ຖ້າກັ່ນຕອງດ້ວຍອີກຄໍລຳ ຜົນຈະບໍ່ຕົງກັບຕາທີ່ເຫັນ.
+async function getReportDaily(session, fromDate, toDate, dateField = "logistic") {
   const scope = getBranchScope(session);
   await ensureForwardBranchColumn();
-  return query(`SELECT to_char(a.create_date_time_now,'DD-MM-YYYY HH24:MI') as doc_date, doc_no, to_char(date_logistic,'DD-MM-YYYY') as date_logistic, to_char(a.job_close,'DD-MM-YYYY HH24:MI') as job_code, b.name_1 as car, c.name_1 as driver, item_bill, d.name_1 as user_created, approve_status, case when approve_status=0 then 'ລໍຖ້າອະນຸມັດ' else case when job_status=0 then 'ລໍຖ້າຈັດສົ່ງ' when job_status=1 then 'ຮັບຖ້ຽວ / ເບີກເຄື່ອງ' when job_status=2 then 'ກຳລັງຈັດສົ່ງ' when job_status=3 then 'ຄົນຂັບປິດງານ' else 'admin ປິດຖ້ຽວ' end end as status, job_status, coalesce(b.imei,'') as imei FROM odg_tms a LEFT JOIN public.odg_tms_car b ON b.code=a.car LEFT JOIN public.odg_tms_driver c ON c.code=a.driver LEFT JOIN erp_user d ON d.code=a.user_created WHERE date_logistic BETWEEN $1 AND $2 ${branchFilterJob(scope, "a")} ORDER BY a.date_logistic, a.create_date_time_now`, [fromDate, toDate]);
+  // ຮັບແຕ່ຄ່າທີ່ຮູ້ຈັກ — ຄ່ານີ້ຖືກຕໍ່ໃສ່ SQL ໂດຍກົງ
+  const byDispatch = dateField === "dispatch";
+  const rangeSql = byDispatch
+    ? "a.create_date_time_now::date BETWEEN $1::date AND $2::date"
+    : "a.date_logistic BETWEEN $1 AND $2";
+  const orderSql = byDispatch
+    ? "a.create_date_time_now, a.date_logistic"
+    : "a.date_logistic, a.create_date_time_now";
+  // ເວລາເລີ່ມຈັດສົ່ງຈິງ = ຕອນຄົນຂັບກົດ "ເລີ່ມສົ່ງ" ບິນທຳອິດຂອງຖ້ຽວ. ຢູ່ລະດັບບິນ
+  // (odg_tms_detail.sent_start) ບໍ່ແມ່ນລະດັບຖ້ຽວ ຈຶ່ງຕ້ອງຍຸບເອົາອັນທຳອິດ.
+  return query(`WITH trip_start AS (
+      SELECT doc_no, MIN(sent_start) AS first_sent_at
+      FROM public.odg_tms_detail
+      WHERE sent_start IS NOT NULL AND ${getFixedYearSqlFilter("doc_date")}
+      GROUP BY doc_no
+    )
+    SELECT to_char(a.create_date_time_now,'DD-MM-YYYY HH24:MI') as doc_date, a.doc_no, to_char(a.date_logistic,'DD-MM-YYYY') as date_logistic, to_char(a.job_close,'DD-MM-YYYY HH24:MI') as job_code, to_char(ts.first_sent_at,'DD-MM-YYYY HH24:MI') as sent_start, b.name_1 as car, c.name_1 as driver, a.item_bill, d.name_1 as user_created, a.approve_status, case when a.approve_status=0 then 'ລໍຖ້າອະນຸມັດ' else case when a.job_status=0 then 'ລໍຖ້າຈັດສົ່ງ' when a.job_status=1 then 'ຮັບຖ້ຽວ / ເບີກເຄື່ອງ' when a.job_status=2 then 'ກຳລັງຈັດສົ່ງ' when a.job_status=3 then 'ຄົນຂັບປິດງານ' else 'admin ປິດຖ້ຽວ' end end as status, a.job_status, coalesce(b.imei,'') as imei FROM odg_tms a LEFT JOIN trip_start ts ON ts.doc_no=a.doc_no LEFT JOIN public.odg_tms_car b ON b.code=a.car LEFT JOIN public.odg_tms_driver c ON c.code=a.driver LEFT JOIN erp_user d ON d.code=a.user_created WHERE ${rangeSql} ${branchFilterJob(scope, "a")} ORDER BY ${orderSql}`, [fromDate, toDate]);
 }
 
 async function getReportByDriver(session, fromDate, toDate, driverId) {
@@ -46,6 +68,184 @@ async function getReportByCar(session, fromDate, toDate, carId) {
 async function getReportByBill(session, fromDate, toDate) {
   const scope = getBranchScope(session);
   return query(`SELECT to_char(a.create_date_time_now,'DD-MM-YYYY HH24:MI') as doc_date, a.doc_no, bill_no, to_char(bill_date,'DD-MM-YYYY') as bill_date, b.name_1 as cust_code, to_char(a.date_logistic,'DD-MM-YYYY') as date_logistic, a.status, url_img, COALESCE(a.sight_img,'') as sight_img, COALESCE(img.delivery_images, ARRAY[]::text[]) as delivery_images, case when sent_start IS NULL then 'ລໍຖ້າຈັດສົ່ງ / ເບີກເຄື່ອງ' when sent_start IS NOT NULL AND sent_end IS NULL then 'ກຳລັງຈັດສົ່ງ' else case when a.status=1 then 'ຈັດສົ່ງສຳເລັດ' else 'ຍົກເລີກຈັດສົ່ງ' end end as status_trans, d.name_1 as car, e.name_1 as driver, count_item, a.remark, to_char(a.recipt_job,'DD-MM-YYYY HH24:MI') as recipt_job, to_char(a.sent_start,'DD-MM-YYYY HH24:MI') as sent_start, to_char(a.sent_end,'DD-MM-YYYY HH24:MI') as sent_end FROM public.odg_tms_detail a LEFT JOIN ar_customer b ON b.code=a.cust_code LEFT JOIN odg_tms c ON c.doc_no=a.doc_no LEFT JOIN public.odg_tms_car d ON d.code=a.car LEFT JOIN public.odg_tms_driver e ON e.code=c.driver LEFT JOIN public.ic_trans_shipment s ON s.doc_no=a.bill_no LEFT JOIN LATERAL (SELECT array_agg(di.image_data ORDER BY di.created_at ASC, di.roworder ASC) as delivery_images FROM public.odg_tms_delivery_images di WHERE di.bill_no = a.bill_no) img ON true WHERE a.doc_date BETWEEN $1 AND $2 ${scope.scoped ? `AND s.transport_code IN (${scope.branchListSql})` : ""} ORDER BY a.roworder`, [fromDate, toDate]);
+}
+
+// ==================== ລາຍງານຕາມຖ້ຽວ ====================
+
+// ໜຶ່ງແຖວຕໍ່ໜຶ່ງຖ້ຽວ (odg_tms) ພ້ອມສະຫຼຸບບິນ, ເວລາ ແລະ ໄລຍະທາງ.
+// ກັ່ນຕອງດ້ວຍ date_logistic (ວັນທີຈັດສົ່ງຂອງຖ້ຽວ) ຄືກັບລາຍງານປະຈຳວັນ —
+// doc_date ເປັນວັນທີສ້າງໃບງານ ຈຶ່ງບໍ່ຕົງກັບວັນທີລົດອອກແລ່ນ.
+async function getReportByTrip(session, fromDate, toDate, filters = {}) {
+  const { getDistanceMap } = require("./trip-distance");
+  const { ensureDeliveryRoundSchema, listDeliveryRounds } = require("./delivery-round");
+  const { ensureDeliveryRouteSchema } = require("./delivery-route");
+
+  const scope = getBranchScope(session);
+  await ensureForwardBranchColumn();
+  await ensureDeliveryRoundSchema();
+  await ensureDeliveryRouteSchema();
+
+  const carCode = String(filters.carId ?? "").trim();
+  const driverCode = String(filters.driverId ?? "").trim();
+  const roundCode = String(filters.roundCode ?? "").trim();
+
+  const params = [fromDate, toDate];
+  const tripFilters = [];
+  if (carCode) {
+    params.push(carCode);
+    tripFilters.push(`AND a.car = $${params.length}`);
+  }
+  if (driverCode) {
+    params.push(driverCode);
+    tripFilters.push(`AND a.driver = $${params.length}`);
+  }
+  if (roundCode) {
+    params.push(roundCode);
+    tripFilters.push(`AND a.delivery_round_code = $${params.length}`);
+  }
+
+  const rows = await query(
+    `WITH trips AS (
+       SELECT a.*
+       FROM odg_tms a
+       WHERE a.date_logistic BETWEEN $1 AND $2
+         AND ${getFixedYearSqlFilter("a.doc_date")}
+         ${tripFilters.join("\n         ")}
+         ${branchFilterJob(scope, "a")}
+     ),
+     bill_summary AS (
+       SELECT d.doc_no,
+         COUNT(*)::int AS bills_total,
+         COUNT(*) FILTER (WHERE d.sent_end IS NOT NULL AND COALESCE(d.status, 0) = 1)::int AS bills_delivered,
+         COUNT(*) FILTER (WHERE d.sent_end IS NOT NULL AND COALESCE(d.status, 0) = 2)::int AS bills_cancelled,
+         COUNT(*) FILTER (WHERE d.sent_start IS NOT NULL AND d.sent_end IS NULL)::int AS bills_sending,
+         COUNT(*) FILTER (WHERE d.sent_start IS NULL)::int AS bills_waiting,
+         COALESCE(SUM(COALESCE(NULLIF(TRIM(d.count_item::text), ''), '0')::numeric), 0)::int AS item_count,
+         MIN(d.recipt_job) AS recipt_at,
+         MIN(d.sent_start) AS first_sent_at,
+         MAX(d.sent_end) AS last_sent_at
+       FROM public.odg_tms_detail d
+       JOIN trips t ON t.doc_no = d.doc_no
+       GROUP BY d.doc_no
+     )
+     SELECT
+       a.doc_no,
+       to_char(a.doc_date, 'DD-MM-YYYY') AS doc_date,
+       to_char(a.date_logistic, 'DD-MM-YYYY') AS date_logistic,
+       to_char(a.date_logistic, 'YYYY-MM-DD') AS date_logistic_iso,
+       to_char(a.create_date_time_now, 'DD-MM-YYYY HH24:MI') AS created_at,
+       COALESCE(a.car, '') AS car_code,
+       COALESCE(b.name_1, a.car, '-') AS car,
+       COALESCE(a.driver, '') AS driver_code,
+       COALESCE(c.name_1, a.driver, '-') AS driver,
+       COALESCE(u.name_1, '') AS user_created,
+       COALESCE(a.delivery_round_code, '') AS round_code,
+       COALESCE(dr.name, '') AS round_name,
+       COALESCE(dr.time_label, '') AS round_time_label,
+       COALESCE(rt.name, '') AS route_name,
+       COALESCE(NULLIF(TRIM(a.item_bill::text), ''), '0')::numeric::int AS item_bill,
+       a.approve_status,
+       a.job_status,
+       CASE WHEN a.approve_status = 0 THEN 'ລໍຖ້າອະນຸມັດ'
+         ELSE CASE
+           WHEN a.job_status = 0 THEN 'ລໍຖ້າຈັດສົ່ງ'
+           WHEN a.job_status = 1 THEN 'ຮັບຖ້ຽວ / ເບີກເຄື່ອງ'
+           WHEN a.job_status = 2 THEN 'ກຳລັງຈັດສົ່ງ'
+           WHEN a.job_status = 3 THEN 'ຄົນຂັບປິດງານ'
+           ELSE 'admin ປິດຖ້ຽວ' END
+       END AS status,
+       COALESCE(bs.bills_total, 0) AS bills_total,
+       COALESCE(bs.bills_delivered, 0) AS bills_delivered,
+       COALESCE(bs.bills_cancelled, 0) AS bills_cancelled,
+       COALESCE(bs.bills_sending, 0) AS bills_sending,
+       COALESCE(bs.bills_waiting, 0) AS bills_waiting,
+       COALESCE(bs.item_count, 0) AS item_count,
+       to_char(bs.recipt_at, 'DD-MM-YYYY HH24:MI') AS recipt_at,
+       to_char(bs.first_sent_at, 'HH24:MI') AS first_sent_at,
+       to_char(bs.last_sent_at, 'HH24:MI') AS last_sent_at,
+       to_char(a.job_close, 'DD-MM-YYYY HH24:MI') AS job_close,
+       CASE
+         WHEN bs.first_sent_at IS NOT NULL AND COALESCE(a.job_close, bs.last_sent_at) IS NOT NULL
+           AND COALESCE(a.job_close, bs.last_sent_at) >= bs.first_sent_at
+         THEN ROUND(EXTRACT(EPOCH FROM (COALESCE(a.job_close, bs.last_sent_at) - bs.first_sent_at)) / 60.0)::int
+       END AS duration_min,
+       COALESCE(a.miles_start, '') AS miles_start,
+       COALESCE(a.miles_end, '') AS miles_end,
+       CASE
+         WHEN regexp_replace(COALESCE(a.miles_start, ''), '[^0-9.]', '', 'g') ~ E'^\\\\d+(\\\\.\\\\d+)?$'
+          AND regexp_replace(COALESCE(a.miles_end, ''), '[^0-9.]', '', 'g') ~ E'^\\\\d+(\\\\.\\\\d+)?$'
+          AND regexp_replace(a.miles_end, '[^0-9.]', '', 'g')::numeric >= regexp_replace(a.miles_start, '[^0-9.]', '', 'g')::numeric
+         THEN ROUND(regexp_replace(a.miles_end, '[^0-9.]', '', 'g')::numeric - regexp_replace(a.miles_start, '[^0-9.]', '', 'g')::numeric, 1)
+       END AS miles_km
+     FROM trips a
+     LEFT JOIN bill_summary bs ON bs.doc_no = a.doc_no
+     LEFT JOIN public.odg_tms_car b ON b.code = a.car
+     LEFT JOIN public.odg_tms_driver c ON c.code = a.driver
+     LEFT JOIN erp_user u ON u.code = a.user_created
+     LEFT JOIN public.odg_tms_delivery_round dr ON dr.code = a.delivery_round_code
+     LEFT JOIN public.odg_tms_delivery_route rt ON rt.code = a.delivery_route_code
+     ORDER BY a.date_logistic DESC, a.doc_no DESC`,
+    params
+  );
+
+  // ໄລຍະທາງຈາກເລກໄມລ໌ tracker ແມ່ນແມ່ນຢຳກວ່າເລກທີ່ຄົນຂັບພິມເອງ ຈຶ່ງເອົາກ່ອນ.
+  const distances = await getDistanceMap(rows.map((r) => r.doc_no));
+  for (const row of rows) {
+    const tracked = distances.get(row.doc_no);
+    const manual = row.miles_km === null || row.miles_km === undefined ? null : Number(row.miles_km);
+    row.distance_km = tracked ?? manual ?? null;
+    row.distance_source = tracked != null ? "tracker" : manual != null ? "miles" : "";
+  }
+
+  const [cars, drivers, rounds] = await Promise.all([
+    query("SELECT code, name_1 FROM public.odg_tms_car ORDER BY name_1"),
+    query("SELECT code, name_1 FROM public.odg_tms_driver ORDER BY name_1"),
+    listDeliveryRounds({ activeOnly: true }),
+  ]);
+
+  const totals = rows.reduce(
+    (acc, r) => {
+      acc.trips += 1;
+      acc.bills += Number(r.bills_total) || 0;
+      acc.delivered += Number(r.bills_delivered) || 0;
+      acc.cancelled += Number(r.bills_cancelled) || 0;
+      acc.pending += (Number(r.bills_sending) || 0) + (Number(r.bills_waiting) || 0);
+      acc.items += Number(r.item_count) || 0;
+      acc.km += Number(r.distance_km) || 0;
+      return acc;
+    },
+    { trips: 0, bills: 0, delivered: 0, cancelled: 0, pending: 0, items: 0, km: 0 }
+  );
+  totals.km = Math.round(totals.km * 10) / 10;
+
+  return { rows, cars, drivers, rounds, totals };
+}
+
+// ບິນທັງໝົດຂອງໜຶ່ງຖ້ຽວ — ໃຊ້ຕອນກາງແຖວລາຍງານຕາມຖ້ຽວ.
+async function getReportTripBills(docNo) {
+  return query(
+    `SELECT
+       d.bill_no,
+       to_char(d.bill_date, 'DD-MM-YYYY') AS bill_date,
+       COALESCE(NULLIF(TRIM(cust.name_1), ''), NULLIF(TRIM(d.cust_code), ''), '-') AS customer,
+       COALESCE(NULLIF(TRIM(d.count_item::text), ''), '0')::int AS item_count,
+       COALESCE(d.remark, '') AS remark,
+       COALESCE(d.status, 0) AS status,
+       CASE
+         WHEN d.sent_start IS NULL THEN 'ລໍຖ້າຈັດສົ່ງ / ເບີກເຄື່ອງ'
+         WHEN d.sent_end IS NULL THEN 'ກຳລັງຈັດສົ່ງ'
+         WHEN COALESCE(d.status, 0) = 1 THEN 'ຈັດສົ່ງສຳເລັດ'
+         ELSE 'ຍົກເລີກຈັດສົ່ງ'
+       END AS status_trans,
+       to_char(d.recipt_job, 'DD-MM-YYYY HH24:MI') AS recipt_job,
+       to_char(d.sent_start, 'HH24:MI') AS sent_start,
+       to_char(d.sent_end, 'HH24:MI') AS sent_end
+     FROM public.odg_tms_detail d
+     LEFT JOIN ar_customer cust ON cust.code = d.cust_code
+     WHERE d.doc_no = $1
+     ORDER BY d.roworder`,
+    [docNo]
+  );
 }
 
 async function getReportMonthlyCar(session, monthly) {
@@ -837,13 +1037,22 @@ async function getReportDailyActivity(session, fromDate, toDate) {
 
   // ── ຄົງເຫຼືອ / ຄ້າງສົ່ງ : reuse the canonical pending list so the number is
   // byte-for-byte the same as the bills-pending page (pending as of toDate). ──
-  const { getBillsPending } = require("./bills.js");
+  const { getBillsPending, getDispatchedBillsSummary } = require("./bills.js");
   const { FIXED_YEAR_START, FIXED_YEAR_END } = require("../lib/fixed-year");
   // Full-year window = exactly what the bills-pending page passes, so the count
   // equals the page's current "ຄ້າງສົ່ງ" total (e.g. 86) regardless of the
   // report's date filter — pending is a "right now" figure, not date-sliced.
-  const pending = await getBillsPending(session, FIXED_YEAR_START, FIXED_YEAR_END, "all");
+  const [pending, dispatched] = await Promise.all([
+    getBillsPending(session, FIXED_YEAR_START, FIXED_YEAR_END, "all"),
+    // ບິນທີ່ຈັດຖ້ຽວແລ້ວແຕ່ຍັງບໍ່ຮອດມືລູກຄ້າ — ບໍ່ຢູ່ໃນ ຄົງເຫຼືອ ເພາະ ERP ຕັ້ງ
+    // check_status=1 ຕັ້ງແຕ່ວັນຈັດຖ້ຽວ. ຈັດຖ້ຽວລ່ວງໜ້າຈຶ່ງເຮັດໃຫ້ຍອດນີ້ຫຼຸດລົງ
+    // ໂດຍທີ່ຍັງບໍ່ໄດ້ສົ່ງ — ສະແດງແຍກໄວ້ ຈຶ່ງບໍ່ຫາຍໄປງຽບໆ.
+    getDispatchedBillsSummary(session),
+  ]);
   const pendingRows = (pending && pending.trans) || [];
+  const dispatchedByBranch = new Map(
+    (dispatched.byBranch || []).map((r) => [String(r.branch_code || "").trim(), r])
+  );
   const pendingByBranch = new Map();
   for (const row of pendingRows) {
     const code = (row.transport_code || "").trim();
@@ -960,6 +1169,9 @@ async function getReportDailyActivity(session, fromDate, toDate) {
       opened_qty: openedQty,
       delivered_qty: deliveredQty,
       remaining_qty: remainingQty,
+      // ນອກເໜືອຈາກ ຄົງເຫຼືອ — ບໍ່ເອົາເຂົ້າສົມຜົນ ຈຶ່ງບໍ່ກະທົບຍອດເກົ່າ
+      dispatched_bills: Number(dispatchedByBranch.get(code)?.bills ?? 0),
+      dispatched_ahead: Number(dispatchedByBranch.get(code)?.scheduled_ahead ?? 0),
     };
   };
   const branches = codes.map((code) => build(code));
@@ -973,11 +1185,14 @@ async function getReportDailyActivity(session, fromDate, toDate) {
       acc.opened_qty += b.opened_qty;
       acc.delivered_qty += b.delivered_qty;
       acc.remaining_qty += b.remaining_qty;
+      acc.dispatched_bills += b.dispatched_bills;
+      acc.dispatched_ahead += b.dispatched_ahead;
       return acc;
     },
     {
       carry_bills: 0, opened_bills: 0, delivered_bills: 0, remaining_bills: 0,
       carry_qty: 0, opened_qty: 0, delivered_qty: 0, remaining_qty: 0,
+      dispatched_bills: 0, dispatched_ahead: 0,
     }
   );
   return { fromDate, toDate, branches, total };
@@ -1792,6 +2007,8 @@ module.exports = {
   getReportByDriver,
   getReportByCar,
   getReportByBill,
+  getReportByTrip,
+  getReportTripBills,
   getReportMonthlyCar,
   getReportMonthlyDriver,
   getReportMonthlyDelivery,

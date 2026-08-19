@@ -18,10 +18,13 @@ import { Actions } from "@/lib/api";
 // Ported from server actions: getReportDaily
 
 interface ReportItem {
+  /** ວັນ/ເວລາທີ່ຜູ້ຈັດຖ້ຽວສ້າງໃບງານ (odg_tms.create_date_time_now — ເວລາລາວ) */
   doc_date: string;
   doc_no: string;
   date_logistic: string;
   job_code: string;
+  /** ວັນ/ເວລາທີ່ຄົນຂັບກົດເລີ່ມສົ່ງບິນທຳອິດຂອງຖ້ຽວ */
+  sent_start: string | null;
   car: string;
   driver: string;
   item_bill: number;
@@ -40,18 +43,29 @@ const STATUS_STYLES: Record<number, { badge: string; dot: string }> = {
 
 const FALLBACK_STATUS = { badge: "bg-slate-500/10 text-slate-600 dark:text-slate-400", dot: "bg-slate-400" };
 
+// ຖ້ຽວມີສອງວັນທີ: ວັນທີ່ຜູ້ຈັດຖ້ຽວສ້າງໃບງານ ແລະ ວັນທີ່ນັດອອກລົດສົ່ງ. ຈັດຖ້ຽວ
+// ລ່ວງໜ້າເຮັດໃຫ້ສອງອັນນີ້ຄົນລະວັນ ຈຶ່ງຕ້ອງເລືອກໄດ້ວ່າຈະນັບຖ້ຽວເຂົ້າວັນໃດ.
+type DateField = "logistic" | "dispatch";
+
+const DATE_FIELDS: { key: DateField; label: string; hint: string }[] = [
+  { key: "logistic", label: "ວັນຈັດສົ່ງ", hint: "ນັບຖ້ຽວເຂົ້າວັນທີ່ນັດອອກລົດສົ່ງ" },
+  { key: "dispatch", label: "ວັນຈັດຖ້ຽວ", hint: "ນັບຖ້ຽວເຂົ້າວັນທີ່ຜູ້ຈັດຖ້ຽວສ້າງໃບງານ" },
+];
+
 export default function DailyReportPage() {
   const [items, setItems] = useState<ReportItem[]>([]);
   const [fromDate, setFromDate] = useState(() => getFixedTodayDate());
   const [toDate, setToDate] = useState(() => getFixedTodayDate());
   const [loading, setLoading] = useState(true);
   const [currentPage, setCurrentPage] = useState(1);
+  // ຊ່ວງວັນທີກັ່ນຕອງດ້ວຍວັນໃດ — ສອງອັນນີ້ຕ່າງກັນເມື່ອຖ້ຽວຖືກຈັດລ່ວງໜ້າ
+  const [dateField, setDateField] = useState<DateField>("logistic");
   const perPage = 20;
 
-  const fetchItems = () => {
+  const fetchItems = (field: DateField = dateField) => {
     setLoading(true);
     setCurrentPage(1);
-    Actions.getReportDaily(fromDate, toDate)
+    Actions.getReportDaily(fromDate, toDate, field)
       .then((data) => setItems(data as ReportItem[]))
       .catch(console.error)
       .finally(() => setLoading(false));
@@ -81,7 +95,14 @@ export default function DailyReportPage() {
         </div>
         <div>
           <h1 className="text-lg font-bold text-slate-800 dark:text-white">ລາຍງານການຈັດສົ່ງປະຈຳວັນ</h1>
-          <p className="text-xs text-slate-500 dark:text-slate-400">ສະຫຼຸບຖ້ຽວຕາມວັນທີຈັດສົ່ງ ຈາກວັນທີ–ຫາວັນທີ</p>
+          <p className="text-xs text-slate-500 dark:text-slate-400">
+            ສະຫຼຸບຖ້ຽວຕາມ{" "}
+            <span className="font-semibold text-slate-600 dark:text-slate-300">
+              {DATE_FIELDS.find((f) => f.key === dateField)?.label}
+            </span>{" "}
+            ຈາກວັນທີ–ຫາວັນທີ
+            <span className="text-slate-400"> · ຈັດຖ້ຽວລ່ວງໜ້າເຮັດໃຫ້ສອງວັນນີ້ຄົນລະວັນ</span>
+          </p>
         </div>
       </div>
 
@@ -94,6 +115,36 @@ export default function DailyReportPage() {
           }}
           className="flex flex-wrap items-end gap-4"
         >
+          {/* ສະຫຼັບວ່າຊ່ວງວັນທີຂ້າງລຸ່ມກັ່ນຕອງດ້ວຍວັນໃດ — ກົດແລ້ວດຶງໃໝ່ທັນທີ
+              ຈຶ່ງບໍ່ຕ້ອງກົດ "ຄົ້ນຫາ" ຊ້ຳ ແລະ ບໍ່ມີຊ່ວງທີ່ປຸ່ມກັບຕາຕະລາງບໍ່ຕົງກັນ. */}
+          <div className="w-full">
+            <label className="block text-xs font-medium text-slate-600 dark:text-slate-300 mb-1.5">
+              <FaCalendar className="inline mr-1.5 text-slate-400" size={11} />
+              ນັບຖ້ຽວຕາມ
+            </label>
+            <div className="inline-flex rounded-lg bg-white/40 dark:bg-white/5 p-0.5 ring-1 ring-slate-200/60 dark:ring-white/10">
+              {DATE_FIELDS.map((f) => (
+                <button
+                  key={f.key}
+                  type="button"
+                  title={f.hint}
+                  onClick={() => {
+                    if (f.key === dateField) return;
+                    setDateField(f.key);
+                    fetchItems(f.key);
+                  }}
+                  className={`px-3 py-1.5 rounded-md text-xs font-semibold transition-colors cursor-pointer ${
+                    dateField === f.key
+                      ? "bg-teal-600 text-white shadow-sm"
+                      : "text-slate-600 dark:text-slate-300 hover:bg-white/60 dark:hover:bg-white/10"
+                  }`}
+                >
+                  {f.label}
+                </button>
+              ))}
+            </div>
+          </div>
+
           <div className="flex-1 min-w-[140px]">
             <label className="block text-xs font-medium text-slate-600 dark:text-slate-300 mb-1.5">
               <FaCalendar className="inline mr-1.5 text-slate-400" size={11} />
@@ -194,13 +245,14 @@ export default function DailyReportPage() {
                   <thead>
                     <tr className="bg-white/30 dark:bg-white/5 border-b border-slate-200/30 dark:border-white/5">
                       <th className="px-4 py-3 text-left font-semibold text-slate-600 dark:text-slate-300">#</th>
+                      <th className="px-4 py-3 text-left font-semibold text-slate-600 dark:text-slate-300">ວັນທີຈັດຖ້ຽວ</th>
                       <th className="px-4 py-3 text-left font-semibold text-slate-600 dark:text-slate-300">ວັນທີຈັດສົ່ງ</th>
-                      <th className="px-4 py-3 text-left font-semibold text-slate-600 dark:text-slate-300">ວັນທີເປີດ</th>
                       <th className="px-4 py-3 text-left font-semibold text-slate-600 dark:text-slate-300">ເລກທີ</th>
                       <th className="px-4 py-3 text-left font-semibold text-slate-600 dark:text-slate-300">ລົດ / ຄົນຂັບ</th>
                       <th className="px-4 py-3 text-right font-semibold text-slate-600 dark:text-slate-300">ຈຳນວນບິນ</th>
                       <th className="px-4 py-3 text-left font-semibold text-slate-600 dark:text-slate-300">ຜູ້ສ້າງ</th>
                       <th className="px-4 py-3 text-left font-semibold text-slate-600 dark:text-slate-300">ສະຖານະ</th>
+                      <th className="px-4 py-3 text-left font-semibold text-slate-600 dark:text-slate-300">ເລີ່ມຈັດສົ່ງ</th>
                       <th className="px-4 py-3 text-left font-semibold text-slate-600 dark:text-slate-300">ວັນທີປິດ</th>
                       <th className="px-4 py-3 text-center font-semibold text-slate-600 dark:text-slate-300">GPS</th>
                     </tr>
@@ -220,8 +272,8 @@ export default function DailyReportPage() {
                               {(currentPage - 1) * perPage + index + 1}
                             </span>
                           </td>
-                          <td className="px-4 py-3 font-semibold text-slate-700 dark:text-slate-200">{item.date_logistic}</td>
                           <td className="px-4 py-3 text-slate-500 dark:text-slate-400">{item.doc_date}</td>
+                          <td className="px-4 py-3 font-semibold text-slate-700 dark:text-slate-200">{item.date_logistic}</td>
                           <td className="px-4 py-3 font-semibold text-slate-800 dark:text-white">{item.doc_no}</td>
                           <td className="px-4 py-3">
                             <div className="flex flex-col">
@@ -242,6 +294,7 @@ export default function DailyReportPage() {
                               {item.status}
                             </span>
                           </td>
+                          <td className="px-4 py-3 text-slate-500">{item.sent_start || "-"}</td>
                           <td className="px-4 py-3 text-slate-500">{item.job_code || "-"}</td>
                           <td className="px-4 py-3 text-center">
                             {item.imei ? (

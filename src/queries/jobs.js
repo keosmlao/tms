@@ -125,6 +125,77 @@ async function getJobs(session) {
   );
 }
 
+/**
+ * ຍ້າຍ "ວັນນັດ" ຂອງບິນໄປຕາມວັນຈັດສົ່ງຂອງຖ້ຽວ ເມື່ອຖ້ຽວຖືກຈັດໄວ້ວັນຫຼັງກວ່າວັນນັດເດີມ.
+ *
+ * ຮ່າງຖ້ຽວ = ວັນ × ຮອບ × ສາຍ. ຖ້ຽວຖືທັງສາມ (ບວກສາຂາ) ຢູ່ແລ້ວ ບິນທີ່ຍັງບໍ່ເຄີຍ
+ * ຖືກນັດຈຶ່ງໄດ້ຮັບຄ່າເຫຼົ່ານີ້ຈາກການຖືກໃສ່ຖ້ຽວ ໂດຍຜູ້ຈັດຖ້ຽວບໍ່ຕ້ອງໄປນັດເທື່ອລະບິນ.
+ *
+ * ⚠️ ວັນນັດ ຍ້າຍໄປໜ້າໄດ້ຢ່າງດຽວ (GREATEST) ບໍ່ຖອຍຫຼັງ:
+ *   - ຖ້ຽວທີ່ຈັດໄວ້ວັນຫຼັງ = ການເລື່ອນນັດຈິງ ວັນນັດຕ້ອງຕາມໄປ. ຂອງເກົ່າໃຊ້
+ *     COALESCE(ຂອງເກົ່າ, ຂອງໃໝ່) ຈຶ່ງປະວັນນັດຄ້າງຢູ່ວັນເກົ່າ ເກີດອາການ
+ *     "ຈັດຖ້ຽວລ່ວງໜ້າ ແລ້ວບິນກາຍເປັນຄ້າງສົ່ງ" — ຖ້ຽວນັດວັນ 20 ແຕ່ບິນຍັງຖືວັນນັດ
+ *     ວັນ 15 ຈຶ່ງອ່ານເປັນ "ເລີຍນັດ" ຕັ້ງແຕ່ວັນ 16 ທັງທີ່ຍັງບໍ່ຮອດວັນອອກລົດ ແລະ
+ *     ຊັ້ນເວລານຳສົ່ງ "ວັນນັດ >48h" ນັບເປັນສົ່ງຊ້າແບບບໍ່ຈິງ.
+ *   - ຖ້ຽວທີ່ອອກກ່ອນວັນນັດ ບໍ່ຄວນລົບຄຳໝັ້ນສັນຍາທີ່ໃຫ້ລູກຄ້າໄວ້ ຈຶ່ງປະວັນນັດເດີມ.
+ *
+ * ທຸກຄັ້ງທີ່ວັນນັດຖືກຍ້າຍຈິງ ຈະບັນທຶກລົງ odg_tms_pending_bill_history ຈຶ່ງຍັງ
+ * ນັບເປັນ "ການເລື່ອນນັດ" ໃນ KPI ໄດ້ຢູ່ (reschedule_count) ບໍ່ແມ່ນລຶບຮ່ອງຮອຍ.
+ * ສ່ວນເສັ້ນທາງ/ຮອບ/ສາຂາ ຍັງຕື່ມສະເພາະຊ່ອງວ່າງຄືເກົ່າ.
+ */
+async function syncBillScheduleToTrip(client, { billNos, tripDay, routeCode, roundCode, branchCode, user }) {
+  const bills = (billNos ?? []).filter(Boolean);
+  if (bills.length === 0 || !tripDay) return;
+
+  // ອ່ານວັນນັດປັດຈຸບັນກ່ອນ ເພື່ອຮູ້ວ່າແຖວໃດຖືກຍ້າຍຈິງ — ຈຳເປັນເພາະ
+  // ON CONFLICT DO UPDATE … RETURNING ຄືນໃຫ້ແຕ່ຄ່າໃໝ່ ບອກຄ່າເກົ່າບໍ່ໄດ້.
+  const before = await client.query(
+    `SELECT bill_no, to_char(scheduled_date,'YYYY-MM-DD') AS scheduled_date
+     FROM public.odg_tms_pending_bill WHERE bill_no = ANY($1::varchar[])`,
+    [bills]
+  );
+  const previous = new Map(before.rows.map((r) => [r.bill_no, r.scheduled_date]));
+
+  const after = await client.query(
+    `INSERT INTO public.odg_tms_pending_bill
+       (bill_no, scheduled_date, delivery_route_code, delivery_round_code, transport_code, updated_by, updated_at)
+     SELECT b.bill_no, $2::date, $3, $4, $5, $6, LOCALTIMESTAMP(0)
+     FROM unnest($1::varchar[]) AS b(bill_no)
+     ON CONFLICT (bill_no) DO UPDATE SET
+       scheduled_date = GREATEST(
+         COALESCE(public.odg_tms_pending_bill.scheduled_date, EXCLUDED.scheduled_date),
+         EXCLUDED.scheduled_date
+       ),
+       delivery_route_code = COALESCE(NULLIF(TRIM(public.odg_tms_pending_bill.delivery_route_code), ''), EXCLUDED.delivery_route_code),
+       delivery_round_code = COALESCE(NULLIF(TRIM(public.odg_tms_pending_bill.delivery_round_code), ''), EXCLUDED.delivery_round_code),
+       transport_code = COALESCE(NULLIF(TRIM(public.odg_tms_pending_bill.transport_code), ''), EXCLUDED.transport_code),
+       updated_by = EXCLUDED.updated_by,
+       updated_at = LOCALTIMESTAMP(0)
+     RETURNING bill_no, to_char(scheduled_date,'YYYY-MM-DD') AS scheduled_date`,
+    [bills, tripDay, routeCode ?? null, roundCode ?? null, branchCode || null, user ?? null]
+  );
+
+  // ບັນທຶກປະຫວັດສະເພາະບິນທີ່ວັນນັດຂະຫຍັບຈິງ — ຖ້າຂຽນທຸກບິນທຸກຄັ້ງ
+  // reschedule_count ໃນລາຍງານປະສິດທິພາບຈະພອງຂຶ້ນທັງທີ່ບໍ່ມີການເລື່ອນ.
+  const moved = after.rows.filter(
+    (row) => previous.has(row.bill_no) && previous.get(row.bill_no) !== row.scheduled_date
+  );
+  if (moved.length === 0) return;
+  try {
+    await client.query(
+      `INSERT INTO public.odg_tms_pending_bill_history
+         (bill_no, scheduled_date, remark, action_status, delivery_route_code, delivery_round_code, transport_code, planned_lat, planned_lng, changed_by)
+       SELECT bill_no, scheduled_date, remark, action_status, delivery_route_code, delivery_round_code, transport_code, planned_lat, planned_lng, updated_by
+       FROM public.odg_tms_pending_bill
+       WHERE bill_no = ANY($1::varchar[])`,
+      [moved.map((row) => row.bill_no)]
+    );
+  } catch (err) {
+    // ປະຫວັດເປັນ audit — ຢ່າໃຫ້ລົ້ມການຈັດຖ້ຽວ
+    console.error("pending_bill history insert failed (trip schedule sync):", err);
+  }
+}
+
 async function createJob(session, data) {
   // Lazy-require to avoid circular dependencies
   const { getDispatchDriverByCode } = require("./master-data");
@@ -372,32 +443,14 @@ async function createJob(session, data) {
         [billNos]
       );
 
-      // ຮ່າງຖ້ຽວ = ວັນ × ຮອບ × ສາຍ. The trip already holds all three (plus the
-      // branch), so a bill that was never scheduled inherits them simply by
-      // being put on the trip — the dispatcher no longer has to schedule each
-      // bill on a separate screen before a trip can be built. Bills that were
-      // already scheduled keep their own values: only the blanks are filled.
-      await client.query(
-        `INSERT INTO public.odg_tms_pending_bill
-           (bill_no, scheduled_date, delivery_route_code, delivery_round_code, transport_code, updated_by, updated_at)
-         SELECT b.bill_no, $2::date, $3, $4, $5, $6, LOCALTIMESTAMP(0)
-         FROM unnest($1::varchar[]) AS b(bill_no)
-         ON CONFLICT (bill_no) DO UPDATE SET
-           scheduled_date = COALESCE(public.odg_tms_pending_bill.scheduled_date, EXCLUDED.scheduled_date),
-           delivery_route_code = COALESCE(NULLIF(TRIM(public.odg_tms_pending_bill.delivery_route_code), ''), EXCLUDED.delivery_route_code),
-           delivery_round_code = COALESCE(NULLIF(TRIM(public.odg_tms_pending_bill.delivery_round_code), ''), EXCLUDED.delivery_round_code),
-           transport_code = COALESCE(NULLIF(TRIM(public.odg_tms_pending_bill.transport_code), ''), EXCLUDED.transport_code),
-           updated_by = EXCLUDED.updated_by,
-           updated_at = LOCALTIMESTAMP(0)`,
-        [
-          billNos,
-          fixedDateLog,
-          deliveryRouteCode,
-          deliveryRoundCode,
-          originBranch || null,
-          session.usercode,
-        ]
-      );
+      await syncBillScheduleToTrip(client, {
+        billNos,
+        tripDay: fixedDateLog,
+        routeCode: deliveryRouteCode,
+        roundCode: deliveryRoundCode,
+        branchCode: originBranch,
+        user: session.usercode,
+      });
     }
     await client.query("DELETE FROM public.odg_tms_listbill_draft WHERE user_create=$1", [session.usercode]);
     await client.query("COMMIT");
@@ -480,6 +533,9 @@ async function addBillsToJob(docNo, bills) {
     `SELECT doc_no, to_char(doc_date,'YYYY-MM-DD') as doc_date,
             to_char(date_logistic,'YYYY-MM-DD') as date_logistic,
             car, driver,
+            COALESCE(delivery_route_code, '') as delivery_route_code,
+            COALESCE(delivery_round_code, '') as delivery_round_code,
+            COALESCE(origin_transport_code, '') as origin_transport_code,
             COALESCE(approve_status, 0) as approve_status,
             COALESCE(job_status, 0) as job_status
      FROM odg_tms
@@ -647,6 +703,16 @@ async function addBillsToJob(docNo, bills) {
       const { syncCodAmounts } = require("./cod");
       await syncCodAmounts(codBillNos, client);
     }
+
+    // ບິນທີ່ຫາກໍຖືກໃສ່ຖ້ຽວ ຕ້ອງຮັບວັນນັດຂອງຖ້ຽວຄືກັນກັບຕອນສ້າງຖ້ຽວ
+    await syncBillScheduleToTrip(client, {
+      billNos: codBillNos,
+      tripDay: job.date_logistic,
+      routeCode: job.delivery_route_code || null,
+      roundCode: job.delivery_round_code || null,
+      branchCode: job.origin_transport_code,
+      user: null,
+    });
 
     // Refresh the bill count cached on the job header so list pages show it.
     await client.query(
@@ -1185,6 +1251,15 @@ async function updateJob(session, docNo, data) {
         const { syncCodAmounts } = require("./cod");
         await syncCodAmounts(codBillNos, client);
       }
+      // ຜູ້ຈັດຖ້ຽວເລື່ອນວັນຂອງຖ້ຽວໄດ້ຢູ່ນີ້ — ວັນນັດຂອງບິນຕ້ອງຕາມໄປ
+      await syncBillScheduleToTrip(client, {
+        billNos: codBillNos,
+        tripDay: fixedDateLog,
+        routeCode: deliveryRouteCode,
+        roundCode: deliveryRoundCode,
+        branchCode: null,
+        user: session.usercode,
+      });
     }
 
     // Workers
@@ -2086,6 +2161,7 @@ async function reclassifyDeliveredBillToBranch(session, docNo, billNo, forwardTr
 }
 
 module.exports = {
+
   getJobs,
   createJob,
   updateJob,

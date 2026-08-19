@@ -18,6 +18,7 @@ import {
   sendBillContactLine as svcSendBillContactLine,
   getBillProducts as svcGetBillProducts,
   getBillsWaitingSent as svcGetBillsWaitingSent,
+  getDispatchedBillsSummary as svcGetDispatchedBillsSummary,
   getBillsWaitingSentDetails as svcGetBillsWaitingSentDetails,
   getBillsInProgress as svcGetBillsInProgress,
   getBillCompleteList as svcGetBillCompleteList,
@@ -260,6 +261,12 @@ export async function sendBillContactLine(
 export async function getBillsWaitingSent() {
   const s = await requireSession();
   return svcGetBillsWaitingSent(s);
+}
+
+// ບິນທີ່ຈັດຖ້ຽວແລ້ວແຕ່ຍັງບໍ່ຮອດມືລູກຄ້າ — ຊ່ອງທີ່ບໍ່ຢູ່ໃນ "ຄ້າງສົ່ງ" ແລະ ບໍ່ຢູ່ໃນ "ສົ່ງແລ້ວ".
+export async function getDispatchedBillsSummary() {
+  const s = await requireSession();
+  return svcGetDispatchedBillsSummary(s);
 }
 
 export async function getBillsWaitingSentDetails(docNo: string) {

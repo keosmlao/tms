@@ -1734,8 +1734,64 @@ async function getBillProducts(docNo) {
   return getCustomBillProducts(docNo);
 }
 
+/**
+ * ບິນທີ່ "ຈັດຖ້ຽວແລ້ວ ແຕ່ຍັງບໍ່ຮອດມືລູກຄ້າ".
+ *
+ * ຊ່ອງນີ້ເຄີຍເປັນຊ່ອງມືດ: ພໍບິນຖືກໃສ່ຖ້ຽວ ERP ຈະຕັ້ງ check_status=1 ບິນຈຶ່ງ
+ * ອອກຈາກ getBillsPending ທັນທີ ໃນ "ວັນທີ່ຈັດຖ້ຽວ" ບໍ່ແມ່ນວັນທີ່ສົ່ງຈິງ. ຖ້າ
+ * ຈັດຖ້ຽວລ່ວງໜ້າ 3 ມື້ ບິນຈະບໍ່ປາກົດຢູ່ຄິວໃດເລີຍເປັນເວລາ 3 ມື້ ທັງທີ່ຍັງບໍ່ໄດ້ສົ່ງ
+ * — ໜ້າ /bills-pending ຈຶ່ງລາຍງານ "ຄ້າງສົ່ງ" ໜ້ອຍກວ່າ "ຄົງເຫຼືອ" ຂອງລາຍງານ
+ * ປະສິດທິພາບການຈັດສົ່ງ (ເບິ່ງ getOutstandingBillNos ທີ່ລວມສອງຊຸດເຂົ້າກັນ).
+ *
+ * ຟັງຊັນນີ້ຄືນຊຸດທີ່ຫາຍໄປນັ້ນ ຈຶ່ງໄດ້ສົມຜົນ:
+ *   ຄ້າງສົ່ງ (getBillsPending) + ຈັດຖ້ຽວແລ້ວລໍສົ່ງ (ຢູ່ນີ້) = ຄົງເຫຼືອ
+ *
+ * ນິຍາມ "ຖ້ຽວທີ່ຍັງບໍ່ຈົບ" ຕ້ອງກົງກັບ getOutstandingBillNos ແປະໆ.
+ */
+async function getDispatchedBillsSummary(session) {
+  const scope = getBranchScope(session);
+  const { getLaoToday } = require("../lib/lao-date");
+  const laoToday = getLaoToday();
+  const branchSql = scope.scoped ? scope.branchListSql : deliveryBranchListSql();
+
+  const rows = await query(
+    `SELECT
+       COALESCE(NULLIF(TRIM(pb.transport_code), ''), NULLIF(TRIM(s.transport_code), ''), '') AS branch_code,
+       COUNT(DISTINCT d.bill_no)::int AS bills,
+       COUNT(DISTINCT d.bill_no) FILTER (WHERE j.date_logistic::date > $1::date)::int AS scheduled_ahead,
+       COUNT(DISTINCT d.bill_no) FILTER (WHERE j.date_logistic::date = $1::date)::int AS due_today,
+       COUNT(DISTINCT d.bill_no) FILTER (WHERE j.date_logistic::date < $1::date)::int AS overdue
+     FROM public.odg_tms_detail d
+     JOIN public.odg_tms j ON j.doc_no = d.doc_no
+     LEFT JOIN public.ic_trans_shipment s ON s.doc_no = d.bill_no
+     LEFT JOIN public.odg_tms_pending_bill pb ON pb.bill_no = d.bill_no
+     WHERE COALESCE(d.status, 0) NOT IN (1, 2)
+       AND COALESCE(j.approve_status, 0) = 1
+       AND COALESCE(j.job_status, 0) <> 4
+       AND ${getFixedYearSqlFilter("d.doc_date")}
+       AND COALESCE(NULLIF(TRIM(pb.transport_code), ''), NULLIF(TRIM(s.transport_code), ''), '') IN (${branchSql})
+     GROUP BY 1`,
+    [laoToday]
+  );
+
+  const totals = rows.reduce(
+    (acc, r) => {
+      acc.bills += Number(r.bills) || 0;
+      acc.scheduled_ahead += Number(r.scheduled_ahead) || 0;
+      acc.due_today += Number(r.due_today) || 0;
+      acc.overdue += Number(r.overdue) || 0;
+      return acc;
+    },
+    { bills: 0, scheduled_ahead: 0, due_today: 0, overdue: 0 }
+  );
+  return { totals, byBranch: rows };
+}
+
 async function getBillsWaitingSent(session) {
   const scope = getBranchScope(session);
+  const { getLaoToday } = require("../lib/lao-date");
+  // ວັນນີ້ຕາມໂມງລາວ — ບໍ່ເອົາຈາກໂມງເຄື່ອງ/UTC (ເບິ່ງ AGENTS.md)
+  const laoToday = getLaoToday();
   await ensureJobListIndexes();
   const { ensureDeliveryRouteSchema } = require("./delivery-route");
   const { ensureDeliveryRoundSchema } = require("./delivery-round");
@@ -1785,7 +1841,11 @@ async function getBillsWaitingSent(session) {
       COALESCE(rt.name, '') as delivery_route_name,
       COALESCE(a.delivery_round_code, '') as delivery_round_code,
       COALESCE(dr.name, '') as delivery_round_name,
-      COALESCE(dr.time_label, '') as delivery_round_time_label
+      COALESCE(dr.time_label, '') as delivery_round_time_label,
+      -- ຄິວນີ້ບໍ່ເຄີຍກັ່ນຕອງວັນທີ ຈຶ່ງເອົາຖ້ຽວທີ່ຈັດໄວ້ລ່ວງໜ້າ (ຍັງບໍ່ຮອດວັນອອກລົດ)
+      -- ໄປປົນກັບຖ້ຽວທີ່ເລີຍກຳນົດແລ້ວ ເຮັດໃຫ້ອ່ານເປັນ "ຄ້າງສົ່ງ" ທັງໝົດ.
+      -- ບວກ = ຍັງເຫຼືອອີກ n ມື້, 0 = ວັນນີ້, ລົບ = ເລີຍກຳນົດ n ມື້.
+      (a.date_logistic::date - $1::date)::int as days_to_logistic
     FROM odg_tms a
     INNER JOIN bill_summary bs ON bs.doc_no = a.doc_no
     LEFT JOIN public.odg_tms_car b ON b.code = a.car
@@ -1799,7 +1859,8 @@ async function getBillsWaitingSent(session) {
       AND COALESCE(a.job_status, 0) in (1,0)
       AND ${getFixedYearSqlFilter("a.doc_date")}
       ${branchFilterJob(scope, "a")}
-    ORDER BY a.date_logistic ASC, a.create_date_time_now ASC, a.doc_no ASC`
+    ORDER BY a.date_logistic ASC, a.create_date_time_now ASC, a.doc_no ASC`,
+    [laoToday]
   );
 }
 
@@ -2272,6 +2333,7 @@ module.exports = {
   updateBillTransport,
   getBillProducts,
   getBillsWaitingSent,
+  getDispatchedBillsSummary,
   getBillsWaitingSentDetails,
   getBillsInProgress,
   getBillCompleteList,

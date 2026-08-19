@@ -604,6 +604,13 @@ export default function BillsPendingClient() {
   const [updating, setUpdating] = useState(false);
   const [tick, setTick] = useState(0);
   const [sortOrder, setSortOrder] = useState<"asc" | "desc">("asc");
+  // ບິນທີ່ຈັດຖ້ຽວແລ້ວຫາຍອອກຈາກລາຍການນີ້ຕັ້ງແຕ່ວັນຈັດຖ້ຽວ (ERP ຕັ້ງ check_status=1)
+  // ບໍ່ແມ່ນວັນສົ່ງ — ຈັດຖ້ຽວລ່ວງໜ້າຈຶ່ງເຮັດໃຫ້ຍອດຄ້າງເບິ່ງຄືຫຼຸດລົງທັງທີ່ຍັງບໍ່ໄດ້ສົ່ງ.
+  // ສະແດງຈຳນວນນັ້ນໄວ້ຂ້າງໆ ພ້ອມທາງລັດໄປຄິວລໍຖ້າຈັດສົ່ງ.
+  const [dispatched, setDispatched] = useState<{
+    bills: number;
+    scheduled_ahead: number;
+  } | null>(null);
   const [productsByDoc, setProductsByDoc] = useState<Record<string, Product[]>>({});
   const [loadingDoc, setLoadingDoc] = useState<string | null>(null);
   const [scheduleBill, setScheduleBill] = useState<{ billNo: string; defaults: PendingScheduleDefaults } | null>(null);
@@ -1305,6 +1312,14 @@ export default function BillsPendingClient() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [bills]);
 
+  useEffect(() => {
+    void (Actions.getDispatchedBillsSummary() as Promise<{
+      totals: { bills: number; scheduled_ahead: number };
+    }>)
+      .then((data) => setDispatched(data?.totals ?? null))
+      .catch(console.error);
+  }, []);
+
   return (
     <div className="space-y-5">
       {/* ສາຍທີ່ແນະນຳ + ແຜນທີ່ — ຕອບ "ບິນນີ້ເຂົ້າສາຍໃດ" ແລະ "ມັນຢູ່ໃສ"
@@ -1328,6 +1343,16 @@ export default function BillsPendingClient() {
             <span className="rounded-full bg-slate-500/10 px-2.5 py-1 text-[11px] font-semibold text-slate-600 dark:text-slate-300 whitespace-nowrap">
               ພົບ <span className="font-bold text-teal-600 dark:text-teal-400">{filtered.length}</span> ບິນ
             </span>
+            {dispatched && dispatched.bills > 0 && (
+              <a
+                href="/bills-waitingsent"
+                title="ບິນເຫຼົ່ານີ້ຖືກຈັດຖ້ຽວແລ້ວ ຈຶ່ງບໍ່ຢູ່ໃນລາຍການນີ້ ແຕ່ຍັງບໍ່ຮອດມືລູກຄ້າ"
+                className="rounded-full bg-sky-500/10 px-2.5 py-1 text-[11px] font-semibold text-sky-600 dark:text-sky-400 whitespace-nowrap hover:bg-sky-500/20 transition-colors"
+              >
+                ຈັດຖ້ຽວແລ້ວ ລໍສົ່ງ <span className="font-bold">{dispatched.bills}</span> ບິນ
+                {dispatched.scheduled_ahead > 0 && ` (ລ່ວງໜ້າ ${dispatched.scheduled_ahead})`}
+              </a>
+            )}
             <button
               type="button"
               onClick={() => setSortOrder(sortOrder === "asc" ? "desc" : "asc")}
