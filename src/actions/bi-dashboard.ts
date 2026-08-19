@@ -7,6 +7,7 @@ import { getDeliveryPerformance } from "@/queries/reports.js";
 import { getSettings } from "@/queries/settings.js";
 import {
   getExceptions,
+  listTransportCars,
   getFuelEfficiency,
   getMonthSnapshot,
   getOnTimeTrend,
@@ -53,6 +54,9 @@ export type BiMonthSnapshot = {
     amount: number;
     liters: number;
     suspect_rows: number;
+    /** ນ້ຳມັນຂອງພາຫະນະນອກກອງລົດຂົນສົ່ງ — ບໍ່ໄດ້ນັບເຂົ້າ amount */
+    excluded_amount: number;
+    excluded_refills: number;
     by_type: Array<{ fuel_type: string; refills: number; amount: number }>;
   };
   km: number;
@@ -113,6 +117,14 @@ export type BiLoad = {
   bands: Array<{ label: string; trips: number }>;
 } | null;
 
+export type BiCar = {
+  code: string;
+  name: string;
+  transport_code: string;
+  car_type: string;
+  trips: number;
+};
+
 export type BiTargets = {
   on_time_rate: number | null;
   avg_delivery_minutes: number | null;
@@ -121,6 +133,9 @@ export type BiTargets = {
 
 export type BiDashboard = {
   month: string;
+  /** ລົດທີ່ກຳລັງກັ່ນຕອງຢູ່ — ຫວ່າງ = ທຸກຄັນ */
+  carCode: string;
+  cars: BiCar[];
   current: BiMonthSnapshot;
   previous: BiMonthSnapshot;
   onTimeTrend: Array<{ month: string; drops: number; on_time: number; on_time_pct: number }>;
@@ -140,8 +155,12 @@ export type BiDashboard = {
  * ໃຊ້ເວລາ ~12 ວິນາທີ ຖ້າມັດຮວມມາອັນດຽວ ໜ້າຈໍຈະຂາວທັງໜ້າ 12 ວິນາທີ.
  * ໜ້າຈໍຈຶ່ງເອີ້ນ getBiDeliveryStatus() ແຍກຕ່າງຫາກ ແລ້ວຕື່ມພາກ ② ພາຍຫຼັງ.
  */
-export async function getBiDashboard(month: string): Promise<BiDashboard> {
+export async function getBiDashboard(
+  month: string,
+  carCode = ""
+): Promise<BiDashboard> {
   const session = await requireSession();
+  const car = String(carCode ?? "").trim();
   const prev = previousMonth(month);
   const monthStart = `${month}-01`;
   // buildUtilizationReport ຮັບຊ່ວງແບບປິດທ້າຍ (dateTo ລວມ) ຈຶ່ງຕ້ອງລົບ 1 ວັນ
@@ -158,17 +177,19 @@ export async function getBiDashboard(month: string): Promise<BiDashboard> {
     utilization,
     fuelByCar,
     exceptions,
+    cars,
     settings,
   ] = await Promise.all([
-    getMonthSnapshot(session, month) as Promise<BiMonthSnapshot>,
-    getMonthSnapshot(session, prev) as Promise<BiMonthSnapshot>,
-    getOnTimeTrend(session, year) as Promise<BiDashboard["onTimeTrend"]>,
-    getTripsByWeekday(session, month) as Promise<BiDashboard["tripsByWeekday"]>,
-    getRouteAnalysis(session, month, 8) as Promise<BiRoute[]>,
-    getVehicleUtilization(session, month) as Promise<BiVehicles>,
-    buildUtilizationReport(monthStart, monthEnd),
-    getFuelEfficiency(session, month, 12) as Promise<BiFuelCar[]>,
-    getExceptions(session, month) as Promise<BiExceptions>,
+    getMonthSnapshot(session, month, car) as Promise<BiMonthSnapshot>,
+    getMonthSnapshot(session, prev, car) as Promise<BiMonthSnapshot>,
+    getOnTimeTrend(session, year, car) as Promise<BiDashboard["onTimeTrend"]>,
+    getTripsByWeekday(session, month, car) as Promise<BiDashboard["tripsByWeekday"]>,
+    getRouteAnalysis(session, month, 8, car) as Promise<BiRoute[]>,
+    getVehicleUtilization(session, month, car) as Promise<BiVehicles>,
+    buildUtilizationReport(monthStart, monthEnd, car),
+    getFuelEfficiency(session, month, 12, car) as Promise<BiFuelCar[]>,
+    getExceptions(session, month, car) as Promise<BiExceptions>,
+    listTransportCars(session, month) as Promise<BiCar[]>,
     getSettings([
       "kpi.target_on_time_rate",
       "kpi.target_avg_delivery_minutes",
@@ -195,6 +216,8 @@ export async function getBiDashboard(month: string): Promise<BiDashboard> {
 
   return {
     month,
+    carCode: car,
+    cars,
     current,
     previous: previousSnapshot,
     onTimeTrend,

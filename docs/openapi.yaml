@@ -973,7 +973,7 @@ components:
         fuel_type:
           type: string
           nullable: true
-          enum: [ptt_voucher, fuel_pass, cash, other]
+          enum: [ptt_voucher, odien_station, fuel_pass, cash, other]
           description: >-
             ປະເພດການເຕີມນ້ຳມັນ — ຂຽນບົງ PTT / ນ້ຳມັນພັສ / ຈ່າຍເງິນສົດ / ອື່ນໆ.
             Optional; omitted (or null) by older app builds and stored as NULL.

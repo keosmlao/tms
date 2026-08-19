@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   FUEL_PAYMENT_TYPES,
+  FUEL_PAYMENT_TYPE_CODES,
   fuelPaymentTypeLabel,
   normalizeFuelPaymentType,
 } from "./fuel-payment-type";
@@ -32,6 +33,16 @@ describe("fuelPaymentTypeLabel", () => {
   it("returns the Lao label of a known code", () => {
     expect(fuelPaymentTypeLabel("cash")).toBe("ຈ່າຍເງິນສົດ");
     expect(fuelPaymentTypeLabel("fuel_pass")).toBe("ນ້ຳມັນພັສ");
+    expect(fuelPaymentTypeLabel("odien_station")).toBe("ປ້ຳໂອດ້ຽນ");
+  });
+
+  // ທຸກ code ຕ້ອງມີ label ຂອງມັນເອງ — ຖ້າເພີ່ມ code ໃສ່ CODES ແຕ່ລືມໃສ່
+  // FUEL_PAYMENT_TYPES ໜ້າຈໍຈະສະແດງ "-" ແທນຊື່ ໂດຍບໍ່ມີໃຜຮູ້.
+  it("gives every declared code a label", () => {
+    for (const code of FUEL_PAYMENT_TYPE_CODES) {
+      expect(fuelPaymentTypeLabel(code)).not.toBe("-");
+    }
+    expect(FUEL_PAYMENT_TYPES.length).toBe(FUEL_PAYMENT_TYPE_CODES.length);
   });
 
   it("returns a dash for legacy rows with no type", () => {

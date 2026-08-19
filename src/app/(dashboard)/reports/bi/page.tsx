@@ -27,6 +27,7 @@ import {
   getFixedTodayMonth,
 } from "@/lib/fixed-year";
 import { deliveryPerfRates } from "@/lib/delivery-performance";
+import { fuelPaymentTypeLabel } from "@/lib/fuel-payment-type";
 import type { BiDashboard } from "@/actions/bi-dashboard";
 import type { DeliveryPerfReport } from "@/lib/delivery-performance";
 
@@ -410,6 +411,7 @@ const FLOW = [
 
 export default function BiDashboardPage() {
   const [month, setMonth] = useState(getFixedTodayMonth());
+  const [carCode, setCarCode] = useState("");
   const [data, setData] = useState<BiDashboard | null>(null);
   const [status, setStatus] = useState<DeliveryPerfReport | null>(null);
   const [loading, setLoading] = useState(false);
@@ -419,13 +421,13 @@ export default function BiDashboardPage() {
   // ພາກ ② ຖາມແຍກ ເພາະ query ຂອງມັນໃຊ້ເວລາ ~12 ວິນາທີ. Server action ແລ່ນ
   // ເທື່ອລະອັນຢູ່ແລ້ວ ຈຶ່ງຍິງອັນໄວກ່ອນ — ໜ້າຈໍຂຶ້ນພາຍໃນ 1 ວິນາທີ ແລ້ວພາກ ②
   // ຈຶ່ງຕື່ມເຂົ້າມາທີ່ຫຼັງ ແທນທີ່ຈະຄ້າງຂາວທັງໜ້າ.
-  const load = useCallback(async (target: string) => {
+  const load = useCallback(async (target: string, car: string) => {
     setLoading(true);
-    setStatusLoading(true);
+    setStatusLoading(!car);
     setError(null);
     setStatus(null);
     try {
-      setData((await Actions.getBiDashboard(target)) as BiDashboard);
+      setData((await Actions.getBiDashboard(target, car)) as BiDashboard);
     } catch (e) {
       console.error(e);
       setError(e instanceof Error ? e.message : "ໂຫຼດຂໍ້ມູນບໍ່ສຳເລັດ");
@@ -434,6 +436,9 @@ export default function BiDashboardPage() {
     } finally {
       setLoading(false);
     }
+    // ພາກ ② ນັບຢູ່ລະດັບບິນ ຈຶ່ງແຍກຕາມລົດບໍ່ໄດ້ — ເມື່ອກັ່ນຕອງລົດຄັນດຽວ ຈຶ່ງ
+    // ບໍ່ຍິງມັນເລີຍ (ປະຢັດ ~12 ວິນາທີ) ແລະ ໜ້າຈໍບອກແທນວ່າເປັນຫຍັງ.
+    if (car) return;
     try {
       setStatus((await Actions.getBiDeliveryStatus(target)) as DeliveryPerfReport);
     } catch (e) {
@@ -444,8 +449,8 @@ export default function BiDashboardPage() {
   }, []);
 
   useEffect(() => {
-    void load(month);
-  }, [load, month]);
+    void load(month, carCode);
+  }, [load, month, carCode]);
 
   const rates = useMemo(
     () => (status ? deliveryPerfRates(status.overall) : null),
@@ -453,6 +458,10 @@ export default function BiDashboardPage() {
   );
 
   const months = useMemo(() => monthOptions(), []);
+  const selectedCar = useMemo(
+    () => data?.cars.find((c) => c.code === data.carCode) ?? null,
+    [data]
+  );
 
   return (
     <div className="space-y-4">
@@ -467,10 +476,11 @@ export default function BiDashboardPage() {
             </h1>
             <p className="text-[11px] text-slate-400">
               ຕິດຕາມການຂົນສົ່ງຄົບທຸກມິຕິ — {monthText(month)}
+              {selectedCar ? ` · ${selectedCar.name}` : " · ທຸກຄັນ"}
             </p>
           </div>
         </div>
-        <div className="flex items-center gap-2">
+        <div className="flex flex-wrap items-center gap-2">
           <select
             value={month}
             onChange={(e) => setMonth(e.target.value)}
@@ -482,9 +492,32 @@ export default function BiDashboardPage() {
               </option>
             ))}
           </select>
+          <select
+            value={carCode}
+            onChange={(e) => setCarCode(e.target.value)}
+            title="ກັ່ນຕອງທັງໜ້າລົງລົດຄັນດຽວ"
+            className="max-w-[220px] rounded-lg border border-slate-300 bg-white px-2.5 py-1.5 text-xs text-slate-700 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200"
+          >
+            <option value="">ທຸກຄັນ ({data?.cars.length ?? 0} ຄັນ)</option>
+            {(data?.cars ?? []).map((c) => (
+              <option key={c.code} value={c.code}>
+                {c.name}
+                {c.trips > 0 ? ` · ${c.trips} ຖ້ຽວ` : " · ບໍ່ມີຖ້ຽວ"}
+              </option>
+            ))}
+          </select>
+          {carCode && (
+            <button
+              type="button"
+              onClick={() => setCarCode("")}
+              className="rounded-lg border border-slate-300 px-2.5 py-1.5 text-xs font-semibold text-slate-600 hover:bg-slate-50 dark:border-slate-700 dark:text-slate-300 dark:hover:bg-slate-800"
+            >
+              ລ້າງ
+            </button>
+          )}
           <button
             type="button"
-            onClick={() => void load(month)}
+            onClick={() => void load(month, carCode)}
             disabled={loading}
             className="flex items-center gap-1.5 rounded-lg bg-teal-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-teal-700 disabled:opacity-50"
           >
@@ -549,6 +582,9 @@ function DashboardBody({
   const overall = status?.overall ?? null;
   // ເດືອນທີ່ກຳລັງແລ່ນຢູ່ ຍັງບໍ່ຄົບວັນ ຈຶ່ງທຽບກັບເດືອນເຕັມບໍ່ໄດ້ຊື່ໆ
   const isPartialMonth = data.month === getFixedTodayMonth();
+  // ພາກທີ່ນັບຢູ່ລະດັບ "ບິນ" (② ແລະ ອັນດັບໃນ ③) ບໍ່ມີມິຕິລົດ ຈຶ່ງກັ່ນຕອງບໍ່ໄດ້
+  const carFiltered = Boolean(data.carCode);
+  const carName = data.cars.find((c) => c.code === data.carCode)?.name ?? data.carCode;
 
   const statusSlices: Slice[] = overall
     ? [
@@ -559,15 +595,13 @@ function DashboardBody({
       ]
     : [];
 
+  // ຄຳອະທິບາຍປະເພດການເຕີມ ດຶງຈາກ lib/fuel-payment-type.js ບ່ອນດຽວ — ເພີ່ມ
+  // ປະເພດໃໝ່ຢູ່ບ່ອນນັ້ນແລ້ວ ໜ້ານີ້ຂຶ້ນຕາມເອງ ບໍ່ຕ້ອງແກ້ 2 ບ່ອນ.
   const fuelSlices: Slice[] = current.fuel.by_type.map((t, i) => ({
     label:
       t.fuel_type === "unspecified"
         ? "ບໍ່ໄດ້ລະບຸປະເພດ"
-        : t.fuel_type === "ptt_voucher"
-          ? "ບັດ PTT"
-          : t.fuel_type === "other"
-            ? "ອື່ນໆ"
-            : t.fuel_type,
+        : fuelPaymentTypeLabel(t.fuel_type),
     value: t.amount,
     color: [C.good, C.info, C.warn, C.bad][i % 4],
   }));
@@ -746,8 +780,16 @@ function DashboardBody({
               </div>
             </>
           ) : (
-            <div className="flex h-[196px] flex-col items-center justify-center gap-2 text-[11px] text-slate-400">
-              {statusLoading ? (
+            <div className="flex h-[196px] flex-col items-center justify-center gap-2 px-3 text-center text-[11px] text-slate-400">
+              {carFiltered ? (
+                <>
+                  <FaTruck className="text-base" />
+                  <span>
+                    ພາກນີ້ນັບຢູ່ລະດັບ <strong>ບິນ</strong> (ຍົກມາ / ເປີດໃໝ່ / ຄ້າງ) ຊຶ່ງບໍ່ຜູກກັບລົດ
+                    ຄັນໃດຄັນໜຶ່ງ — ບິນດຽວອາດຖືກສົ່ງຫຼາຍຖ້ຽວ ຫຼາຍຄັນ. ເລືອກ “ທຸກຄັນ” ເພື່ອເບິ່ງພາກນີ້.
+                  </span>
+                </>
+              ) : statusLoading ? (
                 <>
                   <FaSpinner className="animate-spin text-base" />
                   ກຳລັງຄິດຍອດບິນທັງເດືອນ… (ໃຊ້ເວລາປະມານ 10 ວິນາທີ)
@@ -780,7 +822,9 @@ function DashboardBody({
             </p>
             <ul className="space-y-1.5">
               {branchBars.length === 0 && (
-                <li className="text-[11px] text-slate-400">{statusLoading ? "ກຳລັງໂຫຼດ…" : "ບໍ່ມີຂໍ້ມູນ"}</li>
+                <li className="text-[11px] text-slate-400">
+                  {carFiltered ? "ບໍ່ແຍກຕາມລົດໄດ້ — ນັບຢູ່ລະດັບບິນ" : statusLoading ? "ກຳລັງໂຫຼດ…" : "ບໍ່ມີຂໍ້ມູນ"}
+                </li>
               )}
               {branchBars.map((b) => (
                 <BarRow key={b.label} label={b.label} value={b.value} max={100} display={pct(b.value)} color={C.good} />
@@ -793,7 +837,9 @@ function DashboardBody({
             </p>
             <ul className="space-y-1.5">
               {deptBars.length === 0 && (
-                <li className="text-[11px] text-slate-400">{statusLoading ? "ກຳລັງໂຫຼດ…" : "ບໍ່ມີຂໍ້ມູນ"}</li>
+                <li className="text-[11px] text-slate-400">
+                  {carFiltered ? "ບໍ່ແຍກຕາມລົດໄດ້ — ນັບຢູ່ລະດັບບິນ" : statusLoading ? "ກຳລັງໂຫຼດ…" : "ບໍ່ມີຂໍ້ມູນ"}
+                </li>
               )}
               {deptBars.map((d) => (
                 <BarRow key={d.label} label={d.label} value={d.value} max={100} display={pct(d.value)} color={C.info} />
@@ -892,31 +938,49 @@ function DashboardBody({
 
       <div className="grid gap-4 xl:grid-cols-3">
         {/* ⑤ ການໃຊ້ລົດ */}
-        <Section index={5} title="ການໃຊ້ລົດຂົນສົ່ງ" subtitle="ນັບສະເພາະລົດທີ່ສັງກັດສາຂາຂົນສົ່ງ" icon={<FaTruck />}>
+        <Section
+          index={5}
+          title={carFiltered ? `ການໃຊ້ລົດ · ${carName}` : "ການໃຊ້ລົດຂົນສົ່ງ"}
+          subtitle={carFiltered ? "ສະເພາະຄັນທີ່ເລືອກ" : "ນັບສະເພາະລົດທີ່ສັງກັດສາຂາຂົນສົ່ງ"}
+          icon={<FaTruck />}
+        >
           <div className="grid grid-cols-3 gap-2 text-center text-[11px]">
-            {[
-              { label: "ລົດຂົນສົ່ງ", value: vehicles.total_cars, color: "text-slate-800 dark:text-slate-100" },
-              { label: "ອອກຖ້ຽວ", value: vehicles.used_cars, color: "text-emerald-600 dark:text-emerald-400" },
-              { label: "ບໍ່ໄດ້ໃຊ້", value: vehicles.idle_cars, color: "text-slate-400" },
-            ].map((s) => (
+            {(carFiltered
+              ? [
+                  { label: "ຖ້ຽວ", value: current.trips.trips, unit: "ຖ້ຽວ", color: "text-slate-800 dark:text-slate-100" },
+                  { label: "ວັນທີ່ອອກຖ້ຽວ", value: vehicles.car_days, unit: "ວັນ", color: "text-emerald-600 dark:text-emerald-400" },
+                  { label: "ວັນທີ່ຈອດ", value: Math.max(0, vehicles.days_in_month - vehicles.car_days), unit: "ວັນ", color: "text-slate-400" },
+                ]
+              : [
+                  { label: "ລົດຂົນສົ່ງ", value: vehicles.total_cars, unit: "ຄັນ", color: "text-slate-800 dark:text-slate-100" },
+                  { label: "ອອກຖ້ຽວ", value: vehicles.used_cars, unit: "ຄັນ", color: "text-emerald-600 dark:text-emerald-400" },
+                  { label: "ບໍ່ໄດ້ໃຊ້", value: vehicles.idle_cars, unit: "ຄັນ", color: "text-slate-400" },
+                ]
+            ).map((s) => (
               <div key={s.label} className="rounded-lg bg-slate-50 px-2 py-2 dark:bg-slate-800/70">
                 <p className="text-slate-400">{s.label}</p>
                 <p className={`text-lg font-extrabold tabular-nums ${s.color}`}>{n(s.value)}</p>
-                <p className="text-[9.5px] text-slate-400">ຄັນ</p>
+                <p className="text-[9.5px] text-slate-400">{s.unit}</p>
               </div>
             ))}
           </div>
           <div className="mt-3 flex justify-center">
             <Gauge
               value={vehicles.utilization_pct}
-              caption={`${n(vehicles.car_days)} ວັນ-ຄັນ ທີ່ມີຖ້ຽວ ÷ (${n(vehicles.total_cars)} ຄັນ × ${vehicles.days_in_month} ວັນ)`}
+              caption={
+                carFiltered
+                  ? `${carName} ອອກຖ້ຽວ ${n(vehicles.car_days)} ວັນ ຈາກ ${vehicles.days_in_month} ວັນ`
+                  : `${n(vehicles.car_days)} ວັນ-ຄັນ ທີ່ມີຖ້ຽວ ÷ (${n(vehicles.total_cars)} ຄັນ × ${vehicles.days_in_month} ວັນ)`
+              }
               color={C.info}
             />
           </div>
-          <Note>
-            ບໍ່ນັບພາຫະນະທີ່ບໍ່ແມ່ນລົດຂົນສົ່ງ (ເຊັ່ນ Forklift) ແລະ ລົດທີ່ຕິດ GPS ໄວ້ແຕ່ຍັງບໍ່ໄດ້
-            ຜູກສາຂາຂົນສົ່ງ. ໄລຍະທາງ ແລະ ຕາຕະລາງນ້ຳມັນ ກໍ່ນັບລົດຊຸດດຽວກັນນີ້.
-          </Note>
+          {!carFiltered && (
+            <Note>
+              ບໍ່ນັບພາຫະນະທີ່ບໍ່ແມ່ນລົດຂົນສົ່ງ (ເຊັ່ນ Forklift) ແລະ ລົດທີ່ຕິດ GPS ໄວ້ແຕ່ຍັງບໍ່ໄດ້
+              ຜູກສາຂາຂົນສົ່ງ. ໄລຍະທາງ ແລະ ຕາຕະລາງນ້ຳມັນ ກໍ່ນັບລົດຊຸດດຽວກັນນີ້.
+            </Note>
+          )}
           <div className="mt-2 grid grid-cols-2 gap-2 text-[11px]">
             <div className="rounded-lg bg-slate-50 px-2.5 py-1.5 dark:bg-slate-800/70">
               <p className="text-slate-400">ຄົນຂັບທີ່ອອກຖ້ຽວ</p>
@@ -1017,6 +1081,13 @@ function DashboardBody({
             ບໍ່ໄດ້ລວມຄ່າແຮງຄົນຂັບ, ຄ່າຜ່ານທາງ, ຄ່າສ້ອມແປງ ແລະ ຄ່າຈ້າງລົດນອກ —
             ລະບົບຍັງບໍ່ມີບ່ອນເກັບຄ່າໃຊ້ຈ່າຍເຫຼົ່ານັ້ນ.
           </Note>
+          {current.fuel.excluded_amount > 0 && (
+            <Note>
+              ອີກ <strong>{kip(current.fuel.excluded_amount)} ກີບ</strong> ({n(current.fuel.excluded_refills)} ໃບບິນ)
+              ເປັນນ້ຳມັນຂອງພາຫະນະທີ່ບໍ່ຢູ່ໃນກອງລົດຂົນສົ່ງ — ບໍ່ໄດ້ນັບເຂົ້າຕົວເລກຂ້າງເທິງ.
+              ຖ້າແມ່ນລົດຂົນສົ່ງແທ້ ໃຫ້ໄປຕັ້ງສາຂາໃຫ້ມັນຢູ່ໜ້າຈັດການລົດ ແລ້ວມັນຈະຖືກນັບເອງ.
+            </Note>
+          )}
         </Section>
       </div>
 

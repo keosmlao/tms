@@ -7,6 +7,10 @@
 //   • ໄລຍະທາງ = odg_tms_gps_daily (rollup) ບໍ່ແມ່ນສະແກນ ping ດິບ
 //   • ພື້ນທີ່ບັນທຸກ = buildUtilizationReport() ໃນ actions/trip-volume.ts
 //
+// ທຸກ slice ຮັບ `carCode` ໄດ້ (ຫວ່າງ/null = ທຸກຄັນ) ເພື່ອໃຫ້ໜ້າຈໍກັ່ນຕອງລົງ
+// ລົດຄັນດຽວໄດ້. ຂໍ້ຍົກເວັ້ນມີແຕ່ getDeliveryPerformance() ໃນ reports.js ເພາະ
+// ມັນນັບຢູ່ລະດັບ "ບິນ" ບໍ່ແມ່ນລະດັບ "ຖ້ຽວ" ຈຶ່ງບໍ່ມີມິຕິລົດໃຫ້ກັ່ນຕອງ.
+//
 // ⚠️ ຕົ້ນທຶນ: ລະບົບບັນທຶກສະເພາະ "ຄ່ານ້ຳມັນ" (odg_tms_fuel_log). ຄ່າຄົນຂັບ,
 // ຄ່າຜ່ານທາງ, ຄ່າສ້ອມແປງ ແລະ ຄ່າຈ້າງລົດນອກ ຍັງບໍ່ມີບ່ອນເກັບໃນ TMS ຈຶ່ງບໍ່ໄດ້
 // ຄິດເຂົ້າໃນ "ຕົ້ນທຶນ/ຖ້ຽວ" ແລະ "ຕົ້ນທຶນ/ກມ". ໜ້າຈໍຕ້ອງບອກຂໍ້ຈຳກັດນີ້ໃຫ້ຊັດ.
@@ -20,8 +24,8 @@ const { MIN_PLAUSIBLE_LITERS, MAX_PLAUSIBLE_LITERS } = require("../lib/fuel-sani
 const MAX_TRIP_ODOMETER_KM = 2000;
 
 /**
- * "ລົດຂົນສົ່ງ" — ບ່ອນດຽວທີ່ນິຍາມ ໃຊ້ຮ່ວມກັນທັງ 3 ພາກ (ການໃຊ້ລົດ, ໄລຍະທາງ
- * GPS ແລະ ປະສິດທິພາບນ້ຳມັນ) ເພື່ອໃຫ້ 3 ພາກນັບລົດຊຸດດຽວກັນສະເໝີ.
+ * "ລົດຂົນສົ່ງ" — ບ່ອນດຽວທີ່ນິຍາມ ໃຊ້ຮ່ວມກັນທຸກພາກ (ການໃຊ້ລົດ, ໄລຍະທາງ GPS,
+ * ປະສິດທິພາບນ້ຳມັນ ແລະ ລາຍການໃນ dropdown) ເພື່ອໃຫ້ທຸກພາກນັບລົດຊຸດດຽວກັນ.
  *
  * ຕົວຕັດສິນແມ່ນ transport_code (ສາຂາທີ່ລົດສັງກັດ). odg_tms_car ຍັງເກັບ
  * ພາຫະນະທີ່ບໍ່ແມ່ນລົດຂົນສົ່ງນຳ — Forklift (transport_code = '') ແລະ ລົດທີ່
@@ -31,23 +35,75 @@ const MAX_TRIP_ODOMETER_KM = 2000;
  */
 const IS_TRANSPORT_CAR = `NULLIF(BTRIM(transport_code), '') IS NOT NULL`;
 
-/** ເງື່ອນໄຂເລືອກລົດຂົນສົ່ງ ບວກຂອບເຂດສາຂາຂອງຜູ້ໃຊ້ */
-function transportCarWhere(scope, paramIndex) {
-  return scope.scoped
-    ? `WHERE ${IS_TRANSPORT_CAR} AND transport_code = ANY($${paramIndex})`
-    : `WHERE ${IS_TRANSPORT_CAR}`;
-}
-
 // miles_start / miles_end ເປັນ varchar (ຄົນຂັບພິມເອງ) — ຕັດຕົວອັກສອນອອກກ່ອນ
 // ແປງເປັນຕົວເລກ ບໍ່ດັ່ງນັ້ນ query ລົ້ມທັງອັນຍ້ອນ 1 ແຖວທີ່ມີ "km" ຕິດມາ.
 const odoNum = (col) => `NULLIF(regexp_replace(COALESCE(${col}, ''), '[^0-9.]', '', 'g'), '')::numeric`;
 
 const monthRange = (month) => [`${month}-01`, getNextMonthStart(month)];
 
+/** ຄ່າ carCode ທີ່ໃຊ້ໄດ້ຈິງ ຫຼື null ຖ້າ "ທຸກຄັນ" */
+function cleanCar(carCode) {
+  const value = String(carCode ?? "").trim();
+  return value || null;
+}
+
+/**
+ * ຕົວສ້າງ placeholder ຂອງ query — ຍູ້ຄ່າໃສ່ params ແລ້ວຄືນ `$n`.
+ *
+ * ຂຽນເປັນຕົວຊ່ວຍເພາະແຕ່ລະ slice ມີເງື່ອນໄຂທາງເລືອກ 2 ອັນ (ສາຂາ + ລົດ) —
+ * ຖ້າຂຽນ `$3` ຕາຍຕົວ ການເພີ່ມເງື່ອນໄຂໃໝ່ຈະເລື່ອນເລກຂອງທຸກອັນທີ່ຕາມມາ.
+ */
+function makeParams(initial = []) {
+  const params = [...initial];
+  return {
+    params,
+    add(value) {
+      params.push(value);
+      return `$${params.length}`;
+    },
+  };
+}
+
 /** ຈຳນວນວັນໃນເດືອນ ຄິດດ້ວຍ string ລ້ວນໆ ບໍ່ແຕະ Date ຂອງເຄື່ອງ */
 function daysInMonth(month) {
   const [year, mon] = month.split("-").map(Number);
   return new Date(Date.UTC(year, mon, 0)).getUTCDate();
+}
+
+// ────────────────────────────────────────────────────────────────────────
+// (0) ລາຍການລົດ ສຳລັບ dropdown ກັ່ນຕອງ
+// ────────────────────────────────────────────────────────────────────────
+
+/**
+ * ລົດຂົນສົ່ງທັງໝົດທີ່ຜູ້ໃຊ້ເຫັນໄດ້ ພ້ອມຈຳນວນຖ້ຽວໃນເດືອນທີ່ເລືອກ.
+ * ຈຳນວນຖ້ຽວມີໄວ້ໃຫ້ໜ້າຈໍເອົາລົດທີ່ບໍ່ໄດ້ແລ່ນເດືອນນັ້ນລົງລຸ່ມ.
+ */
+async function listTransportCars(session, month) {
+  const scope = getBranchScope(session);
+  const [start, next] = monthRange(month);
+  const p = makeParams([start, next]);
+  const branchClause = scope.scoped ? `AND c.transport_code = ANY(${p.add(scope.branches)})` : "";
+  const rows = await query(
+    `SELECT c.code,
+       COALESCE(NULLIF(TRIM(c.name_1), ''), c.code) AS name,
+       COALESCE(c.transport_code, '') AS transport_code,
+       COALESCE(NULLIF(TRIM(c.car_type), ''), '') AS car_type,
+       (SELECT COUNT(*) FROM public.odg_tms a
+         WHERE a.car = c.code
+           AND a.doc_date >= $1::date AND a.doc_date < $2::date
+           AND COALESCE(a.approve_status, 0) = 1)::int AS trips
+     FROM public.odg_tms_car c
+     WHERE NULLIF(BTRIM(c.transport_code), '') IS NOT NULL ${branchClause}
+     ORDER BY trips DESC, name`,
+    p.params
+  );
+  return rows.map((r) => ({
+    code: r.code,
+    name: r.name,
+    transport_code: r.transport_code,
+    car_type: r.car_type,
+    trips: Number(r.trips) || 0,
+  }));
 }
 
 // ────────────────────────────────────────────────────────────────────────
@@ -58,10 +114,14 @@ function daysInMonth(month) {
 /**
  * ຖ້ຽວທີ່ອະນຸມັດແລ້ວໃນເດືອນ + ໄມລ໌ທີ່ຄົນຂັບບັນທຶກ.
  * @param {string} month YYYY-MM
+ * @param {string|null} [carCode] ຫວ່າງ = ທຸກຄັນ
  */
-async function getTripCore(session, month) {
+async function getTripCore(session, month, carCode) {
   const scope = getBranchScope(session);
   const [start, next] = monthRange(month);
+  const car = cleanCar(carCode);
+  const p = makeParams([start, next]);
+  const carClause = car ? `AND a.car = ${p.add(car)}` : "";
   const row = await queryOne(
     `SELECT
        COUNT(*)::int AS trips,
@@ -80,8 +140,9 @@ async function getTripCore(session, month) {
      FROM public.odg_tms a
      WHERE a.doc_date >= $1::date AND a.doc_date < $2::date
        AND COALESCE(a.approve_status, 0) = 1
+       ${carClause}
        ${branchFilterJob(scope, "a")}`,
-    [start, next]
+    p.params
   );
   return {
     trips: Number(row?.trips) || 0,
@@ -100,9 +161,12 @@ async function getTripCore(session, month) {
  * ຕັ້ງໄວ້ (odg_tms_pending_bill.scheduled_date) → ວັນສົ່ງໃນບິນຂາຍ
  * (ic_trans.send_date) → ວັນທີ່ບິນ. ນິຍາມດຽວກັນກັບ kpi-alert.js.
  */
-async function getDeliveryCore(session, month) {
+async function getDeliveryCore(session, month, carCode) {
   const scope = getBranchScope(session);
   const [start, next] = monthRange(month);
+  const car = cleanCar(carCode);
+  const p = makeParams([start, next]);
+  const carClause = car ? `AND a.car = ${p.add(car)}` : "";
   const row = await queryOne(
     `WITH legs AS (
        SELECT d.bill_no,
@@ -116,6 +180,7 @@ async function getDeliveryCore(session, month) {
          AND d.sent_end IS NOT NULL
          AND COALESCE(a.approve_status, 0) = 1
          AND d.sent_end >= $1::timestamp AND d.sent_end < $2::timestamp
+         ${carClause}
          ${branchFilterJob(scope, "a")}
      )
      SELECT
@@ -125,7 +190,7 @@ async function getDeliveryCore(session, month) {
        COUNT(*) FILTER (WHERE due_date IS NOT NULL AND delivered_on > due_date)::int AS late,
        COUNT(*) FILTER (WHERE due_date IS NULL)::int AS no_due
      FROM legs`,
-    [start, next]
+    p.params
   );
   const drops = Number(row?.drops) || 0;
   const measurable = drops - (Number(row?.no_due) || 0);
@@ -144,14 +209,17 @@ async function getDeliveryCore(session, month) {
  *
  * ⚠️ ບວກຢູ່ລະດັບ imei ບໍ່ແມ່ນລະດັບລົດ — ມີລົດ 2 ຄັນທີ່ຜູກ imei ດຽວກັນ ຖ້າ
  * join ຜ່ານ odg_tms_car ກ່ອນບວກ ໄລຍະທາງຂອງ tracker ນັ້ນຈະຖືກນັບ 2 ເທື່ອ.
+ * ນັບສະເພາະ tracker ທີ່ຕິດຢູ່ລົດຂົນສົ່ງ — ໃນ gps_daily ມີ tracker ທີ່ບໍ່ຢູ່ໃນ
+ * ຕາຕະລາງລົດເລີຍ ແລະ ທີ່ຕິດຢູ່ພາຫະນະທີ່ບໍ່ແມ່ນລົດຂົນສົ່ງ.
  */
-async function getGpsCore(session, month) {
+async function getGpsCore(session, month, carCode) {
   const scope = getBranchScope(session);
   const [start, next] = monthRange(month);
-  const params = [start, next];
-  if (scope.scoped) params.push(scope.branches);
-  // ນັບສະເພາະ tracker ທີ່ຕິດຢູ່ລົດຂົນສົ່ງ — ມີ tracker ຢູ່ໃນ gps_daily ທີ່ບໍ່ຢູ່
-  // ໃນຕາຕະລາງລົດເລີຍ ແລະ ຕິດຢູ່ພາຫະນະທີ່ບໍ່ແມ່ນລົດຂົນສົ່ງ.
+  const car = cleanCar(carCode);
+  const p = makeParams([start, next]);
+  const fleetClauses = [IS_TRANSPORT_CAR];
+  if (scope.scoped) fleetClauses.push(`transport_code = ANY(${p.add(scope.branches)})`);
+  if (car) fleetClauses.push(`code = ${p.add(car)}`);
   const row = await queryOne(
     `SELECT
        COALESCE(SUM(distance_km), 0)::float AS distance_km,
@@ -163,9 +231,9 @@ async function getGpsCore(session, month) {
      WHERE usage_date >= $1::date AND usage_date < $2::date
        AND imei IN (
          SELECT NULLIF(BTRIM(imei), '') FROM public.odg_tms_car
-         ${transportCarWhere(scope, 3)}
+         WHERE ${fleetClauses.join(" AND ")}
        )`,
-    params
+    p.params
   );
   return {
     distance_km: Number(row?.distance_km) || 0,
@@ -176,38 +244,65 @@ async function getGpsCore(session, month) {
   };
 }
 
-/** ຄ່ານ້ຳມັນລວມຂອງເດືອນ ແລະ ການແຍກຕາມຮູບແບບຈ່າຍ */
-async function getFuelCore(session, month) {
+/**
+ * ຄ່ານ້ຳມັນລວມຂອງເດືອນ ແລະ ການແຍກຕາມຮູບແບບຈ່າຍ.
+ *
+ * ຊ່ອງ odg_tms_fuel_log.car ບາງແຖວເກັບ "ລະຫັດລົດ" ບາງແຖວເກັບ "ຊື່ລົດ" ຈຶ່ງ
+ * ຕ້ອງທຽບທັງສອງແບບ ບໍ່ດັ່ງນັ້ນການກັ່ນຕອງລາຍຄັນຈະຫຼຸດໃບບິນໄປເຄິ່ງໜຶ່ງ.
+ */
+async function getFuelCore(session, month, carCode) {
   const scope = getBranchScope(session);
   const [start, next] = monthRange(month);
-  const params = [start, next];
-  let branchClause = "";
+  const car = cleanCar(carCode);
+  const p = makeParams([start, next]);
+  const clauses = [`fuel_date >= $1::date`, `fuel_date < $2::date`];
   if (scope.scoped) {
-    params.push(scope.branches);
-    branchClause = `AND (transport_code = ANY($3) OR transport_code IS NULL)`;
+    clauses.push(`(transport_code = ANY(${p.add(scope.branches)}) OR transport_code IS NULL)`);
   }
+  if (car) {
+    const ref = p.add(car);
+    clauses.push(
+      `(TRIM(car::text) = ${ref}
+        OR EXISTS (SELECT 1 FROM public.odg_tms_car c
+                    WHERE c.code = ${ref}
+                      AND upper(TRIM(c.name_1::text)) = upper(TRIM(odg_tms_fuel_log.car::text))))`
+    );
+  }
+  // ນັບສະເພາະນ້ຳມັນຂອງລົດຂົນສົ່ງ — ບໍ່ດັ່ງນັ້ນນ້ຳມັນຂອງ Forklift ແລະ ພາຫະນະ
+  // ທີ່ຍັງບໍ່ໄດ້ຜູກສາຂາ ຈະດັນ "ຄ່ານ້ຳມັນ/ຖ້ຽວ" ແລະ "ຄ່ານ້ຳມັນ/ກມ" ໃຫ້ສູງເກີນຈິງ
+  // (ວັດ 2026-08: 5,658,400 ກີບ ≈ 9%). ຍອດທີ່ຕັດອອກຍັງຄືນໄປໃຫ້ໜ້າຈໍສະແດງ
+  // ບໍ່ໄດ້ລຶບຖິ້ມງຽບໆ — ສ່ວນຫຼາຍແມ່ນລົດທີ່ລືມຕັ້ງສາຂາ.
+  const IS_FLEET_ROW = `EXISTS (
+    SELECT 1 FROM public.odg_tms_car c
+     WHERE NULLIF(BTRIM(c.transport_code), '') IS NOT NULL
+       AND (TRIM(c.code::text) = TRIM(odg_tms_fuel_log.car::text)
+         OR upper(TRIM(c.name_1::text)) = upper(TRIM(odg_tms_fuel_log.car::text))))`;
+  const where = clauses.join(" AND ");
   // ແຖວທີ່ຊ່ອງ liters ຖືກປ້ອນເປັນຈຳນວນເງິນ (ບັນຫາຂໍ້ມູນທີ່ຮູ້ຢູ່ແລ້ວ) ຖືກແຍກ
   // ອອກຈາກຍອດລິດ ແຕ່ຍອດ "ເງິນ" ຂອງມັນຍັງນັບ — ໃບບິນນັ້ນຈ່າຍເງິນຈິງ.
   const [totals, byType] = await Promise.all([
     queryOne(
       `SELECT
-         COUNT(*)::int AS refills,
-         COALESCE(SUM(amount), 0)::float AS amount,
-         COALESCE(SUM(liters) FILTER (WHERE liters BETWEEN ${MIN_PLAUSIBLE_LITERS} AND ${MAX_PLAUSIBLE_LITERS}), 0)::float AS liters,
-         COUNT(*) FILTER (WHERE liters > ${MAX_PLAUSIBLE_LITERS})::int AS suspect_rows
+         COUNT(*) FILTER (WHERE ${IS_FLEET_ROW})::int AS refills,
+         COALESCE(SUM(amount) FILTER (WHERE ${IS_FLEET_ROW}), 0)::float AS amount,
+         COALESCE(SUM(liters) FILTER (
+           WHERE ${IS_FLEET_ROW} AND liters BETWEEN ${MIN_PLAUSIBLE_LITERS} AND ${MAX_PLAUSIBLE_LITERS}), 0)::float AS liters,
+         COUNT(*) FILTER (WHERE ${IS_FLEET_ROW} AND liters > ${MAX_PLAUSIBLE_LITERS})::int AS suspect_rows,
+         COALESCE(SUM(amount) FILTER (WHERE NOT ${IS_FLEET_ROW}), 0)::float AS excluded_amount,
+         COUNT(*) FILTER (WHERE NOT ${IS_FLEET_ROW})::int AS excluded_refills
        FROM public.odg_tms_fuel_log
-       WHERE fuel_date >= $1::date AND fuel_date < $2::date ${branchClause}`,
-      params
+       WHERE ${where}`,
+      p.params
     ),
     query(
       `SELECT COALESCE(NULLIF(TRIM(fuel_type), ''), 'unspecified') AS fuel_type,
               COUNT(*)::int AS refills,
               COALESCE(SUM(amount), 0)::float AS amount
        FROM public.odg_tms_fuel_log
-       WHERE fuel_date >= $1::date AND fuel_date < $2::date ${branchClause}
+       WHERE ${where} AND ${IS_FLEET_ROW}
        GROUP BY 1
        ORDER BY 3 DESC`,
-      params
+      p.params
     ),
   ]);
   return {
@@ -215,6 +310,8 @@ async function getFuelCore(session, month) {
     amount: Number(totals?.amount) || 0,
     liters: Number(totals?.liters) || 0,
     suspect_rows: Number(totals?.suspect_rows) || 0,
+    excluded_amount: Number(totals?.excluded_amount) || 0,
+    excluded_refills: Number(totals?.excluded_refills) || 0,
     by_type: byType.map((r) => ({
       fuel_type: r.fuel_type,
       refills: Number(r.refills) || 0,
@@ -224,12 +321,12 @@ async function getFuelCore(session, month) {
 }
 
 /** ໜຶ່ງເດືອນຄົບຊຸດ — ໃຊ້ທັງເດືອນທີ່ເລືອກ ແລະ ເດືອນກ່ອນ ເພື່ອທຽບກັນ */
-async function getMonthSnapshot(session, month) {
+async function getMonthSnapshot(session, month, carCode) {
   const [trips, delivery, gps, fuel] = await Promise.all([
-    getTripCore(session, month),
-    getDeliveryCore(session, month),
-    getGpsCore(session, month),
-    getFuelCore(session, month),
+    getTripCore(session, month, carCode),
+    getDeliveryCore(session, month, carCode),
+    getGpsCore(session, month, carCode),
+    getFuelCore(session, month, carCode),
   ]);
   // ໄລຍະທາງທີ່ເອົາມາຄິດຕົ້ນທຶນ/ກມ: GPS ກ່ອນ ເພາະຄຸມທຸກຄັນທີ່ມີ tracker;
   // ຖ້າເດືອນນັ້ນ GPS ຍັງບໍ່ມີຂໍ້ມູນ ຈຶ່ງຖອຍໄປໃຊ້ເລກໄມລ໌ທີ່ຄົນຂັບບັນທຶກ.
@@ -253,8 +350,11 @@ async function getMonthSnapshot(session, month) {
 // (2) ແນວໂນ້ມອັດຕາສົ່ງທັນເວລາ ລາຍເດືອນ ພາຍໃນປີ
 // ────────────────────────────────────────────────────────────────────────
 
-async function getOnTimeTrend(session, year) {
+async function getOnTimeTrend(session, year, carCode) {
   const scope = getBranchScope(session);
+  const car = cleanCar(carCode);
+  const p = makeParams([`${year}-01-01`, `${year + 1}-01-01`]);
+  const carClause = car ? `AND a.car = ${p.add(car)}` : "";
   const rows = await query(
     `WITH legs AS (
        SELECT to_char(d.sent_end, 'YYYY-MM') AS month,
@@ -268,6 +368,7 @@ async function getOnTimeTrend(session, year) {
          AND d.sent_end IS NOT NULL
          AND COALESCE(a.approve_status, 0) = 1
          AND d.sent_end >= $1::date AND d.sent_end < $2::date
+         ${carClause}
          ${branchFilterJob(scope, "a")}
      )
      SELECT month,
@@ -277,7 +378,7 @@ async function getOnTimeTrend(session, year) {
      FROM legs
      GROUP BY month
      ORDER BY month`,
-    [`${year}-01-01`, `${year + 1}-01-01`]
+    p.params
   );
   return rows.map((r) => {
     const measurable = Number(r.measurable) || 0;
@@ -296,17 +397,21 @@ async function getOnTimeTrend(session, year) {
 // ────────────────────────────────────────────────────────────────────────
 
 /** ຖ້ຽວແຍກຕາມມື້ຂອງອາທິດ (1 = ຈັນ … 7 = ອາທິດ) */
-async function getTripsByWeekday(session, month) {
+async function getTripsByWeekday(session, month, carCode) {
   const scope = getBranchScope(session);
   const [start, next] = monthRange(month);
+  const car = cleanCar(carCode);
+  const p = makeParams([start, next]);
+  const carClause = car ? `AND a.car = ${p.add(car)}` : "";
   const rows = await query(
     `SELECT EXTRACT(ISODOW FROM a.doc_date)::int AS dow, COUNT(*)::int AS trips
      FROM public.odg_tms a
      WHERE a.doc_date >= $1::date AND a.doc_date < $2::date
        AND COALESCE(a.approve_status, 0) = 1
+       ${carClause}
        ${branchFilterJob(scope, "a")}
      GROUP BY 1`,
-    [start, next]
+    p.params
   );
   const byDow = new Map(rows.map((r) => [Number(r.dow), Number(r.trips) || 0]));
   return Array.from({ length: 7 }, (_, i) => ({ dow: i + 1, trips: byDow.get(i + 1) ?? 0 }));
@@ -317,9 +422,12 @@ async function getTripsByWeekday(session, month) {
  * ຖ້ຽວທີ່ບໍ່ໄດ້ຕິດສາຍທາງ ຖືກລວມເປັນແຖວດຽວ "ບໍ່ໄດ້ລະບຸສາຍ" ບໍ່ຖິ້ມຖິ້ມ
  * ບໍ່ດັ່ງນັ້ນຍອດຖ້ຽວໃນຕາຕະລາງນີ້ຈະບໍ່ກົງກັບຍອດຖ້ຽວຂ້າງເທິງ.
  */
-async function getRouteAnalysis(session, month, limit = 8) {
+async function getRouteAnalysis(session, month, limit = 8, carCode) {
   const scope = getBranchScope(session);
   const [start, next] = monthRange(month);
+  const car = cleanCar(carCode);
+  const p = makeParams([start, next]);
+  const carClause = car ? `AND a.car = ${p.add(car)}` : "";
   const rows = await query(
     `WITH trips AS (
        SELECT a.doc_no,
@@ -327,6 +435,7 @@ async function getRouteAnalysis(session, month, limit = 8) {
        FROM public.odg_tms a
        WHERE a.doc_date >= $1::date AND a.doc_date < $2::date
          AND COALESCE(a.approve_status, 0) = 1
+         ${carClause}
          ${branchFilterJob(scope, "a")}
      ),
      trip_counts AS (
@@ -365,7 +474,7 @@ async function getRouteAnalysis(session, month, limit = 8) {
      LEFT JOIN public.odg_tms_delivery_route r ON r.code = tc.route_code
      ORDER BY tc.trips DESC, tc.route_code
      LIMIT ${Number(limit) || 8}`,
-    [start, next]
+    p.params
   );
   return rows.map((r) => {
     const measurable = Number(r.measurable) || 0;
@@ -393,15 +502,27 @@ async function getRouteAnalysis(session, month, limit = 8) {
  *
  * "ອັດຕາການໃຊ້" = ວັນ-ຄັນ ທີ່ມີຖ້ຽວ ÷ (ຈຳນວນລົດທັງໝົດ × ວັນໃນເດືອນ).
  * ບໍ່ແມ່ນ % ຂອງພື້ນທີ່ບັນທຸກ — ອັນນັ້ນຢູ່ພາກ "ການໃຊ້ພື້ນທີ່ບັນທຸກ".
+ * ເມື່ອກັ່ນຕອງລົດຄັນດຽວ ໂຕຫານກາຍເປັນ 1 ຄັນ × ວັນໃນເດືອນ ຈຶ່ງອ່ານໄດ້ວ່າ
+ * "ຄັນນີ້ອອກຖ້ຽວ ຈັກ % ຂອງວັນໃນເດືອນ".
  */
-async function getVehicleUtilization(session, month) {
+async function getVehicleUtilization(session, month, carCode) {
   const scope = getBranchScope(session);
   const [start, next] = monthRange(month);
+  const car = cleanCar(carCode);
+
+  const fleetP = makeParams([]);
+  const fleetClauses = [IS_TRANSPORT_CAR];
+  if (scope.scoped) fleetClauses.push(`transport_code = ANY(${fleetP.add(scope.branches)})`);
+  if (car) fleetClauses.push(`code = ${fleetP.add(car)}`);
+
+  const usedP = makeParams([start, next]);
+  const carClause = car ? `AND a.car = ${usedP.add(car)}` : "";
+
   const [fleetRow, usedRow] = await Promise.all([
     queryOne(
       `SELECT COUNT(*)::int AS total_cars
-       FROM public.odg_tms_car ${transportCarWhere(scope, 1)}`,
-      scope.scoped ? [scope.branches] : []
+       FROM public.odg_tms_car WHERE ${fleetClauses.join(" AND ")}`,
+      fleetP.params
     ),
     queryOne(
       `SELECT COUNT(DISTINCT a.car)::int AS used_cars,
@@ -410,8 +531,9 @@ async function getVehicleUtilization(session, month) {
        WHERE a.doc_date >= $1::date AND a.doc_date < $2::date
          AND COALESCE(a.approve_status, 0) = 1
          AND NULLIF(TRIM(a.car), '') IS NOT NULL
+         ${carClause}
          ${branchFilterJob(scope, "a")}`,
-      [start, next]
+      usedP.params
     ),
   ]);
   const totalCars = Number(fleetRow?.total_cars) || 0;
@@ -440,25 +562,32 @@ async function getVehicleUtilization(session, month) {
  *   • ລົດທີ່ແບ່ງ imei ກັນ (dup_imei = true) ໄດ້ໄລຍະທາງເຕັມຂອງ tracker
  *     ທັງສອງຄັນ ຈຶ່ງ ກມ/ລິດ ຂອງມັນເຊື່ອບໍ່ໄດ້
  */
-async function getFuelEfficiency(session, month, limit = 12) {
+async function getFuelEfficiency(session, month, limit = 12, carCode) {
   const scope = getBranchScope(session);
   const [start, next] = monthRange(month);
-  const params = [start, next];
+  const car = cleanCar(carCode);
+  const p = makeParams([start, next]);
+  const carClauses = [`NULLIF(BTRIM(c.transport_code), '') IS NOT NULL`];
   let fuelBranch = "";
   if (scope.scoped) {
-    params.push(scope.branches);
-    fuelBranch = `AND (f.transport_code = ANY($3) OR f.transport_code IS NULL)`;
+    // ຕົວດຽວກັນຖືກໃຊ້ 2 ບ່ອນ (ຕາຕະລາງລົດ ແລະ ໃບບິນນ້ຳມັນ) — ຈຶ່ງເກັບ
+    // placeholder ໄວ້ ບໍ່ຍູ້ຄ່າຊ້ຳ
+    const ref = p.add(scope.branches);
+    carClauses.push(`c.transport_code = ANY(${ref})`);
+    fuelBranch = `AND (f.transport_code = ANY(${ref}) OR f.transport_code IS NULL)`;
   }
+  if (car) carClauses.push(`c.code = ${p.add(car)}`);
   const rows = await query(
     `WITH cars AS (
        SELECT c.code, COALESCE(NULLIF(TRIM(c.name_1), ''), c.code) AS car_name,
               NULLIF(TRIM(c.imei), '') AS imei
        FROM public.odg_tms_car c
-       WHERE NULLIF(BTRIM(c.transport_code), '') IS NOT NULL
-         ${scope.scoped ? `AND c.transport_code = ANY($3)` : ""}
+       WHERE ${carClauses.join(" AND ")}
      ),
      dup AS (
-       SELECT imei FROM cars WHERE imei IS NOT NULL GROUP BY imei HAVING COUNT(*) > 1
+       SELECT imei FROM public.odg_tms_car
+       WHERE NULLIF(TRIM(imei), '') IS NOT NULL
+       GROUP BY imei HAVING COUNT(*) > 1
      ),
      gps AS (
        SELECT imei, SUM(distance_km)::float AS distance_km
@@ -509,7 +638,7 @@ async function getFuelEfficiency(session, month, limit = 12) {
      WHERE COALESCE(g.distance_km, 0) > 0 OR COALESCE(fl.amount, 0) > 0 OR COALESCE(tr.trips, 0) > 0
      ORDER BY COALESCE(g.distance_km, 0) DESC
      LIMIT ${Number(limit) || 12}`,
-    params
+    p.params
   );
   return rows.map((r) => {
     const km = Number(r.distance_km) || 0;
@@ -547,9 +676,14 @@ const CANCEL_REASON_LABEL = {
   other: "ອື່ນໆ",
 };
 
-async function getExceptions(session, month) {
+async function getExceptions(session, month, carCode) {
   const scope = getBranchScope(session);
   const [start, next] = monthRange(month);
+  const car = cleanCar(carCode);
+  const totalsP = makeParams([start, next]);
+  const totalsCar = car ? `AND a.car = ${totalsP.add(car)}` : "";
+  const reasonsP = makeParams([start, next]);
+  const reasonsCar = car ? `AND a.car = ${reasonsP.add(car)}` : "";
   const [totals, reasons] = await Promise.all([
     queryOne(
       `WITH legs AS (
@@ -562,6 +696,7 @@ async function getExceptions(session, month) {
          WHERE COALESCE(a.approve_status, 0) = 1
            AND COALESCE(d.sent_end, d.create_date_time_now) >= $1::timestamp
            AND COALESCE(d.sent_end, d.create_date_time_now) < $2::timestamp
+           ${totalsCar}
            ${branchFilterJob(scope, "a")}
        )
        SELECT COUNT(*)::int AS legs,
@@ -570,7 +705,7 @@ async function getExceptions(session, month) {
          COUNT(*) FILTER (WHERE COALESCE(status, 0) = 2)::int AS cancelled,
          COUNT(*) FILTER (WHERE reschedule_date IS NOT NULL)::int AS rescheduled
        FROM legs`,
-      [start, next]
+      totalsP.params
     ),
     query(
       `SELECT COALESCE(NULLIF(TRIM(d.cancel_reason_code), ''), 'unspecified') AS reason_code,
@@ -581,10 +716,11 @@ async function getExceptions(session, month) {
          AND COALESCE(a.approve_status, 0) = 1
          AND COALESCE(d.sent_end, d.create_date_time_now) >= $1::timestamp
          AND COALESCE(d.sent_end, d.create_date_time_now) < $2::timestamp
+         ${reasonsCar}
          ${branchFilterJob(scope, "a")}
        GROUP BY 1
        ORDER BY 2 DESC`,
-      [start, next]
+      reasonsP.params
     ),
   ]);
   const legs = Number(totals?.legs) || 0;
@@ -612,6 +748,7 @@ async function getExceptions(session, month) {
 
 module.exports = {
   CANCEL_REASON_LABEL,
+  listTransportCars,
   getMonthSnapshot,
   getOnTimeTrend,
   getTripsByWeekday,

@@ -69,6 +69,7 @@ const formatNumber = (n: number | string | null | undefined) => {
 // ສີປະຈຳແຕ່ລະປະເພດ — ໃຫ້ແຍກອອກຈາກກັນໄດ້ໄວໃນຕາຕະລາງ.
 const TYPE_TONE: Record<string, string> = {
   ptt_voucher: "bg-sky-500/10 text-sky-700 dark:text-sky-300",
+  odien_station: "bg-amber-500/10 text-amber-700 dark:text-amber-300",
   fuel_pass: "bg-violet-500/10 text-violet-700 dark:text-violet-300",
   cash: "bg-emerald-500/10 text-emerald-700 dark:text-emerald-300",
   other: "bg-slate-500/10 text-slate-600 dark:text-slate-300",

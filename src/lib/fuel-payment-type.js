@@ -8,15 +8,16 @@
 "use strict";
 
 /**
- * @typedef {"ptt_voucher" | "fuel_pass" | "cash" | "other"} FuelPaymentTypeCode
+ * @typedef {"ptt_voucher" | "odien_station" | "fuel_pass" | "cash" | "other"} FuelPaymentTypeCode
  */
 
-/** @type {readonly ["ptt_voucher", "fuel_pass", "cash", "other"]} */
-const FUEL_PAYMENT_TYPE_CODES = ["ptt_voucher", "fuel_pass", "cash", "other"];
+/** @type {readonly ["ptt_voucher", "odien_station", "fuel_pass", "cash", "other"]} */
+const FUEL_PAYMENT_TYPE_CODES = ["ptt_voucher", "odien_station", "fuel_pass", "cash", "other"];
 
 /** @type {ReadonlyArray<{ code: FuelPaymentTypeCode, label: string }>} */
 const FUEL_PAYMENT_TYPES = [
   { code: "ptt_voucher", label: "ນ້ຳມັນຂຽນບົງ PTT" },
+  { code: "odien_station", label: "ປ້ຳໂອດ້ຽນ" },
   { code: "fuel_pass", label: "ນ້ຳມັນພັສ" },
   { code: "cash", label: "ຈ່າຍເງິນສົດ" },
   { code: "other", label: "ອື່ນໆ" },

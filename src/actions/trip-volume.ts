@@ -466,15 +466,24 @@ export async function getUtilizationReport(dateFrom: string, dateTo: string) {
  * ກວດສິດດ້ວຍ REPORT_API_SECRET ແທນ cookie ຂອງຜູ້ໃຊ້. ສູດຄິດໄລ່ຢູ່ບ່ອນດຽວ
  * ທັງສອງທາງຈຶ່ງໄດ້ຕົວເລກດຽວກັນສະເໝີ.
  */
-export async function buildUtilizationReport(dateFrom: string, dateTo: string) {
-
-  const { trips, items } = (await getTripsInRange({ dateFrom, dateTo })) as {
+export async function buildUtilizationReport(
+  dateFrom: string,
+  dateTo: string,
+  carCode?: string
+) {
+  const { trips: allTrips, items: allItems } = (await getTripsInRange({ dateFrom, dateTo })) as {
     trips: Array<Record<string, unknown>>;
     items: Array<TripItem & { doc_no: string }>;
   };
+  // ກັ່ນຕອງລົດຄັນດຽວຢູ່ນີ້ ບໍ່ແມ່ນຢູ່ SQL — ດຶງກ້ອນດຽວແລ້ວຄິດໃນ memory ຄືເກົ່າ
+  // ແລະ ສູດ (ຊັ້ນ %, ຄ່າກາງ, ພື້ນທີ່ວ່າງ) ຍັງຢູ່ບ່ອນດຽວ.
+  const car = String(carCode ?? "").trim();
+  const trips = car ? allTrips.filter((t) => String(t.car ?? "").trim() === car) : allTrips;
   if (trips.length === 0) {
     return { dateFrom, dateTo, trips: [] as UtilizationRow[], summary: null };
   }
+  const tripDocNos = car ? new Set(trips.map((t) => String(t.doc_no))) : null;
+  const items = tripDocNos ? allItems.filter((i) => tripDocNos.has(i.doc_no)) : allItems;
 
   const itemCodes = Array.from(
     new Set(items.map((i) => String(i.item_code ?? "").trim()).filter(Boolean))
