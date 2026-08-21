@@ -281,7 +281,13 @@ export default function DailyDepartmentReport() {
               ))}
             </select>
           </div>
-          <label className="flex items-center gap-2 pb-2 text-xs font-medium text-slate-600 dark:text-slate-300 cursor-pointer select-none">
+          {/* ຕິກໄວ້ = ນັບສະເພາະບິນທີ່ພະນັກງານຂາຍຢູ່ຝ່າຍຂາຍ (division 200). ບິນໂອນ
+              ສາຂາ / ໃບເບີກ / ບິນນອກລະບົບ ບໍ່ມີພະແນກຂາຍ ຈຶ່ງຫຼຸດອອກ — ຖ້າຢາກໃຫ້
+              ຍອດ "ຈັດສົ່ງໃນວັນ" ຕົງກັບໜ້າຈໍ TV ຕ້ອງເອົາຕິກອອກ. */}
+          <label
+            title="ເອົາຕິກອອກເພື່ອນັບທຸກບິນທີ່ຄົນຂັບປິດ (ລວມໃບໂອນສາຂາ ແລະ ໃບເບີກ) — ຈະຕົງກັບໜ້າຈໍ TV"
+            className="flex items-center gap-2 pb-2 text-xs font-medium text-slate-600 dark:text-slate-300 cursor-pointer select-none"
+          >
             <input
               type="checkbox"
               checked={salesOnly}

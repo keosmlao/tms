@@ -39,8 +39,19 @@ async function getReportDaily(session, fromDate, toDate, dateField = "logistic")
       FROM public.odg_tms_detail
       WHERE sent_start IS NOT NULL AND ${getFixedYearSqlFilter("doc_date")}
       GROUP BY doc_no
+    ),
+    -- ບິນຂອງແຕ່ລະຖ້ຽວ ນັບຈາກແຖວຈິງໃນ odg_tms_detail ບໍ່ແມ່ນ odg_tms.item_bill —
+    -- item_bill ຖືກຂຽນຕອນສ້າງໃບງານ ຈຶ່ງບໍ່ຂຶ້ນຕາມການເພີ່ມ/ຖອດບິນພາຍຫຼັງ.
+    -- ບໍ່ສຳເລັດ = ທຸກແຖວທີ່ບໍ່ແມ່ນ status=1 (ຍັງບໍ່ໄດ້ສົ່ງ ແລະ ຍົກເລີກ).
+    trip_bills AS (
+      SELECT doc_no,
+             COUNT(DISTINCT bill_no)::int AS bills_total,
+             COUNT(DISTINCT bill_no) FILTER (WHERE COALESCE(status,0) = 1)::int AS bills_done
+      FROM public.odg_tms_detail
+      WHERE ${getFixedYearSqlFilter("doc_date")}
+      GROUP BY doc_no
     )
-    SELECT to_char(a.create_date_time_now,'DD-MM-YYYY HH24:MI') as doc_date, a.doc_no, to_char(a.date_logistic,'DD-MM-YYYY') as date_logistic, to_char(a.job_close,'DD-MM-YYYY HH24:MI') as job_code, to_char(ts.first_sent_at,'DD-MM-YYYY HH24:MI') as sent_start, b.name_1 as car, c.name_1 as driver, a.item_bill, d.name_1 as user_created, a.approve_status, case when a.approve_status=0 then 'ລໍຖ້າອະນຸມັດ' else case when a.job_status=0 then 'ລໍຖ້າຈັດສົ່ງ' when a.job_status=1 then 'ຮັບຖ້ຽວ / ເບີກເຄື່ອງ' when a.job_status=2 then 'ກຳລັງຈັດສົ່ງ' when a.job_status=3 then 'ຄົນຂັບປິດງານ' else 'admin ປິດຖ້ຽວ' end end as status, a.job_status, coalesce(b.imei,'') as imei FROM odg_tms a LEFT JOIN trip_start ts ON ts.doc_no=a.doc_no LEFT JOIN public.odg_tms_car b ON b.code=a.car LEFT JOIN public.odg_tms_driver c ON c.code=a.driver LEFT JOIN erp_user d ON d.code=a.user_created WHERE ${rangeSql} ${branchFilterJob(scope, "a")} ORDER BY ${orderSql}`, [fromDate, toDate]);
+    SELECT to_char(a.create_date_time_now,'DD-MM-YYYY HH24:MI') as doc_date, a.doc_no, to_char(a.date_logistic,'DD-MM-YYYY') as date_logistic, to_char(a.job_close,'DD-MM-YYYY HH24:MI') as job_code, to_char(ts.first_sent_at,'DD-MM-YYYY HH24:MI') as sent_start, b.name_1 as car, c.name_1 as driver, a.item_bill, COALESCE(tb.bills_total, 0)::int as bills_total, COALESCE(tb.bills_done, 0)::int as bills_done, GREATEST(COALESCE(tb.bills_total, 0) - COALESCE(tb.bills_done, 0), 0)::int as bills_undone, d.name_1 as user_created, a.approve_status, case when a.approve_status=0 then 'ລໍຖ້າອະນຸມັດ' else case when a.job_status=0 then 'ລໍຖ້າຈັດສົ່ງ' when a.job_status=1 then 'ຮັບຖ້ຽວ / ເບີກເຄື່ອງ' when a.job_status=2 then 'ກຳລັງຈັດສົ່ງ' when a.job_status=3 then 'ຄົນຂັບປິດງານ' else 'admin ປິດຖ້ຽວ' end end as status, a.job_status, coalesce(b.imei,'') as imei FROM odg_tms a LEFT JOIN trip_start ts ON ts.doc_no=a.doc_no LEFT JOIN trip_bills tb ON tb.doc_no=a.doc_no LEFT JOIN public.odg_tms_car b ON b.code=a.car LEFT JOIN public.odg_tms_driver c ON c.code=a.driver LEFT JOIN erp_user d ON d.code=a.user_created WHERE ${rangeSql} ${branchFilterJob(scope, "a")} ORDER BY ${orderSql}`, [fromDate, toDate]);
 }
 
 async function getReportByDriver(session, fromDate, toDate, driverId) {
@@ -1015,6 +1026,85 @@ async function getAttemptDeliveryItems(docNo, billNo) {
   );
 }
 
+// ── ຈັກກະວານບິນຂອງບັນຊີເຄື່ອນໄຫວ (ໃຊ້ຮ່ວມກັນທັງ 3 ຄຳຂໍ) ──
+// ບໍ່ແມ່ນສະເພາະໃບຂາຍຂອງ ERP (ic_trans_shipment trans_flag=44) ອີກຕໍ່ໄປ. ຄົນຂັບ
+// ປິດບິນອີກຫຼາຍປະເພດຢູ່ໜ້າມືຖື: ໃບໂອນສາຂາ (FT, flag 70/72), ໃບເບີກ (WFOH,
+// flag 56), ບິນ COD/INH ໜ້າຮ້ານທີ່ບໍ່ມີແຖວ shipment ແລະ ບິນທີ່ບໍ່ມີເອກະສານ ERP
+// ເລີຍ. ຄຸມແຕ່ flag 44 ເຮັດໃຫ້ "ຈັດສົ່ງໃນວັນ" ໜ້ອຍກວ່າໜ້າ TV ທຸກມື້
+// (19-08-2026 ດອນຕິ້ວ: 76 ທຽບ 88 — ຫຼຸດ 12 ບິນ).
+//
+// extra_bills = ບິນທີ່ຖ້ຽວຂອງສາຂານີ້ຈັບ ແຕ່ແຂນທຳອິດ (ໃບຂາຍ) ເຫັນບໍ່ໄດ້ —
+// ບໍ່ມີແຖວ shipment ເລີຍ ຫຼື ສາຂາຂອງບິນບໍ່ແມ່ນສາຂາຂົນສົ່ງທີ່ບັນຊີນີ້ຄຸມ (ເຊັ່ນ
+// 02-0004 ລູກຄ້າຮັບເອງ, 02-0007 ໂພນສະອາດ, 02-0008 ສົ່ງແລ້ວແຕ່ບໍ່ໄດ້ຈັດຖ້ຽວ).
+// ໃນກໍລະນີນັ້ນຖືເປັນຍອດຂອງສາຂາທີ່ແລ່ນຖ້ຽວແທ້.
+//
+// ⚠️ ຂຽນເປັນ subquery ບົນຕາຕະລາງຈິງ ບໍ່ແມ່ນ CTE ຊ້ອນ CTE: DB ເປັນ PostgreSQL 11
+// ເຊິ່ງ CTE ເປັນກຳແພງກັ້ນ optimizer ແລະ CTE ທີ່ອ້າງ CTE ອື່ນຈະຖືກຄາດຄະເນເປັນ
+// 1 ແຖວ ແລ້ວ planner ເລືອກ nested loop ໃສ່ 15,000 ແຖວ — ວັດແລ້ວ 110 ວິນາທີ.
+//
+// allowedListSql ຕ້ອງເປັນ "ທຸກສາຂາທີ່ຜູ້ໃຊ້ເຫັນໄດ້" ບໍ່ແມ່ນສາຂາທີ່ຖືກເລືອກຢູ່ຕົວ
+// ກັ່ນຕອງ — ບໍ່ດັ່ງນັ້ນບິນຂອງສາຂາອື່ນຈະຍ້າຍມາໃສ່ຖ້ຽວເມື່ອປ່ຽນຕົວກັ່ນຕອງ.
+function ledgerExtraBillsCte(branchListSql, allowedListSql) {
+  return `extra_bills AS (
+      SELECT d.bill_no,
+             MIN(d.bill_date)::date AS tms_date,
+             (ARRAY_AGG(t.origin_transport_code
+                        ORDER BY (COALESCE(d.status, 0) = 1) DESC,
+                                 d.sent_end DESC NULLS LAST))[1] AS trip_branch
+      FROM public.odg_tms_detail d
+      JOIN public.odg_tms t ON t.doc_no = d.doc_no
+      WHERE ${getFixedYearSqlFilter("d.doc_date")}
+        AND t.origin_transport_code IN (${branchListSql})
+        AND NOT EXISTS (
+          SELECT 1 FROM ic_trans_shipment s
+          LEFT JOIN public.odg_tms_pending_bill p2 ON p2.bill_no = s.doc_no
+          WHERE s.doc_no = d.bill_no AND s.trans_flag = 44
+            AND ${getFixedYearSqlFilter("s.doc_date")}
+            AND COALESCE(NULLIF(TRIM(p2.transport_code), ''), s.transport_code)
+                IN (${allowedListSql})
+        )
+      GROUP BY d.bill_no
+    )`;
+}
+
+// ແຂນທີສອງຂອງ sale_bills — ຄືນຄໍລຳ (doc_no, doc_date, branch_code, sale_code)
+// ຄືກັນກັບແຂນໃບຂາຍ. ວັນທີ່ບິນເອົາຈາກ ic_trans ບໍ່ວ່າ trans_flag ໃດ ແລະ ຖ້າບໍ່ມີ
+// ເອກະສານ ERP ເລີຍຈຶ່ງໃຊ້ວັນທີ່ບິນທີ່ TMS ຈົດໄວ້.
+function ledgerExtraBillsArmSql(toDateParam = "$2") {
+  return `SELECT eb.bill_no AS doc_no,
+             COALESCE(ic.doc_date::date, eb.tms_date) AS doc_date,
+             eb.trip_branch AS branch_code,
+             ic.sale_code
+      FROM extra_bills eb
+      LEFT JOIN LATERAL (
+        SELECT x.doc_date, x.sale_code FROM ic_trans x
+        WHERE x.doc_no = eb.bill_no ORDER BY x.doc_date LIMIT 1
+      ) ic ON true
+      WHERE COALESCE(ic.doc_date::date, eb.tms_date) IS NOT NULL
+        AND COALESCE(ic.doc_date::date, eb.tms_date) <= ${toDateParam}::date
+        AND ${getFixedYearSqlFilter("COALESCE(ic.doc_date::date, eb.tms_date)")}`;
+}
+
+const LEDGER_BILL_ITEMS_SQL = `bill_items AS (
+      SELECT d.doc_no AS bill_no, SUM(COALESCE(d.qty, 0))::numeric AS total_qty
+      FROM ic_trans_detail d
+      WHERE d.item_code NOT LIKE '97%'
+        AND d.doc_no IN (SELECT doc_no FROM sale_bills)
+      GROUP BY d.doc_no
+      UNION ALL
+      SELECT it.bill_no,
+             SUM(CASE WHEN COALESCE(it.delivered_qty, 0) = 0
+                      THEN COALESCE(it.selected_qty, 0)
+                      ELSE COALESCE(it.delivered_qty, 0) END)::numeric AS total_qty
+      FROM public.odg_tms_detail_item it
+      WHERE it.bill_no IN (SELECT doc_no FROM sale_bills)
+        AND NOT EXISTS (
+          SELECT 1 FROM ic_trans_detail d2
+          WHERE d2.doc_no = it.bill_no AND d2.item_code NOT LIKE '97%'
+        )
+      GROUP BY it.bill_no
+    )`;
+
 // Daily-activity movement summary over a date range — a flow ledger for the
 // delivery pipeline, expressed as: ຍອດຍົກມາ + ເປີດບິນ − ຈັດສົ່ງ = ຄົງເຫຼືອ.
 //   ຄົງເຫຼືອ (remaining) — pending RIGHT NOW. MUST equal the bills-pending page,
@@ -1062,7 +1152,8 @@ async function getReportDailyActivity(session, fromDate, toDate) {
 
   // ── ບັນຊີເຄື່ອນໄຫວຄົບ 5 ຊ່ອງ ຕໍ່ສາຂາ ──
   const flowRows = await query(
-    `WITH sale_bills AS (
+    `WITH ${ledgerExtraBillsCte(branchList, branchList)},
+    sale_bills AS (
       SELECT a.doc_no,
              b.doc_date::date AS doc_date,
              COALESCE(NULLIF(TRIM(pb.transport_code), ''), a.transport_code) AS branch_code
@@ -1073,14 +1164,11 @@ async function getReportDailyActivity(session, fromDate, toDate) {
         AND b.doc_date::date <= $2::date
         AND ${getFixedYearSqlFilter("a.doc_date")}
         AND COALESCE(NULLIF(TRIM(pb.transport_code), ''), a.transport_code) IN (${branchList})
+      UNION ALL
+      SELECT u.doc_no, u.doc_date, u.branch_code
+      FROM (${ledgerExtraBillsArmSql()}) u
     ),
-    bill_items AS (
-      SELECT d.doc_no AS bill_no, SUM(COALESCE(d.qty, 0))::numeric AS total_qty
-      FROM ic_trans_detail d
-      WHERE d.item_code NOT LIKE '97%'
-        AND d.doc_no IN (SELECT doc_no FROM sale_bills)
-      GROUP BY d.doc_no
-    ),
+    ${LEDGER_BILL_ITEMS_SQL},
     returned AS (
       SELECT rd.ref_doc_no AS bill_no, SUM(ABS(COALESCE(rd.qty, 0)))::numeric AS returned_qty
       FROM ic_trans_detail rd
@@ -1275,9 +1363,11 @@ async function getReportDailyDepartment(
   const picked = String(transportCode ?? "").trim();
   const selectedBranch = allowedBranches.includes(picked) ? picked : "";
   const activeBranches = selectedBranch ? [selectedBranch] : allowedBranches;
-  const branchList = activeBranches
-    .map((c) => `'${String(c).replace(/'/g, "''")}'`)
-    .join(", ");
+  const quote = (c) => `'${String(c).replace(/'/g, "''")}'`;
+  const branchList = activeBranches.map(quote).join(", ");
+  // ລາຍຊື່ສາຂາທັງໝົດທີ່ຜູ້ໃຊ້ເຫັນໄດ້ — ໃຊ້ຕັດສິນວ່າສາຂາຂອງບິນເປັນສາຂາຂົນສົ່ງ
+  // ແທ້ບໍ່ ຈຶ່ງບໍ່ປ່ຽນຄຳຕອບຕາມສາຂາທີ່ຖືກເລືອກຢູ່ຕົວກັ່ນຕອງ.
+  const allowedList = allowedBranches.map(quote).join(", ");
 
   // Department master: gives the sales-division whitelist (matched by NAME,
   // because the pending list only carries the display name) and the code used
@@ -1313,32 +1403,34 @@ async function getReportDailyDepartment(
 
   // ── ບັນຊີເຄື່ອນໄຫວຄົບ 5 ຊ່ອງ ຕໍ່ພະແນກ ──
   const flowRows = await query(
-    `WITH sale_bills AS (
-      SELECT a.doc_no,
-             b.doc_date::date AS doc_date,
+    `WITH ${ledgerExtraBillsCte(branchList, allowedList)},
+    sale_bills AS (
+      SELECT u.doc_no, u.doc_date,
              COALESCE(
                NULLIF(TRIM(od.department_name_lo), ''),
                NULLIF(TRIM(oe.department_code::text), ''),
                '${UNASSIGNED_DEPARTMENT}'
              ) AS department
-      FROM ic_trans_shipment a
-      JOIN ic_trans b ON b.doc_no = a.doc_no
-      LEFT JOIN public.odg_tms_pending_bill pb ON pb.bill_no = a.doc_no
-      LEFT JOIN public.odg_employee oe ON oe.employee_code = b.sale_code
+      FROM (
+        SELECT a.doc_no,
+               b.doc_date::date AS doc_date,
+               b.sale_code
+        FROM ic_trans_shipment a
+        JOIN ic_trans b ON b.doc_no = a.doc_no
+        LEFT JOIN public.odg_tms_pending_bill pb ON pb.bill_no = a.doc_no
+        WHERE a.trans_flag = 44
+          AND b.doc_date::date <= $2::date
+          AND ${getFixedYearSqlFilter("a.doc_date")}
+          AND COALESCE(NULLIF(TRIM(pb.transport_code), ''), a.transport_code) IN (${branchList})
+        UNION ALL
+        SELECT x.doc_no, x.doc_date, x.sale_code
+        FROM (${ledgerExtraBillsArmSql()}) x
+      ) u
+      LEFT JOIN public.odg_employee oe ON oe.employee_code = u.sale_code
       LEFT JOIN public.odg_department od ON od.department_code = oe.department_code
-      WHERE a.trans_flag = 44
-        AND b.doc_date::date <= $2::date
-        AND ${getFixedYearSqlFilter("a.doc_date")}
-        AND COALESCE(NULLIF(TRIM(pb.transport_code), ''), a.transport_code) IN (${branchList})
-        ${salesOnly ? `AND TRIM(od.division_code) = '${SALES_DIVISION_CODE}'` : ""}
+      ${salesOnly ? `WHERE TRIM(od.division_code) = '${SALES_DIVISION_CODE}'` : ""}
     ),
-    bill_items AS (
-      SELECT d.doc_no AS bill_no, SUM(COALESCE(d.qty, 0))::numeric AS total_qty
-      FROM ic_trans_detail d
-      WHERE d.item_code NOT LIKE '97%'
-        AND d.doc_no IN (SELECT doc_no FROM sale_bills)
-      GROUP BY d.doc_no
-    ),
+    ${LEDGER_BILL_ITEMS_SQL},
     returned AS (
       SELECT rd.ref_doc_no AS bill_no, SUM(ABS(COALESCE(rd.qty, 0)))::numeric AS returned_qty
       FROM ic_trans_detail rd
@@ -1532,6 +1624,12 @@ async function getReportDailyDepartment(
 //
 // bucket: opened | delivered | remaining. ຍອດຍົກມາ (carry) is DERIVED
 // (remaining + delivered − opened) and has no bill list of its own.
+//
+// ⚠️ ນິຍາມທັງ 3 ຊ່ອງຕ້ອງເປັນສູດດຽວກັບ getReportDailyActivity /
+// getReportDailyDepartment ບໍ່ດັ່ງນັ້ນກົດເບິ່ງແລ້ວຈຳນວນແຖວບໍ່ຕົງກັບຕົວເລກໃນບັດ.
+// ກ່ອນນີ້ຊ່ອງ ຄົງເຫຼືອ ອ່ານລາຍການບິນຄ້າງ "ຢູ່ຕອນນີ້" ໂດຍກົງ ຈຶ່ງບໍ່ຕົງທຸກຄັ້ງທີ່
+// ເບິ່ງວັນຍ້ອນຫຼັງ (19-08 ດອນຕິ້ວ: ບັດ 48 ທຽບລາຍການ 35). ຕອນເບິ່ງມື້ນີ້ສອງ
+// ນິຍາມນີ້ໃຫ້ຄຳຕອບດຽວກັນຢູ່ແລ້ວ ເພາະບິນທີ່ຍັງຄ້າງບໍ່ມີວັນອອກຈາກຍອດ.
 async function getReportDailyActivityBills(session, fromDate, toDate, branchCode, bucket, department) {
   // department (optional) narrows to one sale department — used by the
   // ແຍກຕາມພະແນກ report, which shows the same buckets split that way.
@@ -1540,38 +1638,47 @@ async function getReportDailyActivityBills(session, fromDate, toDate, branchCode
   await ensureForwardBranchColumn();
   const allowed = scope.scoped ? scope.branches : MONTHLY_DELIVERY_BRANCH_CODES;
   const branch = String(branchCode ?? "").trim();
-  const branchList = (allowed.includes(branch) ? [branch] : allowed)
-    .map((c) => `'${String(c).replace(/'/g, "''")}'`)
-    .join(", ");
+  const quote = (c) => `'${String(c).replace(/'/g, "''")}'`;
+  const branchList = (allowed.includes(branch) ? [branch] : allowed).map(quote).join(", ");
+  const allowedList = allowed.map(quote).join(", ");
   const kind = ["opened", "delivered", "remaining"].includes(String(bucket))
     ? String(bucket)
     : "opened";
 
-  if (kind === "remaining") {
-    // ຄົງເຫຼືອ is whatever the canonical pending list says right now — same
-    // source the report totals use, so the rows always add up to the figure.
-    const { getBillsPending } = require("./bills.js");
-    const { FIXED_YEAR_START, FIXED_YEAR_END } = require("../lib/fixed-year");
-    const pending = await getBillsPending(session, FIXED_YEAR_START, FIXED_YEAR_END, "all");
-    return ((pending && pending.trans) || [])
-      .filter((r) => !branch || (r.transport_code || "").trim() === branch)
-      .filter((r) => !dept || (r.department || "").trim() === dept)
-      .map((r) => ({
-        bill_no: r.doc_no,
-        doc_date: r.doc_date,
-        cust_name: r.transport_name || r.cust_name || r.cust_code || "-",
-        cust_area: r.cust_area || "",
-        sale: r.sale || "",
-        department: r.department || "",
-        qty: Number(r.remaining_qty_total ?? 0),
-        item_count: Number(r.remaining_count ?? 0),
-        note: r.scheduled_date_display ? `ນັດ ${r.scheduled_date_display}` : "",
-      }));
-  }
+  // ບິນທີ່ຍັງຄ້າງຢູ່ຕອນນີ້ — ຈຸດຢືນອັນດຽວກັບບັດສະຫຼຸບ (ເບິ່ງຄຳອະທິບາຍທີ່ນັ້ນ)
+  const { getBillsPending } = require("./bills.js");
+  const { FIXED_YEAR_START, FIXED_YEAR_END } = require("../lib/fixed-year");
+  const pending = await getBillsPending(session, FIXED_YEAR_START, FIXED_YEAR_END, "all");
+  const outstandingNow = Array.from(
+    new Set(
+      ((pending && pending.trans) || [])
+        .map((row) => (row && row.doc_no ? String(row.doc_no) : ""))
+        .filter(Boolean)
+    )
+  );
 
-  const dateCol = kind === "opened" ? "sb.doc_date" : "dd.completion_date";
+  const bucketWhere = {
+    opened: "c.doc_date BETWEEN $1::date AND $2::date",
+    delivered: "c.completion_date BETWEEN $1::date AND $2::date",
+    remaining: `c.doc_date <= $2::date
+        AND (c.completion_date IS NULL OR c.completion_date > $2::date)
+        AND (c.closed_other_date IS NULL OR c.closed_other_date > $2::date)`,
+  }[kind];
+  // ໜ່ວຍຂອງແຕ່ລະຊ່ອງ ຄືກັບບັດ: ເປີດບິນ = ຈຳນວນສຸດທິຂອງບິນ, ຈັດສົ່ງ = ທີ່ມອບ
+  // ໃນຊ່ວງນີ້, ຄົງເຫຼືອ = ສ່ວນທີ່ຍັງບໍ່ທັນມອບຮອດວັນສຸດທ້າຍຂອງຊ່ວງ.
+  const bucketQty = {
+    opened: "c.net_total",
+    delivered: "c.units_in",
+    remaining: "GREATEST(c.net_total - c.units_to_end, 0)",
+  }[kind];
+  const orderCol = kind === "delivered" ? "c.completion_date" : "c.doc_date";
+  const params = dept
+    ? [fromDate, toDate, outstandingNow, dept]
+    : [fromDate, toDate, outstandingNow];
+
   return query(
-    `WITH sale_bills AS (
+    `WITH ${ledgerExtraBillsCte(branchList, allowedList)},
+    sale_bills AS (
       SELECT a.doc_no,
              b.doc_date::date AS doc_date,
              COALESCE(NULLIF(TRIM(pb.transport_code), ''), a.transport_code) AS branch_code
@@ -1582,13 +1689,23 @@ async function getReportDailyActivityBills(session, fromDate, toDate, branchCode
         AND b.doc_date::date <= $2::date
         AND ${getFixedYearSqlFilter("a.doc_date")}
         AND COALESCE(NULLIF(TRIM(pb.transport_code), ''), a.transport_code) IN (${branchList})
+      UNION ALL
+      SELECT u.doc_no, u.doc_date, u.branch_code
+      FROM (${ledgerExtraBillsArmSql()}) u
     ),
-    bill_items AS (
-      SELECT d.doc_no AS bill_no, SUM(COALESCE(d.qty, 0))::numeric AS total_qty,
-             COUNT(DISTINCT d.item_code)::int AS item_count
-      FROM ic_trans_detail d
-      WHERE d.item_code NOT LIKE '97%' AND d.doc_no IN (SELECT doc_no FROM sale_bills)
-      GROUP BY d.doc_no
+    ${LEDGER_BILL_ITEMS_SQL},
+    bill_lines AS (
+      SELECT bill_no, COUNT(*)::int AS item_count FROM (
+        SELECT d.doc_no AS bill_no, d.item_code
+        FROM ic_trans_detail d
+        WHERE d.item_code NOT LIKE '97%' AND d.doc_no IN (SELECT doc_no FROM sale_bills)
+        GROUP BY d.doc_no, d.item_code
+        UNION
+        SELECT it.bill_no, it.item_code
+        FROM public.odg_tms_detail_item it
+        WHERE it.bill_no IN (SELECT doc_no FROM sale_bills)
+        GROUP BY it.bill_no, it.item_code
+      ) x GROUP BY bill_no
     ),
     returned AS (
       SELECT rd.ref_doc_no AS bill_no, SUM(ABS(COALESCE(rd.qty, 0)))::numeric AS returned_qty
@@ -1597,37 +1714,109 @@ async function getReportDailyActivityBills(session, fromDate, toDate, branchCode
       WHERE rd.item_code NOT LIKE '97%' AND rd.ref_doc_no IN (SELECT doc_no FROM sale_bills)
       GROUP BY rd.ref_doc_no
     ),
+    outstanding AS (
+      SELECT DISTINCT o.bill_no FROM unnest($3::varchar[]) AS o(bill_no)
+    ),
     del_dates AS (
-      SELECT d.bill_no, MAX(d.sent_end)::date AS completion_date
+      SELECT d.bill_no, MAX(d.sent_end) AS last_sent_end
       FROM public.odg_tms_detail d
       WHERE COALESCE(d.status, 0) = 1
         AND NULLIF(TRIM(d.forward_transport_code), '') IS NULL
         AND d.bill_no IN (SELECT doc_no FROM sale_bills)
       GROUP BY d.bill_no
+    ),
+    del_units_day AS (
+      SELECT item.bill_no, det.sent_end::date AS sent_on,
+             SUM(CASE WHEN COALESCE(item.delivered_qty, 0) = 0
+                      THEN COALESCE(item.selected_qty, 0)
+                      ELSE COALESCE(item.delivered_qty, 0) END)::numeric AS units
+      FROM public.odg_tms_detail_item item
+      JOIN public.odg_tms_detail det
+        ON det.bill_no = item.bill_no AND det.doc_no = item.doc_no
+      WHERE COALESCE(det.status, 0) = 1
+        AND NULLIF(TRIM(det.forward_transport_code), '') IS NULL
+        AND item.bill_no IN (SELECT doc_no FROM sale_bills)
+      GROUP BY item.bill_no, det.sent_end::date
+    ),
+    del_units AS (
+      SELECT bill_no,
+             COALESCE(SUM(units) FILTER (WHERE sent_on >= $1::date AND sent_on <= $2::date), 0) AS units_in,
+             COALESCE(SUM(units) FILTER (WHERE sent_on <= $2::date), 0) AS units_to_end
+      FROM del_units_day
+      GROUP BY bill_no
+    ),
+    credit AS (
+      SELECT rd.ref_doc_no AS bill_no, MIN(r.doc_date)::date AS credited_on
+      FROM ic_trans_detail rd
+      JOIN ic_trans r ON r.doc_no = rd.doc_no AND r.trans_flag = 48
+      WHERE rd.ref_doc_no IN (SELECT doc_no FROM sale_bills)
+      GROUP BY rd.ref_doc_no
+    ),
+    calc AS (
+      SELECT sb.doc_no, sb.doc_date,
+             GREATEST(COALESCE(bi.total_qty, 0) - COALESCE(rt.returned_qty, 0), 0)::numeric AS net_total,
+             CASE WHEN on_now.bill_no IS NOT NULL THEN NULL
+                  ELSE dd.last_sent_end::date END AS completion_date,
+             CASE WHEN on_now.bill_no IS NOT NULL THEN NULL
+                  WHEN dd.last_sent_end IS NOT NULL THEN NULL
+                  ELSE COALESCE(cr.credited_on, sb.doc_date) END AS closed_other_date,
+             COALESCE(du.units_in, 0)::numeric AS units_in,
+             COALESCE(du.units_to_end, 0)::numeric AS units_to_end,
+             COALESCE(bl.item_count, 0) AS item_count
+      FROM sale_bills sb
+      LEFT JOIN bill_items bi ON bi.bill_no = sb.doc_no
+      LEFT JOIN bill_lines bl ON bl.bill_no = sb.doc_no
+      LEFT JOIN returned rt ON rt.bill_no = sb.doc_no
+      LEFT JOIN del_dates dd ON dd.bill_no = sb.doc_no
+      LEFT JOIN del_units du ON du.bill_no = sb.doc_no
+      LEFT JOIN outstanding on_now ON on_now.bill_no = sb.doc_no
+      LEFT JOIN credit cr ON cr.bill_no = sb.doc_no
     )
-    SELECT sb.doc_no AS bill_no,
-           to_char(sb.doc_date, 'DD-MM-YYYY') AS doc_date,
-           COALESCE(NULLIF(TRIM(cust.name_1), ''), s.cust_code, '-') AS cust_name,
-           ${customerAreaSql("s.cust_code")} AS cust_area,
+    SELECT c.doc_no AS bill_no,
+           to_char(c.doc_date, 'DD-MM-YYYY') AS doc_date,
+           COALESCE(NULLIF(TRIM(cust.name_1), ''), NULLIF(TRIM(cc.cust_code), ''), '-') AS cust_name,
+           ${customerAreaSql("cc.cust_code")} AS cust_area,
            COALESCE(NULLIF(TRIM(oe.fullname_lo), ''), NULLIF(TRIM(oe.nickname), ''), ic.sale_code, '') AS sale,
-           COALESCE(NULLIF(TRIM(od.department_name_lo), ''), '') AS department,
-           GREATEST(COALESCE(bi.total_qty, 0) - COALESCE(rt.returned_qty, 0), 0)::numeric AS qty,
-           COALESCE(bi.item_count, 0) AS item_count,
-           COALESCE(to_char(dd.completion_date, 'DD-MM-YYYY'), '') AS note
-    FROM sale_bills sb
-    LEFT JOIN ic_trans_shipment s ON s.doc_no = sb.doc_no
-    LEFT JOIN ic_trans ic ON ic.doc_no = sb.doc_no
-    LEFT JOIN ar_customer cust ON cust.code = s.cust_code
+           -- ຕ້ອງເປັນສູດດຽວກັບ getReportDailyDepartment ບໍ່ດັ່ງນັ້ນຊ່ອງ
+           -- "${UNASSIGNED_DEPARTMENT}" ກົດເບິ່ງແລ້ວບໍ່ມີແຖວ
+           COALESCE(
+             NULLIF(TRIM(od.department_name_lo), ''),
+             NULLIF(TRIM(oe.department_code::text), ''),
+             '${UNASSIGNED_DEPARTMENT}'
+           ) AS department,
+           ${bucketQty}::numeric AS qty,
+           c.item_count,
+           CASE WHEN c.completion_date IS NOT NULL
+                THEN to_char(c.completion_date, 'DD-MM-YYYY')
+                WHEN pb2.scheduled_date IS NOT NULL
+                THEN 'ນັດ ' || to_char(pb2.scheduled_date, 'DD-MM-YYYY')
+                ELSE '' END AS note
+    FROM calc c
+    -- ລູກຄ້າ: ເອົາຈາກໃບຂາຍກ່ອນ ແລະ ຖ້າບໍ່ມີ (ບິນໂອນ/ບິນນອກລະບົບ) ຈຶ່ງເອົາຈາກ TMS
+    LEFT JOIN LATERAL (
+      SELECT COALESCE(
+        (SELECT NULLIF(TRIM(x.cust_code), '') FROM ic_trans_shipment x
+          WHERE x.doc_no = c.doc_no AND x.trans_flag = 44 LIMIT 1),
+        (SELECT NULLIF(TRIM(td.cust_code), '') FROM public.odg_tms_detail td
+          WHERE td.bill_no = c.doc_no AND NULLIF(TRIM(td.cust_code), '') IS NOT NULL LIMIT 1)
+      ) AS cust_code
+    ) cc ON true
+    LEFT JOIN LATERAL (
+      SELECT x.sale_code FROM ic_trans x WHERE x.doc_no = c.doc_no ORDER BY x.doc_date LIMIT 1
+    ) ic ON true
+    LEFT JOIN public.odg_tms_pending_bill pb2 ON pb2.bill_no = c.doc_no
+    LEFT JOIN ar_customer cust ON cust.code = cc.cust_code
     LEFT JOIN public.odg_employee oe ON oe.employee_code = ic.sale_code
     LEFT JOIN public.odg_department od ON od.department_code = oe.department_code
-    LEFT JOIN bill_items bi ON bi.bill_no = sb.doc_no
-    LEFT JOIN returned rt ON rt.bill_no = sb.doc_no
-    LEFT JOIN del_dates dd ON dd.bill_no = sb.doc_no
-    WHERE GREATEST(COALESCE(bi.total_qty, 0) - COALESCE(rt.returned_qty, 0), 0) > 0
-      AND ${dateCol} BETWEEN $1::date AND $2::date
-      ${dept ? `AND COALESCE(NULLIF(TRIM(od.department_name_lo), ''), '') = $3` : ""}
-    ORDER BY ${dateCol}, sb.doc_no`,
-    dept ? [fromDate, toDate, dept] : [fromDate, toDate]
+    WHERE c.net_total > 0
+      AND ${bucketWhere}
+      ${dept ? `AND COALESCE(
+             NULLIF(TRIM(od.department_name_lo), ''),
+             NULLIF(TRIM(oe.department_code::text), ''),
+             '${UNASSIGNED_DEPARTMENT}'
+           ) = $4` : ""}
+    ORDER BY ${orderCol}, c.doc_no`,
+    params
   );
 }
 

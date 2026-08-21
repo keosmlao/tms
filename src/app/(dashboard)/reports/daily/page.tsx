@@ -6,11 +6,13 @@ import {
   FaCalendarDay,
   FaCheckCircle,
   FaClock,
+  FaFileInvoice,
   FaListUl,
   FaMapMarkerAlt,
   FaRoute,
   FaSearch,
   FaSpinner,
+  FaTimesCircle,
   FaTruck,
 } from "react-icons/fa";
 import { FIXED_YEAR_END, FIXED_YEAR_START, getFixedTodayDate } from "@/lib/fixed-year";
@@ -28,6 +30,10 @@ interface ReportItem {
   car: string;
   driver: string;
   item_bill: number;
+  /** ບິນທັງໝົດຂອງຖ້ຽວ ນັບຈາກ odg_tms_detail (ບໍ່ແມ່ນ item_bill ທີ່ຂຽນຕອນສ້າງ) */
+  bills_total: number;
+  bills_done: number;
+  bills_undone: number;
   user_created: string;
   status: string;
   job_status: number;
@@ -80,7 +86,10 @@ export default function DailyReportPage() {
     const total = items.length;
     const completed = items.filter((i) => i.job_status === 3).length;
     const inProgress = items.filter((i) => i.job_status === 1 || i.job_status === 2).length;
-    return { total, completed, inProgress };
+    // ຍອດບິນລວມທຸກຖ້ຽວທີ່ຢູ່ໃນລາຍການ — ບິນໜຶ່ງໃບຢູ່ໄດ້ຖ້ຽວດຽວ ຈຶ່ງບວກກົງໆໄດ້
+    const billsTotal = items.reduce((sum, i) => sum + (Number(i.bills_total) || 0), 0);
+    const billsDone = items.reduce((sum, i) => sum + (Number(i.bills_done) || 0), 0);
+    return { total, completed, inProgress, billsTotal, billsDone, billsUndone: billsTotal - billsDone };
   }, [items]);
 
   const totalPages = Math.max(1, Math.ceil(items.length / perPage));
@@ -188,7 +197,7 @@ export default function DailyReportPage() {
 
       {/* Summary Cards */}
       {items.length > 0 && (
-        <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+        <div className="grid grid-cols-1 sm:grid-cols-3 lg:grid-cols-6 gap-3">
           <StatCard
             label="ຈຳນວນຖ້ຽວ"
             value={stats.total}
@@ -209,6 +218,27 @@ export default function DailyReportPage() {
             icon={<FaCheckCircle />}
             accent="text-emerald-600"
             iconBg="bg-emerald-500/10 text-emerald-600 dark:text-emerald-400"
+          />
+          <StatCard
+            label="ບິນສົ່ງທັງໝົດ"
+            value={stats.billsTotal}
+            icon={<FaFileInvoice />}
+            accent="text-indigo-600"
+            iconBg="bg-indigo-500/10 text-indigo-600 dark:text-indigo-400"
+          />
+          <StatCard
+            label="ບິນສົ່ງສຳເລັດ"
+            value={stats.billsDone}
+            icon={<FaCheckCircle />}
+            accent="text-emerald-600"
+            iconBg="bg-emerald-500/10 text-emerald-600 dark:text-emerald-400"
+          />
+          <StatCard
+            label="ບິນສົ່ງບໍ່ສຳເລັດ"
+            value={stats.billsUndone}
+            icon={<FaTimesCircle />}
+            accent="text-rose-600"
+            iconBg="bg-rose-500/10 text-rose-600 dark:text-rose-400"
           />
         </div>
       )}
@@ -250,6 +280,8 @@ export default function DailyReportPage() {
                       <th className="px-4 py-3 text-left font-semibold text-slate-600 dark:text-slate-300">ເລກທີ</th>
                       <th className="px-4 py-3 text-left font-semibold text-slate-600 dark:text-slate-300">ລົດ / ຄົນຂັບ</th>
                       <th className="px-4 py-3 text-right font-semibold text-slate-600 dark:text-slate-300">ຈຳນວນບິນ</th>
+                      <th className="px-4 py-3 text-right font-semibold text-emerald-600 dark:text-emerald-400">ສຳເລັດ</th>
+                      <th className="px-4 py-3 text-right font-semibold text-rose-600 dark:text-rose-400">ບໍ່ສຳເລັດ</th>
                       <th className="px-4 py-3 text-left font-semibold text-slate-600 dark:text-slate-300">ຜູ້ສ້າງ</th>
                       <th className="px-4 py-3 text-left font-semibold text-slate-600 dark:text-slate-300">ສະຖານະ</th>
                       <th className="px-4 py-3 text-left font-semibold text-slate-600 dark:text-slate-300">ເລີ່ມຈັດສົ່ງ</th>
@@ -284,7 +316,11 @@ export default function DailyReportPage() {
                               <span className="text-[10px] text-slate-500 mt-0.5">{item.driver || "-"}</span>
                             </div>
                           </td>
-                          <td className="px-4 py-3 text-right font-semibold text-slate-800">{item.item_bill}</td>
+                          <td className="px-4 py-3 text-right font-semibold text-slate-800">{item.bills_total}</td>
+                          <td className="px-4 py-3 text-right font-semibold text-emerald-600 dark:text-emerald-400">{item.bills_done}</td>
+                          <td className="px-4 py-3 text-right font-semibold text-rose-600 dark:text-rose-400">
+                            {item.bills_undone > 0 ? item.bills_undone : <span className="text-slate-300 dark:text-slate-500">-</span>}
+                          </td>
                           <td className="px-4 py-3 text-slate-500">{item.user_created || "-"}</td>
                           <td className="px-4 py-3">
                             <span
