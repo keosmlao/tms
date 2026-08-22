@@ -1,6 +1,7 @@
 "use server";
 
 import { requireSession } from "./_helpers";
+import type { Session } from "@/lib/auth";
 import { buildUtilizationReport } from "./trip-volume";
 import { getDeliveryPerformance } from "@/queries/reports.js";
 import { getSettings } from "@/queries/settings.js";
@@ -13,6 +14,7 @@ import {
   getDriverPerformance,
   getExceptions,
   getFleetActivity,
+  listTransportBranches,
   listTransportCars,
   getFuelEfficiency,
   getRangeSnapshot,
@@ -29,6 +31,26 @@ import type { DeliveryPerfReport } from "@/lib/delivery-performance";
 import type { TripCostSummary } from "@/lib/trip-cost-types";
 
 export type BiRange = { from: string; to: string };
+
+export type BiBranchOption = { code: string; name: string; cars: number };
+
+/**
+ * ບີບ session ໃຫ້ເຫັນສະເພາະສາຂາທີ່ເລືອກ — ທຸກຄຳຖາມໃນໜ້ານີ້ກັ່ນຕອງຜ່ານ
+ * getBranchScope(session) ຢູ່ແລ້ວ ຈຶ່ງບໍ່ຕ້ອງແກ້ SQL ເທື່ອລະອັນ.
+ *
+ * ⚠️ ຜູ້ໃຊ້ທີ່ຜູກສາຂາຢູ່ແລ້ວ ຂະຫຍາຍສິດຕົນເອງບໍ່ໄດ້: ຮັບສະເພາະລະຫັດທີ່ຢູ່ໃນ
+ * ຂອບເຂດເດີມ ນອກນັ້ນຖິ້ມຄ່າ ແລ້ວໃຊ້ຂອບເຂດເດີມແທນ.
+ */
+function narrowToBranch(session: Session, branchCode: string): Session {
+  const code = String(branchCode ?? "").trim();
+  if (!code) return session;
+  const own = String(session.branch_codes ?? "")
+    .split(",")
+    .map((c) => c.trim())
+    .filter(Boolean);
+  if (own.length > 0 && !own.includes(code)) return session;
+  return { ...session, branch_codes: code };
+}
 
 /** ຈຳນວນວັນໃນຊ່ວງ (ລວມທັງສອງທ້າຍ) — Date.UTC ລ້ວນໆ ບໍ່ແຕະ TZ ຂອງເຄື່ອງ */
 function rangeDays(range: BiRange) {
@@ -276,6 +298,10 @@ export type BiDashboard = {
   cod: BiCod;
   dataQuality: BiDataQuality;
   targets: BiTargets;
+  /** ສາຂາທີ່ເລືອກຢູ່ ("" = ທຸກສາຂາ) */
+  branchCode: string;
+  /** ລາຍການສາຂາໃຫ້ເລືອກ — ບໍ່ຫຼຸດຕາມສາຂາທີ່ເລືອກ ຈຶ່ງສະຫຼັບກັບຄືນໄດ້ */
+  branchOptions: BiBranchOption[];
 };
 
 /**
@@ -288,9 +314,15 @@ export type BiDashboard = {
 export async function getBiDashboard(
   from: string,
   to: string,
-  carCode = ""
+  carCode = "",
+  branchCode = ""
 ): Promise<BiDashboard> {
-  const session = await requireSession();
+  const login = await requireSession();
+  // ລາຍການສາຂາອ່ານດ້ວຍສິດເຕັມຂອງຜູ້ໃຊ້ ບໍ່ແມ່ນສິດທີ່ຖືກບີບ ບໍ່ດັ່ງນັ້ນ dropdown
+  // ຈະເຫຼືອສາຂາດຽວແລ້ວກັບຄືນບໍ່ໄດ້
+  const branchOptions = (await listTransportBranches(login)) as BiBranchOption[];
+  const branch = String(branchCode ?? "").trim();
+  const session = narrowToBranch(login, branch);
   const car = String(carCode ?? "").trim();
   // ຄ່າທີ່ມາຈາກ URL/ໜ້າຈໍ ຖືກບີບເຂົ້າປີທີ່ລະບົບຕັ້ງໄວ້ ແລະ ຈັດລຳດັບໃຫ້ຖືກກ່ອນ
   const { fromDate, toDate } = getFixedYearDateRange(from, to);
@@ -376,6 +408,8 @@ export async function getBiDashboard(
     from: range.from,
     to: range.to,
     carCode: car,
+    branchCode: branch,
+    branchOptions,
     cars,
     current,
     previous: previousSnapshot,
@@ -415,9 +449,10 @@ export async function getBiDashboard(
  */
 export async function getBiDeliveryStatus(
   from: string,
-  to: string
+  to: string,
+  branchCode = ""
 ): Promise<DeliveryPerfReport> {
-  const session = await requireSession();
+  const session = narrowToBranch(await requireSession(), branchCode);
   const { fromDate, toDate } = getFixedYearDateRange(from, to);
   return getDeliveryPerformance(session, {
     from: fromDate,

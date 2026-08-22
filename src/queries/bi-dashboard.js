@@ -116,6 +116,33 @@ function rangeDays(range) {
  * ລົດຂົນສົ່ງທັງໝົດທີ່ຜູ້ໃຊ້ເຫັນໄດ້ ພ້ອມຈຳນວນຖ້ຽວໃນຊ່ວງທີ່ເລືອກ.
  * ຈຳນວນຖ້ຽວມີໄວ້ໃຫ້ໜ້າຈໍເອົາລົດທີ່ບໍ່ໄດ້ແລ່ນໃນຊ່ວງນັ້ນລົງລຸ່ມ.
  */
+/**
+ * ສາຂາຂົນສົ່ງທີ່ໃຫ້ເລືອກໃນ filter — ອ່ານຈາກທະບຽນລົດ (ສາຂາທີ່ມີລົດ = ສາຂາທີ່
+ * ອອກຖ້ຽວໄດ້) ຈຶ່ງບໍ່ຕ້ອງສະແກນຕາຕະລາງຖ້ຽວທັງປີ. ຜູ້ໃຊ້ທີ່ຜູກສາຂາ ເຫັນສະເພາະ
+ * ສາຂາຕົນ ຄືກັບຄຳຖາມອື່ນໃນໜ້ານີ້.
+ */
+async function listTransportBranches(session) {
+  const scope = getBranchScope(session);
+  const p = makeParams([]);
+  const branchClause = scope.scoped ? `AND c.transport_code = ANY(${p.add(scope.branches)})` : "";
+  const rows = await query(
+    `SELECT c.transport_code AS code,
+       COALESCE(NULLIF(TRIM(tt.name_1), ''), c.transport_code) AS name,
+       COUNT(*)::int AS cars
+     FROM public.odg_tms_car c
+     LEFT JOIN transport_type tt ON tt.code = c.transport_code
+     WHERE NULLIF(BTRIM(c.transport_code), '') IS NOT NULL ${branchClause}
+     GROUP BY 1, 2
+     ORDER BY name`,
+    p.params
+  );
+  return rows.map((r) => ({
+    code: r.code,
+    name: r.name,
+    cars: Number(r.cars) || 0,
+  }));
+}
+
 async function listTransportCars(session, range) {
   const scope = getBranchScope(session);
   const [start, next] = rangeBounds(range);
@@ -1383,6 +1410,7 @@ async function getDataQuality(session, range, carCode) {
 
 module.exports = {
   CANCEL_REASON_LABEL,
+  listTransportBranches,
   listTransportCars,
   getRangeSnapshot,
   getOnTimeTrend,

@@ -35,6 +35,36 @@ import { tripCostTypeLabel } from "@/lib/trip-cost-type";
 import type { BiDashboard } from "@/actions/bi-dashboard";
 import type { DeliveryPerfReport } from "@/lib/delivery-performance";
 
+/**
+ * ຍອດບິນຂອງຊ່ວງ — ເອົາສະເພາະແຖວລວມຂອງ getReportDailyActivity (ບັນຊີດຽວກັບ
+ * ໜ້າ "ລາຍງານກິດຈະກຳປະຈຳວັນ") ຈຶ່ງບໍ່ຄິດສູດໃໝ່ຢູ່ນີ້.
+ *
+ * ⚠️ ຢ່າສະຫຼັບໄປໃຊ້ຍອດຂອງພາກ ② (getBiDeliveryStatus): ອັນນັ້ນນັບບິນທີ່ຈັດຖ້ຽວ
+ * ແລ້ວແຕ່ຍັງບໍ່ຮອດລູກຄ້າ ເປັນ "ຍັງຄ້າງ" ນຳ ຈຶ່ງໃຫ້ ຍົກໄປ 83 ທຽບກັບ ຄົງເຫຼືອ 38
+ * (ວັດເມື່ອ 21/08/2026) ແລະ ບໍ່ຕົງກັບໜ້າ /bills-pending.
+ */
+type BillLedgerTotal = {
+  carry_bills: number;
+  opened_bills: number;
+  delivered_bills: number;
+  closed_other_bills: number;
+  remaining_bills: number;
+  dispatched_bills: number;
+};
+
+type BillLedgerBranch = BillLedgerTotal & { branch_code: string; branch_name: string };
+
+type BillLedger = { total: BillLedgerTotal; branches: BillLedgerBranch[] };
+
+const EMPTY_BILL_LEDGER_TOTAL: BillLedgerTotal = {
+  carry_bills: 0,
+  opened_bills: 0,
+  delivered_bills: 0,
+  closed_other_bills: 0,
+  remaining_bills: 0,
+  dispatched_bills: 0,
+};
+
 // ── ສີຂອງກຣາຟ ────────────────────────────────────────────────────────────
 // ຊຸດນີ້ຜ່ານການກວດທັງພື້ນຂາວ ແລະ ພື້ນມືດ (ຄວາມສະຫວ່າງ, contrast ≥ 3:1 ແລະ
 // ການແຍກສີສຳລັບຄົນຕາບອດສີ) ຈຶ່ງໃຊ້ຄ່າດຽວກັນທັງສອງໂໝດ ບໍ່ຕ້ອງສະຫຼັບ.
@@ -77,16 +107,23 @@ function dateText(date: string) {
  * ຜູ້ບໍລິຫານຕ້ອງເອົາຕົວເລກໄປປະຊຸມ ຈຶ່ງຕ້ອງອອກໄດ້ທັງຊຸດ ບໍ່ແມ່ນ copy ເທື່ອລະຊ່ອງ.
  * ຄ່າທີ່ອອກເປັນຕົວເລກດິບ (ບໍ່ຈັດຮູບແບບ) ເພື່ອໃຫ້ Excel ຄິດຕໍ່ໄດ້.
  */
-function exportDashboard(data: BiDashboard) {
+function exportDashboard(data: BiDashboard, ledger: BillLedger | null) {
   const round1 = (v: number) => Math.round((Number(v) || 0) * 10) / 10;
   const c = data.current;
   // ແຕ່ລະແຖບມີຮູບແຖວຕ່າງກັນ ຈຶ່ງຕ້ອງບອກ generic ເອງ ບໍ່ດັ່ງນັ້ນ TS ຈະຖືເອົາ
   // ຮູບແຖວຂອງແຖບທຳອິດເປັນຂອງທຸກແຖບ
-  exportSheets<Record<string, unknown>>(`bi_${data.from}_to_${data.to}${data.carCode ? `_${data.carCode}` : ""}`, [
+  const billRow = !ledger
+    ? null
+    : data.branchCode
+      ? (ledger.branches.find((b) => b.branch_code === data.branchCode) ?? null)
+      : ledger.total;
+  const tag = `${data.branchCode ? `_${data.branchCode}` : ""}${data.carCode ? `_${data.carCode}` : ""}`;
+  exportSheets<Record<string, unknown>>(`bi_${data.from}_to_${data.to}${tag}`, [
     {
       name: "ສະຫຼຸບ",
       rows: [
         { k: "ຊ່ວງ", v: `${data.from} → ${data.to}` },
+        { k: "ສາຂາທີ່ກັ່ນຕອງ", v: data.branchCode || "ທຸກສາຂາ" },
         { k: "ລົດທີ່ກັ່ນຕອງ", v: data.carCode || "ທຸກຄັນ" },
         { k: "ຖ້ຽວທັງໝົດ", v: c.trips.trips },
         { k: "ຈຸດສົ່ງສຳເລັດ", v: c.delivery.drops },
@@ -102,6 +139,17 @@ function exportDashboard(data: BiDashboard) {
         { k: "ຢູ່ໜ້າຮ້ານ (ນາທີ, ກາງ)", v: Math.round(data.timing.median_stop_minutes) },
         { k: "COD ຕ້ອງເກັບ (ກີບ)", v: Math.round(data.cod.expected) },
         { k: "COD ບັນທຶກວ່າເກັບ (ກີບ)", v: Math.round(data.cod.collected) },
+        // ຍອດບິນມາຈາກຄຳຖາມຄົນລະອັນ ແລະ ບໍ່ມີເມື່ອກັ່ນຕອງລົດຄັນດຽວ
+        ...(billRow
+          ? [
+              { k: "ບິນຍົກມາ", v: billRow.carry_bills },
+              { k: "ບິນທີ່ເປີດ", v: billRow.opened_bills },
+              { k: "ບິນທີ່ຈັດສົ່ງ", v: billRow.delivered_bills },
+              { k: "ບິນປິດດ້ວຍທາງອື່ນ", v: billRow.closed_other_bills },
+              { k: "ຄົງເຫຼືອ (ຍົກໄປ)", v: billRow.remaining_bills },
+              { k: "ຈັດຖ້ຽວແລ້ວລໍສົ່ງ", v: billRow.dispatched_bills },
+            ]
+          : []),
       ],
       columns: [
         { key: "k", header: "ລາຍການ", width: 30 },
@@ -423,6 +471,11 @@ function KpiTile({
   );
 }
 
+/** ຄຳອະທິບາຍນ້ອຍລຸ່ມຊ່ອງ KPI ບ່ອນທີ່ບໍ່ມີຊ່ວງກ່ອນໜ້າໃຫ້ທຽບ */
+function TileHint({ children }: { children: React.ReactNode }) {
+  return <p className="text-[10px] text-slate-400">{children}</p>;
+}
+
 type Slice = { label: string; value: number; color: string };
 
 /** ວົງແຫວນ + ປ້າຍຄ່າຂ້າງ — ປ້າຍເປັນຕົວໜັງສືສະເໝີ ບໍ່ໄດ້ອາໄສສີຢ່າງດຽວ */
@@ -662,8 +715,10 @@ export default function BiDashboardPage() {
   const [from, setFrom] = useState(() => startOfMonthDate(getFixedTodayDate()));
   const [to, setTo] = useState(() => getFixedTodayDate());
   const [carCode, setCarCode] = useState("");
+  const [branchCode, setBranchCode] = useState("");
   const [data, setData] = useState<BiDashboard | null>(null);
   const [status, setStatus] = useState<DeliveryPerfReport | null>(null);
+  const [ledger, setLedger] = useState<BillLedger | null>(null);
   const [loading, setLoading] = useState(false);
   const [statusLoading, setStatusLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -671,13 +726,14 @@ export default function BiDashboardPage() {
   // ພາກ ② ຖາມແຍກ ເພາະ query ຂອງມັນໃຊ້ເວລາ ~12 ວິນາທີ. Server action ແລ່ນ
   // ເທື່ອລະອັນຢູ່ແລ້ວ ຈຶ່ງຍິງອັນໄວກ່ອນ — ໜ້າຈໍຂຶ້ນພາຍໃນ 1 ວິນາທີ ແລ້ວພາກ ②
   // ຈຶ່ງຕື່ມເຂົ້າມາທີ່ຫຼັງ ແທນທີ່ຈະຄ້າງຂາວທັງໜ້າ.
-  const load = useCallback(async (dateFrom: string, dateTo: string, car: string) => {
+  const load = useCallback(async (dateFrom: string, dateTo: string, car: string, branch: string) => {
     setLoading(true);
     setStatusLoading(!car);
     setError(null);
     setStatus(null);
+    setLedger(null);
     try {
-      setData((await Actions.getBiDashboard(dateFrom, dateTo, car)) as BiDashboard);
+      setData((await Actions.getBiDashboard(dateFrom, dateTo, car, branch)) as BiDashboard);
     } catch (e) {
       console.error(e);
       setError(e instanceof Error ? e.message : "ໂຫຼດຂໍ້ມູນບໍ່ສຳເລັດ");
@@ -689,8 +745,15 @@ export default function BiDashboardPage() {
     // ພາກ ② ນັບຢູ່ລະດັບບິນ ຈຶ່ງແຍກຕາມລົດບໍ່ໄດ້ — ເມື່ອກັ່ນຕອງລົດຄັນດຽວ ຈຶ່ງ
     // ບໍ່ຍິງມັນເລີຍ (ປະຢັດ ~12 ວິນາທີ) ແລະ ໜ້າຈໍບອກແທນວ່າເປັນຫຍັງ.
     if (car) return;
+    // ຍອດບິນ (~4 ວິນາທີ) ຍິງກ່ອນພາກ ② ທີ່ຊ້າກວ່າ — server action ແລ່ນເທື່ອລະ
+    // ອັນ ຈຶ່ງໄດ້ຕົວເລກຂຶ້ນໄວ ແທນທີ່ຈະລໍພາກ ② ຈົບກ່ອນ
     try {
-      setStatus((await Actions.getBiDeliveryStatus(dateFrom, dateTo)) as DeliveryPerfReport);
+      setLedger((await Actions.getReportDailyActivity(dateFrom, dateTo)) as BillLedger);
+    } catch (e) {
+      console.error(e);
+    }
+    try {
+      setStatus((await Actions.getBiDeliveryStatus(dateFrom, dateTo, branch)) as DeliveryPerfReport);
     } catch (e) {
       console.error(e);
     } finally {
@@ -701,13 +764,18 @@ export default function BiDashboardPage() {
   // ຊ່ອງວັນທີມັກປ່ຽນເປັນຄູ່ (ແຕ່ວັນ ແລ້ວ ຫາວັນ) ແລະ ພາກ ② ໃຊ້ເວລາຫຼາຍວິນາທີ —
   // ຖ້າຍິງທັນທີທຸກຄັ້ງຈະໄດ້ 2 ຮອບຊ້ອນກັນ ຈຶ່ງລໍໃຫ້ຢຸດປ່ຽນກ່ອນ.
   useEffect(() => {
-    const timer = setTimeout(() => void load(from, to, carCode), 350);
+    const timer = setTimeout(() => void load(from, to, carCode, branchCode), 350);
     return () => clearTimeout(timer);
-  }, [load, from, to, carCode]);
+  }, [load, from, to, carCode, branchCode]);
 
   const rates = useMemo(
     () => (status ? deliveryPerfRates(status.overall) : null),
     [status]
+  );
+
+  const selectedBranch = useMemo(
+    () => data?.branchOptions.find((b) => b.code === data.branchCode) ?? null,
+    [data]
   );
 
   const selectedCar = useMemo(
@@ -728,6 +796,7 @@ export default function BiDashboardPage() {
             </h1>
             <p className="text-[11px] text-slate-400">
               ຕິດຕາມການຂົນສົ່ງຄົບທຸກມິຕິ — {rangeText(from, to)}
+              {selectedBranch ? ` · ${selectedBranch.name}` : ""}
               {selectedCar ? ` · ${selectedCar.name}` : " · ທຸກຄັນ"}
             </p>
           </div>
@@ -788,6 +857,25 @@ export default function BiDashboardPage() {
               );
             })}
           </div>
+          {/* ສາຂາ: ບີບທັງໜ້າ (ຖາມຄືນຝັ່ງເຊີບເວີ) — ຕ່າງກັບລົດ ຕົງທີ່ຍອດບິນ
+              ແຍກຕາມສາຂາໄດ້ ຈຶ່ງບໍ່ມີພາກໃດຫາຍໄປ */}
+          <select
+            value={branchCode}
+            onChange={(e) => {
+              setBranchCode(e.target.value);
+              // ລົດຄັນທີ່ເລືອກໄວ້ ອາດບໍ່ຢູ່ສາຂາໃໝ່ — ລ້າງໄວ້ ບໍ່ດັ່ງນັ້ນໄດ້ໜ້າຫວ່າງ
+              setCarCode("");
+            }}
+            title="ກັ່ນຕອງທັງໜ້າລົງສາຂາດຽວ"
+            className="max-w-[200px] rounded-lg border border-slate-300 bg-white px-2.5 py-1.5 text-xs text-slate-700 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200"
+          >
+            <option value="">ທຸກສາຂາ</option>
+            {(data?.branchOptions ?? []).map((b) => (
+              <option key={b.code} value={b.code}>
+                {b.name}
+              </option>
+            ))}
+          </select>
           <select
             value={carCode}
             onChange={(e) => setCarCode(e.target.value)}
@@ -802,10 +890,13 @@ export default function BiDashboardPage() {
               </option>
             ))}
           </select>
-          {carCode && (
+          {(carCode || branchCode) && (
             <button
               type="button"
-              onClick={() => setCarCode("")}
+              onClick={() => {
+                setCarCode("");
+                setBranchCode("");
+              }}
               className="rounded-lg border border-slate-300 px-2.5 py-1.5 text-xs font-semibold text-slate-600 hover:bg-slate-50 dark:border-slate-700 dark:text-slate-300 dark:hover:bg-slate-800"
             >
               ລ້າງ
@@ -813,7 +904,7 @@ export default function BiDashboardPage() {
           )}
           <button
             type="button"
-            onClick={() => data && exportDashboard(data)}
+            onClick={() => data && exportDashboard(data, ledger)}
             disabled={loading || !data}
             className="flex items-center gap-1.5 rounded-lg border border-slate-300 px-3 py-1.5 text-xs font-semibold text-slate-600 hover:bg-slate-50 disabled:opacity-50 dark:border-slate-700 dark:text-slate-300 dark:hover:bg-slate-800"
           >
@@ -821,7 +912,7 @@ export default function BiDashboardPage() {
           </button>
           <button
             type="button"
-            onClick={() => void load(from, to, carCode)}
+            onClick={() => void load(from, to, carCode, branchCode)}
             disabled={loading}
             className="flex items-center gap-1.5 rounded-lg bg-teal-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-teal-700 disabled:opacity-50"
           >
@@ -860,6 +951,7 @@ export default function BiDashboardPage() {
         <DashboardBody
           data={data}
           status={status}
+          ledger={ledger}
           rates={rates}
           statusLoading={statusLoading}
           loading={loading}
@@ -872,12 +964,14 @@ export default function BiDashboardPage() {
 function DashboardBody({
   data,
   status,
+  ledger,
   rates,
   statusLoading,
   loading,
 }: {
   data: BiDashboard;
   status: DeliveryPerfReport | null;
+  ledger: BillLedger | null;
   rates: ReturnType<typeof deliveryPerfRates> | null;
   statusLoading: boolean;
   loading: boolean;
@@ -890,6 +984,23 @@ function DashboardBody({
   // ພາກທີ່ນັບຢູ່ລະດັບ "ບິນ" (② ແລະ ອັນດັບໃນ ③) ບໍ່ມີມິຕິລົດ ຈຶ່ງກັ່ນຕອງບໍ່ໄດ້
   const carFiltered = Boolean(data.carCode);
   const carName = data.cars.find((c) => c.code === data.carCode)?.name ?? data.carCode;
+
+  // ຍອດບິນຂອງຊ່ວງ — ບັນຊີດຽວກັບໜ້າ "ລາຍງານກິດຈະກຳປະຈຳວັນ". ບັນຊີສົ່ງແຖວແຍກ
+  // ຕາມສາຂາມາຢູ່ແລ້ວ ຈຶ່ງກັ່ນຕອງຢູ່ນີ້ ບໍ່ຕ້ອງຖາມຖານຂໍ້ມູນຄືນ
+  const bills = !ledger
+    ? null
+    : data.branchCode
+      ? (ledger.branches.find((b) => b.branch_code === data.branchCode) ??
+        EMPTY_BILL_LEDGER_TOTAL)
+      : ledger.total;
+  // ສາຂາທີ່ບໍ່ມີແຖວໃນບັນຊີບິນ (ເຊັ່ນ ສາຂາທີ່ມີລົດ ແຕ່ບໍ່ໄດ້ເປັນເຈົ້າຂອງບິນ)
+  const billsBranchMissing = Boolean(
+    ledger && data.branchCode && !ledger.branches.some((b) => b.branch_code === data.branchCode)
+  );
+  // ທຸກ % ອ່ານທຽບກັບ "ບິນໃນມື" (ຍົກມາ + ເປີດ) ບ່ອນດຽວ ຈຶ່ງບວກກັນໄດ້ 100%
+  const billsHandled = bills ? bills.carry_bills + bills.opened_bills : 0;
+  const shareOfHandled = (v: number) =>
+    billsHandled > 0 ? pct((v / billsHandled) * 100) : "—";
 
   const statusSlices: Slice[] = overall
     ? [
@@ -1057,6 +1168,96 @@ function DashboardBody({
               <Delta current={current.cost_per_km} previous={previous.cost_per_km} higherIsBetter={false} />
             }
           />
+        </div>
+        {/* ຍອດບິນ — ນັບຢູ່ລະດັບບິນ ຈຶ່ງບໍ່ຢູ່ໃນ getBiDashboard() ແລະ ມາທີ່ຫຼັງ.
+            ບັນຊີດຽວກັບ "ລາຍງານກິດຈະກຳປະຈຳວັນ" (/reports/daily) ບໍ່ແມ່ນຂອງພາກ ② */}
+        <div className="mt-3">
+          <p className="mb-1.5 text-[10.5px] font-semibold text-slate-500 dark:text-slate-400">
+            ຍອດບິນຂອງຊ່ວງ — ຍົກມາ + ເປີດ − ຈັດສົ່ງ − ປິດທາງອື່ນ = ຄົງເຫຼືອ
+            <span className="ml-1 font-normal text-slate-400">
+              (ບັນຊີດຽວກັບລາຍງານກິດຈະກຳປະຈຳວັນ)
+            </span>
+          </p>
+          {bills ? (
+            <>
+              <div className="grid grid-cols-2 gap-2.5 md:grid-cols-4">
+                <KpiTile
+                  label="ບິນຍົກມາ"
+                  value={n(bills.carry_bills)}
+                  unit="ບິນ"
+                  icon={<FaWarehouse />}
+                  accent={C.muted}
+                  footer={<TileHint>{shareOfHandled(bills.carry_bills)} ຂອງບິນໃນມື</TileHint>}
+                />
+                <KpiTile
+                  label="ບິນທີ່ເປີດ"
+                  value={n(bills.opened_bills)}
+                  unit="ບິນ"
+                  icon={<FaClipboardList />}
+                  accent={C.warn}
+                  footer={<TileHint>{shareOfHandled(bills.opened_bills)} ຂອງບິນໃນມື</TileHint>}
+                />
+                <KpiTile
+                  label="ບິນທີ່ຈັດສົ່ງ"
+                  value={n(bills.delivered_bills)}
+                  unit="ບິນ"
+                  icon={<FaBoxOpen />}
+                  accent={C.good}
+                  footer={<TileHint>{shareOfHandled(bills.delivered_bills)} ຂອງບິນໃນມື</TileHint>}
+                />
+                <KpiTile
+                  label="ຄົງເຫຼືອ (ຍົກໄປ)"
+                  value={n(bills.remaining_bills)}
+                  unit="ບິນ"
+                  icon={<FaTruckLoading />}
+                  accent={C.info}
+                  footer={
+                    <TileHint>
+                      ນອກນັ້ນ ຈັດຖ້ຽວແລ້ວລໍສົ່ງ {n(bills.dispatched_bills)} ບິນ
+                    </TileHint>
+                  }
+                />
+              </div>
+              {/* ບິນທະຍອຍສົ່ງ ແລະ ບິນທີ່ອອກຈາກຍອດໂດຍບໍ່ໄດ້ສົ່ງ ເປັນ 2 ຂໍ້ທີ່ຄົນ
+                  ອ່ານແລ້ວມັກຄິດວ່າຍອດຜິດ ຈຶ່ງບອກນິຍາມໄວ້ຕິດຊ່ອງເລີຍ */}
+              <p className="mt-1.5 rounded-lg bg-slate-50 px-2 py-1.5 text-[10.5px] leading-relaxed text-slate-500 dark:bg-slate-800/60 dark:text-slate-400">
+                <strong>ບິນທີ່ສົ່ງຫຼາຍຮອບ</strong> ນັບເປັນ “ຈັດສົ່ງ” ໃນ
+                <strong> ວັນທີ່ຮອບສຸດທ້າຍສົ່ງຄົບ</strong> ເທົ່ານັ້ນ — ຮອບກ່ອນໜ້າ
+                ບິນຍັງຢູ່ໃນ ຄົງເຫຼືອ ຈຶ່ງບໍ່ຖືກນັບ 2 ເທື່ອ.
+                {bills.closed_other_bills > 0 && (
+                  <>
+                    {" · "}
+                    <strong>{n(bills.closed_other_bills)} ບິນ</strong> ອອກຈາກຍອດ
+                    ໂດຍບໍ່ໄດ້ສົ່ງ (ຄືນຜ່ານໃບຫຼຸດໜີ້ ຫຼື ຖືກປິດຢູ່ ERP)
+                  </>
+                )}
+                {" · "}ບິນ 02-0004 (ລູກຄ້າຮັບເອງ) ບໍ່ຢູ່ໃນຍອດນີ້.
+                {billsBranchMissing && (
+                  <>
+                    {" "}
+                    <strong>
+                      ສາຂານີ້ບໍ່ຢູ່ໃນບັນຊີບິນ (ນັບສະເພາະ 3 ສາຂາຂົນສົ່ງ) ຈຶ່ງເປັນ 0.
+                    </strong>
+                  </>
+                )}
+              </p>
+            </>
+          ) : (
+            <p className="rounded-xl border border-dashed border-slate-200 px-3 py-4 text-center text-[11px] text-slate-400 dark:border-slate-700">
+              {carFiltered ? (
+                <>
+                  ຍອດບິນນັບຢູ່ລະດັບ <strong>ບິນ</strong> ຈຶ່ງແຍກຕາມລົດບໍ່ໄດ້ — ເລືອກ “ທຸກຄັນ” ເພື່ອເບິ່ງ
+                </>
+              ) : statusLoading ? (
+                <>
+                  <FaSpinner className="mr-1 inline animate-spin" />
+                  ກຳລັງຄິດຍອດບິນ…
+                </>
+              ) : (
+                "ໂຫຼດຍອດບິນບໍ່ສຳເລັດ"
+              )}
+            </p>
+          )}
         </div>
         {isPartialPeriod && (
           <Note>
