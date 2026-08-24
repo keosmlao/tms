@@ -6,6 +6,7 @@ export interface NotifySettings {
   "whatsapp.test_enabled": string;
   "whatsapp.test_to": string;
   "pending.not_yet_days": string;
+  "pending.erp_transfer_enabled": string;
   "app.qr_scan_verify_enabled": string;
   "app.mobile.location_tracking_enabled": string;
   "app.mobile.min_version": string;
@@ -39,6 +40,7 @@ export const EMPTY_SETTINGS: NotifySettings = {
   "whatsapp.test_enabled": "",
   "whatsapp.test_to": "",
   "pending.not_yet_days": "3",
+  "pending.erp_transfer_enabled": "1",
   "app.qr_scan_verify_enabled": "1",
   "app.mobile.location_tracking_enabled": "1",
   "app.mobile.min_version": "",

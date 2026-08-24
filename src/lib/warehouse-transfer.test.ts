@@ -62,6 +62,22 @@ describe("ໃບຂໍໂອນສິນຄ້າລະຫວ່າງສາງ 
 
   // ໃບຂໍໂອນບໍ່ມີລາຍການໃນຕາຕະລາງ ERP ທີ່ applyRemainingCounts ນັບ ຈຶ່ງ
   // count_item = 0 ສະເໝີ. ຖ້າຕົວກັ່ນຕອງໃດຕົກຫຼົ່ນ ໃບຈະຫາຍຈາກຄິວແບບງຽບໆ.
+  // ຜູ້ໃຊ້ຂໍໃຫ້ເປີດ/ປິດໄດ້ຈາກໜ້າຕັ້ງຄ່າ. ສອງເລື່ອງທີ່ພັງງ່າຍ: (1) ປິດແລ້ວ
+  // return ໄວຈົນແຂນອື່ນ (ບິນແຍກສາຂາ / ບໍລິການ) ຫາຍໄປນຳ, (2) ບໍ່ໄດ້ຕັ້ງ
+  // ຄ່າແລ້ວກາຍເປັນປິດ ເຮັດໃຫ້ຄິວຂອງທຸກຄົນປ່ຽນເອງໂດຍບໍ່ມີໃຜສັ່ງ.
+  it("ເປີດ/ປິດໄດ້ຈາກຕັ້ງຄ່າ ແລະ ບໍ່ໄດ້ຕັ້ງ = ເປີດ", () => {
+    expect(billsSrc).toContain(
+      'const ERP_TRANSFER_SETTING_KEY = "pending.erp_transfer_enabled"'
+    );
+    expect(billsSrc).toContain('getSetting(ERP_TRANSFER_SETTING_KEY, "1")');
+    expect(billsSrc).toContain('!== "0"');
+  });
+
+  it("ປິດແລ້ວຂ້າມສະເພາະ query ຂອງໃບຂໍໂອນ ບໍ່ແມ່ນ return ໄວ", () => {
+    expect(billsSrc).toContain("const erpTransferRows = !(await erpTransferEnabled())");
+    expect(billsSrc).toContain("? []");
+  });
+
   it("ຜ່ານຕົວກັ່ນຕອງ 'ຈຳນວນຄົງເຫຼືອ' ຄົບທັງ 3 ບ່ອນ", () => {
     const hits = billsSrc.match(/source_type === ERP_TRANSFER_SOURCE_TYPE/g) ?? [];
     expect(hits.length).toBe(3);

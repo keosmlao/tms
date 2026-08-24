@@ -2985,6 +2985,10 @@ const DAILY_BILL_BUCKETS = {
   outstanding: `status NOT IN (1, 2)
                 AND opened_at IS NOT NULL
                 AND opened_at::date <= $1::date`,
+  // ຍົກເລີກມື້ນັ້ນ. **ບໍ່ຢູ່ໃນສົມຜົນຍອດບິນ** (ຍົກມາ + ເປີດໃໝ່ − ສົ່ງ =
+  // ຄົງເຫຼືອ) ຈຶ່ງບໍ່ໄດ້ໃສ່ໃນຕາລາງ — ເປັນລາຍການແຍກສຳລັບໄລ່ຕາມພາຍໃນມື້.
+  cancelled: `status = 2 AND sent_end IS NOT NULL
+              AND sent_end::date = $1::date`,
 };
 
 /**
@@ -3062,6 +3066,10 @@ async function mobileDailyBills(day, bucket) {
          d.sent_end,
          COALESCE(d.cust_code, '')  AS cust_code,
          COALESCE(cus.name_1, '')   AS cust_name,
+         COALESCE(NULLIF(TRIM(cus.telephone), ''),
+                  NULLIF(TRIM(cus.sms_phonenumber), ''), '') AS cust_phone,
+         COALESCE(d.cancel_reason_code, '') AS cancel_reason_code,
+         COALESCE(d.remark, '')     AS cancel_note,
          COALESCE(t.driver, '')     AS driver_code,
          COALESCE(drv.name_1, '')   AS driver_name,
          COALESCE(car.name_1, t.car, '') AS car_name,
@@ -3074,13 +3082,21 @@ async function mobileDailyBills(day, bucket) {
        LEFT JOIN public.odg_tms_car car ON car.code = t.car
        WHERE ${getFixedYearSqlFilter("d.doc_date")}
      )
-     SELECT bill_no, doc_no, status, cust_code, cust_name,
+     SELECT bill_no, doc_no, status, cust_code, cust_name, cust_phone,
+            cancel_reason_code, cancel_note,
             driver_code, driver_name, car_name,
             to_char(opened_at, 'YYYY-MM-DD HH24:MI') AS opened_at,
-            to_char(sent_end,  'YYYY-MM-DD HH24:MI') AS sent_end
+            to_char(sent_end,  'YYYY-MM-DD HH24:MI') AS sent_end,
+            -- ອາຍຸເປັນວັນ ນັບແຕ່ວັນເປີດບິນຮອດວັນທີ່ຖາມ. ນັບຢູ່ SQL ບໍ່ແມ່ນ
+            -- ຢູ່ແອັບ ເພາະໂມງເຄື່ອງຜູ້ໃຊ້ຕັ້ງຜິດໄດ້ ແລ້ວອາຍຸຈະຜິດຕາມ.
+            GREATEST(($1::date - opened_at::date), 0)::int AS age_days
        FROM scoped
       WHERE ${where}
-      ORDER BY opened_at DESC NULLS LAST
+      ORDER BY ${
+        bucket === "outstanding"
+          ? "opened_at ASC NULLS LAST" // ເກົ່າສຸດຂຶ້ນກ່ອນ — ຄືອັນທີ່ຕ້ອງໄລ່ກ່ອນ
+          : "opened_at DESC NULLS LAST"
+      }
       LIMIT 300`,
     [day]
   );
@@ -3090,6 +3106,10 @@ async function mobileDailyBills(day, bucket) {
     status: Number(r.status ?? 0),
     cust_code: String(r.cust_code ?? ""),
     cust_name: String(r.cust_name ?? "").trim(),
+    cust_phone: String(r.cust_phone ?? "").trim(),
+    cancel_reason_code: String(r.cancel_reason_code ?? "").trim(),
+    cancel_note: String(r.cancel_note ?? "").trim(),
+    age_days: Number(r.age_days ?? 0),
     driver_code: String(r.driver_code ?? ""),
     driver_name: String(r.driver_name ?? "").trim(),
     car_name: String(r.car_name ?? "").trim(),

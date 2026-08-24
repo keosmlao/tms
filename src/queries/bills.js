@@ -62,6 +62,24 @@ const CUSTOM_SOURCE_TYPE = "custom";
 // ທັງສອງແບບບໍ່ມີແຖວໃນ ic_trans_shipment ຈຶ່ງແຂນຫຼັກຂອງຄິວ (ທີ່ອ່ານຈາກ
 // shipment ແລະ ກັ່ນຕອງ trans_flag=44) ເຫັນບໍ່ໄດ້ເລີຍ.
 const ERP_TRANSFER_SOURCE_TYPE = "erp_transfer";
+
+/** ຄີຕັ້ງຄ່າ: ດຶງໃບຂໍໂອນຂອງ ERP ເຂົ້າຄິວ ບິນລໍຈັດຖ້ຽວ ຫຼື ບໍ່. */
+const ERP_TRANSFER_SETTING_KEY = "pending.erp_transfer_enabled";
+
+/**
+ * ເປີດຢູ່ບໍ່. **ບໍ່ໄດ້ຕັ້ງ = ເປີດ** — ຮັກສາພຶດຕິກຳເກົ່າໄວ້ ຄົນທີ່ບໍ່ເຄີຍແຕະ
+ * ໜ້າຕັ້ງຄ່າຈຶ່ງບໍ່ເຫັນຄິວປ່ຽນຕົວເອງ. ມີແຕ່ "0" ທີ່ປິດ.
+ */
+async function erpTransferEnabled() {
+  try {
+    const { getSetting } = require("./settings.js");
+    const raw = await getSetting(ERP_TRANSFER_SETTING_KEY, "1");
+    return String(raw ?? "").trim() !== "0";
+  } catch {
+    // ອ່ານຄ່າບໍ່ໄດ້ = ຄືເກົ່າ (ເປີດ). ບໍ່ໃຫ້ຄິວຫາຍໄປເພາະຕາຕະລາງຕັ້ງຄ່າສະດຸດ.
+    return true;
+  }
+}
 // ໃບຂໍໂອນເລີ່ມນັບແຕ່ວັນທີ່ຝ່າຍຂົນສົ່ງເລີ່ມໃຊ້ລະບົບນີ້
 const ERP_TRANSFER_MIN_DATE = "2026-08-10";
 // ລະຫັດສາງ 2 ໂຕໜ້າ = ກຸ່ມສາຂາຂົນສົ່ງທີ່ຮັບຜິດຊອບ. 99xx (ສາງລະຫວ່າງທາງ,
@@ -1189,7 +1207,15 @@ async function getManualPendingRowsForPending(
       ? `AND ${WAREHOUSE_BRANCH_SQL} = $3`
       : `AND ${WAREHOUSE_BRANCH_SQL} IN (${deliveryBranchListSql()})`;
   const erpTransferDocFilter = docNos ? `AND t.doc_no = ANY($${params.length + 1}::varchar[])` : "";
-  const erpTransferRows = await query(
+  // ສະວິດເປີດ/ປິດ (ຕັ້ງຄ່າ → ບິນລໍຈັດຖ້ຽວ). ບາງສາຂາຈັດການໂອນສາງດ້ວຍວິທີຂອງ
+  // ເຂົາເອງ ແລ້ວໃບຂໍໂອນທີ່ໄຫຼເຂົ້າມາເປັນສຽງລົບກວນໃນຄິວ. ປິດແລ້ວຄິວກັບໄປ
+  // ເປັນບິນຂາຍຢ່າງດຽວ — ບໍ່ໄດ້ລຶບຫຍັງ ເປີດຄືນເມື່ອໃດກໍ່ມາຄືເກົ່າ.
+  //
+  // ປິດ = ຂ້າມ **ສະເພາະ** query ນີ້. ຫ້າມ return ໄວ — ແຂນຕໍ່ໄປ (ບິນແຍກສາຂາ
+  // ແລະ ບິນບໍລິການ) ຢູ່ຄົນລະແຫຼ່ງ ແລະ ຕ້ອງຍັງມາຄືເກົ່າ.
+  const erpTransferRows = !(await erpTransferEnabled())
+    ? []
+    : await query(
     `SELECT DISTINCT ON (t.doc_no)
       ${idsOnly ? `t.doc_no, '${ERP_TRANSFER_SOURCE_TYPE}' as source_type` : `t.doc_no,
       to_char(t.doc_date,'DD-MM-YYYY') as doc_date,

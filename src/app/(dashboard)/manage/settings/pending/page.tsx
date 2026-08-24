@@ -2,10 +2,10 @@
 
 import Link from "next/link";
 import { useEffect, useState } from "react";
-import { FaArrowLeft, FaCog } from "react-icons/fa";
+import { FaArrowLeft, FaCog, FaExchangeAlt } from "react-icons/fa";
 import { Actions } from "@/lib/api";
 import { StatusPageHeader } from "@/components/status-page-shell";
-import { Field, PageLoading, SaveBar, SectionCard } from "../_components";
+import { Field, PageLoading, SaveBar, SectionCard, Toggle } from "../_components";
 import { EMPTY_SETTINGS, type NotifySettings } from "../_settings";
 
 export default function PendingSettingsPage() {
@@ -37,6 +37,7 @@ export default function PendingSettingsPage() {
         "pending.not_yet_days": String(
           Number.isFinite(days) ? Math.max(0, Math.min(30, Math.trunc(days))) : 3
         ),
+        "pending.erp_transfer_enabled": data["pending.erp_transfer_enabled"],
       });
       setSavedAt(Date.now());
     } catch (e) {
@@ -45,6 +46,10 @@ export default function PendingSettingsPage() {
       setSaving(false);
     }
   };
+
+  // ບໍ່ໄດ້ຕັ້ງ = ເປີດ (ພຶດຕິກຳເກົ່າ). ມີແຕ່ "0" ທີ່ປິດ — ຕ້ອງກົງກັບ
+  // `erpTransferEnabled()` ຢູ່ queries/bills.js.
+  const erpTransferOn = data["pending.erp_transfer_enabled"].trim() !== "0";
 
   return (
     <div className="space-y-5">
@@ -78,6 +83,25 @@ export default function PendingSettingsPage() {
               onChange={(v) => setData((d) => ({ ...d, "pending.not_yet_days": v.replace(/\D/g, "").slice(0, 2) }))}
               placeholder="3"
               icon={<FaCog />}
+            />
+          </SectionCard>
+
+          <SectionCard
+            title="ໃບຂໍໂອນສິນຄ້າລະຫວ່າງສາງ"
+            subtitle="ດຶງໃບຂໍໂອນຈາກ ERP ເຂົ້າຄິວ ບິນລໍຈັດຖ້ຽວ ຫຼື ບໍ່"
+            icon={<FaExchangeAlt className="text-sky-600" />}
+            tone="sky"
+          >
+            <Toggle
+              label="ເອົາໃບຂໍໂອນເຂົ້າຄິວ ບິນລໍຈັດຖ້ຽວ"
+              description="ເມື່ອເປີດ: ໃບຂໍໂອນທີ່ຍ້າຍຂ້າມສາຂາ (ດອນຕິ້ວ · ໂພນສະອາດ · ຂົວຫຼວງ · ປາກເຊ) ຂຶ້ນຄິວຂອງສາຂາຕົ້ນທາງ ໃຫ້ຈັດເຂົ້າຖ້ຽວຄືບິນຂາຍ. ເມື່ອປິດ: ຄິວມີແຕ່ບິນຂາຍ — ບໍ່ໄດ້ລຶບຫຍັງ, ໃບຂໍໂອນຍັງຢູ່ໃນ ERP ຄືເກົ່າ ແລະ ເປີດຄືນເມື່ອໃດກໍ່ກັບມາທັນທີ. ຖ້ຽວທີ່ຈັດໄປແລ້ວບໍ່ໄດ້ຮັບຜົນກະທົບ."
+              checked={erpTransferOn}
+              onChange={(v) =>
+                setData((d) => ({
+                  ...d,
+                  "pending.erp_transfer_enabled": v ? "1" : "0",
+                }))
+              }
             />
           </SectionCard>
 

@@ -66,7 +66,13 @@ export const ManagerDashboardQuerySchema = z.object({
  */
 export const DailyBillsQuerySchema = z.object({
   date: z.string().trim().optional(),
-  bucket: z.enum(["carried", "opened", "sending", "outstanding"]),
+  bucket: z.enum([
+    "carried",
+    "opened",
+    "sending",
+    "outstanding",
+    "cancelled",
+  ]),
 });
 
 export const BillsListQuerySchema = z.object({

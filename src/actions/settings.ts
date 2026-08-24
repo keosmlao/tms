@@ -14,6 +14,9 @@ const NOTIFY_KEYS = [
   "whatsapp.test_enabled",
   "whatsapp.test_to",
   "pending.not_yet_days",
+  // ດຶງໃບຂໍໂອນສິນຄ້າລະຫວ່າງສາງຂອງ ERP (ic_trans trans_flag 124) ເຂົ້າຄິວ
+  // ບິນລໍຈັດຖ້ຽວ ຫຼື ບໍ່. "0" = ປິດ; ຢ່າງອື່ນ (ລວມທັງບໍ່ຕັ້ງ) = ເປີດ.
+  "pending.erp_transfer_enabled",
   // Driver-app feature flag. "1" = QR-scan verify button visible in bill rows;
   // anything else hides it. Defaulted to "1" in the dashboard form.
   "app.qr_scan_verify_enabled",
@@ -64,6 +67,7 @@ export interface NotifySettings {
   "whatsapp.test_enabled": string;
   "whatsapp.test_to": string;
   "pending.not_yet_days": string;
+  "pending.erp_transfer_enabled": string;
   "app.qr_scan_verify_enabled": string;
   "app.mobile.location_tracking_enabled": string;
   "app.mobile.min_version": string;
