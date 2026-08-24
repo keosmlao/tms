@@ -1,6 +1,6 @@
 "use client";
 
-import { Suspense, useState } from "react";
+import { Suspense, useEffect, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import {
   FaTruck,
@@ -13,6 +13,8 @@ import {
   FaShieldAlt,
   FaRoute,
   FaChartLine,
+  FaDownload,
+  FaAndroid,
 } from "react-icons/fa";
 import { Auth } from "@/lib/api";
 import { useSession } from "@/providers/session-provider";
@@ -35,6 +37,26 @@ function Login() {
   const [showPassword, setShowPassword] = useState(false);
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
+  // ເວີຊັນຂອງ APK ທີ່ວາງໃຫ້ໂຫຼດ. ອ່ານຈາກໄຟລ໌ static ດຽວກັນກັບທີ່ gate
+  // ບັງຄັບອັບເດດອ່ານ ຈຶ່ງບໍ່ມີທາງບອກຄົນລະເລກກັບສິ່ງທີ່ດາວໂຫຼດໄດ້ຈິງ.
+  const [apkVersion, setApkVersion] = useState("");
+
+  useEffect(() => {
+    let cancelled = false;
+    fetch("/tms.apk.version")
+      .then((r) => (r.ok ? r.text() : ""))
+      .then((text) => {
+        if (cancelled) return;
+        // ໄຟລ໌ເປັນ "1.3.6+17" — ສະແດງແຕ່ສ່ວນເວີຊັນ.
+        setApkVersion(text.trim().split("+")[0].trim());
+      })
+      .catch(() => {
+        // ອ່ານບໍ່ໄດ້ = ບໍ່ສະແດງເລກ. ປຸ່ມຍັງໂຫຼດໄດ້ຄືເກົ່າ.
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   const from = searchParams.get("from") ?? "/";
 
@@ -224,7 +246,34 @@ function Login() {
               </button>
             </form>
 
-            <div className="mt-8 border-t border-slate-200/70 pt-5 text-center dark:border-slate-800">
+            {/* ດາວໂຫຼດແອັບ — ຄົນຂັບສ່ວນຫຼາຍມາເຖິງໜ້ານີ້ດ້ວຍມືຖື ແລະ ສິ່ງທີ່
+                ເຂົາຕ້ອງການແມ່ນແອັບ ບໍ່ແມ່ນເວັບ. ເມື່ອກ່ອນປຸ່ມໂຫຼດຢູ່ໃນແຖບ
+                ເທິງ ເຊິ່ງເຫັນໄດ້ຫຼັງເຂົ້າສູ່ລະບົບເທົ່ານັ້ນ. */}
+            <div className="mt-6 rounded-2xl border border-emerald-200/70 bg-emerald-50/70 p-4 dark:border-emerald-500/25 dark:bg-emerald-500/10">
+              <div className="flex items-center gap-2.5">
+                <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-emerald-100 text-emerald-600 dark:bg-emerald-500/20 dark:text-emerald-400">
+                  <FaAndroid size={16} />
+                </span>
+                <div className="min-w-0">
+                  <p className="text-xs font-semibold text-slate-700 dark:text-slate-200">
+                    ແອັບ ODG TMS ສຳລັບ Android
+                  </p>
+                  <p className="text-[11px] text-slate-500 dark:text-slate-400">
+                    ຄົນຂັບ ແລະ ຫົວໜ້າ ໃຊ້ແອັບ — ມີ GPS, ກ້ອງ ແລະ ແຈ້ງເຕືອນ
+                  </p>
+                </div>
+              </div>
+              <a
+                href="/tms.apk"
+                download
+                className="mt-3 flex h-11 w-full items-center justify-center gap-2 rounded-xl bg-gradient-to-r from-emerald-600 to-teal-600 text-sm font-semibold text-white shadow-lg shadow-emerald-500/25 transition-all hover:from-emerald-500 hover:to-teal-500 hover:shadow-xl focus:outline-none focus:ring-4 focus:ring-emerald-500/30 active:scale-[0.99]"
+              >
+                <FaDownload size={13} />
+                <span>ດາວໂຫຼດ App{apkVersion ? ` ${apkVersion}` : ""}</span>
+              </a>
+            </div>
+
+            <div className="mt-6 border-t border-slate-200/70 pt-5 text-center dark:border-slate-800">
               <p className="text-xs text-slate-400 dark:text-slate-600">
                 ມີບັນຫາໃນການເຂົ້າສູ່ລະບົບ? ກະລຸນາຕິດຕໍ່ຜູ້ດູແລລະບົບ
               </p>

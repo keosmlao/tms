@@ -41,7 +41,16 @@ describe("proxy — ການເຂົ້າເຖິງແບບບໍ່ມີ
 
   it("ຍັງປ່ອຍ APK ແລະ ເສັ້ນທາງສາທາລະນະຜ່ານຄືເກົ່າ", async () => {
     const { proxy } = await import("./proxy");
-    for (const p of ["/tms.apk", "/track", "/track/ABC123", "/tv", "/login"]) {
+    for (const p of [
+      "/tms.apk",
+      // ໜ້າ login ດຶງໄຟລ໌ນີ້ມາສະແດງເລກເວີຊັນຂ້າງປຸ່ມດາວໂຫຼດ — ຖ້າຖືກ
+      // redirect ໄປ login ມັນຈະໄດ້ HTML ມາແທນຕົວເລກ.
+      "/tms.apk.version",
+      "/track",
+      "/track/ABC123",
+      "/tv",
+      "/login",
+    ]) {
       const res = await proxy(anonymousRequest(p));
       expect(res.status, p).toBe(200);
     }
