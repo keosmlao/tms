@@ -9,6 +9,8 @@ export interface NotifySettings {
   "app.qr_scan_verify_enabled": string;
   "app.mobile.location_tracking_enabled": string;
   "app.mobile.min_version": string;
+  "app.mobile.min_version_mode": string;
+  "app.mobile.force_after_trip": string;
   "app.mobile.latest_version": string;
   "app.mobile.update_url_android": string;
   "app.mobile.update_url_ios": string;
@@ -40,6 +42,8 @@ export const EMPTY_SETTINGS: NotifySettings = {
   "app.qr_scan_verify_enabled": "1",
   "app.mobile.location_tracking_enabled": "1",
   "app.mobile.min_version": "",
+  "app.mobile.min_version_mode": "auto",
+  "app.mobile.force_after_trip": "1",
   "app.mobile.latest_version": "",
   "app.mobile.update_url_android": "",
   "app.mobile.update_url_ios": "",

@@ -64,7 +64,9 @@ export async function requireMobileSession(
   // Force a client update before any protected work when the app version is
   // below the admin-set minimum. Throws a 426 that mobileErrorResponse turns
   // into a force_update payload.
-  await assertMobileAppVersion(request);
+  // ສົ່ງ driverId ເຂົ້າໄປ: gate ຈະໄດ້ຮູ້ວ່າຄົນນີ້ກຳລັງແລ່ນຖ້ຽວຢູ່ບໍ່ ແລະ
+  // ເລື່ອນການບັງຄັບອອກໄປຈົນປິດຖ້ຽວ.
+  await assertMobileAppVersion(request, driverId);
   const session = {
     usercode,
     username,

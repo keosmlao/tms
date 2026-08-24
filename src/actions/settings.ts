@@ -25,6 +25,13 @@ const NOTIFY_KEYS = [
   // are forced to update). latest_version = newest build (soft prompt). The
   // two URLs point drivers to the store/APK per platform. Empty min = gate off.
   "app.mobile.min_version",
+  // "auto" = ຂັ້ນຕ່ຳຕິດຕາມ APK ທີ່ວາງໃຫ້ໂຫຼດຢູ່ /tms.apk ເອງ (ອ່ານຈາກ
+  // public/tms.apk.version) ຈຶ່ງບໍ່ຕ້ອງພິມເລກທຸກຄັ້ງທີ່ອອກລຸ້ນໃໝ່.
+  // ຢ່າງອື່ນ (ລວມທັງບໍ່ຕັ້ງ) = ໃຊ້ min_version ທີ່ພິມເອງ.
+  "app.mobile.min_version_mode",
+  // "0" = ບັງຄັບທັນທີ. ຢ່າງອື່ນ (ຄ່າເລີ່ມຕົ້ນ) = ລໍໃຫ້ປິດຖ້ຽວກ່ອນ ຈຶ່ງບັງຄັບ
+  // — ບໍ່ລັອກຄົນຂັບອອກກາງທາງ.
+  "app.mobile.force_after_trip",
   "app.mobile.latest_version",
   "app.mobile.update_url_android",
   "app.mobile.update_url_ios",
@@ -60,6 +67,8 @@ export interface NotifySettings {
   "app.qr_scan_verify_enabled": string;
   "app.mobile.location_tracking_enabled": string;
   "app.mobile.min_version": string;
+  "app.mobile.min_version_mode": string;
+  "app.mobile.force_after_trip": string;
   "app.mobile.latest_version": string;
   "app.mobile.update_url_android": string;
   "app.mobile.update_url_ios": string;

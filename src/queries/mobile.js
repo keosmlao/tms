@@ -178,6 +178,28 @@ function closedTripWindow(days) {
   return { from: shift(-days), to: shift(days) };
 }
 
+/**
+ * ຄົນຂັບຄົນນີ້ມີຖ້ຽວທີ່ຍັງບໍ່ປິດຢູ່ບໍ່ (ຮັບຖ້ຽວແລ້ວ = 1, ກຳລັງຈັດສົ່ງ = 2).
+ *
+ * ໃຊ້ໂດຍ gate ບັງຄັບອັບເດດ: ບໍ່ຄວນລັອກຄົນຂັບອອກຈາກລະບົບກາງຖ້ຽວ ເພາະ
+ * ຫຼັກຖານການສົ່ງ, ການປິດບິນ ແລະ GPS ຈະຄ້າງໝົດ ແລະ ລູກຄ້າຢືນລໍຢູ່ໜ້າຮ້ານ.
+ * ຖ້ຽວທີ່ຍັງບໍ່ຮັບ (0) ບໍ່ນັບ — ຍັງບໍ່ໄດ້ເລີ່ມ ຈຶ່ງອັບເດດກ່ອນໄດ້.
+ *
+ * `job_status = 4` ຄືຖ້ຽວທີ່ຖືກຍົກເລີກ — ບໍ່ນັບ.
+ */
+async function driverHasOpenTrip(driverId) {
+  const code = String(driverId ?? "").trim();
+  if (!code) return false;
+  const { rows } = await pool.query(
+    `SELECT EXISTS (
+       SELECT 1 FROM public.odg_tms
+        WHERE driver = $1 AND job_status IN (1, 2)
+     ) AS open`,
+    [code]
+  );
+  return rows[0]?.open === true;
+}
+
 async function mobileJobsList(driverId, date, options = {}) {
   await Promise.all([
     ensureTmsWorkerTable(),
@@ -3147,6 +3169,7 @@ async function mobileDeliveryQuality(day) {
 
 module.exports = {
   mobileLogin,
+  driverHasOpenTrip,
   mobileDailyBills,
   mobileJobsList,
   mobileJobsListAll,

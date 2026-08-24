@@ -93,6 +93,8 @@ export default function AppSettingsPage() {
         "app.mobile.location_tracking_enabled":
           data["app.mobile.location_tracking_enabled"],
         "app.mobile.min_version": data["app.mobile.min_version"].trim(),
+        "app.mobile.min_version_mode": data["app.mobile.min_version_mode"],
+        "app.mobile.force_after_trip": data["app.mobile.force_after_trip"],
         "app.mobile.latest_version": data["app.mobile.latest_version"].trim(),
         "app.mobile.update_url_android": data["app.mobile.update_url_android"].trim(),
         "app.mobile.update_url_ios": data["app.mobile.update_url_ios"].trim(),
@@ -109,6 +111,12 @@ export default function AppSettingsPage() {
     data["app.qr_scan_verify_enabled"] === "1" ||
     data["app.qr_scan_verify_enabled"] === "true" ||
     data["app.qr_scan_verify_enabled"] === "";
+
+  const autoMinVersion =
+    data["app.mobile.min_version_mode"].trim().toLowerCase() === "auto";
+
+  // ບໍ່ໄດ້ຕັ້ງ = ເລື່ອນໄປຫຼັງປິດຖ້ຽວ (ຄ່າທີ່ປອດໄພກວ່າ). ມີແຕ່ "0" ທີ່ບັງຄັບທັນທີ.
+  const forceAfterTrip = data["app.mobile.force_after_trip"].trim() !== "0";
 
   // Unset = on. Only an explicit "0"/"false" switches phone GPS off.
   const locationTrackingEnabled = !(
@@ -259,13 +267,37 @@ export default function AppSettingsPage() {
             icon={<FaMobileAlt className="text-teal-600" />}
             tone="teal"
           >
-            <Field
-              label="ເວີຊັນຕ່ຳສຸດທີ່ອະນຸຍາດ (min version)"
-              hint="ຕົວຢ່າງ 1.4.0 — app ທີ່ຕ່ຳກວ່ານີ້ (ຫຼືບໍ່ສົ່ງເວີຊັນ) ຈະຖືກບັງຄັບໃຫ້ອັບເດດ. ປ່ອຍຫວ່າງ = ປິດການບັງຄັບ."
-              value={data["app.mobile.min_version"]}
-              onChange={(v) => setData((d) => ({ ...d, "app.mobile.min_version": v }))}
-              placeholder="1.4.0"
+            <Toggle
+              label="ຕັ້ງເວີຊັນຕ່ຳສຸດອັດຕະໂນມັດ"
+              description="ເມື່ອເປີດ: ເວີຊັນຕ່ຳສຸດຕິດຕາມ APK ທີ່ວາງໃຫ້ໂຫຼດຢູ່ /tms.apk ເອງ — ອັບ APK ໃໝ່ຂຶ້ນເຊີເວີແລ້ວບັງຄັບເລີຍ ບໍ່ຕ້ອງມາພິມເລກຢູ່ນີ້ (ຂັ້ນຕອນທີ່ລືມງ່າຍທີ່ສຸດ). ເມື່ອປິດ: ໃຊ້ເລກທີ່ພິມໄວ້ຂ້າງລຸ່ມ."
+              checked={autoMinVersion}
+              onChange={(v) =>
+                setData((d) => ({
+                  ...d,
+                  "app.mobile.min_version_mode": v ? "auto" : "manual",
+                }))
+              }
             />
+            <Toggle
+              label="ບັງຄັບຫຼັງປິດຖ້ຽວແລ້ວເທົ່ານັ້ນ"
+              description="ເມື່ອເປີດ: ຄົນຂັບທີ່ກຳລັງແລ່ນຖ້ຽວຢູ່ (ຮັບຖ້ຽວແລ້ວ / ກຳລັງຈັດສົ່ງ) ຍັງໃຊ້ລຸ້ນເກົ່າຕໍ່ໄດ້ຈົນປິດຖ້ຽວ ຈຶ່ງຖືກບັງຄັບ — ຫຼັກຖານການສົ່ງ ແລະ GPS ຈະບໍ່ຄ້າງກາງທາງ. ເມື່ອປິດ: ບັງຄັບທັນທີ ເຖິງວ່າຈະຢູ່ກາງຖ້ຽວ."
+              checked={forceAfterTrip}
+              onChange={(v) =>
+                setData((d) => ({
+                  ...d,
+                  "app.mobile.force_after_trip": v ? "1" : "0",
+                }))
+              }
+            />
+            {!autoMinVersion && (
+              <Field
+                label="ເວີຊັນຕ່ຳສຸດທີ່ອະນຸຍາດ (min version)"
+                hint="ຕົວຢ່າງ 1.4.0 — app ທີ່ຕ່ຳກວ່ານີ້ (ຫຼືບໍ່ສົ່ງເວີຊັນ) ຈະຖືກບັງຄັບໃຫ້ອັບເດດ. ປ່ອຍຫວ່າງ = ປິດການບັງຄັບ."
+                value={data["app.mobile.min_version"]}
+                onChange={(v) => setData((d) => ({ ...d, "app.mobile.min_version": v }))}
+                placeholder="1.4.0"
+              />
+            )}
             <Field
               label="ເວີຊັນຫຼ້າສຸດ (latest version)"
               hint="ໃຊ້ສຳລັບແຈ້ງເຕືອນແບບບໍ່ບັງຄັບ ('ມີເວີຊັນໃໝ່'). ປ່ອຍຫວ່າງໄດ້."
