@@ -53,19 +53,27 @@ const SERVICE_SOURCE_TYPE = "odservice.tb_product";
 // Free-form bills the dispatcher typed in by hand (odg_tms_custom_bill) —
 // deliveries with no ERP document at all ("ອື່ນໆ").
 const CUSTOM_SOURCE_TYPE = "custom";
-// ໃບຂໍໂອນສິນຄ້າຂອງ ERP (ic_trans trans_flag 70/72) — ບໍ່ມີແຖວໃນ ic_trans_shipment
-// ຈຶ່ງແຂນຫຼັກຂອງຄິວ (ທີ່ອ່ານຈາກ shipment) ເຫັນບໍ່ໄດ້ເລີຍ.
+// ໃບຂໍໂອນສິນຄ້າລະຫວ່າງສາງ ຂອງ ERP = ic_trans trans_flag 124 (ເລກ FR…).
+//
+// ⚠️ ຢ່າສັບສົນກັບ trans_flag 70/72 (FT…) — ນັ້ນຄື "ໃບໂອນ" ທີ່ຝ່າຍສາງອອກຕອນ
+// ຍ້າຍເຄື່ອງຈິງ ແລະ ເສັ້ນທາງຂອງມັນຜ່ານ ສາງລະຫວ່າງທາງ (9903) ຈຶ່ງບອກປາຍທາງ
+// ແທ້ບໍ່ໄດ້. ໃບຂໍໂອນ (FR) ມາກ່ອນ ແລະ ມີທັງສາງຕົ້ນທາງ ແລະ ປາຍທາງຈິງ.
+//
+// ທັງສອງແບບບໍ່ມີແຖວໃນ ic_trans_shipment ຈຶ່ງແຂນຫຼັກຂອງຄິວ (ທີ່ອ່ານຈາກ
+// shipment ແລະ ກັ່ນຕອງ trans_flag=44) ເຫັນບໍ່ໄດ້ເລີຍ.
 const ERP_TRANSFER_SOURCE_TYPE = "erp_transfer";
 // ໃບຂໍໂອນເລີ່ມນັບແຕ່ວັນທີ່ຝ່າຍຂົນສົ່ງເລີ່ມໃຊ້ລະບົບນີ້
 const ERP_TRANSFER_MIN_DATE = "2026-08-10";
 // ລະຫັດສາງ 2 ໂຕໜ້າ = ກຸ່ມສາຂາຂົນສົ່ງທີ່ຮັບຜິດຊອບ. 99xx (ສາງລະຫວ່າງທາງ,
 // ສາງເຄື່ອງໃຊ້ຫ້ອງການ) ບໍ່ແມ່ນສາງຈິງ ຈຶ່ງບໍ່ຢູ່ໃນນີ້.
-const WAREHOUSE_BRANCH_SQL = `CASE left(t.wh_from, 2)
+const warehouseBranchSql = (col) => `CASE left(${col}, 2)
         WHEN '11' THEN '02-0001'
         WHEN '12' THEN '02-0002'
         WHEN '13' THEN '02-0007'
         WHEN '14' THEN '02-0003'
       END`;
+const WAREHOUSE_BRANCH_SQL = warehouseBranchSql("t.wh_from");
+const WAREHOUSE_BRANCH_TO_SQL = warehouseBranchSql("t.wh_to");
 
 // The "ລໍຖ້າຈັດຖ້ຽວ" (bills-pending) queue only dispatches the three internal
 // delivery branches: 02-0001 ໂອດ້ຽນ/ຂົວຫຼວງ · 02-0002 ດອນຕິ້ວ · 02-0003 ປາກເຊ.
@@ -1201,13 +1209,19 @@ async function getManualPendingRowsForPending(
      LEFT JOIN public.ic_warehouse wf ON wf.code = t.wh_from
      LEFT JOIN public.ic_warehouse wt ON wt.code = t.wh_to
      LEFT JOIN public.odg_tms_pending_bill pb ON pb.bill_no = t.doc_no
-     WHERE t.trans_flag IN (70, 72)
+     WHERE t.trans_flag = 124
        AND t.doc_date >= '${ERP_TRANSFER_MIN_DATE}'::date
        AND ${WAREHOUSE_BRANCH_SQL} IS NOT NULL
+       -- ວຽກຂອງຝ່າຍຂົນສົ່ງ = ຍ້າຍ **ຂ້າມສາຂາ**. ຍ້າຍພາຍໃນສາຂາດຽວກັນ
+       -- (ເຊັ່ນ ໜ້າຮ້ານຂົວຫຼວງ → ຫຼັງຮ້ານຂົວຫຼວງ) ບໍ່ຕ້ອງໃຊ້ລົດ ຈຶ່ງບໍ່ເຂົ້າຄິວ.
+       -- ປາຍທາງທີ່ບໍ່ແມ່ນສາງຂອງ 4 ສາຂາ (99xx ສາງລະຫວ່າງທາງ) ກໍ່ບໍ່ເຂົ້າ
+       -- ເພາະບອກບໍ່ໄດ້ວ່າຈະໄປສົ່ງໃສ.
+       AND ${WAREHOUSE_BRANCH_TO_SQL} IS NOT NULL
+       AND ${WAREHOUSE_BRANCH_TO_SQL} <> ${WAREHOUSE_BRANCH_SQL}
        AND (pb.scheduled_date IS NULL OR pb.scheduled_date::date BETWEEN $1::date AND $2::date)
        ${erpTransferBranch}
        ${erpTransferDocFilter}
-     ORDER BY t.doc_no, t.trans_flag`,
+     ORDER BY t.doc_no`,
     docNos ? [...params, docNos] : params
   );
   const erpTransferPendingRows = idsOnly
