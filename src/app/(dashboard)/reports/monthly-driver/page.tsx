@@ -231,7 +231,7 @@ export default function MonthlyDriverPage() {
               </p>
               <h1 className="text-xl sm:text-2xl font-bold text-white leading-tight">ຄົນຂັບປະຈຳເດືອນ</h1>
               <p className="text-[11px] text-slate-300 mt-0.5">
-                ສະແດງພະນັກງານຂົນສົ່ງທຸກຄົນ ພ້ອມຈັດອັນດັບການນຳໃຊ້ໃນແຕ່ລະເດືອນ
+                ສະແດງຄົນຂັບຂອງສາຂາທ່ານ ພ້ອມຈັດອັນດັບການນຳໃຊ້ໃນແຕ່ລະເດືອນ
               </p>
             </div>
           </div>
@@ -292,8 +292,8 @@ export default function MonthlyDriverPage() {
           <div className="w-14 h-14 rounded-lg bg-slate-500/10 flex items-center justify-center mb-3">
             <FaListUl className="text-slate-400 text-2xl" />
           </div>
-          <p className="text-sm font-semibold text-slate-700">ບໍ່ພົບຂໍ້ມູນພະນັກງານຂົນສົ່ງ</p>
-          <p className="text-xs text-slate-400 mt-1">ກະລຸນາກວດສອບຂໍ້ມູນພະນັກງານໃນລະບົບ</p>
+          <p className="text-sm font-semibold text-slate-700">ບໍ່ພົບຂໍ້ມູນຄົນຂັບ</p>
+          <p className="text-xs text-slate-400 mt-1">ກະລຸນາກຳນົດຕຳແໜ່ງ "ຄົນຂັບ" ໃຫ້ພະນັກງານທີ່ໜ້າ ພະນັກງານຂົນສົ່ງ ກ່ອນ</p>
         </div>
       ) : (
         <>
@@ -354,7 +354,7 @@ export default function MonthlyDriverPage() {
               value={`${stats.activeWorkers} / ${stats.idleWorkers}`}
               icon={<FaUser size={12} />}
               color="sky"
-              caption={`ພະນັກງານທັງໝົດ ${stats.totalWorkers} ຄົນ`}
+              caption={`ຄົນຂັບທັງໝົດ ${stats.totalWorkers} ຄົນ`}
             />
           </div>
 
@@ -424,7 +424,7 @@ export default function MonthlyDriverPage() {
                 <thead>
                   <tr className="bg-white/30 dark:bg-white/5 border-b border-slate-200/30 dark:border-white/5 text-[10px] font-semibold uppercase tracking-wider text-slate-500 dark:text-slate-400">
                     <th className="px-4 py-2.5 text-left w-16">ອັນດັບ</th>
-                    <th className="px-4 py-2.5 text-left">ຄົນຂັບ / ພະນັກງານ</th>
+                    <th className="px-4 py-2.5 text-left">ຄົນຂັບ</th>
                     <th className="px-4 py-2.5 text-left">ການນຳໃຊ້</th>
                     <th className="px-4 py-2.5 text-right w-28">ຖ້ຽວ</th>
                     <th className="px-4 py-2.5 text-right w-20">%</th>

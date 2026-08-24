@@ -27,6 +27,8 @@ interface DeptRow {
   carry_bills: number;
   opened_bills: number;
   delivered_bills: number;
+  /** ບິນທະຍອຍສົ່ງ — ເຄື່ອງອອກໃນຊ່ວງແຕ່ບິນຍັງບໍ່ປິດ (ຢູ່ໃນຍອດສິນຄ້າ ບໍ່ຢູ່ໃນຍອດບິນ) */
+  partial_bills: number;
   /** ບິນທີ່ອອກຈາກຍອດໂດຍບໍ່ໄດ້ສົ່ງ — ຄືນຜ່ານໃບຫຼຸດໜີ້ ຫຼື ຖືກປິດຢູ່ ERP */
   closed_other_bills: number;
   remaining_bills: number;

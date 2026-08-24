@@ -35,8 +35,18 @@ export async function getSuggestedTrips(input: {
   fillTargetPct?: number;
   maxStops?: number;
 }) {
-  await requireSession();
-  const branch = String(input.branch ?? "").trim();
+  const session = await requireSession();
+  const requested = String(input.branch ?? "").trim();
+  // ສາຂາທີ່ຂໍມາ ຕ້ອງຢູ່ໃນຂອບເຂດຂອງ login — ບໍ່ດັ່ງນັ້ນຜູ້ໃຊ້ສາຂາໜຶ່ງຍິງ request
+  // ເອງກໍ່ໄດ້ບິນຂອງອີກສາຂາ (ໜ້າຈໍບໍ່ໄດ້ໃຫ້ເລືອກ ແຕ່ຝ່າຍ server ບໍ່ໄດ້ບັງຄັບ).
+  const allowed = String(session.branch_codes ?? session.logistic_code ?? "")
+    .split(",")
+    .map((code) => code.trim())
+    .filter((code) => code && code !== "02-0004");
+  if (allowed.length > 0 && !allowed.includes(requested)) {
+    return { hasOrigin: false, trips: [], leftover: [], unlocated: [], totals: null };
+  }
+  const branch = requested;
 
   const [candidates, fleetRows, origins] = await Promise.all([
     getSuggestCandidates({ branch, limit: 300 }) as Promise<CandidateRow[]>,

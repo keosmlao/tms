@@ -109,14 +109,32 @@ async function getTripBillNames(docNo) {
  * ⚠️ ຢ່າ JOIN odg_tms_detail ກັບ odg_tms_detail_item ດ້ວຍ doc_no ຢ່າງດຽວ:
  * odg_tms_detail ມີ 1 ແຖວຕໍ່ "ບິນ" ສະນັ້ນຈະຄູນແຖວສິນຄ້າດ້ວຍຈຳນວນບິນ.
  * ຈຶ່ງດຶງແຍກເປັນ 2 query ແລ້ວປະກອບກັນຢູ່ຊັ້ນເທິງ.
+ *
+ * @param {{dateFrom: string, dateTo: string, branchCodes?: string[] | null}} params
  */
-async function getTripsInRange({ dateFrom, dateTo }) {
+async function getTripsInRange({ dateFrom, dateTo, branchCodes = null }) {
+  const { branchFilterJob, ensureForwardBranchColumn } = require("./helpers");
   const from = String(dateFrom ?? "").trim();
   const to = String(dateTo ?? "").trim() || from;
   if (!from) return { trips: [], items: [] };
 
+  // ຂອບເຂດສາຂາ — ສົ່ງ branchCodes ມາ = ກົດດຽວກັບລາຍງານອື່ນ (branchFilterJob).
+  // ບໍ່ສົ່ງ (null) = ທຸກສາຂາ ໃຊ້ສະເພາະ /api/reports/truck-utilization ທີ່ ODGMGT
+  // ດຶງໄປລວມທັງບໍລິສັດ.
+  await ensureForwardBranchColumn();
+  const branches = Array.isArray(branchCodes)
+    ? branchCodes.map((c) => String(c ?? "").trim()).filter((c) => c && c !== "02-0004")
+    : [];
+  const scope = {
+    scoped: branches.length > 0,
+    branchListSql: branches.map((c) => `'${c.replace(/'/g, "''")}'`).join(", "),
+  };
+
   // odg_tms = ຫົວຖ້ຽວ (1 ແຖວ/ຖ້ຽວ) ຈຶ່ງ join ໄດ້ປອດໄພ;
   // odg_tms_detail = 1 ແຖວ/ບິນ ຈຶ່ງຕ້ອງ GROUP ກ່ອນ
+  //
+  // ນັບສະເພາະຖ້ຽວທີ່ອະນຸມັດແລ້ວ ຄືກັບນິຍາມ "ຖ້ຽວ" ຢູ່ໜ້າອື່ນ — ບໍ່ດັ່ງນັ້ນ
+  // ຈຳນວນຖ້ຽວຢູ່ໜ້ານີ້ຈະຫຼາຍກວ່າໜ້າ BI/ໜ້າຫຼັກ ໂດຍບໍ່ມີເຫດຜົນ.
   const trips = await query(
     `SELECT d.doc_no,
             MAX(COALESCE(d.car, '')) AS car,
@@ -125,8 +143,10 @@ async function getTripsInRange({ dateFrom, dateTo }) {
             MAX(COALESCE(t.driver, '')) AS driver,
             COUNT(DISTINCT d.bill_no)::int AS bills
        FROM public.odg_tms_detail d
-       LEFT JOIN public.odg_tms t ON t.doc_no = d.doc_no
+       INNER JOIN public.odg_tms t ON t.doc_no = d.doc_no
       WHERE d.doc_date BETWEEN $1::date AND $2::date
+        AND COALESCE(t.approve_status, 0) = 1
+        ${branchFilterJob(scope, "t")}
       GROUP BY d.doc_no
       ORDER BY MIN(d.doc_date), d.doc_no`,
     [from, to]

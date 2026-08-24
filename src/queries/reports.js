@@ -8,6 +8,7 @@ const {
   branchFilterJob,
   getNextMonthStart,
   ensureForwardBranchColumn,
+  firstPromiseSql,
 } = require("./helpers");
 
 // ເວລາເປີດບິນ ສຳລັບ query ທີ່ join ic_trans ເປັນ `t` ແລະ ic_trans_shipment ເປັນ `s`.
@@ -56,7 +57,9 @@ async function getReportDaily(session, fromDate, toDate, dateField = "logistic")
 
 async function getReportByDriver(session, fromDate, toDate, driverId) {
   const { getTransportDepartmentEmployees } = require("./master-data");
-  const drivers = await getTransportDepartmentEmployees();
+  // ຄືກັບ getReportMonthlyDriver — ຕ້ອງສົ່ງ session + role ບໍ່ດັ່ງນັ້ນ dropdown
+  // ຂຶ້ນພະນັກງານຂົນສົ່ງທຸກຄົນທຸກສາຂາ ບໍ່ຕົງກັບລາຍຊື່ຢູ່ໜ້າຈັດຖ້ຽວ.
+  const drivers = await getTransportDepartmentEmployees(session, "driver");
   let listitem = [];
   if (driverId) {
     const scope = getBranchScope(session);
@@ -77,9 +80,40 @@ async function getReportByCar(session, fromDate, toDate, carId) {
   return { cars, listitem };
 }
 
+// ໜຶ່ງແຖວຕໍ່ໜຶ່ງບິນຂອງຖ້ຽວໃນຊ່ວງວັນທີ.
+//
+// ⚠️ ຢ່າດຶງຮູບ (url_img / sight_img / odg_tms_delivery_images) ມາໃນລາຍການນີ້:
+// ຮູບເກັບເປັນ base64 ໃນຖານຂໍ້ມູນ ຈຶ່ງໜັກ ~27 MB ຕໍ່ 1 ວັນ (68 ແຖວ) ແລະ ພໍເລືອກ
+// ເປັນເດືອນ JSON.stringify ຈະລົ້ມດ້ວຍ "Invalid string length" ແລ້ວໜ້າຈໍຂຶ້ນ
+// error ລ້າໆ. ໜ້າຈໍນີ້ບໍ່ໄດ້ໃຊ້ຮູບຢູ່ແລ້ວ — ຢາກເບິ່ງຮູບໃຫ້ໄປໜ້າ ຫຼັກຖານການສົ່ງ.
 async function getReportByBill(session, fromDate, toDate) {
   const scope = getBranchScope(session);
-  return query(`SELECT to_char(a.create_date_time_now,'DD-MM-YYYY HH24:MI') as doc_date, a.doc_no, bill_no, to_char(bill_date,'DD-MM-YYYY') as bill_date, b.name_1 as cust_code, to_char(a.date_logistic,'DD-MM-YYYY') as date_logistic, a.status, url_img, COALESCE(a.sight_img,'') as sight_img, COALESCE(img.delivery_images, ARRAY[]::text[]) as delivery_images, case when sent_start IS NULL then 'ລໍຖ້າຈັດສົ່ງ / ເບີກເຄື່ອງ' when sent_start IS NOT NULL AND sent_end IS NULL then 'ກຳລັງຈັດສົ່ງ' else case when a.status=1 then 'ຈັດສົ່ງສຳເລັດ' else 'ຍົກເລີກຈັດສົ່ງ' end end as status_trans, d.name_1 as car, e.name_1 as driver, count_item, a.remark, to_char(a.recipt_job,'DD-MM-YYYY HH24:MI') as recipt_job, to_char(a.sent_start,'DD-MM-YYYY HH24:MI') as sent_start, to_char(a.sent_end,'DD-MM-YYYY HH24:MI') as sent_end FROM public.odg_tms_detail a LEFT JOIN ar_customer b ON b.code=a.cust_code LEFT JOIN odg_tms c ON c.doc_no=a.doc_no LEFT JOIN public.odg_tms_car d ON d.code=a.car LEFT JOIN public.odg_tms_driver e ON e.code=c.driver LEFT JOIN public.ic_trans_shipment s ON s.doc_no=a.bill_no LEFT JOIN LATERAL (SELECT array_agg(di.image_data ORDER BY di.created_at ASC, di.roworder ASC) as delivery_images FROM public.odg_tms_delivery_images di WHERE di.bill_no = a.bill_no) img ON true WHERE a.doc_date BETWEEN $1 AND $2 ${scope.scoped ? `AND s.transport_code IN (${scope.branchListSql})` : ""} ORDER BY a.roworder`, [fromDate, toDate]);
+  await ensureForwardBranchColumn();
+  return query(
+    `SELECT to_char(a.create_date_time_now,'DD-MM-YYYY HH24:MI') as doc_date,
+            a.doc_no, a.bill_no,
+            to_char(a.bill_date,'DD-MM-YYYY') as bill_date,
+            b.name_1 as cust_code,
+            to_char(a.date_logistic,'DD-MM-YYYY') as date_logistic,
+            a.status,
+            case when a.sent_start IS NULL then 'ລໍຖ້າຈັດສົ່ງ / ເບີກເຄື່ອງ'
+                 when a.sent_start IS NOT NULL AND a.sent_end IS NULL then 'ກຳລັງຈັດສົ່ງ'
+                 else case when a.status=1 then 'ຈັດສົ່ງສຳເລັດ' else 'ຍົກເລີກຈັດສົ່ງ' end
+            end as status_trans,
+            d.name_1 as car, e.name_1 as driver, a.count_item, a.remark,
+            to_char(a.recipt_job,'DD-MM-YYYY HH24:MI') as recipt_job,
+            to_char(a.sent_start,'DD-MM-YYYY HH24:MI') as sent_start,
+            to_char(a.sent_end,'DD-MM-YYYY HH24:MI') as sent_end
+     FROM public.odg_tms_detail a
+     JOIN odg_tms c ON c.doc_no = a.doc_no
+     LEFT JOIN ar_customer b ON b.code = a.cust_code
+     LEFT JOIN public.odg_tms_car d ON d.code = a.car
+     LEFT JOIN public.odg_tms_driver e ON e.code = c.driver
+     WHERE a.doc_date BETWEEN $1 AND $2
+       ${branchFilterJob(scope, "c")}
+     ORDER BY a.roworder`,
+    [fromDate, toDate]
+  );
 }
 
 // ==================== ລາຍງານຕາມຖ້ຽວ ====================
@@ -215,9 +249,14 @@ async function getReportByTrip(session, fromDate, toDate, filters = {}) {
     listDeliveryRounds({ activeOnly: true }),
   ]);
 
+  // ລາຍງານນີ້ສະແດງໃບທີ່ຍັງລໍອະນຸມັດນຳ (ຜູ້ຈັດຖ້ຽວຕ້ອງເຫັນ) ແຕ່ນິຍາມ "ຖ້ຽວ"
+  // ຢູ່ໜ້າ BI/ໜ້າຫຼັກ ນັບສະເພາະທີ່ອະນຸມັດແລ້ວ — ຈຶ່ງແຍກ trips_approved ອອກມາ
+  // ໃຫ້ໜ້າຈໍບອກໄດ້ວ່າສ່ວນຕ່າງມາຈາກໃສ.
   const totals = rows.reduce(
     (acc, r) => {
       acc.trips += 1;
+      if (Number(r.approve_status ?? 0) === 1) acc.trips_approved += 1;
+      else acc.trips_pending_approval += 1;
       acc.bills += Number(r.bills_total) || 0;
       acc.delivered += Number(r.bills_delivered) || 0;
       acc.cancelled += Number(r.bills_cancelled) || 0;
@@ -226,7 +265,7 @@ async function getReportByTrip(session, fromDate, toDate, filters = {}) {
       acc.km += Number(r.distance_km) || 0;
       return acc;
     },
-    { trips: 0, bills: 0, delivered: 0, cancelled: 0, pending: 0, items: 0, km: 0 }
+    { trips: 0, trips_approved: 0, trips_pending_approval: 0, bills: 0, delivered: 0, cancelled: 0, pending: 0, items: 0, km: 0 }
   );
   totals.km = Math.round(totals.km * 10) / 10;
 
@@ -260,58 +299,98 @@ async function getReportTripBills(docNo) {
   );
 }
 
+// ລົດ + ຈຳນວນຖ້ຽວ ແລະ ກມ ຂອງເດືອນ.
+//
+// ແຖວ = ລົດຂອງສາຂາທີ່ລັອກອິນ (ຕາມທະບຽນລົດ) ∪ ລົດທີ່ມີຖ້ຽວໃນຂອບເຂດນັ້ນ.
+// ຕ້ອງລວມລົດທີ່ບໍ່ມີຖ້ຽວນຳ ບໍ່ດັ່ງນັ້ນ "ກມ. ລວມ" ຂອງໜ້ານີ້ຈະໜ້ອຍກວ່າໜ້າ BI
+// ທີ່ນັບທັງກອງລົດ (ວັດ 2026-08 ສາຂາ 02-0002: 15,244 ທຽບ 15,998 ກມ).
 async function getReportMonthlyCar(session, monthly) {
   const scope = getBranchScope(session);
   await ensureForwardBranchColumn();
+  const [year, month] = monthly.split("-");
+  // ລົດທີ່ຍັງບໍ່ໄດ້ຜູກສາຂາ ບໍ່ນັບເປັນລົດຂົນສົ່ງ — ກົດດຽວກັບ IS_TRANSPORT_CAR
+  // ຢູ່ໜ້າ BI ບໍ່ດັ່ງນັ້ນຜູ້ໃຊ້ລະດັບບໍລິສັດຈະເຫັນ ກມ. ລວມ ຂອງ 2 ໜ້າຕ່າງກັນ
+  // (ວັດ 2026-08: 6 ຄັນ 4,375 ກມ ທີ່ບໍ່ມີ transport_code).
+  const carBranchSql = scope.scoped
+    ? `b.transport_code IN (${scope.branchListSql})`
+    : "NULLIF(BTRIM(b.transport_code), '') IS NOT NULL";
   return query(
-    `SELECT
-       a.car AS car_code,
-       b.name_1 AS car,
-       COALESCE(b.imei, '') AS imei,
-       COUNT(a.doc_no)::int AS qty,
-       COALESCE(MAX(gps.total_km), 0)::numeric AS total_km,
-       to_char(a.doc_date,'MM') AS month,
-       to_char(a.doc_date,'yyyy') AS year
-     FROM odg_tms a
-     LEFT JOIN public.odg_tms_car b ON b.code = a.car
-     LEFT JOIN (
+    `WITH trip_counts AS (
+       SELECT a.car, COUNT(a.doc_no)::int AS qty
+       FROM odg_tms a
+       WHERE to_char(a.doc_date,'yyyy-MM') = $1
+         -- "ຖ້ຽວ" = ໃບງານທີ່ອະນຸມັດແລ້ວ ຄືກັບ BI/ໜ້າຫຼັກ (getTripCore).
+         AND COALESCE(a.approve_status, 0) = 1
+         ${branchFilterJob(scope, "a")}
+       GROUP BY a.car
+     ),
+     gps AS (
        SELECT imei, SUM(COALESCE(distance_km, 0))::numeric AS total_km
        FROM public.odg_tms_gps_daily
        WHERE to_char(usage_date, 'yyyy-MM') = $1
        GROUP BY imei
-     ) gps ON gps.imei = NULLIF(TRIM(b.imei), '')
-     WHERE to_char(a.doc_date,'yyyy-MM') = $1
-       ${branchFilterJob(scope, "a")}
-     GROUP BY a.car, b.name_1, b.imei, to_char(a.doc_date,'MM'), to_char(a.doc_date,'yyyy')
-     ORDER BY COUNT(a.doc_no) DESC, b.name_1 ASC`,
-    [monthly]
+     )
+     SELECT
+       b.code AS car_code,
+       COALESCE(NULLIF(TRIM(b.name_1), ''), b.code) AS car,
+       COALESCE(b.imei, '') AS imei,
+       COALESCE(tc.qty, 0)::int AS qty,
+       COALESCE(g.total_km, 0)::numeric AS total_km,
+       $2::text AS month,
+       $3::text AS year
+     FROM public.odg_tms_car b
+     LEFT JOIN trip_counts tc ON tc.car = b.code
+     LEFT JOIN gps g ON g.imei = NULLIF(TRIM(b.imei), '')
+     WHERE ${carBranchSql} OR tc.car IS NOT NULL
+     ORDER BY COALESCE(tc.qty, 0) DESC, car ASC`,
+    [monthly, month, year]
   );
 }
 
+// ລາຍຊື່ຄົນຂັບ + ຈຳນວນຖ້ຽວຂອງເດືອນ. ໜ້ານີ້ຄິດ "ວ່າງ" ຈາກ qty = 0 ຈຶ່ງລາຍຊື່
+// ຕ້ອງເປັນ *ຄົນຂັບຂອງສາຂາທີ່ລັອກອິນ* ຄືກັບໜ້າຈັດຖ້ຽວ (getDispatchDrivers):
+// ຖ້າສົ່ງ session/role ບໍ່ຄົບ ຈະໄດ້ພະນັກງານຂົນສົ່ງທັງໝົດທຸກສາຂາ (ກຳມະກອນ,
+// ຫົວໜ້າທີມ, admin ນຳ) ແລ້ວ "ວ່າງ" ບວມຂຶ້ນຫຼາຍສິບຄົນ ບໍ່ຕົງກັບໜ້າອື່ນ.
 async function getReportMonthlyDriver(session, monthly) {
   const { getTransportDepartmentEmployees } = require("./master-data");
   const scope = getBranchScope(session);
-  const employees = await getTransportDepartmentEmployees();
-  const jobBranchFilter = scope.scoped
-    ? `AND EXISTS (
-        SELECT 1 FROM public.odg_tms_detail __dd
-        JOIN public.ic_trans_shipment __ss ON __ss.doc_no = __dd.bill_no
-        WHERE __dd.doc_no = a.doc_no AND __ss.transport_code IN (${scope.branchListSql})
-      )`
-    : "";
+  await ensureForwardBranchColumn();
+  const employees = await getTransportDepartmentEmployees(session, "driver");
+  // ນັບຖ້ຽວດ້ວຍກົດດຽວກັບ BI/ໜ້າຫຼັກ: ອະນຸມັດແລ້ວ + branchFilterJob (ຖື
+  // origin_transport_code ເປັນຫຼັກ). ກົດເກົ່າເບິ່ງແຕ່ສາຂາຂອງບິນ ຈຶ່ງໃຫ້ຄ່າ
+  // ຄົນລະຢ່າງກັບລາຍງານປະຈຳວັນ (ວັດແລ້ວ 140 ຖ້ຽວ/ປີ ທີ່ສອງກົດບໍ່ຕົງກັນ).
   const counts = await query(
     `SELECT a.driver, COUNT(a.doc_no)::int AS qty
      FROM public.odg_tms a
      WHERE to_char(a.doc_date, 'yyyy-MM') = $1
-       ${jobBranchFilter}
+       AND COALESCE(a.approve_status, 0) = 1
+       ${branchFilterJob(scope, "a")}
      GROUP BY a.driver`,
     [monthly]
   );
   const countMap = new Map();
   for (const row of counts) countMap.set(row.driver, Number(row.qty) || 0);
 
+  // ຄົນຂັບທີ່ມີຖ້ຽວໃນຂອບເຂດ ແຕ່ບໍ່ຢູ່ໃນລາຍຊື່ (ຍ້າຍສາຂາ, ລາອອກ, ຫຼື ຍັງບໍ່ໄດ້
+  // ກຳນົດຕຳແໜ່ງ) ຕ້ອງຍັງຂຶ້ນ ບໍ່ດັ່ງນັ້ນຍອດຖ້ຽວລວມຂອງໜ້ານີ້ຈະໜ້ອຍກວ່າຄວາມຈິງ.
+  const listed = new Set(employees.map((e) => e.code));
+  const extraCodes = [...countMap.keys()].filter(
+    (code) => String(code ?? "").trim() && !listed.has(code)
+  );
+  const extras = [];
+  if (extraCodes.length > 0) {
+    const known = await query(
+      `SELECT d.code, COALESCE(NULLIF(TRIM(d.name_1), ''), d.code) AS name_1
+       FROM public.odg_tms_driver d
+       WHERE d.code = ANY($1::varchar[])`,
+      [extraCodes]
+    );
+    const nameMap = new Map(known.map((r) => [r.code, r.name_1]));
+    for (const code of extraCodes) extras.push({ code, name_1: nameMap.get(code) ?? code });
+  }
+
   const [year, month] = monthly.split("-");
-  const result = employees.map((e) => ({
+  const result = [...employees, ...extras].map((e) => ({
     driver: e.name_1,
     driver_code: e.code,
     qty: countMap.get(e.code) ?? 0,
@@ -361,8 +440,14 @@ async function getReportMonthlyDelivery(session, monthly) {
       ? `${year + 1}-01-01`
       : `${year}-${String(month + 1).padStart(2, "0")}-01`;
   const branchCodeSql = MONTHLY_DELIVERY_BRANCH_CODES.map((code) => `'${code}'`).join(",");
+  // ຍິງບັນຊີກາງໄປພ້ອມກັນຕັ້ງແຕ່ຕົ້ນ ແລ້ວຄ່ອຍ await ຢູ່ທ້າຍ — ຖ້າລໍຢູ່ທ້າຍຢ່າງດຽວ
+  // ໜ້ານີ້ຈະຊ້າຂຶ້ນອີກ ~2 ວິນາທີ ໂດຍບໍ່ຈຳເປັນ (server action ແລ່ນເທື່ອລະອັນ).
+  const perfPromise = getDeliveryPerformance(session, monthly);
   const openedBranchClause = scope.scoped ? `AND s.transport_code IN (${scope.branchListSql})` : "";
-  const deliveredBranchClause = scope.scoped ? `AND s.transport_code IN (${scope.branchListSql})` : "";
+  const deliveredBranchClause = scope.scoped
+    ? `AND COALESCE(NULLIF(TRIM(s.transport_code), ''),
+                    NULLIF(TRIM(a.origin_transport_code), ''), '') IN (${scope.branchListSql})`
+    : "";
   const rows = await query(
     `WITH params AS (
        SELECT $1::timestamp AS start_at, $2::timestamp AS end_at
@@ -371,10 +456,10 @@ async function getReportMonthlyDelivery(session, monthly) {
        SELECT
          s.doc_no AS bill_no,
          COALESCE(NULLIF(TRIM(s.transport_code), ''), 'unknown') AS branch_code,
-         COALESCE(NULLIF(TRIM(sale_u.department::text), ''), 'unknown') AS department_code,
+         COALESCE(NULLIF(TRIM(sale_u.department_code::text), ''), 'unknown') AS department_code,
          COALESCE(
-           NULLIF(TRIM(dep.name_1::text), ''),
-           NULLIF(TRIM(sale_u.department::text), ''),
+           NULLIF(TRIM(dep.department_name_lo::text), ''),
+           NULLIF(TRIM(sale_u.department_code::text), ''),
            'ບໍ່ລະບຸພະແນກ'
          ) AS department_name,
          ${BILL_OPENED_AT} AS opened_at,
@@ -382,8 +467,11 @@ async function getReportMonthlyDelivery(session, monthly) {
          p.end_at AS month_end_at
        FROM public.ic_trans_shipment s
        LEFT JOIN public.ic_trans t ON t.doc_no = s.doc_no
-       LEFT JOIN erp_user sale_u ON sale_u.code = t.sale_code
-       LEFT JOIN erp_department_list dep ON dep.code = sale_u.department
+       -- ພະແນກເອົາຈາກທະບຽນ TMS (odg_employee → odg_department) ບ່ອນດຽວກັບ
+       -- getDeliveryPerformance ແລະ ລາຍງານ ປະຈຳວັນ/ພະແນກ ຈຶ່ງໄດ້ຊື່ພະແນກ
+       -- ຊຸດດຽວກັນ. ຝ່າຍ ERP ໃຫ້ພະແນກທີ່ບໍ່ແມ່ນຝ່າຍຂາຍນຳ (ບັນຊີ, HR).
+       LEFT JOIN public.odg_employee sale_u ON sale_u.employee_code = t.sale_code
+       LEFT JOIN public.odg_department dep ON dep.department_code = sale_u.department_code
        LEFT JOIN LATERAL (
          SELECT MIN(done.sent_end) AS sent_end
          FROM public.odg_tms_detail done
@@ -399,6 +487,57 @@ async function getReportMonthlyDelivery(session, monthly) {
          AND s.transport_code IS NOT NULL
          AND s.transport_code IN (${branchCodeSql})
          ${openedBranchClause}
+       UNION ALL
+       -- ບິນທີ່ບໍ່ມີແຖວ shipment ເລີຍ (ໃບໂອນສາຂາ FT, ໃບເບີກ WFOH, ບິນມືຂອງ TMS)
+       -- ແຕ່ຖືກຂົນດ້ວຍຖ້ຽວຂອງສາຂາເຫຼົ່ານີ້ — ນັບເປັນບິນຂອງສາຂາທີ່ຂົນ ຄືກັບ
+       -- getDeliveryPerformance. ບໍ່ມີແຂນນີ້ ຍອດເປີດບິນຈະໜ້ອຍກວ່າໜ້ານັ້ນ
+       -- (ວັດ 08/2026: 1,604 ທຽບ 1,882).
+       SELECT
+         x.bill_no,
+         x.branch_code,
+         COALESCE(NULLIF(TRIM(sale_x.department_code::text), ''), 'unknown') AS department_code,
+         COALESCE(
+           NULLIF(TRIM(dep_x.department_name_lo::text), ''),
+           NULLIF(TRIM(sale_x.department_code::text), ''),
+           'ບໍ່ລະບຸພະແນກ'
+         ) AS department_name,
+         x.opened_at,
+         x.completed_at,
+         p.end_at AS month_end_at
+       FROM (
+         SELECT d.bill_no,
+                (ARRAY_AGG(a.origin_transport_code
+                           ORDER BY (COALESCE(d.status, 0) = 1) DESC,
+                                    d.sent_end DESC NULLS LAST))[1] AS branch_code,
+                COALESCE(MIN(ic_x.doc_date)::timestamp,
+                         MIN(cb_x.created_at),
+                         MIN(d.bill_date)::timestamp) AS opened_at,
+                MIN(d.sent_end) FILTER (WHERE d.status = 1) AS completed_at,
+                MIN(ic_x.sale_code) AS sale_code
+         FROM public.odg_tms_detail d
+         JOIN public.odg_tms a ON a.doc_no = d.doc_no
+         LEFT JOIN LATERAL (
+           SELECT y.doc_date, y.sale_code FROM ic_trans y
+           WHERE y.doc_no = d.bill_no ORDER BY y.doc_date LIMIT 1
+         ) ic_x ON true
+         LEFT JOIN public.odg_tms_custom_bill cb_x ON cb_x.bill_no = d.bill_no
+         WHERE COALESCE(a.approve_status, 0) = 1
+           AND a.origin_transport_code IN (${branchCodeSql})
+           AND ${getFixedYearSqlFilter("d.doc_date")}
+           AND NOT EXISTS (
+             SELECT 1 FROM public.ic_trans_shipment s_x WHERE s_x.doc_no = d.bill_no
+           )
+         GROUP BY d.bill_no
+       ) x
+       -- ພະແນກເອົາຈາກທະບຽນ TMS (odg_employee → odg_department) ບ່ອນດຽວກັບ
+       -- getDeliveryPerformance ແລະ ລາຍງານ ປະຈຳວັນ/ພະແນກ ຈຶ່ງໄດ້ຊື່ພະແນກ
+       -- ຊຸດດຽວກັນ. ຝ່າຍ ERP ໃຫ້ພະແນກທີ່ບໍ່ແມ່ນຝ່າຍຂາຍນຳ (ບັນຊີ, HR).
+       LEFT JOIN public.odg_employee sale_x ON sale_x.employee_code = x.sale_code
+       LEFT JOIN public.odg_department dep_x ON dep_x.department_code = sale_x.department_code
+       CROSS JOIN params p
+       WHERE x.opened_at >= p.start_at
+         AND x.opened_at < p.end_at
+         ${scope.scoped ? `AND x.branch_code IN (${scope.branchListSql})` : ""}
      ),
      opened_rollup AS (
        SELECT
@@ -444,11 +583,18 @@ async function getReportMonthlyDelivery(session, monthly) {
      assigned_source AS (
        SELECT
          d.bill_no,
-         COALESCE(NULLIF(TRIM(s.transport_code), ''), 'unknown') AS branch_code,
-         COALESCE(NULLIF(TRIM(sale_u.department::text), ''), 'unknown') AS department_code,
+         -- ບິນທີ່ບໍ່ມີແຖວ shipment (ໃບໂອນສາຂາ FT, ໃບເບີກ WFOH, ບິນມືຂອງ TMS)
+         -- ຖອຍໄປໃຊ້ສາຂາຕົ້ນທາງຂອງຖ້ຽວ — ນິຍາມດຽວກັບ branchFilterJob ແລະ
+         -- getDeliveryPerformance. ບໍ່ດັ່ງນັ້ນປີນີ້ຫຼຸດໄປ 1,065 ບິນ.
          COALESCE(
-           NULLIF(TRIM(dep.name_1::text), ''),
-           NULLIF(TRIM(sale_u.department::text), ''),
+           NULLIF(TRIM(s.transport_code), ''),
+           NULLIF(TRIM(a.origin_transport_code), ''),
+           'unknown'
+         ) AS branch_code,
+         COALESCE(NULLIF(TRIM(sale_u.department_code::text), ''), 'unknown') AS department_code,
+         COALESCE(
+           NULLIF(TRIM(dep.department_name_lo::text), ''),
+           NULLIF(TRIM(sale_u.department_code::text), ''),
            'ບໍ່ລະບຸພະແນກ'
          ) AS department_name,
          d.status,
@@ -463,8 +609,11 @@ async function getReportMonthlyDelivery(session, monthly) {
        LEFT JOIN public.odg_tms a ON a.doc_no = d.doc_no
        LEFT JOIN public.ic_trans_shipment s ON s.doc_no = d.bill_no
        LEFT JOIN public.ic_trans t ON t.doc_no = d.bill_no
-       LEFT JOIN erp_user sale_u ON sale_u.code = t.sale_code
-       LEFT JOIN erp_department_list dep ON dep.code = sale_u.department
+       -- ພະແນກເອົາຈາກທະບຽນ TMS (odg_employee → odg_department) ບ່ອນດຽວກັບ
+       -- getDeliveryPerformance ແລະ ລາຍງານ ປະຈຳວັນ/ພະແນກ ຈຶ່ງໄດ້ຊື່ພະແນກ
+       -- ຊຸດດຽວກັນ. ຝ່າຍ ERP ໃຫ້ພະແນກທີ່ບໍ່ແມ່ນຝ່າຍຂາຍນຳ (ບັນຊີ, HR).
+       LEFT JOIN public.odg_employee sale_u ON sale_u.employee_code = t.sale_code
+       LEFT JOIN public.odg_department dep ON dep.department_code = sale_u.department_code
        LEFT JOIN LATERAL (
          SELECT COUNT(*)::int AS delivery_rounds
          FROM public.odg_tms_detail hist
@@ -476,7 +625,8 @@ async function getReportMonthlyDelivery(session, monthly) {
        WHERE d.create_date_time_now >= p.start_at
          AND d.create_date_time_now < p.end_at
          AND COALESCE(a.approve_status,0) = 1
-         AND COALESCE(NULLIF(TRIM(s.transport_code), ''), '') IN (${branchCodeSql})
+         AND COALESCE(NULLIF(TRIM(s.transport_code), ''),
+                      NULLIF(TRIM(a.origin_transport_code), ''), '') IN (${branchCodeSql})
          ${deliveredBranchClause}
      ),
      assigned_rollup AS (
@@ -675,42 +825,10 @@ async function getReportMonthlyDelivery(session, monthly) {
     if (assignedDiff !== 0) return assignedDiff;
     return a.department_name.localeCompare(b.department_name);
   });
-  // ບິນຄ້າງສົ່ງແຕ່ລະມື້ — ນັບບິນທີ່ເປີດແຕ່ລະວັນ (ໃນເດືອນ) ແລະ ຍັງບໍ່ສຳເລັດ.
-  const dailyRows = await query(
-    `WITH params AS (SELECT $1::timestamp AS start_at, $2::timestamp AS end_at),
-     opened_source AS (
-       SELECT s.doc_no AS bill_no,
-         ${BILL_OPENED_AT} AS opened_at,
-         (SELECT MIN(done.sent_end) FROM public.odg_tms_detail done
-            LEFT JOIN public.odg_tms done_job ON done_job.doc_no = done.doc_no
-            WHERE done.bill_no = s.doc_no AND done.status = 1 AND done.sent_end IS NOT NULL
-              AND COALESCE(done_job.approve_status,0) = 1) AS completed_at
-       FROM public.ic_trans_shipment s
-       LEFT JOIN public.ic_trans t ON t.doc_no = s.doc_no
-       CROSS JOIN params p
-       WHERE ${BILL_OPENED_AT} >= p.start_at
-         AND ${BILL_OPENED_AT} < p.end_at
-         AND s.transport_code IS NOT NULL
-         AND s.transport_code IN (${branchCodeSql})
-         ${openedBranchClause}
-     )
-     SELECT to_char(opened_at::date, 'YYYY-MM-DD') AS day,
-            to_char(opened_at::date, 'DD/MM') AS day_label,
-            COUNT(DISTINCT bill_no)::int AS opened,
-            COUNT(DISTINCT bill_no) FILTER (WHERE completed_at IS NULL)::int AS pending,
-            COUNT(DISTINCT bill_no) FILTER (WHERE completed_at IS NOT NULL)::int AS delivered
-     FROM opened_source
-     GROUP BY opened_at::date
-     ORDER BY opened_at::date`,
-    [monthStart, nextMonthStart]
-  );
-  const daily = dailyRows.map((r) => ({
-    day: r.day,
-    day_label: r.day_label,
-    opened: Number(r.opened) || 0,
-    pending: Number(r.pending) || 0,
-    delivered: Number(r.delivered) || 0,
-  }));
+  // ບິນຄ້າງສົ່ງແຕ່ລະມື້ — ດຶງຈາກບັນຊີກາງ (getDeliveryPerformance) ບ່ອນດຽວກັບ
+  // ບັດເທິງສຸດ ຈຶ່ງບວກໄດ້ເທົ່າ "ເປີດບິນ" ສະເໝີ. ກ່ອນນີ້ຄິດເອງດ້ວຍ query ຕ່າງຫາກ
+  // ແລ້ວກຣາຟກັບບັດຢູ່ໜ້າດຽວກັນບໍ່ຕົງກັນ (ວັດ 08/2026: 1,609 ທຽບ 1,887).
+  const daily = (await perfPromise).daily ?? [];
 
   // ສະຫຼຸບຕາມເຂດ (ນະຄອນຫຼວງ vs ຕ່າງແຂວງ) — ສະເລ່ຍ "ມື້ທີ່ຈັດສົ່ງສຳເລັດ"
   // ນັບຈາກ ວັນນັດຈັດສົ່ງ (date_logistic) ຫາ ວັນສຳເລັດ (sent_end). province '01' = ນະຄອນຫຼວງ.
@@ -732,7 +850,8 @@ async function getReportMonthlyDelivery(session, monthly) {
        WHERE d.create_date_time_now >= p.start_at
          AND d.create_date_time_now < p.end_at
          AND COALESCE(a.approve_status,0) = 1
-         AND COALESCE(NULLIF(TRIM(s.transport_code), ''), '') IN (${branchCodeSql})
+         AND COALESCE(NULLIF(TRIM(s.transport_code), ''),
+                      NULLIF(TRIM(a.origin_transport_code), ''), '') IN (${branchCodeSql})
          ${deliveredBranchClause}
      )
      SELECT zone,
@@ -766,19 +885,31 @@ async function getReportMonthlyDelivery(session, monthly) {
 
   // ການນຳໃຊ້ລົດ — ຖ້ຽວທີ່ແລ່ນ, ລົດທີ່ໃຊ້ງານ, ສະເລ່ຍຖ້ຽວ/ຄັນ/ມື້ (job ທີ່ອະນຸມັດ
   // ແລະ ມີບິນຢູ່ສາຂາ KPI).
+  // ຂອບເຂດສາຂາ: branchCodeSql ເປັນ 3 ສາຂາ KPI ສະເໝີ ຈຶ່ງຕ້ອງແຄບລົງຕາມ login
+  // ເອງ — ບໍ່ດັ່ງນັ້ນຜູ້ໃຊ້ສາຂາດຽວຈະເຫັນຕົວເລກກອງລົດຂອງທັງບໍລິສັດ.
+  const fleetBranchList = scope.scoped ? scope.branchListSql : branchCodeSql;
   const fleetRow = await queryOne(
     `WITH j AS (
-       SELECT DISTINCT a.doc_no, a.car, a.create_date_time_now::date AS d
+       -- ນິຍາມ "ຖ້ຽວ" ອັນດຽວກັບໜ້າອື່ນ: ນັບດ້ວຍ doc_date (ບໍ່ແມ່ນເວລາສ້າງໃບງານ)
+       -- ແລະ ຂອບເຂດສາຂາຖື origin_transport_code ເປັນຫຼັກ. ກົດເກົ່າ (ເວລາສ້າງ +
+       -- ສາຂາຂອງບິນ) ໃຫ້ 355 ຖ້ຽວ ໃນຂະນະທີ່ໜ້າອື່ນນັບໄດ້ 375 ໃນເດືອນດຽວກັນ.
+       SELECT DISTINCT a.doc_no, a.car, a.doc_date::date AS d
        FROM public.odg_tms a
-       WHERE a.create_date_time_now >= $1::timestamp
-         AND a.create_date_time_now < $2::timestamp
+       WHERE a.doc_date >= $1::date
+         AND a.doc_date < $2::date
          AND COALESCE(a.approve_status,0) = 1
          AND COALESCE(NULLIF(TRIM(a.car), ''), '') <> ''
-         AND EXISTS (
-           SELECT 1 FROM public.odg_tms_detail dd
-           LEFT JOIN public.ic_trans_shipment ss ON ss.doc_no = dd.bill_no
-           WHERE dd.doc_no = a.doc_no
-             AND COALESCE(NULLIF(TRIM(ss.transport_code), ''), '') IN (${branchCodeSql})
+         AND (
+           NULLIF(TRIM(a.origin_transport_code), '') IN (${fleetBranchList})
+           OR (
+             NULLIF(TRIM(a.origin_transport_code), '') IS NULL
+             AND EXISTS (
+               SELECT 1 FROM public.odg_tms_detail dd
+               JOIN public.ic_trans_shipment ss ON ss.doc_no = dd.bill_no
+               WHERE dd.doc_no = a.doc_no
+                 AND NULLIF(TRIM(ss.transport_code), '') IN (${fleetBranchList})
+             )
+           )
          )
      )
      SELECT COUNT(*)::int AS total_trips,
@@ -838,6 +969,52 @@ async function getReportMonthlyDelivery(session, monthly) {
     jumped: qJumped,
     rate: qDelivered > 0 ? (qJumped / qDelivered) * 100 : 0,
   };
+
+  // ── ຊ່ອງບັນຊີ (ຍົກມາ / ເປີດບິນ / ຈັດສົ່ງ / ຍົກໄປ) ເອົາຈາກແຫຼ່ງດຽວ ──
+  //
+  // getDeliveryPerformance() ເປັນບັນຊີລະດັບບິນທີ່ກົງກັບໜ້າ /bills-pending ສະເໝີ
+  // ແລະ ໜ້າ /reports/bi ກໍ່ດຶງຈາກມັນຢູ່ແລ້ວ. ກ່ອນນີ້ໜ້ານີ້ຄິດເອງ ຈຶ່ງໃຫ້ຄ່າ
+  // ຄົນລະຢ່າງກັບໜ້າ ປະສິດທິພາບການຈັດສົ່ງ ໃນເດືອນດຽວກັນ (ວັດ 08/2026 ກ່ອນແກ້:
+  // ເປີດບິນ 1,604 ທຽບ 1,882 · ຈັດສົ່ງ 1,598 ທຽບ 1,896).
+  //
+  // ຄ່າສະເພາະຂອງໜ້ານີ້ (ຍອດຈັດຖ້ຽວ, ບິນຫຼາຍຮອບ, ທັນ 24 ຊມ ຈາກເປີດບິນ/ວັນນັດ,
+  // ພະແນກ, ໂຊນ, ກອງລົດ, ຄິວ) ຍັງຄິດຢູ່ບ່ອນນີ້ຄືເກົ່າ.
+  const LEDGER_KEYS = ["carry_in", "opened", "delivered", "carry_out", "closed_other"];
+  // ອັດຕາ "ທັນ 24 ຊມ ນັບແຕ່ເປີດບິນ" ມີ opened ເປັນຕົວຫານ ຈຶ່ງຕົວເສດຕ້ອງມາຈາກ
+  // ຊຸດຂໍ້ມູນດຽວກັນ. ຖ້າປະໄວ້ຄ່າເກົ່າ ຕົວເສດຈະນັບຈາກຊຸດແຄບກວ່າ ແລ້ວອັດຕາຕໍ່າ
+  // ກວ່າຄວາມຈິງ (ວັດ 08/2026: ທັນ+ຊ້າ ໄດ້ 1,807 ແຕ່ ເປີດບິນ 1,888).
+  const applyOnTime = (target, src) => {
+    const opened = Number(src?.opened) || 0;
+    const onTime = Number(src?.opened_on_time_24h) || 0;
+    target.on_time_from_open = onTime;
+    target.breach_from_open = Math.max(opened - onTime, 0);
+    target.on_time = onTime;
+    target.breach = target.breach_from_open;
+    // "ຄ້າງ" ກໍ່ຕ້ອງມາຈາກຊຸດດຽວກັບ opened ບໍ່ດັ່ງນັ້ນ pendingRate ປົນສອງຊຸດ
+    target.pending = Number(src?.opened_pending) || 0;
+  };
+  const perf = await perfPromise;
+  const perfByBranch = new Map((perf.branches || []).map((b) => [String(b.branch_code), b]));
+  for (const branch of branches) {
+    const src = perfByBranch.get(String(branch.branch_code));
+    if (!src) continue;
+    for (const key of LEDGER_KEYS) branch[key] = Number(src[key]) || 0;
+    applyOnTime(branch, src);
+  }
+  for (const key of LEDGER_KEYS) {
+    overall[key] = Number(perf.overall?.[key]) || 0;
+  }
+  applyOnTime(overall, perf.overall);
+  // ພະແນກ: ຊື່ມາຈາກທະບຽນຊຸດດຽວກັນແລ້ວ ຈຶ່ງຈັບຄູ່ດ້ວຍຊື່ໄດ້ໂດຍກົງ
+  const perfByDept = new Map(
+    (perf.departments || []).map((d) => [String(d.department_name || "").trim(), d])
+  );
+  for (const dept of departments) {
+    const src = perfByDept.get(String(dept.department_name || "").trim());
+    if (!src) continue;
+    for (const key of LEDGER_KEYS) dept[key] = Number(src[key]) || 0;
+    applyOnTime(dept, src);
+  }
 
   return { month: monthly, overall, branches, departments, daily, zones, fleet, queue };
 }
@@ -929,9 +1106,11 @@ async function getReportPendingDaily(session, fromDate, toDate) {
 // same bill across multiple trips each count once per attempt.
 async function getReportByDeliveryStatus(session, fromDate, toDate, status) {
   const scope = getBranchScope(session);
-  const branchClause = scope.scoped
-    ? `AND s.transport_code IN (${scope.branchListSql})`
-    : "";
+  await ensureForwardBranchColumn();
+  // ຂອບເຂດສາຂາ ແລະ ນິຍາມ "ຈຸດສົ່ງ" ຕ້ອງເປັນອັນດຽວກັບໜ້າ BI / ໜ້າຫຼັກ:
+  // ຖ້ຽວທີ່ອະນຸມັດແລ້ວ + branchFilterJob. ກົດເກົ່າ (ສາຂາຂອງບິນ) ໃຫ້ 1,381 ແຖວ
+  // ໃນຂະນະທີ່ໜ້າອື່ນນັບໄດ້ 1,724 ສຳລັບ 02-0002 ເດືອນ 2026-08.
+  const branchClause = branchFilterJob(scope, "j");
   const rows = await query(
     `SELECT
        to_char(d.sent_end, 'YYYY-MM-DD') AS finished_date,
@@ -949,7 +1128,7 @@ async function getReportByDeliveryStatus(session, fromDate, toDate, status) {
        COALESCE(NULLIF(TRIM(d.count_item::text), ''), '0')::int AS item_count,
        COALESCE(d.remark, '') AS remark
      FROM public.odg_tms_detail d
-     LEFT JOIN odg_tms j ON j.doc_no = d.doc_no
+     JOIN odg_tms j ON j.doc_no = d.doc_no
      LEFT JOIN public.ic_trans_shipment s ON s.doc_no = d.bill_no
      LEFT JOIN public.ic_trans ic ON ic.doc_no = d.bill_no
      LEFT JOIN erp_user saleU ON saleU.code = ic.sale_code
@@ -961,6 +1140,7 @@ async function getReportByDeliveryStatus(session, fromDate, toDate, status) {
      WHERE COALESCE(d.status, 0) = $3
        AND d.sent_end IS NOT NULL
        AND d.sent_end::date BETWEEN $1::date AND $2::date
+       AND COALESCE(j.approve_status, 0) = 1
        AND ${getFixedYearSqlFilter("d.doc_date")}
        ${branchClause}
      ORDER BY d.sent_end DESC, d.bill_no`,
@@ -1044,7 +1224,13 @@ async function getAttemptDeliveryItems(docNo, billNo) {
 //
 // allowedListSql ຕ້ອງເປັນ "ທຸກສາຂາທີ່ຜູ້ໃຊ້ເຫັນໄດ້" ບໍ່ແມ່ນສາຂາທີ່ຖືກເລືອກຢູ່ຕົວ
 // ກັ່ນຕອງ — ບໍ່ດັ່ງນັ້ນບິນຂອງສາຂາອື່ນຈະຍ້າຍມາໃສ່ຖ້ຽວເມື່ອປ່ຽນຕົວກັ່ນຕອງ.
-function ledgerExtraBillsCte(branchListSql, allowedListSql) {
+// ⚠️ ທັງສອງພາຣາມິເຕີຕ້ອງເປັນ "ທຸກສາຂາທີ່ຜູ້ໃຊ້ເຫັນໄດ້" ບໍ່ແມ່ນສາຂາທີ່ຖືກເລືອກ
+// ຢູ່ຕົວກັ່ນຕອງ. trip_branch ຄືສາຂາຂອງຖ້ຽວ **ຫຼ້າສຸດທີ່ສົ່ງສຳເລັດ** ຂອງບິນນັ້ນ
+// ຈຶ່ງຕ້ອງເບິ່ງຖ້ຽວທັງໝົດກ່ອນ ແລ້ວຄ່ອຍກັ່ນຕອງດ້ວຍສາຂາທີ່ເລືອກຢູ່ຊັ້ນນອກ:
+// ບິນ 7275 ຖືກສົ່ງໂດຍຖ້ຽວ 02-0001 (ມິຖຸນາ) ແລະ 02-0002 (ສິງຫາ) — ຖ້າສະແກນ
+// ສະເພາະ 02-0001 ມັນຈະຖືກຕີເປັນບິນຂອງ 02-0001 ແລ້ວລາຍການລະອຽດຈະມີ 1 ແຖວ
+// ຫຼາຍກວ່າບັດສະຫຼຸບ.
+function ledgerExtraBillsCte(allowedListSql, allowedListSql2 = allowedListSql) {
   return `extra_bills AS (
       SELECT d.bill_no,
              MIN(d.bill_date)::date AS tms_date,
@@ -1054,23 +1240,73 @@ function ledgerExtraBillsCte(branchListSql, allowedListSql) {
       FROM public.odg_tms_detail d
       JOIN public.odg_tms t ON t.doc_no = d.doc_no
       WHERE ${getFixedYearSqlFilter("d.doc_date")}
-        AND t.origin_transport_code IN (${branchListSql})
+        AND t.origin_transport_code IN (${allowedListSql})
         AND NOT EXISTS (
           SELECT 1 FROM ic_trans_shipment s
           LEFT JOIN public.odg_tms_pending_bill p2 ON p2.bill_no = s.doc_no
           WHERE s.doc_no = d.bill_no AND s.trans_flag = 44
             AND ${getFixedYearSqlFilter("s.doc_date")}
             AND COALESCE(NULLIF(TRIM(p2.transport_code), ''), s.transport_code)
-                IN (${allowedListSql})
+                IN (${allowedListSql2})
         )
       GROUP BY d.bill_no
     )`;
 }
 
+// ແຂນທີສາມຂອງ sale_bills — ບິນທີ່ຢູ່ໃນລາຍການ "ບິນລໍຈັດຖ້ຽວ" (canonical) ແຕ່
+// ອີກສອງແຂນເຫັນບໍ່ໄດ້: ບິນ TMS ທີ່ບໍ່ມີເອກະສານ ERP ເລີຍ (CAK…, OTH-…, CODPB…
+// ທີ່ສ້າງຢູ່ໜ້າ ບິນລໍຈັດຖ້ຽວ) ແລະ **ຍັງບໍ່ໄດ້ຈັດຖ້ຽວ** ຈຶ່ງບໍ່ມີແຖວໃນ
+// odg_tms_detail ໃຫ້ແຂນທີສອງຈັບ.
+//
+// ບໍ່ມີແຂນນີ້ ຊ່ອງ ຄົງເຫຼືອ ຈະໜ້ອຍກວ່າໜ້າ /bills-pending ສະເໝີ (ວັດ 2026-08-23:
+// 40 ທຽບ 44) ແລ້ວ ຍອດຍົກມາ ທີ່ຄິດຍ້ອນຫຼັງຈາກ ຄົງເຫຼືອ ກໍ່ຜິດຕາມ.
+//
+// ວັນທີ່ບິນ: ເອກະສານ ERP → ວັນສ້າງບິນມືຢູ່ TMS → ວັນນັດ. ສາຂາ: ສາຂາທີ່ຜູ້ຈັດ
+// ມອບໝາຍ → ສາຂາໃນແຖວ shipment.
+function ledgerPendingOnlyArmSql(
+  branchListSql,
+  allowedListSql = branchListSql,
+  pendingParam = "$3",
+  toDateParam = "$2"
+) {
+  return `SELECT o.bill_no AS doc_no,
+             COALESCE(ic.doc_date::date, cb.created_at::date, pb.scheduled_date::date) AS doc_date,
+             COALESCE(NULLIF(TRIM(pb.transport_code), ''), sh.transport_code) AS branch_code,
+             ic.sale_code
+      FROM unnest(${pendingParam}::varchar[]) AS o(bill_no)
+      LEFT JOIN LATERAL (
+        SELECT x.doc_date, x.sale_code FROM ic_trans x
+        WHERE x.doc_no = o.bill_no ORDER BY x.doc_date LIMIT 1
+      ) ic ON true
+      LEFT JOIN public.odg_tms_custom_bill cb ON cb.bill_no = o.bill_no
+      LEFT JOIN public.odg_tms_pending_bill pb ON pb.bill_no = o.bill_no
+      LEFT JOIN LATERAL (
+        SELECT s2.transport_code FROM ic_trans_shipment s2
+        WHERE s2.doc_no = o.bill_no ORDER BY s2.doc_date LIMIT 1
+      ) sh ON true
+      WHERE COALESCE(NULLIF(TRIM(pb.transport_code), ''), sh.transport_code) IN (${branchListSql})
+        AND COALESCE(ic.doc_date::date, cb.created_at::date, pb.scheduled_date::date) IS NOT NULL
+        AND COALESCE(ic.doc_date::date, cb.created_at::date, pb.scheduled_date::date) <= ${toDateParam}::date
+        -- ບໍ່ຊ້ຳກັບແຂນໃບຂາຍ ERP
+        AND NOT EXISTS (
+          SELECT 1 FROM ic_trans_shipment s3
+          WHERE s3.doc_no = o.bill_no AND s3.trans_flag = 44
+            AND ${getFixedYearSqlFilter("s3.doc_date")}
+        )
+        -- ບໍ່ຊ້ຳກັບແຂນບິນທີ່ຢູ່ເທິງຖ້ຽວ (extra_bills)
+        AND NOT EXISTS (
+          SELECT 1 FROM public.odg_tms_detail d3
+          JOIN public.odg_tms t3 ON t3.doc_no = d3.doc_no
+          WHERE d3.bill_no = o.bill_no
+            AND ${getFixedYearSqlFilter("d3.doc_date")}
+            AND t3.origin_transport_code IN (${allowedListSql})
+        )`;
+}
+
 // ແຂນທີສອງຂອງ sale_bills — ຄືນຄໍລຳ (doc_no, doc_date, branch_code, sale_code)
 // ຄືກັນກັບແຂນໃບຂາຍ. ວັນທີ່ບິນເອົາຈາກ ic_trans ບໍ່ວ່າ trans_flag ໃດ ແລະ ຖ້າບໍ່ມີ
 // ເອກະສານ ERP ເລີຍຈຶ່ງໃຊ້ວັນທີ່ບິນທີ່ TMS ຈົດໄວ້.
-function ledgerExtraBillsArmSql(toDateParam = "$2") {
+function ledgerExtraBillsArmSql(toDateParam = "$2", branchListSql = "") {
   return `SELECT eb.bill_no AS doc_no,
              COALESCE(ic.doc_date::date, eb.tms_date) AS doc_date,
              eb.trip_branch AS branch_code,
@@ -1082,7 +1318,8 @@ function ledgerExtraBillsArmSql(toDateParam = "$2") {
       ) ic ON true
       WHERE COALESCE(ic.doc_date::date, eb.tms_date) IS NOT NULL
         AND COALESCE(ic.doc_date::date, eb.tms_date) <= ${toDateParam}::date
-        AND ${getFixedYearSqlFilter("COALESCE(ic.doc_date::date, eb.tms_date)")}`;
+        AND ${getFixedYearSqlFilter("COALESCE(ic.doc_date::date, eb.tms_date)")}
+        ${branchListSql ? `AND eb.trip_branch IN (${branchListSql})` : ""}`;
 }
 
 const LEDGER_BILL_ITEMS_SQL = `bill_items AS (
@@ -1152,7 +1389,7 @@ async function getReportDailyActivity(session, fromDate, toDate) {
 
   // ── ບັນຊີເຄື່ອນໄຫວຄົບ 5 ຊ່ອງ ຕໍ່ສາຂາ ──
   const flowRows = await query(
-    `WITH ${ledgerExtraBillsCte(branchList, branchList)},
+    `WITH ${ledgerExtraBillsCte(branchList)},
     sale_bills AS (
       SELECT a.doc_no,
              b.doc_date::date AS doc_date,
@@ -1167,6 +1404,9 @@ async function getReportDailyActivity(session, fromDate, toDate) {
       UNION ALL
       SELECT u.doc_no, u.doc_date, u.branch_code
       FROM (${ledgerExtraBillsArmSql()}) u
+      UNION ALL
+      SELECT po.doc_no, po.doc_date, po.branch_code
+      FROM (${ledgerPendingOnlyArmSql(branchList)}) po
     ),
     ${LEDGER_BILL_ITEMS_SQL},
     returned AS (
@@ -1221,6 +1461,7 @@ async function getReportDailyActivity(session, fromDate, toDate) {
     ),
     calc AS (
       SELECT sb.branch_code, sb.doc_date,
+             (on_now.bill_no IS NOT NULL) AS is_outstanding,
              GREATEST(COALESCE(bi.total_qty, 0) - COALESCE(rt.returned_qty, 0), 0)::numeric AS net_total,
              -- ບິນທີ່ຍັງຄ້າງຢູ່ຕອນນີ້ ຍັງບໍ່ອອກຈາກຍອດ ເຖິງມີບາງຖ້ຽວສົ່ງໄປແລ້ວ
              CASE WHEN on_now.bill_no IS NOT NULL THEN NULL
@@ -1229,10 +1470,26 @@ async function getReportDailyActivity(session, fromDate, toDate) {
              CASE WHEN on_now.bill_no IS NOT NULL THEN NULL
                   WHEN dd.last_sent_end IS NOT NULL THEN NULL
                   ELSE COALESCE(cr.credited_on, sb.doc_date) END AS closed_other_date,
-             COALESCE(du.units_all, 0)::numeric AS units_all,
-             COALESCE(du.units_before, 0)::numeric AS units_before,
-             COALESCE(du.units_in, 0)::numeric AS units_in,
-             COALESCE(du.units_to_end, 0)::numeric AS units_to_end
+             -- ບິນທີ່ຂຶ້ນຫຼາຍຖ້ຽວ ມັກມີແຖວສິນຄ້າ "ເຕັມໃບ" ຢູ່ທຸກຖ້ຽວ (delivered_qty
+             -- ຍັງເປັນ 0 ຈຶ່ງຖອຍໄປໃຊ້ selected_qty = ຈຳນວນທີ່ຂຶ້ນລົດ). ບວກກົງໆ
+             -- ຈະໄດ້ຫຼາຍກວ່າຈຳນວນໃນບິນ — ວັດປີ 2026: 547 ບິນ ເກີນ 194,085 ອັນ
+             -- ແລ້ວດັນໃຫ້ ປິດອື່ນ ຕິດລົບ. ຈຶ່ງຫຍໍ້ຕາມສ່ວນໃຫ້ລວມບໍ່ເກີນຈຳນວນໃນບິນ.
+             (CASE WHEN COALESCE(du.units_all, 0) > GREATEST(COALESCE(bi.total_qty, 0) - COALESCE(rt.returned_qty, 0), 0)::numeric
+                    AND COALESCE(du.units_all, 0) > 0
+                   THEN COALESCE(du.units_all, 0) * (GREATEST(COALESCE(bi.total_qty, 0) - COALESCE(rt.returned_qty, 0), 0)::numeric / du.units_all)
+                   ELSE COALESCE(du.units_all, 0) END)::numeric AS units_all,
+             (CASE WHEN COALESCE(du.units_all, 0) > GREATEST(COALESCE(bi.total_qty, 0) - COALESCE(rt.returned_qty, 0), 0)::numeric
+                    AND COALESCE(du.units_all, 0) > 0
+                   THEN COALESCE(du.units_before, 0) * (GREATEST(COALESCE(bi.total_qty, 0) - COALESCE(rt.returned_qty, 0), 0)::numeric / du.units_all)
+                   ELSE COALESCE(du.units_before, 0) END)::numeric AS units_before,
+             (CASE WHEN COALESCE(du.units_all, 0) > GREATEST(COALESCE(bi.total_qty, 0) - COALESCE(rt.returned_qty, 0), 0)::numeric
+                    AND COALESCE(du.units_all, 0) > 0
+                   THEN COALESCE(du.units_in, 0) * (GREATEST(COALESCE(bi.total_qty, 0) - COALESCE(rt.returned_qty, 0), 0)::numeric / du.units_all)
+                   ELSE COALESCE(du.units_in, 0) END)::numeric AS units_in,
+             (CASE WHEN COALESCE(du.units_all, 0) > GREATEST(COALESCE(bi.total_qty, 0) - COALESCE(rt.returned_qty, 0), 0)::numeric
+                    AND COALESCE(du.units_all, 0) > 0
+                   THEN COALESCE(du.units_to_end, 0) * (GREATEST(COALESCE(bi.total_qty, 0) - COALESCE(rt.returned_qty, 0), 0)::numeric / du.units_all)
+                   ELSE COALESCE(du.units_to_end, 0) END)::numeric AS units_to_end
       FROM sale_bills sb
       LEFT JOIN bill_items bi ON bi.bill_no = sb.doc_no
       LEFT JOIN returned rt ON rt.bill_no = sb.doc_no
@@ -1258,7 +1515,9 @@ async function getReportDailyActivity(session, fromDate, toDate) {
           AND (completion_date IS NULL OR completion_date > $2::date)
           AND (closed_other_date IS NULL OR closed_other_date > $2::date)) AS is_remaining
       FROM calc
-      WHERE net_total > 0
+      -- ບິນທີ່ຍັງຄ້າງຢູ່ຕອນນີ້ ຕ້ອງນັບເຖິງແມ່ນຍັງບໍ່ມີແຖວສິນຄ້າ (ບິນມືທີ່ຫາກໍ່ສ້າງ
+      -- ຢູ່ໜ້າ ບິນລໍຈັດຖ້ຽວ ຍັງບໍ່ໄດ້ຈັດຖ້ຽວ) ບໍ່ດັ່ງນັ້ນ ຄົງເຫຼືອ ຈະໜ້ອຍກວ່າໜ້ານັ້ນ.
+      WHERE net_total > 0 OR is_outstanding
     )
     SELECT branch_code,
       COUNT(*) FILTER (WHERE is_carry_in)::int AS carry_bills,
@@ -1266,6 +1525,12 @@ async function getReportDailyActivity(session, fromDate, toDate) {
       COUNT(*) FILTER (WHERE is_opened)::int AS opened_bills,
       COALESCE(SUM(net_total) FILTER (WHERE is_opened), 0)::numeric AS opened_qty,
       COUNT(*) FILTER (WHERE is_delivered)::int AS delivered_bills,
+      -- ບິນທະຍອຍສົ່ງ: ມີເຄື່ອງອອກໃນຊ່ວງ ແຕ່ບິນຍັງບໍ່ປິດ ຈຶ່ງບໍ່ນັບໃນ delivered_bills
+      -- ແຕ່ຈຳນວນເຄື່ອງຂອງມັນຢູ່ໃນ delivered_qty — ບອກໄວ້ ບໍ່ດັ່ງນັ້ນລາຍການລະອຽດ
+      -- ຈະມີແຖວຫຼາຍກວ່າຕົວເລກເທິງບັດ ໂດຍບໍ່ມີຄຳອະທິບາຍ.
+      -- COALESCE ຈຳເປັນ: completion_date ເປັນ NULL ⇒ is_delivered ເປັນ NULL
+      -- ແລ້ວ NOT NULL ກໍ່ຍັງ NULL ຈຶ່ງຖືກ FILTER ຕັດອອກໝົດ (ໄດ້ 0 ຕະຫຼອດ).
+      COUNT(*) FILTER (WHERE COALESCE(is_delivered, false) = false AND sent_units > 0)::int AS partial_bills,
       COALESCE(SUM(sent_units), 0)::numeric AS delivered_qty,
       COUNT(*) FILTER (WHERE is_closed_other)::int AS closed_other_bills,
       COALESCE(SUM(writeoff_units) FILTER (WHERE is_closed_other OR is_delivered), 0)::numeric AS closed_other_qty,
@@ -1298,6 +1563,7 @@ async function getReportDailyActivity(session, fromDate, toDate) {
       carry_bills: num("carry_bills"),
       opened_bills: num("opened_bills"),
       delivered_bills: num("delivered_bills"),
+      partial_bills: num("partial_bills"),
       closed_other_bills: num("closed_other_bills"),
       remaining_bills: num("remaining_bills"),
       carry_qty: num("carry_qty"),
@@ -1312,7 +1578,7 @@ async function getReportDailyActivity(session, fromDate, toDate) {
   };
   const branches = codes.map((code) => build(code));
   const ACTIVITY_TOTAL_KEYS = [
-    "carry_bills", "opened_bills", "delivered_bills", "closed_other_bills", "remaining_bills",
+    "carry_bills", "opened_bills", "delivered_bills", "partial_bills", "closed_other_bills", "remaining_bills",
     "carry_qty", "opened_qty", "delivered_qty", "closed_other_qty", "remaining_qty",
     "dispatched_bills", "dispatched_ahead",
   ];
@@ -1403,7 +1669,7 @@ async function getReportDailyDepartment(
 
   // ── ບັນຊີເຄື່ອນໄຫວຄົບ 5 ຊ່ອງ ຕໍ່ພະແນກ ──
   const flowRows = await query(
-    `WITH ${ledgerExtraBillsCte(branchList, allowedList)},
+    `WITH ${ledgerExtraBillsCte(allowedList)},
     sale_bills AS (
       SELECT u.doc_no, u.doc_date,
              COALESCE(
@@ -1424,7 +1690,10 @@ async function getReportDailyDepartment(
           AND COALESCE(NULLIF(TRIM(pb.transport_code), ''), a.transport_code) IN (${branchList})
         UNION ALL
         SELECT x.doc_no, x.doc_date, x.sale_code
-        FROM (${ledgerExtraBillsArmSql()}) x
+        FROM (${ledgerExtraBillsArmSql("$2", branchList)}) x
+        UNION ALL
+        SELECT po.doc_no, po.doc_date, po.sale_code
+        FROM (${ledgerPendingOnlyArmSql(branchList, allowedList)}) po
       ) u
       LEFT JOIN public.odg_employee oe ON oe.employee_code = u.sale_code
       LEFT JOIN public.odg_department od ON od.department_code = oe.department_code
@@ -1486,6 +1755,7 @@ async function getReportDailyDepartment(
     ),
     calc AS (
       SELECT sb.department, sb.doc_date,
+             (on_now.bill_no IS NOT NULL) AS is_outstanding,
              GREATEST(COALESCE(bi.total_qty, 0) - COALESCE(rt.returned_qty, 0), 0)::numeric AS net_total,
              -- ບິນທີ່ຍັງຄ້າງຢູ່ຕອນນີ້ ຍັງບໍ່ອອກຈາກຍອດ ຈຶ່ງບໍ່ມີວັນສຳເລັດ ເຖິງວ່າ
              -- ຈະມີບາງຖ້ຽວສົ່ງໄປແລ້ວ (ບິນທະຍອຍສົ່ງ) — ບໍ່ດັ່ງນັ້ນມັນຈະຫາຍ
@@ -1497,10 +1767,26 @@ async function getReportDailyDepartment(
              CASE WHEN on_now.bill_no IS NOT NULL THEN NULL
                   WHEN dd.last_sent_end IS NOT NULL THEN NULL
                   ELSE COALESCE(cr.credited_on, sb.doc_date) END AS closed_other_date,
-             COALESCE(du.units_all, 0)::numeric AS units_all,
-             COALESCE(du.units_before, 0)::numeric AS units_before,
-             COALESCE(du.units_in, 0)::numeric AS units_in,
-             COALESCE(du.units_to_end, 0)::numeric AS units_to_end
+             -- ບິນທີ່ຂຶ້ນຫຼາຍຖ້ຽວ ມັກມີແຖວສິນຄ້າ "ເຕັມໃບ" ຢູ່ທຸກຖ້ຽວ (delivered_qty
+             -- ຍັງເປັນ 0 ຈຶ່ງຖອຍໄປໃຊ້ selected_qty = ຈຳນວນທີ່ຂຶ້ນລົດ). ບວກກົງໆ
+             -- ຈະໄດ້ຫຼາຍກວ່າຈຳນວນໃນບິນ — ວັດປີ 2026: 547 ບິນ ເກີນ 194,085 ອັນ
+             -- ແລ້ວດັນໃຫ້ ປິດອື່ນ ຕິດລົບ. ຈຶ່ງຫຍໍ້ຕາມສ່ວນໃຫ້ລວມບໍ່ເກີນຈຳນວນໃນບິນ.
+             (CASE WHEN COALESCE(du.units_all, 0) > GREATEST(COALESCE(bi.total_qty, 0) - COALESCE(rt.returned_qty, 0), 0)::numeric
+                    AND COALESCE(du.units_all, 0) > 0
+                   THEN COALESCE(du.units_all, 0) * (GREATEST(COALESCE(bi.total_qty, 0) - COALESCE(rt.returned_qty, 0), 0)::numeric / du.units_all)
+                   ELSE COALESCE(du.units_all, 0) END)::numeric AS units_all,
+             (CASE WHEN COALESCE(du.units_all, 0) > GREATEST(COALESCE(bi.total_qty, 0) - COALESCE(rt.returned_qty, 0), 0)::numeric
+                    AND COALESCE(du.units_all, 0) > 0
+                   THEN COALESCE(du.units_before, 0) * (GREATEST(COALESCE(bi.total_qty, 0) - COALESCE(rt.returned_qty, 0), 0)::numeric / du.units_all)
+                   ELSE COALESCE(du.units_before, 0) END)::numeric AS units_before,
+             (CASE WHEN COALESCE(du.units_all, 0) > GREATEST(COALESCE(bi.total_qty, 0) - COALESCE(rt.returned_qty, 0), 0)::numeric
+                    AND COALESCE(du.units_all, 0) > 0
+                   THEN COALESCE(du.units_in, 0) * (GREATEST(COALESCE(bi.total_qty, 0) - COALESCE(rt.returned_qty, 0), 0)::numeric / du.units_all)
+                   ELSE COALESCE(du.units_in, 0) END)::numeric AS units_in,
+             (CASE WHEN COALESCE(du.units_all, 0) > GREATEST(COALESCE(bi.total_qty, 0) - COALESCE(rt.returned_qty, 0), 0)::numeric
+                    AND COALESCE(du.units_all, 0) > 0
+                   THEN COALESCE(du.units_to_end, 0) * (GREATEST(COALESCE(bi.total_qty, 0) - COALESCE(rt.returned_qty, 0), 0)::numeric / du.units_all)
+                   ELSE COALESCE(du.units_to_end, 0) END)::numeric AS units_to_end
       FROM sale_bills sb
       LEFT JOIN bill_items bi ON bi.bill_no = sb.doc_no
       LEFT JOIN returned rt ON rt.bill_no = sb.doc_no
@@ -1530,7 +1816,9 @@ async function getReportDailyDepartment(
           AND (completion_date IS NULL OR completion_date > $2::date)
           AND (closed_other_date IS NULL OR closed_other_date > $2::date)) AS is_remaining
       FROM calc
-      WHERE net_total > 0
+      -- ບິນທີ່ຍັງຄ້າງຢູ່ຕອນນີ້ ຕ້ອງນັບເຖິງແມ່ນຍັງບໍ່ມີແຖວສິນຄ້າ (ບິນມືທີ່ຫາກໍ່ສ້າງ
+      -- ຢູ່ໜ້າ ບິນລໍຈັດຖ້ຽວ ຍັງບໍ່ໄດ້ຈັດຖ້ຽວ) ບໍ່ດັ່ງນັ້ນ ຄົງເຫຼືອ ຈະໜ້ອຍກວ່າໜ້ານັ້ນ.
+      WHERE net_total > 0 OR is_outstanding
     )
     SELECT department,
       COUNT(*) FILTER (WHERE is_carry_in)::int AS carry_bills,
@@ -1538,6 +1826,12 @@ async function getReportDailyDepartment(
       COUNT(*) FILTER (WHERE is_opened)::int AS opened_bills,
       COALESCE(SUM(net_total) FILTER (WHERE is_opened), 0)::numeric AS opened_qty,
       COUNT(*) FILTER (WHERE is_delivered)::int AS delivered_bills,
+      -- ບິນທະຍອຍສົ່ງ: ມີເຄື່ອງອອກໃນຊ່ວງ ແຕ່ບິນຍັງບໍ່ປິດ ຈຶ່ງບໍ່ນັບໃນ delivered_bills
+      -- ແຕ່ຈຳນວນເຄື່ອງຂອງມັນຢູ່ໃນ delivered_qty — ບອກໄວ້ ບໍ່ດັ່ງນັ້ນລາຍການລະອຽດ
+      -- ຈະມີແຖວຫຼາຍກວ່າຕົວເລກເທິງບັດ ໂດຍບໍ່ມີຄຳອະທິບາຍ.
+      -- COALESCE ຈຳເປັນ: completion_date ເປັນ NULL ⇒ is_delivered ເປັນ NULL
+      -- ແລ້ວ NOT NULL ກໍ່ຍັງ NULL ຈຶ່ງຖືກ FILTER ຕັດອອກໝົດ (ໄດ້ 0 ຕະຫຼອດ).
+      COUNT(*) FILTER (WHERE COALESCE(is_delivered, false) = false AND sent_units > 0)::int AS partial_bills,
       -- ນັບສິນຄ້າທີ່ມອບໃນຊ່ວງນີ້ຂອງທຸກບິນ ລວມບິນທີ່ຍັງບໍ່ປິດ (ທະຍອຍສົ່ງ)
       COALESCE(SUM(sent_units), 0)::numeric AS delivered_qty,
       COUNT(*) FILTER (WHERE is_closed_other)::int AS closed_other_bills,
@@ -1571,6 +1865,7 @@ async function getReportDailyDepartment(
       carry_bills: num("carry_bills"),
       opened_bills: num("opened_bills"),
       delivered_bills: num("delivered_bills"),
+      partial_bills: num("partial_bills"),
       closed_other_bills: num("closed_other_bills"),
       remaining_bills: num("remaining_bills"),
       carry_qty: num("carry_qty"),
@@ -1582,7 +1877,7 @@ async function getReportDailyDepartment(
   });
 
   const TOTAL_KEYS = [
-    "carry_bills", "opened_bills", "delivered_bills", "closed_other_bills", "remaining_bills",
+    "carry_bills", "opened_bills", "delivered_bills", "partial_bills", "closed_other_bills", "remaining_bills",
     "carry_qty", "opened_qty", "delivered_qty", "closed_other_qty", "remaining_qty",
   ];
   const total = departments.reduce(
@@ -1659,7 +1954,8 @@ async function getReportDailyActivityBills(session, fromDate, toDate, branchCode
 
   const bucketWhere = {
     opened: "c.doc_date BETWEEN $1::date AND $2::date",
-    delivered: "c.completion_date BETWEEN $1::date AND $2::date",
+    delivered: `(c.completion_date BETWEEN $1::date AND $2::date
+        OR COALESCE(c.units_in, 0) > 0)`,
     remaining: `c.doc_date <= $2::date
         AND (c.completion_date IS NULL OR c.completion_date > $2::date)
         AND (c.closed_other_date IS NULL OR c.closed_other_date > $2::date)`,
@@ -1677,7 +1973,7 @@ async function getReportDailyActivityBills(session, fromDate, toDate, branchCode
     : [fromDate, toDate, outstandingNow];
 
   return query(
-    `WITH ${ledgerExtraBillsCte(branchList, allowedList)},
+    `WITH ${ledgerExtraBillsCte(allowedList)},
     sale_bills AS (
       SELECT a.doc_no,
              b.doc_date::date AS doc_date,
@@ -1691,7 +1987,10 @@ async function getReportDailyActivityBills(session, fromDate, toDate, branchCode
         AND COALESCE(NULLIF(TRIM(pb.transport_code), ''), a.transport_code) IN (${branchList})
       UNION ALL
       SELECT u.doc_no, u.doc_date, u.branch_code
-      FROM (${ledgerExtraBillsArmSql()}) u
+      FROM (${ledgerExtraBillsArmSql("$2", branchList)}) u
+      UNION ALL
+      SELECT po.doc_no, po.doc_date, po.branch_code
+      FROM (${ledgerPendingOnlyArmSql(branchList, allowedList)}) po
     ),
     ${LEDGER_BILL_ITEMS_SQL},
     bill_lines AS (
@@ -1740,6 +2039,7 @@ async function getReportDailyActivityBills(session, fromDate, toDate, branchCode
     ),
     del_units AS (
       SELECT bill_no,
+             COALESCE(SUM(units), 0) AS units_all,
              COALESCE(SUM(units) FILTER (WHERE sent_on >= $1::date AND sent_on <= $2::date), 0) AS units_in,
              COALESCE(SUM(units) FILTER (WHERE sent_on <= $2::date), 0) AS units_to_end
       FROM del_units_day
@@ -1754,14 +2054,25 @@ async function getReportDailyActivityBills(session, fromDate, toDate, branchCode
     ),
     calc AS (
       SELECT sb.doc_no, sb.doc_date,
+             (on_now.bill_no IS NOT NULL) AS is_outstanding,
              GREATEST(COALESCE(bi.total_qty, 0) - COALESCE(rt.returned_qty, 0), 0)::numeric AS net_total,
              CASE WHEN on_now.bill_no IS NOT NULL THEN NULL
                   ELSE dd.last_sent_end::date END AS completion_date,
              CASE WHEN on_now.bill_no IS NOT NULL THEN NULL
                   WHEN dd.last_sent_end IS NOT NULL THEN NULL
                   ELSE COALESCE(cr.credited_on, sb.doc_date) END AS closed_other_date,
-             COALESCE(du.units_in, 0)::numeric AS units_in,
-             COALESCE(du.units_to_end, 0)::numeric AS units_to_end,
+             -- ບິນທີ່ຂຶ້ນຫຼາຍຖ້ຽວ ມັກມີແຖວສິນຄ້າ "ເຕັມໃບ" ຢູ່ທຸກຖ້ຽວ (delivered_qty
+             -- ຍັງເປັນ 0 ຈຶ່ງຖອຍໄປໃຊ້ selected_qty = ຈຳນວນທີ່ຂຶ້ນລົດ). ບວກກົງໆ
+             -- ຈະໄດ້ຫຼາຍກວ່າຈຳນວນໃນບິນ — ວັດປີ 2026: 547 ບິນ ເກີນ 194,085 ອັນ
+             -- ແລ້ວດັນໃຫ້ ປິດອື່ນ ຕິດລົບ. ຈຶ່ງຫຍໍ້ຕາມສ່ວນໃຫ້ລວມບໍ່ເກີນຈຳນວນໃນບິນ.
+             (CASE WHEN COALESCE(du.units_all, 0) > GREATEST(COALESCE(bi.total_qty, 0) - COALESCE(rt.returned_qty, 0), 0)::numeric
+                    AND COALESCE(du.units_all, 0) > 0
+                   THEN COALESCE(du.units_in, 0) * (GREATEST(COALESCE(bi.total_qty, 0) - COALESCE(rt.returned_qty, 0), 0)::numeric / du.units_all)
+                   ELSE COALESCE(du.units_in, 0) END)::numeric AS units_in,
+             (CASE WHEN COALESCE(du.units_all, 0) > GREATEST(COALESCE(bi.total_qty, 0) - COALESCE(rt.returned_qty, 0), 0)::numeric
+                    AND COALESCE(du.units_all, 0) > 0
+                   THEN COALESCE(du.units_to_end, 0) * (GREATEST(COALESCE(bi.total_qty, 0) - COALESCE(rt.returned_qty, 0), 0)::numeric / du.units_all)
+                   ELSE COALESCE(du.units_to_end, 0) END)::numeric AS units_to_end,
              COALESCE(bl.item_count, 0) AS item_count
       FROM sale_bills sb
       LEFT JOIN bill_items bi ON bi.bill_no = sb.doc_no
@@ -1786,7 +2097,13 @@ async function getReportDailyActivityBills(session, fromDate, toDate, branchCode
            ) AS department,
            ${bucketQty}::numeric AS qty,
            c.item_count,
-           CASE WHEN c.completion_date IS NOT NULL
+           CASE WHEN c.completion_date BETWEEN $1::date AND $2::date
+                THEN to_char(c.completion_date, 'DD-MM-YYYY')
+                -- ມີເຄື່ອງອອກໃນຊ່ວງ ແຕ່ບິນຍັງບໍ່ປິດ = ທະຍອຍສົ່ງ. ບັດ "ຈັດສົ່ງ"
+                -- ນັບຈຳນວນເຄື່ອງຂອງແຖວນີ້ ແຕ່ບໍ່ນັບເປັນບິນທີ່ປິດແລ້ວ.
+                WHEN COALESCE(c.units_in, 0) > 0 AND c.completion_date IS NULL
+                THEN 'ທະຍອຍສົ່ງ'
+                WHEN c.completion_date IS NOT NULL
                 THEN to_char(c.completion_date, 'DD-MM-YYYY')
                 WHEN pb2.scheduled_date IS NOT NULL
                 THEN 'ນັດ ' || to_char(pb2.scheduled_date, 'DD-MM-YYYY')
@@ -1808,7 +2125,7 @@ async function getReportDailyActivityBills(session, fromDate, toDate, branchCode
     LEFT JOIN ar_customer cust ON cust.code = cc.cust_code
     LEFT JOIN public.odg_employee oe ON oe.employee_code = ic.sale_code
     LEFT JOIN public.odg_department od ON od.department_code = oe.department_code
-    WHERE c.net_total > 0
+    WHERE (c.net_total > 0 OR c.is_outstanding)
       AND ${bucketWhere}
       ${dept ? `AND COALESCE(
              NULLIF(TRIM(od.department_name_lo), ''),
@@ -1909,6 +2226,10 @@ function toPerfBucket(r) {
     closed_other: num(r?.closed_other),
     carry_out: num(r?.carry_out),
     handled: num(r?.handled),
+    /** ບິນທີ່ເປີດໃນຊ່ວງ ແລະ ຈົບພາຍໃນ 24 ຊມ — ຄູ່ກັບ opened ເປັນຕົວຫານ */
+    opened_on_time_24h: num(r?.opened_on_time_24h),
+    /** ບິນທີ່ເປີດໃນຊ່ວງ ແລະ ຍັງບໍ່ຮອດມືລູກຄ້າ */
+    opened_pending: num(r?.opened_pending),
     from_open: {
       le_24h: num(r?.open_le24),
       h24_48: num(r?.open_24_48),
@@ -2136,7 +2457,14 @@ async function getDeliveryPerformance(session, period) {
            WHEN b.last_delivered_at IS NOT NULL THEN NULL
            ELSE COALESCE(cr.credited_on::timestamp, ${BILL_OPENED_AT}, s.doc_date::timestamp)
          END AS closed_other_at,
-         COALESCE(pb.scheduled_date::timestamp, b.first_logistic_date::timestamp) AS scheduled_at,
+         -- ວັນນັດ = ນັດຄັ້ງທຳອິດກ່ອນ (ນິຍາມກາງ firstPromiseSql) ບໍ່ດັ່ງນັ້ນບິນທີ່
+         -- ຖືກເລື່ອນນັດຈະນັບເປັນ "ທັນເວລາ" ຕາມນັດໃໝ່ສະເໝີ ແລ້ວເປີເຊັນຢູ່ໜ້ານີ້
+         -- ຈະສູງກວ່າໜ້າຫຼັກ/BI ທັງທີ່ວັດເລື່ອງດຽວກັນ.
+         COALESCE(
+           ${firstPromiseSql("b.bill_no")}::timestamp,
+           pb.scheduled_date::timestamp,
+           b.first_logistic_date::timestamp
+         ) AS scheduled_at,
          COALESCE(NULLIF(TRIM(pb.action_status), ''), '') AS action_status,
          COALESCE(b.success_legs, 0) AS success_legs,
          COALESCE(b.cancelled_legs_in_month, 0) AS cancelled_legs_in_month,
@@ -2198,6 +2526,8 @@ async function getDeliveryPerformance(session, period) {
      -- ເປີດວິນາທີດຽວກັນເປັນເປະ ເຊິ່ງບໍ່ມີຜົນຕໍ່ຕົວເລກລວມ.
      queued AS (
        SELECT f.*,
+         -- ວັນທີ່ເປີດບິນ — ໃຫ້ໜ້າຈໍແຈກແຈງເປັນລາຍວັນໄດ້ໂດຍບໍ່ຕ້ອງຄິດສູດຊ້ຳ
+         CASE WHEN f.is_opened THEN f.opened_at::date END AS opened_day,
          MIN(completed_at) OVER (
            PARTITION BY branch_code ORDER BY opened_at DESC, bill_no
            ROWS BETWEEN UNBOUNDED PRECEDING AND 1 PRECEDING
@@ -2210,10 +2540,12 @@ async function getDeliveryPerformance(session, period) {
        CASE
          WHEN GROUPING(branch_code) = 0 THEN 'branch'
          WHEN GROUPING(department_code) = 0 THEN 'department'
+         WHEN GROUPING(opened_day) = 0 THEN 'day'
          ELSE 'overall'
        END AS dimension,
        branch_code,
        department_code,
+       to_char(opened_day, 'YYYY-MM-DD') AS opened_day,
        MAX(department_name) AS department_name,
        MAX(division_code) AS division_code,
        COUNT(*) FILTER (WHERE is_carry_in)::int AS carry_in,
@@ -2222,6 +2554,13 @@ async function getDeliveryPerformance(session, period) {
        COUNT(*) FILTER (WHERE is_closed_other)::int AS closed_other,
        COUNT(*) FILTER (WHERE is_carry_out)::int AS carry_out,
        COUNT(*) FILTER (WHERE is_carry_in OR is_opened)::int AS handled,
+       -- ບິນທີ່ "ເປີດໃນເດືອນ" ແລະ ສົ່ງຈົບພາຍໃນ 24 ຊມ ນັບແຕ່ເປີດບິນ — ໃຊ້ເປັນ
+       -- ຕົວເສດຂອງ KPI ຢູ່ໜ້າ ລາຍງານປະຈຳເດືອນ ເຊິ່ງມີຕົວຫານເປັນ opened.
+       -- ຕ້ອງມາຈາກຊຸດຂໍ້ມູນດຽວກັບ opened ບໍ່ດັ່ງນັ້ນອັດຕາຈະຕໍ່າກວ່າຄວາມຈິງ.
+       COUNT(*) FILTER (WHERE is_opened AND lead_open_h IS NOT NULL AND lead_open_h <= 24)::int
+         AS opened_on_time_24h,
+       -- ບິນທີ່ເປີດໃນຊ່ວງ ແລະ ຍັງບໍ່ຮອດມືລູກຄ້າ — ຄູ່ກັບ opened ຄືກັນ
+       COUNT(*) FILTER (WHERE is_opened AND completed_at IS NULL)::int AS opened_pending,
        COUNT(*) FILTER (WHERE is_delivered AND lead_open_h <= 24)::int AS open_le24,
        COUNT(*) FILTER (WHERE is_delivered AND lead_open_h > 24 AND lead_open_h <= 48)::int AS open_24_48,
        COUNT(*) FILTER (WHERE is_delivered AND lead_open_h > 48)::int AS open_gt48,
@@ -2266,7 +2605,7 @@ async function getDeliveryPerformance(session, period) {
            FILTER (WHERE is_delivered)::numeric, 2
        ) AS median_lead_open_h
      FROM queued
-     GROUP BY GROUPING SETS ((), (branch_code), (department_code))`,
+     GROUP BY GROUPING SETS ((), (branch_code), (department_code), (opened_day))`,
     [monthStart, nextMonthStart, outstandingNow]
   );
 
@@ -2309,10 +2648,24 @@ async function getDeliveryPerformance(session, period) {
     // ພະແນກທີ່ຮັບຜິດຊອບບິນຫຼາຍສຸດຂຶ້ນກ່ອນ
     .sort((a, b) => b.handled - a.handled || a.department_name.localeCompare(b.department_name));
 
+  // ລາຍວັນ — ບິນທີ່ເປີດໃນແຕ່ລະວັນ ແລະ ສະຖານະຂອງມັນ. ດຶງມາຈາກບັນຊີດຽວກັນ
+  // ຈຶ່ງບວກໄດ້ເທົ່າ opened ຂອງທັງເດືອນສະເໝີ.
+  const daily = rows
+    .filter((r) => r.dimension === "day" && r.opened_day)
+    .map((r) => ({
+      day: String(r.opened_day),
+      day_label: `${String(r.opened_day).slice(8, 10)}/${String(r.opened_day).slice(5, 7)}`,
+      opened: Number(r.opened) || 0,
+      delivered: Number(r.delivered) || 0,
+      pending: Math.max((Number(r.opened) || 0) - (Number(r.delivered) || 0), 0),
+    }))
+    .sort((a, b) => a.day.localeCompare(b.day));
+
   return {
     month: bounds.label,
     from: bounds.from,
     to: bounds.to,
+    daily,
     overall: toPerfBucket(overallRow),
     branches,
     departments,

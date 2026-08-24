@@ -456,8 +456,14 @@ export interface UtilizationRow {
  * ບໍ່ຍິງ query ຕໍ່ຖ້ຽວ ເພາະຊ່ວງ 6 ເດືອນມີເກືອບ 3,000 ຖ້ຽວ.
  */
 export async function getUtilizationReport(dateFrom: string, dateTo: string) {
-  await requireSession();
-  return buildUtilizationReport(dateFrom, dateTo);
+  const session = await requireSession();
+  // ຜູກຂອບເຂດສາຂາຕາມ login ຄືກັບລາຍງານອື່ນ — ກ່ອນນີ້ໜ້ານີ້ສະແດງທຸກສາຂາ
+  // ໃຫ້ທຸກຄົນ (ວັດ 2026-08: 379 ຖ້ຽວ ທຽບກັບ 298 ຂອງສາຂາ 02-0002).
+  const branchCodes = String(session.branch_codes ?? session.logistic_code ?? "")
+    .split(",")
+    .map((c) => c.trim())
+    .filter(Boolean);
+  return buildUtilizationReport(dateFrom, dateTo, undefined, branchCodes);
 }
 
 /**
@@ -469,9 +475,15 @@ export async function getUtilizationReport(dateFrom: string, dateTo: string) {
 export async function buildUtilizationReport(
   dateFrom: string,
   dateTo: string,
-  carCode?: string
+  carCode?: string,
+  /** ວ່າງ/ບໍ່ສົ່ງ = ທຸກສາຂາ (ໃຊ້ໂດຍ /api/reports/truck-utilization) */
+  branchCodes?: string[]
 ) {
-  const { trips: allTrips, items: allItems } = (await getTripsInRange({ dateFrom, dateTo })) as {
+  const { trips: allTrips, items: allItems } = (await getTripsInRange({
+    dateFrom,
+    dateTo,
+    branchCodes: branchCodes && branchCodes.length > 0 ? branchCodes : null,
+  })) as {
     trips: Array<Record<string, unknown>>;
     items: Array<TripItem & { doc_no: string }>;
   };

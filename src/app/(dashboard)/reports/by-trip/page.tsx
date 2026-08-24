@@ -87,6 +87,9 @@ interface TripBill {
 
 interface Totals {
   trips: number;
+  /** ນິຍາມ "ຖ້ຽວ" ຢູ່ໜ້າ BI/ໜ້າຫຼັກ = ສະເພາະທີ່ອະນຸມັດແລ້ວ */
+  trips_approved: number;
+  trips_pending_approval: number;
   bills: number;
   delivered: number;
   cancelled: number;
@@ -97,6 +100,8 @@ interface Totals {
 
 const EMPTY_TOTALS: Totals = {
   trips: 0,
+  trips_approved: 0,
+  trips_pending_approval: 0,
   bills: 0,
   delivered: 0,
   cancelled: 0,
@@ -151,11 +156,13 @@ function SummaryCard({
   value,
   icon,
   color,
+  caption,
 }: {
   label: string;
   value: number | string;
   icon: React.ReactNode;
   color: "teal" | "sky" | "amber" | "emerald" | "rose";
+  caption?: string;
 }) {
   const palette = {
     teal: { bg: "bg-teal-500/10", text: "text-teal-600 dark:text-teal-400" },
@@ -170,6 +177,7 @@ function SummaryCard({
       <div className="min-w-0">
         <p className="text-[10px] font-semibold uppercase tracking-wider text-slate-400">{label}</p>
         <p className={`mt-1 text-xl font-bold tabular-nums ${palette.text}`}>{display}</p>
+        {caption ? <p className="mt-0.5 text-[10px] text-slate-400 truncate">{caption}</p> : null}
       </div>
       <div className={`w-10 h-10 rounded-lg ${palette.bg} ${palette.text} flex items-center justify-center shrink-0`}>
         {icon}
@@ -456,7 +464,17 @@ export default function ByTripReportPage() {
         <>
           {/* Summary cards */}
           <div className="grid grid-cols-2 lg:grid-cols-5 gap-3">
-            <SummaryCard label="ຖ້ຽວທັງໝົດ" value={totals.trips} icon={<FaRoute size={12} />} color="teal" />
+            <SummaryCard
+              label="ຖ້ຽວທັງໝົດ"
+              value={totals.trips}
+              icon={<FaRoute size={12} />}
+              color="teal"
+              caption={
+                totals.trips_pending_approval > 0
+                  ? `ອະນຸມັດແລ້ວ ${totals.trips_approved} · ລໍອະນຸມັດ ${totals.trips_pending_approval}`
+                  : undefined
+              }
+            />
             <SummaryCard label="ບິນທັງໝົດ" value={totals.bills} icon={<FaBoxOpen size={12} />} color="sky" />
             <SummaryCard label="ສົ່ງສຳເລັດ" value={totals.delivered} icon={<FaCheckCircle size={12} />} color="emerald" />
             <SummaryCard label="ຍົກເລີກ" value={totals.cancelled} icon={<FaBan size={12} />} color="rose" />

@@ -197,7 +197,11 @@ export default function MonthlyCarPage() {
     const totalCars = items.length;
     const totalTrips = items.reduce((sum, item) => sum + Number(item.qty || 0), 0);
     const maxQty = items.reduce((max, item) => Math.max(max, Number(item.qty || 0)), 0);
-    const avg = totalCars > 0 ? totalTrips / totalCars : 0;
+    // ລາຍຊື່ລວມລົດຂອງສາຂາທີ່ບໍ່ມີຖ້ຽວນຳ (ເພື່ອໃຫ້ ກມ. ລວມ ຕົງກັບໜ້າ BI)
+    // ຈຶ່ງຄິດຄ່າສະເລ່ຍຈາກລົດທີ່ມີຖ້ຽວເທົ່ານັ້ນ ຄືກັບໜ້າ ຄົນຂັບ/ເດືອນ.
+    const activeCars = items.filter((item) => Number(item.qty || 0) > 0).length;
+    const idleCars = totalCars - activeCars;
+    const avg = activeCars > 0 ? totalTrips / activeCars : 0;
     const gpsItems = items.filter(hasGps);
     const gpsCars = gpsItems.length;
     const gpsTrips = gpsItems.reduce((sum, item) => sum + Number(item.qty || 0), 0);
@@ -209,6 +213,8 @@ export default function MonthlyCarPage() {
     }, 0);
     return {
       totalCars,
+      activeCars,
+      idleCars,
       totalTrips,
       maxQty,
       avg,
@@ -281,6 +287,8 @@ export default function MonthlyCarPage() {
           {items.length > 0 && (
             <div className="flex flex-wrap items-center gap-2">
               <StatBadge label="ລົດ" value={stats.totalCars} color="sky" />
+              <StatBadge label="ມີຖ້ຽວ" value={stats.activeCars} color="emerald" />
+              <StatBadge label="ວ່າງ" value={stats.idleCars} color="amber" />
               <StatBadge label="ຖ້ຽວ" value={stats.totalTrips} color="emerald" />
               <StatBadge label="GPS" value={stats.gpsCars} color="sky" />
               <StatBadge label="Coverage" value={`${stats.gpsCoverage.toFixed(1)}%`} color="amber" />
@@ -380,7 +388,7 @@ export default function MonthlyCarPage() {
               value={stats.totalTrips.toLocaleString("en-US")}
               icon={<FaRoute size={12} />}
               color="emerald"
-              caption={`ສະເລ່ຍ ${stats.avg.toFixed(1)} ຖ້ຽວ/ຄັນ`}
+              caption={`ສະເລ່ຍ ${stats.avg.toFixed(1)} ຖ້ຽວ/ຄັນທີ່ມີຖ້ຽວ`}
             />
           </div>
 

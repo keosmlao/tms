@@ -358,8 +358,18 @@ export async function getBiDashboard(
     getTripsByWeekday(session, range, car) as Promise<BiDashboard["tripsByWeekday"]>,
     getRouteAnalysis(session, range, 8, car) as Promise<BiRoute[]>,
     getVehicleUtilization(session, range, car) as Promise<BiVehicles>,
-    // buildUtilizationReport ຮັບຊ່ວງແບບປິດທ້າຍ (dateTo ລວມມື້ນັ້ນນຳ) ຄືກັນ
-    buildUtilizationReport(range.from, range.to, car),
+    // buildUtilizationReport ຮັບຊ່ວງແບບປິດທ້າຍ (dateTo ລວມມື້ນັ້ນນຳ) ຄືກັນ.
+    // ສົ່ງສາຂາຂອງ session ໄປນຳ ບໍ່ດັ່ງນັ້ນ tile ພື້ນທີ່ບັນທຸກຈະນັບທຸກສາຂາ
+    // ໃນຂະນະທີ່ tile ອື່ນຂອງໜ້າດຽວກັນ scope ຢູ່.
+    buildUtilizationReport(
+      range.from,
+      range.to,
+      car,
+      String(session.branch_codes ?? session.logistic_code ?? "")
+        .split(",")
+        .map((c) => c.trim())
+        .filter(Boolean)
+    ),
     getFuelEfficiency(session, range, 12, car) as Promise<BiFuelCar[]>,
     getExceptions(session, range, car) as Promise<BiExceptions>,
     getTripCostSummary(session, range, car) as Promise<TripCostSummary>,

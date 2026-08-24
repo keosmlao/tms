@@ -764,6 +764,30 @@ function getBranchScope(session) {
   };
 }
 
+// ວັນນັດທຳອິດທີ່ຜູ້ຈັດຖ້ຽວຕັ້ງໄວ້ໃຫ້ບິນນີ້ (ຈາກປະຫວັດ ບໍ່ແມ່ນຄ່າປັດຈຸບັນ).
+const firstPromiseSql = (billCol) => `(
+  SELECT h.scheduled_date::date
+    FROM public.odg_tms_pending_bill_history h
+   WHERE h.bill_no = ${billCol} AND h.scheduled_date IS NOT NULL
+   ORDER BY h.changed_at, h.id
+   LIMIT 1
+)`;
+
+/**
+ * ວັນນັດທີ່ໃຊ້ວັດ "ສົ່ງທັນເວລາ" — ນິຍາມກາງຂອງທັງລະບົບ. ທຸກໜ້າ/ທຸກການແຈ້ງເຕືອນ
+ * ຕ້ອງເອີ້ນອັນນີ້ ບໍ່ແມ່ນຂຽນ COALESCE ເອງ ບໍ່ດັ່ງນັ້ນຕົວເລກຈະບໍ່ຕົງກັນ.
+ *
+ * ລຳດັບ: ນັດຄັ້ງທຳອິດ → ນັດປັດຈຸບັນ → ວັນສົ່ງໃນບິນຂາຍ → ວັນທີ່ບິນ.
+ *
+ * ເປັນຫຍັງຕ້ອງເອົາ "ນັດຄັ້ງທຳອິດ": `odg_tms_pending_bill.scheduled_date` ຖືກ
+ * ຂຽນທັບເມື່ອເລື່ອນນັດ ຈຶ່ງເອົາຄ່າປັດຈຸບັນມາວັດບໍ່ໄດ້ — ບິນທີ່ເລື່ອນນັດແລ້ວ
+ * ຈະກາຍເປັນ "ທັນເວລາ" ສະເໝີ. ວັດຈິງເດືອນ 2026-08: ກົດເກົ່າໃຫ້ 96.1%
+ * ກົດນີ້ໃຫ້ 91.4% ຈາກຂໍ້ມູນຊຸດດຽວກັນ (127 ຈຸດສົ່ງທີ່ຖືກເລື່ອນນັດ).
+ */
+const deliveryDueDateSql = (billCol, pbAlias, transAlias, detailAlias) =>
+  `COALESCE(${firstPromiseSql(billCol)}, ${pbAlias}.scheduled_date::date,` +
+  ` ${transAlias}.send_date::date, ${detailAlias}.bill_date::date)`;
+
 function branchFilterShipment(scope, alias = "") {
   if (!scope.scoped) return "";
   const prefix = alias ? `${alias}.` : "";
@@ -920,4 +944,6 @@ module.exports = {
   getBranchScope,
   branchFilterShipment,
   branchFilterJob,
+  firstPromiseSql,
+  deliveryDueDateSql,
 };

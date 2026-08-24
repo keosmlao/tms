@@ -716,9 +716,18 @@ components:
   schemas:
     ManagerTotals:
       type: object
-      description: Trip and bill counters for one window (a day or a month-to-date).
+      description: |
+        Trip and bill counters for one window (a day or a month-to-date).
+
+        `trips` counts APPROVED job documents only - the same definition every
+        web report and the BI dashboard use, so the app and the web agree.
+        Documents still awaiting approval are reported separately in
+        `trips_pending_approval` rather than being folded into `trips`.
       properties:
-        trips: { type: integer }
+        trips: { type: integer, description: Approved job documents in the window. }
+        trips_pending_approval:
+          type: integer
+          description: Job documents in the window that are still awaiting approval.
         trips_closed: { type: integer }
         bills: { type: integer }
         delivered: { type: integer }

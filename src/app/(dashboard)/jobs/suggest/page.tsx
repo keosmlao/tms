@@ -81,14 +81,21 @@ export default function SuggestTripsPage() {
   useEffect(() => {
     void Actions.getSalesTransportBranches()
       .then((rows) => {
-        const list = (rows ?? []) as Array<{ code: string; name_1: string }>;
+        const all = (rows ?? []) as Array<{ code: string; name_1: string }>;
+        // ສະແດງສະເພາະສາຂາຂອງ login — ຝ່າຍ server ບໍ່ຍອມສາຂານອກຂອບເຂດຢູ່ແລ້ວ
+        // (ເບິ່ງ getSuggestedTrips) ຈຶ່ງບໍ່ຄວນໃຫ້ເລືອກແລ້ວໄດ້ໜ້າຫວ່າງ.
+        const allowed = String(session?.branch_codes ?? session?.logistic_code ?? "")
+          .split(",")
+          .map((code) => code.trim())
+          .filter((code) => code && code !== "02-0004");
+        const list = allowed.length > 0 ? all.filter((b) => allowed.includes(b.code)) : all;
         setBranches(list);
         // ຄ່າເລີ່ມຕົ້ນ = ສາຂາຂອງຜູ້ໃຊ້ ຖ້າມີ
         const mine = session?.logistic_code ?? "";
         setBranch(list.some((b) => b.code === mine) ? mine : (list[0]?.code ?? ""));
       })
       .catch(() => setBranches([]));
-  }, [session?.logistic_code]);
+  }, [session?.logistic_code, session?.branch_codes]);
 
   const load = async () => {
     if (!branch) return;

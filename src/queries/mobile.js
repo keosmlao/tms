@@ -2641,8 +2641,13 @@ async function mobileManagerDashboard({ date = "", branch = "" } = {}) {
   // two blocks can never be computed differently.
   const totalsSql = `
     SELECT
-      COUNT(DISTINCT t.doc_no)::int AS trips,
-      COUNT(DISTINCT t.doc_no) FILTER (WHERE COALESCE(t.job_status,0) >= 3)::int AS trips_closed,
+      -- "ຖ້ຽວ" = ໃບງານທີ່ອະນຸມັດແລ້ວ ອັນດຽວກັບເວັບ (BI / ໜ້າຫຼັກ / ລາຍງານ).
+      -- ວັດ 2026-08 ສາຂາ 02-0002: ນັບທຸກໃບໄດ້ 298 ແຕ່ເວັບໃຫ້ 294.
+      -- ໃບທີ່ຍັງລໍອະນຸມັດ ຄືນແຍກເປັນ trips_pending_approval ຈຶ່ງບໍ່ຫາຍໄປງຽບໆ.
+      COUNT(DISTINCT t.doc_no) FILTER (WHERE COALESCE(t.approve_status,0) = 1)::int AS trips,
+      COUNT(DISTINCT t.doc_no) FILTER (WHERE COALESCE(t.approve_status,0) <> 1)::int AS trips_pending_approval,
+      COUNT(DISTINCT t.doc_no) FILTER (WHERE COALESCE(t.job_status,0) >= 3
+                                         AND COALESCE(t.approve_status,0) = 1)::int AS trips_closed,
       COUNT(d.bill_no)::int AS bills,
       COUNT(*) FILTER (WHERE COALESCE(d.status,0) = 1)::int AS delivered,
       COUNT(*) FILTER (WHERE COALESCE(d.status,0) = 2)::int AS cancelled,
@@ -2836,6 +2841,8 @@ async function mobileManagerDashboard({ date = "", branch = "" } = {}) {
   const num = (row, key) => Number(row?.[key] ?? 0);
   const shape = (row) => ({
     trips: num(row, "trips"),
+    /** ໃບງານທີ່ຍັງລໍອະນຸມັດ — ບໍ່ນັບໃນ trips ແຕ່ບອກໄວ້ໃຫ້ຮູ້ */
+    trips_pending_approval: num(row, "trips_pending_approval"),
     trips_closed: num(row, "trips_closed"),
     bills: num(row, "bills"),
     delivered: num(row, "delivered"),

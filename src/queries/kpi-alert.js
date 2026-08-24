@@ -3,6 +3,10 @@ const { getFixedYearSqlFilter, getFixedTodayDate } = require("../lib/fixed-year"
 const { addDays } = require("../lib/lao-date");
 const { getSetting } = require("./settings");
 const { sendLineText } = require("../lib/line");
+const { deliveryDueDateSql } = require("./helpers");
+// ວັນນັດທີ່ໃຊ້ວັດ "ສົ່ງທັນເວລາ" — ນິຍາມກາງ ໃຊ້ຮ່ວມກັບ BI ແລະ ໜ້າອື່ນ.
+const DUE_DATE = deliveryDueDateSql("d.bill_no", "pb", "t", "d");
+
 
 function fmtMinutes(seconds) {
   if (seconds == null) return "—";
@@ -22,8 +26,8 @@ async function getYesterdayKpi() {
               THEN EXTRACT(EPOCH FROM (a.job_close - d.sent_end))::float8
          END AS close_seconds,
          CASE
-           WHEN COALESCE(pb.scheduled_date::date, t.send_date::date, d.bill_date::date) IS NULL THEN NULL
-           WHEN d.sent_end::date <= COALESCE(pb.scheduled_date::date, t.send_date::date, d.bill_date::date) THEN true
+           WHEN ${DUE_DATE} IS NULL THEN NULL
+           WHEN d.sent_end::date <= ${DUE_DATE} THEN true
            ELSE false
          END AS is_on_time
        FROM public.odg_tms_detail d

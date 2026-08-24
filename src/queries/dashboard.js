@@ -12,7 +12,13 @@ const {
   toDisplayDate,
   toDisplayMonth,
   getBranchScope,
+  deliveryDueDateSql,
+  branchFilterJob,
+  ensureForwardBranchColumn,
 } = require("./helpers");
+
+// ວັນນັດທີ່ໃຊ້ວັດ "ສົ່ງທັນເວລາ" — ນິຍາມກາງ ໃຊ້ຮ່ວມກັບ BI ແລະ ໜ້າອື່ນ.
+const DUE_DATE = deliveryDueDateSql("d.bill_no", "pb", "t", "d");
 
 // ── Short-TTL cache (per slice, per branch) ──
 // The dashboard is a read-only overview reloaded on every visit. Each slice
@@ -185,9 +191,12 @@ function getDashboardKpi(session, force = false) {
 async function computeKpi(session) {
   const c = ctx(session);
   const { getSettings } = require("./settings");
-  const kpiBranchClause = c.scope.scoped
-    ? `AND EXISTS (SELECT 1 FROM ic_trans_shipment __ts WHERE __ts.doc_no = d.bill_no AND __ts.transport_code IN (${c.scope.branchListSql}))`
-    : "";
+  // ຂອບເຂດສາຂາຂອງ KPI ຕ້ອງເປັນ branchFilterJob() ອັນດຽວກັບໜ້າ BI ແລະ ລາຍງານ
+  // ອື່ນໆ (ຖືສາຂາຕົ້ນທາງຂອງຖ້ຽວເປັນຫຼັກ). ກົດເກົ່າຢູ່ນີ້ເບິ່ງແຕ່ສາຂາຂອງບິນ
+  // ຈຶ່ງໃຫ້ຄ່າຄົນລະຢ່າງ — ວັດ 2026-08 ສາຂາ 02-0002: ກົດເກົ່າ 1,381 ຈຸດສົ່ງ
+  // ແຕ່ໜ້າ BI ນັບໄດ້ 1,724 ຈາກຂໍ້ມູນຊຸດດຽວກັນ.
+  await ensureForwardBranchColumn();
+  const kpiBranchClause = branchFilterJob(c.scope, "a");
 
   const [branchNameRows, kpiRows, trendRows, kpiSettings] = await Promise.all([
     query(BRANCH_NAMES_SQL),
@@ -201,8 +210,8 @@ async function computeKpi(session) {
                 THEN EXTRACT(EPOCH FROM (a.job_close - d.sent_end))::float8
            END AS close_seconds,
            CASE
-             WHEN COALESCE(pb.scheduled_date::date, t.send_date::date, d.bill_date::date) IS NULL THEN NULL
-             WHEN d.sent_end::date <= COALESCE(pb.scheduled_date::date, t.send_date::date, d.bill_date::date) THEN true
+             WHEN ${DUE_DATE} IS NULL THEN NULL
+             WHEN d.sent_end::date <= ${DUE_DATE} THEN true
              ELSE false
            END AS is_on_time
          FROM public.odg_tms_detail d
@@ -248,8 +257,8 @@ async function computeKpi(session) {
                 THEN EXTRACT(EPOCH FROM (a.job_close - d.sent_end))::float8
            END AS close_seconds,
            CASE
-             WHEN COALESCE(pb.scheduled_date::date, t.send_date::date, d.bill_date::date) IS NULL THEN NULL
-             WHEN d.sent_end::date <= COALESCE(pb.scheduled_date::date, t.send_date::date, d.bill_date::date) THEN true
+             WHEN ${DUE_DATE} IS NULL THEN NULL
+             WHEN d.sent_end::date <= ${DUE_DATE} THEN true
              ELSE false
            END AS is_on_time
          FROM public.odg_tms_detail d
@@ -391,11 +400,9 @@ function getDashboardPending(session, force = false) {
 async function computePending(session) {
   const c = ctx(session);
   const { getBillsPending } = require("./bills");
-  const branchScopeClause = c.scope.scoped
-    ? `AND EXISTS (SELECT 1 FROM public.ic_trans_shipment __s
-                    WHERE __s.doc_no = d.bill_no
-                      AND __s.transport_code IN (${c.scope.branchListSql}))`
-    : "";
+  // ບິນທີ່ຢູ່ເທິງຖ້ຽວ ກັ່ນຕອງດ້ວຍສາຂາຕົ້ນທາງຂອງຖ້ຽວ ຄືກັບ KPI ແລະ ລາຍການອື່ນ.
+  await ensureForwardBranchColumn();
+  const branchScopeClause = branchFilterJob(c.scope, "j");
   const [{ trans: pendingWithRemaining }, onTripRows] = await Promise.all([
     getBillsPending(session, FIXED_YEAR_START, FIXED_YEAR_END, "all"),
     // ບິນທີ່ຢູ່ເທິງຖ້ຽວທີ່ຍັງບໍ່ຈົບ (ຮັບຖ້ຽວແລ້ວ / ກຳລັງສົ່ງ) — ຍັງບໍ່ຮອດມືລູກຄ້າ
@@ -502,9 +509,10 @@ async function getDashboardData(session, force = false) {
 // concurrently.
 async function getDashboardActivity(session) {
   const scope = getBranchScope(session);
-  const listBranchClause = scope.scoped
-    ? `AND EXISTS (SELECT 1 FROM ic_trans_shipment __ts WHERE __ts.doc_no = d.bill_no AND __ts.transport_code IN (${scope.branchListSql}))`
-    : "";
+  // ຂອບເຂດສາຂາອັນດຽວກັບ KPI ຂ້າງເທິງ (branchFilterJob) — ບໍ່ດັ່ງນັ້ນ tile ນັບ
+  // ຊຸດໜຶ່ງ ແຕ່ລາຍການທີ່ກົດເຂົ້າໄປເບິ່ງເປັນອີກຊຸດໜຶ່ງ.
+  await ensureForwardBranchColumn();
+  const listBranchClause = branchFilterJob(scope, "a");
 
   const inProgressRowsP = query(
     `SELECT

@@ -887,7 +887,7 @@ export default function MonthlyDeliveryPage() {
                   <div className="flex items-center justify-between">
                     <h3 className="text-sm font-extrabold text-slate-900 dark:text-white">{z.zone}</h3>
                     <span className="rounded-full bg-white px-2 py-0.5 text-[10px] font-bold text-slate-500 dark:bg-white/10 dark:text-slate-300">
-                      ສົ່ງສຳເລັດ {numberText(z.delivered)} ບິນ
+                      ສົ່ງສຳເລັດ {numberText(z.delivered)} ຈຸດສົ່ງ
                     </span>
                   </div>
                   <div className="mt-3 grid grid-cols-3 gap-2">

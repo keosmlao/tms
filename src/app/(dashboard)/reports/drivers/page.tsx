@@ -83,7 +83,7 @@ export default function DriverLeaderboardPage() {
 
       <div className="glass rounded-lg p-3 flex items-center justify-between flex-wrap gap-3">
         <p className="text-[11px] text-slate-500 dark:text-slate-400">
-          ຈັດອັນດັບຕາມ <strong>ຈຳນວນທີ່ສົ່ງສຳເລັດທັນເວລາ</strong> (ຫຼັງຈາກນັ້ນຕາມຈຳນວນທັງໝົດ)
+          ຈັດອັນດັບຕາມ <strong>ຈຳນວນຈຸດສົ່ງທີ່ສຳເລັດທັນເວລາ</strong> (ຫຼັງຈາກນັ້ນຕາມຈຳນວນທັງໝົດ) — ບິນທີ່ທະຍອຍສົ່ງຫຼາຍຮອບ ນັບຕາມຮອບ
         </p>
         <div className="inline-flex items-center gap-1 rounded-lg bg-slate-100 p-1 dark:bg-slate-800/70">
           {tabs.map((t) => (
@@ -125,7 +125,7 @@ export default function DriverLeaderboardPage() {
                   </p>
                   <p className="text-xl font-bold text-slate-800 dark:text-white truncate">{top.driver_name}</p>
                   <p className="text-[11px] text-slate-500 dark:text-slate-400">
-                    {top.on_time} ບິນທັນເວລາ ({pct(top.on_time, top.total)}%) ຈາກ {top.total} ບິນ
+                    {top.on_time} ຈຸດສົ່ງທັນເວລາ ({pct(top.on_time, top.total)}%) ຈາກ {top.total} ຈຸດສົ່ງ
                   </p>
                 </div>
               </div>
@@ -139,7 +139,7 @@ export default function DriverLeaderboardPage() {
                   <tr>
                     <th className="px-3 py-2 text-left font-semibold">ອັນດັບ</th>
                     <th className="px-3 py-2 text-left font-semibold">ຄົນຂັບ</th>
-                    <th className="px-3 py-2 text-right font-semibold">ສຳເລັດ</th>
+                    <th className="px-3 py-2 text-right font-semibold">ຈຸດສົ່ງ</th>
                     <th className="px-3 py-2 text-right font-semibold">
                       <FaCheckCircle className="inline mr-1 text-emerald-500" size={9} /> ທັນເວລາ
                     </th>

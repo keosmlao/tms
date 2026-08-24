@@ -1,7 +1,15 @@
 const { query } = require("../lib/db");
 const { getFixedTodayDate, getFixedYearSqlFilter } = require("../lib/fixed-year");
 const { addMonths, startOfMonth } = require("../lib/lao-date");
-const { getBranchScope } = require("./helpers");
+const {
+  getBranchScope,
+  deliveryDueDateSql,
+  branchFilterJob,
+  ensureForwardBranchColumn,
+} = require("./helpers");
+// ວັນນັດທີ່ໃຊ້ວັດ "ສົ່ງທັນເວລາ" — ນິຍາມກາງ ໃຊ້ຮ່ວມກັບ BI ແລະ ໜ້າອື່ນ.
+const DUE_DATE = deliveryDueDateSql("d.bill_no", "pb", "t", "d");
+
 
 // Driver performance leaderboard for a chosen window (today/month/year).
 // Computed on completed bills (status=1, sent_end set). Returns one row per
@@ -14,9 +22,10 @@ async function getDriverLeaderboard(session, period = "month") {
   const nextMonthStart = addMonths(monthStart, 1);
 
   const scope = getBranchScope(session);
-  const branchClause = scope.scoped
-    ? `AND EXISTS (SELECT 1 FROM ic_trans_shipment __ts WHERE __ts.doc_no = d.bill_no AND __ts.transport_code IN (${scope.branchListSql}))`
-    : "";
+  // ຂອບເຂດສາຂາອັນດຽວກັບໜ້າຫຼັກ ແລະ BI (branchFilterJob) ບໍ່ດັ່ງນັ້ນຍອດບິນ
+  // ລວມຂອງໜ້ານີ້ຈະບໍ່ຕົງກັບ KPI ຢູ່ໜ້າຫຼັກ.
+  await ensureForwardBranchColumn();
+  const branchClause = branchFilterJob(scope, "a");
 
   // ສົ່ງສະເພາະ param ທີ່ຊ່ວງນັ້ນໃຊ້ຈິງ. ເມື່ອກ່ອນສົ່ງທັງ 3 ຕົວສະເໝີ ແຕ່ຊ່ວງ
   // "ເດືອນ" (ຄ່າເລີ່ມຕົ້ນ) ແລະ "ປີ" ບໍ່ໄດ້ອ້າງ $1 ເລີຍ Postgres ຈຶ່ງຕອບ
@@ -48,8 +57,8 @@ async function getDriverLeaderboard(session, period = "month") {
               THEN EXTRACT(EPOCH FROM (a.job_close - d.sent_end))::float8
          END AS close_seconds,
          CASE
-           WHEN COALESCE(pb.scheduled_date::date, t.send_date::date, d.bill_date::date) IS NULL THEN NULL
-           WHEN d.sent_end::date <= COALESCE(pb.scheduled_date::date, t.send_date::date, d.bill_date::date) THEN true
+           WHEN ${DUE_DATE} IS NULL THEN NULL
+           WHEN d.sent_end::date <= ${DUE_DATE} THEN true
            ELSE false
          END AS is_on_time
        FROM public.odg_tms_detail d

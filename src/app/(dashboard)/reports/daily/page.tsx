@@ -36,6 +36,8 @@ interface ReportItem {
   bills_undone: number;
   user_created: string;
   status: string;
+  /** 1 = ອະນຸມັດແລ້ວ — ນິຍາມ "ຖ້ຽວ" ຢູ່ໜ້າ BI/ໜ້າຫຼັກ ນັບສະເພາະອັນນີ້ */
+  approve_status: number | null;
   job_status: number;
   imei: string;
 }
@@ -84,12 +86,17 @@ export default function DailyReportPage() {
 
   const stats = useMemo(() => {
     const total = items.length;
+    // ລາຍການນີ້ຕັ້ງໃຈສະແດງໃບທີ່ຍັງລໍອະນຸມັດນຳ (ຜູ້ຈັດຖ້ຽວຕ້ອງເຫັນ) ແຕ່ນິຍາມ
+    // "ຖ້ຽວ" ຢູ່ໜ້າ BI/ໜ້າຫຼັກ ນັບສະເພາະທີ່ອະນຸມັດແລ້ວ — ຈຶ່ງແຍກໃຫ້ເຫັນ
+    // ບໍ່ດັ່ງນັ້ນຜູ້ໃຊ້ຈະທຽບ 2 ໜ້າແລ້ວຄິດວ່າຕົວເລກຜິດ.
+    const pendingApproval = items.filter((i) => Number(i.approve_status ?? 0) !== 1).length;
+    const approved = total - pendingApproval;
     const completed = items.filter((i) => i.job_status === 3).length;
     const inProgress = items.filter((i) => i.job_status === 1 || i.job_status === 2).length;
     // ຍອດບິນລວມທຸກຖ້ຽວທີ່ຢູ່ໃນລາຍການ — ບິນໜຶ່ງໃບຢູ່ໄດ້ຖ້ຽວດຽວ ຈຶ່ງບວກກົງໆໄດ້
     const billsTotal = items.reduce((sum, i) => sum + (Number(i.bills_total) || 0), 0);
     const billsDone = items.reduce((sum, i) => sum + (Number(i.bills_done) || 0), 0);
-    return { total, completed, inProgress, billsTotal, billsDone, billsUndone: billsTotal - billsDone };
+    return { total, approved, pendingApproval, completed, inProgress, billsTotal, billsDone, billsUndone: billsTotal - billsDone };
   }, [items]);
 
   const totalPages = Math.max(1, Math.ceil(items.length / perPage));
@@ -201,6 +208,11 @@ export default function DailyReportPage() {
           <StatCard
             label="ຈຳນວນຖ້ຽວ"
             value={stats.total}
+            caption={
+              stats.pendingApproval > 0
+                ? `ອະນຸມັດແລ້ວ ${stats.approved} · ລໍອະນຸມັດ ${stats.pendingApproval}`
+                : undefined
+            }
             icon={<FaRoute />}
             accent="text-teal-600"
             iconBg="bg-teal-500/10 text-teal-600 dark:text-teal-400"
@@ -409,12 +421,14 @@ export default function DailyReportPage() {
 function StatCard({
   label,
   value,
+  caption,
   icon,
   accent,
   iconBg,
 }: {
   label: string;
   value: number;
+  caption?: string;
   icon: React.ReactNode;
   accent: string;
   iconBg: string;
@@ -424,6 +438,7 @@ function StatCard({
       <div>
         <p className="text-[11px] font-semibold uppercase tracking-wider text-slate-400">{label}</p>
         <p className={`mt-1.5 text-xl font-bold ${accent}`}>{value.toLocaleString("en-US")}</p>
+        {caption ? <p className="mt-0.5 text-[10px] text-slate-400">{caption}</p> : null}
       </div>
       <div className={`w-9 h-9 rounded-lg flex items-center justify-center ${iconBg}`}>{icon}</div>
     </div>

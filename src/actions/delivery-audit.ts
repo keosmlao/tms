@@ -18,11 +18,11 @@ export async function getDeliveryLocationReport(input: {
   minKm?: number;
   branch?: string;
   limit?: number;
-}) {
-  await requireSession();
+}): Promise<{ rows: unknown; summary: unknown }> {
+  const session = await requireSession();
   const [rows, summary] = await Promise.all([
-    svcAudit(input),
-    svcSummary({ fromDate: input.fromDate, toDate: input.toDate }),
+    svcAudit({ ...input, session }),
+    svcSummary({ fromDate: input.fromDate, toDate: input.toDate, session }),
   ]);
   return { rows, summary };
 }

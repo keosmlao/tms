@@ -1027,7 +1027,7 @@ function DeliveryKpiCard({ kpi }: { kpi: DeliveryKpi }) {
             {onTimeRate}%
           </p>
           <p className="text-[10px] text-slate-500 dark:text-slate-400 mt-0.5">
-            {formatNumber(period.on_time)} / {formatNumber(period.total)} ບິນ
+            {formatNumber(period.on_time)} / {formatNumber(period.total)} ຈຸດສົ່ງ
           </p>
           <Sparkline values={onTimeSeries} color="#059669" label="ທັນເວລາ" targetLine={targets.on_time_rate} />
         </div>
@@ -1093,7 +1093,7 @@ function DeliveryKpiCard({ kpi }: { kpi: DeliveryKpi }) {
               <thead className="text-slate-500 dark:text-slate-400">
                 <tr>
                   <th className="px-2 py-1.5 text-left font-semibold">ສາຂາ</th>
-                  <th className="px-2 py-1.5 text-right font-semibold">ສົ່ງສຳເລັດ</th>
+                  <th className="px-2 py-1.5 text-right font-semibold">ຈຸດສົ່ງ</th>
                   <th className="px-2 py-1.5 text-right font-semibold">ທັນເວລາ</th>
                   <th className="px-2 py-1.5 text-right font-semibold">ຊ້າ</th>
                   <th className="px-2 py-1.5 text-right font-semibold">ສະເລ່ຍສົ່ງ</th>

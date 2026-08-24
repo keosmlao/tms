@@ -19,7 +19,7 @@ const DIST_KM_SQL = `
 /**
  * ບິນທີ່ປິດຫ່າງຈາກຈຸດອ້າງອີງເກີນ minKm.
  *
- * @param {{ fromDate?: string, toDate?: string, minKm?: number, branch?: string, limit?: number }} opts
+ * @param {{ fromDate?: string, toDate?: string, minKm?: number, branch?: string, limit?: number, session?: unknown }} opts
  */
 async function getDeliveryLocationAudit(opts = {}) {
   const fromDate = String(opts.fromDate ?? "").trim();
@@ -42,6 +42,11 @@ async function getDeliveryLocationAudit(opts = {}) {
     params.push(branch);
     where += ` AND COALESCE(j.origin_transport_code, '') = $${params.length}`;
   }
+  // ຂອບເຂດສາຂາຂອງ login — ບັງຄັບສະເໝີ ບໍ່ແມ່ນແຄ່ຕົວກັ່ນຕອງທີ່ຜູ້ໃຊ້ເລືອກ.
+  // ກ່ອນນີ້ໜ້ານີ້ສະແດງທຸກສາຂາໃຫ້ທຸກຄົນ ຕ່າງກັບລາຍງານອື່ນທັງໝົດ.
+  const { getBranchScope, branchFilterJob } = require("./helpers");
+  const scope = getBranchScope(opts.session);
+  where += ` ${branchFilterJob(scope, "j")}`;
   params.push(limit);
 
   return query(
@@ -93,6 +98,11 @@ async function getDeliveryLocationSummary(opts = {}) {
     params.push(toDate);
     where += ` AND d.doc_date <= $${params.length}::date`;
   }
+  // ຂອບເຂດສາຂາອັນດຽວກັບລາຍການຂ້າງລຸ່ມ — ບໍ່ດັ່ງນັ້ນ "ພາບລວມ" ນັບທັງບໍລິສັດ
+  // ແຕ່ລາຍການນັບສະເພາະສາຂາ ແລ້ວສອງຕົວເລກໃນໜ້າດຽວກັນຂັດກັນເອງ.
+  const { getBranchScope, branchFilterJob } = require("./helpers");
+  const scope = getBranchScope(opts.session);
+  where += ` ${branchFilterJob(scope, "j")}`;
 
   const [row] = await query(
     `SELECT count(*)::int AS compared,
@@ -105,6 +115,7 @@ async function getDeliveryLocationSummary(opts = {}) {
          SELECT ${DIST_KM_SQL} AS dist
            FROM public.odg_tms_detail d
            JOIN public.odg_tms_customer_point cp ON cp.cust_code = d.cust_code
+           LEFT JOIN public.odg_tms j ON j.doc_no = d.doc_no
           WHERE d.status = 1
             AND COALESCE(NULLIF(TRIM(d.lat_end), ''), '') <> ''
             AND COALESCE(NULLIF(TRIM(d.lng_end), ''), '') <> ''
@@ -118,8 +129,9 @@ async function getDeliveryLocationSummary(opts = {}) {
   // ບິນທີ່ປິດໂດຍບໍ່ມີ GPS ເລີຍ — ຊ່ອງວ່າງອີກແບບໜຶ່ງ
   const [noGps] = await query(
     `SELECT count(*)::int AS closed,
-            count(*) FILTER (WHERE COALESCE(NULLIF(TRIM(lat_end), ''), '') = '')::int AS without_gps
+            count(*) FILTER (WHERE COALESCE(NULLIF(TRIM(d.lat_end), ''), '') = '')::int AS without_gps
        FROM public.odg_tms_detail d
+       LEFT JOIN public.odg_tms j ON j.doc_no = d.doc_no
       WHERE d.status = 1 AND ${getFixedYearSqlFilter("d.doc_date")} ${where}`,
     params
   );

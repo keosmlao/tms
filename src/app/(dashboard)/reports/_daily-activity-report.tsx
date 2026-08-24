@@ -27,6 +27,8 @@ interface BranchRow {
   carry_bills: number;
   opened_bills: number;
   delivered_bills: number;
+  /** ບິນທະຍອຍສົ່ງ — ເຄື່ອງອອກໃນຊ່ວງແຕ່ບິນຍັງບໍ່ປິດ (ຢູ່ໃນຍອດສິນຄ້າ ບໍ່ຢູ່ໃນຍອດບິນ) */
+  partial_bills?: number;
   /** ບິນທີ່ອອກຈາກຍອດໂດຍບໍ່ໄດ້ສົ່ງ — ຄືນຜ່ານໃບຫຼຸດໜີ້ ຫຼື ຖືກປິດຢູ່ ERP */
   closed_other_bills: number;
   remaining_bills: number;
@@ -312,6 +314,11 @@ export default function DailyActivityReport({ mode }: { mode: Mode }) {
               icon={<FaTruck />}
               iconBg="bg-emerald-500/10 text-emerald-600 dark:text-emerald-400"
               accent="text-emerald-600 dark:text-emerald-400"
+              caption={
+                Number(data.total.partial_bills ?? 0) > 0
+                  ? `+ ທະຍອຍສົ່ງ ${Number(data.total.partial_bills)} ບິນ ທີ່ຍັງບໍ່ປິດ (ນັບສະເພາະຈຳນວນສິນຄ້າ)`
+                  : undefined
+              }
             />
             <SummaryCard
               label="ປິດດ້ວຍທາງອື່ນ"
@@ -522,6 +529,7 @@ function SummaryCard({
   icon,
   iconBg,
   accent,
+  caption,
 }: {
   label: string;
   value: number;
@@ -529,6 +537,7 @@ function SummaryCard({
   icon: React.ReactNode;
   iconBg: string;
   accent: string;
+  caption?: string;
 }) {
   return (
     <div className="bg-white dark:bg-white/5 rounded-lg border border-slate-100 dark:border-white/5 p-4 flex items-center justify-between">
@@ -538,6 +547,7 @@ function SummaryCard({
           {value.toLocaleString("en-US", { maximumFractionDigits: 2 })}
           <span className="ml-1 text-[11px] font-medium text-slate-400">{unit}</span>
         </p>
+        {caption ? <p className="mt-0.5 text-[10px] text-slate-400">{caption}</p> : null}
       </div>
       <div className={`w-9 h-9 rounded-lg flex items-center justify-center ${iconBg}`}>{icon}</div>
     </div>

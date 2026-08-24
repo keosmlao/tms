@@ -2,7 +2,8 @@
 //
 // ຫຼັກການ: ໜ້ານີ້ບໍ່ຄິດສູດໃໝ່ຂອງມັນເອງ. ຕົວເລກທຸກໂຕດຶງມາຈາກຄຳນິຍາມທີ່ໜ້າອື່ນ
 // ໃຊ້ຢູ່ແລ້ວ ເພື່ອບໍ່ໃຫ້ຜູ້ບໍລິຫານເຫັນ 2 ຕົວເລກທີ່ບໍ່ກົງກັນຢູ່ 2 ໜ້າ:
-//   • ອັດຕາສົ່ງທັນເວລາ = ນິຍາມດຽວກັບ kpi-alert.js (ສົ່ງສຳເລັດພາຍໃນວັນນັດ)
+//   • ອັດຕາສົ່ງທັນເວລາ = deliveryDueDateSql() ໃນ helpers.js — ອັນດຽວກັບ
+//     ໜ້າຫຼັກ, ຄະແນນຄົນຂັບ ແລະ kpi-alert.js (ສົ່ງສຳເລັດພາຍໃນວັນນັດຄັ້ງທຳອິດ)
 //   • ຍອດຄ້າງ / ສົ່ງສຳເລັດ / ຍົກເລີກ = getDeliveryPerformance() ໃນ reports.js
 //   • ໄລຍະທາງ = odg_tms_gps_daily (rollup) ບໍ່ແມ່ນສະແກນ ping ດິບ
 //   • ພື້ນທີ່ບັນທຸກ = buildUtilizationReport() ໃນ actions/trip-volume.ts
@@ -17,7 +18,12 @@
 "use strict";
 
 const { query, queryOne } = require("../lib/db");
-const { getBranchScope, branchFilterJob } = require("./helpers");
+const {
+  getBranchScope,
+  branchFilterJob,
+  deliveryDueDateSql,
+  firstPromiseSql,
+} = require("./helpers");
 const { addDays } = require("../lib/lao-date");
 const { MIN_PLAUSIBLE_LITERS, MAX_PLAUSIBLE_LITERS } = require("../lib/fuel-sanity");
 
@@ -40,30 +46,9 @@ const IS_TRANSPORT_CAR = `NULLIF(BTRIM(transport_code), '') IS NOT NULL`;
 // ແປງເປັນຕົວເລກ ບໍ່ດັ່ງນັ້ນ query ລົ້ມທັງອັນຍ້ອນ 1 ແຖວທີ່ມີ "km" ຕິດມາ.
 const odoNum = (col) => `NULLIF(regexp_replace(COALESCE(${col}, ''), '[^0-9.]', '', 'g'), '')::numeric`;
 
-/**
- * ວັນນັດທີ່ເອົາມາວັດ "ສົ່ງທັນເວລາ" — **ນັດຄັ້ງທຳອິດ** ທີ່ຜູ້ຈັດຕັ້ງໄວ້.
- *
- * ⚠️ ເປັນຫຍັງບໍ່ໃຊ້ odg_tms_pending_bill.scheduled_date ຊື່ໆ: ຊ່ອງນັ້ນຖືກ
- * ຂຽນທັບຕອນຈັດຖ້ຽວ ຈຶ່ງກາຍເປັນວັນດຽວກັບວັນທີ່ສົ່ງເກືອບທຸກໃບ (ວັດ 2026-08-19:
- * 1,417 ຈາກ 1,448 ຈຸດສົ່ງ ມີວັນນັດ = ວັນສົ່ງພໍດີ) ⇒ ອັດຕາທັນເວລາຈະສູງເກືອບ
- * 100% ໂດຍບໍ່ໄດ້ວັດຫຍັງເລີຍ. ປະຫວັດຢູ່ odg_tms_pending_bill_history ເກັບນັດ
- * ເດີມໄວ້ ຈຶ່ງເອົາອັນທຳອິດມາເປັນຄຳສັນຍາຕໍ່ລູກຄ້າ.
- *
- * ປະຫວັດເລີ່ມເກັບ 2026-06-04 — ບິນທີ່ເກົ່າກວ່ານັ້ນຈຶ່ງຖອຍໄປໃຊ້ລຳດັບເກົ່າ
- * (ນັດປັດຈຸບັນ → ວັນສົ່ງໃນບິນຂາຍ → ວັນທີ່ບິນ) ບໍ່ດັ່ງນັ້ນຈະວັດບໍ່ໄດ້ເລີຍ.
- */
-const firstPromiseSql = (billCol) => `(
-  SELECT h.scheduled_date::date
-    FROM public.odg_tms_pending_bill_history h
-   WHERE h.bill_no = ${billCol} AND h.scheduled_date IS NOT NULL
-   ORDER BY h.changed_at, h.id
-   LIMIT 1
-)`;
-
-/** ວັນນັດທີ່ໃຊ້ວັດ — ນັດຄັ້ງທຳອິດ ແລ້ວຄ່ອຍຖອຍໄປລຳດັບເກົ່າ */
-const dueDateSql = (billCol, pbAlias, transAlias, detailAlias) =>
-  `COALESCE(${firstPromiseSql(billCol)}, ${pbAlias}.scheduled_date::date,` +
-  ` ${transAlias}.send_date::date, ${detailAlias}.bill_date::date)`;
+// ວັນນັດທີ່ເອົາມາວັດ "ສົ່ງທັນເວລາ" — ນິຍາມກາງຢູ່ helpers.js (deliveryDueDateSql)
+// ເພື່ອໃຫ້ໜ້ານີ້, ໜ້າຫຼັກ, ຄະແນນຄົນຂັບ ແລະ ແຈ້ງເຕືອນ KPI ໃຊ້ສູດດຽວກັນ.
+const dueDateSql = deliveryDueDateSql;
 
 /**
  * ຊ່ວງວັນທີທີ່ທຸກ slice ຂອງໜ້ານີ້ໃຊ້ຮ່ວມກັນ.
