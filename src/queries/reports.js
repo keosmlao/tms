@@ -1271,11 +1271,24 @@ function ledgerPendingOnlyArmSql(
 ) {
   return `SELECT o.bill_no AS doc_no,
              COALESCE(ic.doc_date::date, cb.created_at::date, pb.scheduled_date::date) AS doc_date,
-             COALESCE(NULLIF(TRIM(pb.transport_code), ''), sh.transport_code) AS branch_code,
+             -- ໃບຂໍໂອນສິນຄ້າ (ic_trans flag 70/72) ບໍ່ມີທັງແຖວ pending ແລະ shipment
+             -- ຈຶ່ງຖອຍໄປໃຊ້ກຸ່ມສາງ: 11xx ຂົວຫຼວງ · 12xx ດອນຕິ້ວ · 13xx ໂພນສະອາດ
+             -- · 14xx ປາກເຊ. ບໍ່ມີແຖວນີ້ ໃບຂໍໂອນຈະຫາຍຈາກບັນຊີເຄື່ອນໄຫວ ທັງທີ່ຂຶ້ນ
+             -- ຢູ່ຄິວ ບິນລໍຈັດຖ້ຽວ ແລ້ວ.
+             COALESCE(
+               NULLIF(TRIM(pb.transport_code), ''),
+               sh.transport_code,
+               CASE left(COALESCE(ic.wh_from, ''), 2)
+                 WHEN '11' THEN '02-0001'
+                 WHEN '12' THEN '02-0002'
+                 WHEN '13' THEN '02-0007'
+                 WHEN '14' THEN '02-0003'
+               END
+             ) AS branch_code,
              ic.sale_code
       FROM unnest(${pendingParam}::varchar[]) AS o(bill_no)
       LEFT JOIN LATERAL (
-        SELECT x.doc_date, x.sale_code FROM ic_trans x
+        SELECT x.doc_date, x.sale_code, x.wh_from FROM ic_trans x
         WHERE x.doc_no = o.bill_no ORDER BY x.doc_date LIMIT 1
       ) ic ON true
       LEFT JOIN public.odg_tms_custom_bill cb ON cb.bill_no = o.bill_no
@@ -1284,7 +1297,16 @@ function ledgerPendingOnlyArmSql(
         SELECT s2.transport_code FROM ic_trans_shipment s2
         WHERE s2.doc_no = o.bill_no ORDER BY s2.doc_date LIMIT 1
       ) sh ON true
-      WHERE COALESCE(NULLIF(TRIM(pb.transport_code), ''), sh.transport_code) IN (${branchListSql})
+      WHERE COALESCE(
+              NULLIF(TRIM(pb.transport_code), ''),
+              sh.transport_code,
+              CASE left(COALESCE(ic.wh_from, ''), 2)
+                WHEN '11' THEN '02-0001'
+                WHEN '12' THEN '02-0002'
+                WHEN '13' THEN '02-0007'
+                WHEN '14' THEN '02-0003'
+              END
+            ) IN (${branchListSql})
         AND COALESCE(ic.doc_date::date, cb.created_at::date, pb.scheduled_date::date) IS NOT NULL
         AND COALESCE(ic.doc_date::date, cb.created_at::date, pb.scheduled_date::date) <= ${toDateParam}::date
         -- ບໍ່ຊ້ຳກັບແຂນໃບຂາຍ ERP

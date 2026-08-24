@@ -53,6 +53,19 @@ const SERVICE_SOURCE_TYPE = "odservice.tb_product";
 // Free-form bills the dispatcher typed in by hand (odg_tms_custom_bill) —
 // deliveries with no ERP document at all ("ອື່ນໆ").
 const CUSTOM_SOURCE_TYPE = "custom";
+// ໃບຂໍໂອນສິນຄ້າຂອງ ERP (ic_trans trans_flag 70/72) — ບໍ່ມີແຖວໃນ ic_trans_shipment
+// ຈຶ່ງແຂນຫຼັກຂອງຄິວ (ທີ່ອ່ານຈາກ shipment) ເຫັນບໍ່ໄດ້ເລີຍ.
+const ERP_TRANSFER_SOURCE_TYPE = "erp_transfer";
+// ໃບຂໍໂອນເລີ່ມນັບແຕ່ວັນທີ່ຝ່າຍຂົນສົ່ງເລີ່ມໃຊ້ລະບົບນີ້
+const ERP_TRANSFER_MIN_DATE = "2026-08-10";
+// ລະຫັດສາງ 2 ໂຕໜ້າ = ກຸ່ມສາຂາຂົນສົ່ງທີ່ຮັບຜິດຊອບ. 99xx (ສາງລະຫວ່າງທາງ,
+// ສາງເຄື່ອງໃຊ້ຫ້ອງການ) ບໍ່ແມ່ນສາງຈິງ ຈຶ່ງບໍ່ຢູ່ໃນນີ້.
+const WAREHOUSE_BRANCH_SQL = `CASE left(t.wh_from, 2)
+        WHEN '11' THEN '02-0001'
+        WHEN '12' THEN '02-0002'
+        WHEN '13' THEN '02-0007'
+        WHEN '14' THEN '02-0003'
+      END`;
 
 // The "ລໍຖ້າຈັດຖ້ຽວ" (bills-pending) queue only dispatches the three internal
 // delivery branches: 02-0001 ໂອດ້ຽນ/ຂົວຫຼວງ · 02-0002 ດອນຕິ້ວ · 02-0003 ປາກເຊ.
@@ -1154,6 +1167,72 @@ async function getManualPendingRowsForPending(
      ORDER BY cb.created_at ASC`,
     docNos ? [...params, docNos] : params
   );
+  // ── ໃບຂໍໂອນສິນຄ້າລະຫວ່າງສາງ ຂອງ ERP ──
+  // ໜຶ່ງໃບມີ 2 ແຖວ (flag 70 ໂອນອອກ / 72 ໂອນເຂົ້າ) ທີ່ມີ wh_from/wh_to ຄືກັນ
+  // ຈຶ່ງ DISTINCT ON (doc_no) ບໍ່ດັ່ງນັ້ນຄິວຈະຂຶ້ນຊ້ຳ 2 ເທື່ອ.
+  //
+  // ເອົາສະເພາະ **ດ້ານອອກ**: wh_from ເປັນສາງຈິງ (11xx-14xx) ໄປ ສາງລະຫວ່າງທາງ
+  // ຫຼື ສາງອື່ນ — ນັ້ນຄືວຽກທີ່ລົດຕ້ອງໄປຮັບເຄື່ອງ ຈຶ່ງເຂົ້າຄິວຂອງສາຂາຕົ້ນທາງ.
+  // ຫຼຸດອອກຈາກຄິວເອງເມື່ອຖືກຈັດເຂົ້າຖ້ຽວ ດ້ວຍຕົວກັ່ນຕອງ active-dispatch ອັນດຽວ
+  // ກັບບິນຂາຍ.
+  const erpTransferBranch = scopedList
+    ? `AND ${WAREHOUSE_BRANCH_SQL} IN (${branchListSql})`
+    : filterByTransport
+      ? `AND ${WAREHOUSE_BRANCH_SQL} = $3`
+      : `AND ${WAREHOUSE_BRANCH_SQL} IN (${deliveryBranchListSql()})`;
+  const erpTransferDocFilter = docNos ? `AND t.doc_no = ANY($${params.length + 1}::varchar[])` : "";
+  const erpTransferRows = await query(
+    `SELECT DISTINCT ON (t.doc_no)
+      ${idsOnly ? `t.doc_no, '${ERP_TRANSFER_SOURCE_TYPE}' as source_type` : `t.doc_no,
+      to_char(t.doc_date,'DD-MM-YYYY') as doc_date,
+      '' as cust_code,
+      COALESCE(NULLIF(TRIM(wt.name_1), ''), t.wh_to, '') as cust_name,
+      COALESCE(NULLIF(TRIM(wt.name_1), ''), t.wh_to, '') as transport_name,
+      '' as cust_phone,
+      COALESCE(NULLIF(TRIM(t.remark), ''), '') as sales_remark,
+      to_char(pb.scheduled_date,'YYYY-MM-DD') as send_date,
+      to_char(pb.scheduled_date,'DD-MM-YYYY') as send_date_display,
+      COALESCE(NULLIF(TRIM(pb.transport_code), ''), ${WAREHOUSE_BRANCH_SQL}, '') as transport_code,
+      COALESCE(NULLIF(TRIM(wf.name_1), ''), t.wh_from, '') as transport,
+      to_char(t.doc_date,'DD-MM-YYYY') as time_open,
+      now() - t.doc_date::timestamp as time_use,
+      t.trans_flag as source_trans_flag`}
+     FROM public.ic_trans t
+     LEFT JOIN public.ic_warehouse wf ON wf.code = t.wh_from
+     LEFT JOIN public.ic_warehouse wt ON wt.code = t.wh_to
+     LEFT JOIN public.odg_tms_pending_bill pb ON pb.bill_no = t.doc_no
+     WHERE t.trans_flag IN (70, 72)
+       AND t.doc_date >= '${ERP_TRANSFER_MIN_DATE}'::date
+       AND ${WAREHOUSE_BRANCH_SQL} IS NOT NULL
+       AND (pb.scheduled_date IS NULL OR pb.scheduled_date::date BETWEEN $1::date AND $2::date)
+       ${erpTransferBranch}
+       ${erpTransferDocFilter}
+     ORDER BY t.doc_no, t.trans_flag`,
+    docNos ? [...params, docNos] : params
+  );
+  const erpTransferPendingRows = idsOnly
+    ? erpTransferRows
+    : erpTransferRows.map((row) => ({
+        doc_no: row.doc_no,
+        doc_date: row.doc_date,
+        cust_code: "",
+        cust_name: row.cust_name,
+        transport_name: row.transport_name,
+        cust_phone: "",
+        sales_remark: row.sales_remark,
+        send_date: row.send_date ?? null,
+        send_date_display: row.send_date_display ?? null,
+        sale: "",
+        department: "ຂໍໂອນສາງ",
+        transport_code: row.transport_code ?? "",
+        transport: row.transport ?? "",
+        time_open: row.time_open ?? "",
+        time_use: row.time_use ?? null,
+        manual_pending_bill: true,
+        source_trans_flag: row.source_trans_flag,
+        source_type: ERP_TRANSFER_SOURCE_TYPE,
+      }));
+
   const scheduleMap = new Map(readySchedules.map((row) => [row.bill_no, row]));
   const legPendingRows = idsOnly
     ? legRows
@@ -1221,7 +1300,7 @@ async function getManualPendingRowsForPending(
       source_type: CUSTOM_SOURCE_TYPE,
     };
   });
-  return [...icRows, ...serviceRows, ...customPendingRows, ...legPendingRows];
+  return [...icRows, ...serviceRows, ...customPendingRows, ...legPendingRows, ...erpTransferPendingRows];
 }
 
 async function getBillsPending(session, fromDate, toDate, transportCode) {
@@ -1361,7 +1440,9 @@ async function getBillsPending(session, fromDate, toDate, transportCode) {
   const keptDocNos = countedIdRows
     .filter(
       (row) =>
-        row.source_type === SERVICE_SOURCE_TYPE || Number(row.count_item ?? 0) > 0
+        row.source_type === SERVICE_SOURCE_TYPE ||
+        row.source_type === ERP_TRANSFER_SOURCE_TYPE ||
+        Number(row.count_item ?? 0) > 0
     )
     .map((row) => row.doc_no);
   if (keptDocNos.length === 0) {
@@ -1510,6 +1591,7 @@ async function getBillsPending(session, fromDate, toDate, transportCode) {
       !forwardedAwaySet.has(bill.doc_no) &&
       !deliveredServiceSet.has(bill.doc_no) &&
       (bill.source_type === SERVICE_SOURCE_TYPE ||
+        bill.source_type === ERP_TRANSFER_SOURCE_TYPE ||
         Number(summaries.get(bill.doc_no)?.remaining_count ?? 0) > 0)
   );
   const keptBillNos = keptRaw.map((bill) => bill.doc_no);
@@ -1686,7 +1768,12 @@ async function getBillsPending(session, fromDate, toDate, transportCode) {
     // service summary can't net out delivered_qty (re-deliverable), so this is
     // what makes a completed service stop leave the queue.
     .filter((bill) => !deliveredServiceSet.has(bill.doc_no))
-    .filter((bill) => bill.source_type === SERVICE_SOURCE_TYPE || bill.remaining_count > 0)
+    .filter(
+      (bill) =>
+        bill.source_type === SERVICE_SOURCE_TYPE ||
+        bill.source_type === ERP_TRANSFER_SOURCE_TYPE ||
+        bill.remaining_count > 0
+    )
     .map((bill, index) => ({ ...bill, row_num: index + 1 }));
 
   // ຈຸດສົ່ງຄັ້ງກ່ອນ: ບິນເປີດໃໝ່ຂອງລູກຄ້າເກົ່າຈຶ່ງມີໝຸດຕັ້ງແຕ່ຕົ້ນ ບໍ່ຕ້ອງປັກຄືນ
