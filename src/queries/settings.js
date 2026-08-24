@@ -84,6 +84,21 @@ async function getSettings(keys) {
   return out;
 }
 
+/**
+ * ບາງຄ່າຕັ້ງປ່ຽນ **ຜົນຂອງ query ທີ່ຖືກ cache ໄວ້** ບໍ່ແມ່ນແຕ່ຕົວມັນເອງ.
+ * `pending.*` ຄຸມວ່າຄິວ ບິນລໍຈັດຖ້ຽວ ດຶງຫຍັງມາແດ່ ແລະ ຄິວນັ້ນ cache ໄວ້ 45
+ * ວິນາທີ — ບໍ່ລ້າງ ຜູ້ໃຊ້ຈະປິດສະວິດແລ້ວຍັງເຫັນຂອງເກົ່າຢູ່ ແລ້ວຄິດວ່າສະວິດ
+ * ບໍ່ເຮັດວຽກ (ເກີດຂຶ້ນຈິງກັບສະວິດໃບຂໍໂອນ).
+ */
+function invalidateDependentCaches(keys) {
+  if (!keys.some((k) => String(k).startsWith("pending."))) return;
+  try {
+    require("./helpers").invalidatePendingList();
+  } catch {
+    // ລ້າງບໍ່ໄດ້ = ຄ່າໃໝ່ມີຜົນຊ້າສຸດ 45 ວິນາທີ ບໍ່ແມ່ນເລື່ອງທີ່ຕ້ອງລົ້ມການບັນທຶກ.
+  }
+}
+
 async function setSetting(key, value, userCode) {
   await ensureSettingsSchema();
   const k = String(key ?? "").trim();
@@ -108,6 +123,7 @@ async function setSetting(key, value, userCode) {
   const c = getCache();
   if (v == null) c.map.delete(k);
   else c.map.set(k, v);
+  invalidateDependentCaches([k]);
   if (oldValue !== v) {
     await recordAudit({
       action: "setting.update",
@@ -160,6 +176,7 @@ async function setSettings(entries, userCode) {
   );
   // Cache refresh + best-effort audit, after the write committed.
   const c = getCache();
+  invalidateDependentCaches(pairs.map(([k]) => k));
   for (const [k, v] of pairs) {
     if (v == null) c.map.delete(k);
     else c.map.set(k, v);

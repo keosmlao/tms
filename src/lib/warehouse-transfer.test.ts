@@ -6,6 +6,10 @@ import { join } from "node:path";
 // ສ້າງເອງ. ເອກະສານພວກນີ້ບໍ່ມີແຖວໃນ ic_trans_shipment ຈຶ່ງແຂນຫຼັກຂອງຄິວ
 // ບິນລໍຈັດຖ້ຽວ (ທີ່ອ່ານຈາກ shipment ແລະ ກັ່ນຕອງ trans_flag=44) ເຫັນບໍ່ໄດ້ເລີຍ.
 const billsSrc = readFileSync(join(process.cwd(), "src", "queries", "bills.js"), "utf8");
+const settingsSrc = readFileSync(
+  join(process.cwd(), "src", "queries", "settings.js"),
+  "utf8"
+);
 const reportsSrc = readFileSync(join(process.cwd(), "src", "queries", "reports.js"), "utf8");
 
 describe("ໃບຂໍໂອນສິນຄ້າລະຫວ່າງສາງ ໃນຄິວ ບິນລໍຈັດຖ້ຽວ", () => {
@@ -76,6 +80,17 @@ describe("ໃບຂໍໂອນສິນຄ້າລະຫວ່າງສາງ 
   it("ປິດແລ້ວຂ້າມສະເພາະ query ຂອງໃບຂໍໂອນ ບໍ່ແມ່ນ return ໄວ", () => {
     expect(billsSrc).toContain("const erpTransferRows = !(await erpTransferEnabled())");
     expect(billsSrc).toContain("? []");
+  });
+
+  // ຜູ້ໃຊ້ປິດສະວິດແລ້ວຍັງເຫັນໃບຂໍໂອນຢູ່ ເພາະຄິວ cache ໄວ້ 45 ວິນາທີ. ບັນທຶກ
+  // ຄ່າຕັ້ງ `pending.*` ຕ້ອງລ້າງ cache ນັ້ນ ບໍ່ດັ່ງນັ້ນສະວິດເບິ່ງຄືບໍ່ເຮັດວຽກ.
+  it("ບັນທຶກຄ່າ pending.* ແລ້ວລ້າງ cache ຂອງຄິວ", () => {
+    expect(settingsSrc).toContain("invalidateDependentCaches");
+    expect(settingsSrc).toContain('String(k).startsWith("pending.")');
+    expect(settingsSrc).toContain('require("./helpers").invalidatePendingList()');
+    // ຕ້ອງເອີ້ນທັງທາງບັນທຶກຄ່າດຽວ ແລະ ຫຼາຍຄ່າພ້ອມກັນ (ໜ້າຕັ້ງຄ່າໃຊ້ອັນຫຼັງ).
+    const calls = settingsSrc.match(/invalidateDependentCaches\(/g) ?? [];
+    expect(calls.length).toBe(3); // 1 ນິຍາມ + 2 ຈຸດເອີ້ນ
   });
 
   it("ຜ່ານຕົວກັ່ນຕອງ 'ຈຳນວນຄົງເຫຼືອ' ຄົບທັງ 3 ບ່ອນ", () => {
