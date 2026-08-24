@@ -76,6 +76,17 @@ describe("ໂໝດອັດຕະໂນມັດ — ຂັ້ນຕ່ຳຕ�
     expect(r.force_update).toBe(false);
   });
 
+  // ຄ່າ latest_version ທີ່ພິມໄວ້ແຕ່ດົນມັກຄ້າງເປັນເລກເກົ່າ.
+  it("ເວີຊັນ APK ທັບຄ່າ latest_version ທີ່ພິມໄວ້ເກົ່າ", async () => {
+    settings["app.mobile.min_version_mode"] = "auto";
+    settings["app.mobile.latest_version"] = "1.3.3";
+    shipped = "1.3.5";
+    const r = await evaluateMobileAppVersion(req("1.3.5"), "D001");
+    expect(r.latest_version).toBe("1.3.5");
+    expect(r.force_update).toBe(false);
+    expect(r.update_available).toBe(false);
+  });
+
   it("ໂໝດພິມເອງ ບໍ່ສົນໃຈເວີຊັນ APK", async () => {
     settings["app.mobile.min_version_mode"] = "manual";
     settings["app.mobile.min_version"] = "1.2.0";

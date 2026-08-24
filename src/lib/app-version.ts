@@ -61,8 +61,10 @@ export async function evaluateMobileAppVersion(
   const shipped = mode === "auto" ? await shippedAppVersion() : "";
   const manualMin = (raw["app.mobile.min_version"] ?? "").trim();
   const minVersion = mode === "auto" ? shipped || manualMin : manualMin;
+  // ໂໝດອັດຕະໂນມັດ: APK ທີ່ວາງຢູ່ຄື "ຫຼ້າສຸດ" ຕາມນິຍາມ ຈຶ່ງມາກ່ອນຄ່າທີ່
+  // ພິມໄວ້ — ບໍ່ດັ່ງນັ້ນເລກເກົ່າທີ່ຄ້າງຢູ່ໃນຕັ້ງຄ່າຈະທັບເວີຊັນຈິງ.
   const latestVersion =
-    (raw["app.mobile.latest_version"] ?? "").trim() || shipped;
+    shipped || (raw["app.mobile.latest_version"] ?? "").trim();
   // ຄ່າເລີ່ມຕົ້ນ = ເລື່ອນ. ການລັອກຄົນຂັບອອກກາງຖ້ຽວແພງກວ່າການປ່ອຍໃຫ້ລຸ້ນ
   // ເກົ່າແລ່ນຕໍ່ອີກ 2–3 ຊົ່ວໂມງຈົນປິດຖ້ຽວ.
   const forceAfterTrip =
