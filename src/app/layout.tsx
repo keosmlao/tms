@@ -1,7 +1,8 @@
-import type { Metadata } from "next";
+import type { Metadata, Viewport } from "next";
 import { Montserrat, Noto_Sans_Lao } from "next/font/google";
 import { Toaster } from "react-hot-toast";
 import { SessionProvider } from "@/providers/session-provider";
+import { DisablePageZoom } from "@/components/disable-page-zoom";
 import "./globals.css";
 
 // Load Noto Sans Lao via next/font so the browser actually has a Lao-aware
@@ -32,6 +33,18 @@ export const metadata: Metadata = {
   description: "Odien Group Transport Management System",
 };
 
+// ປິດການບີບຂະຫຍາຍ/ຊູມໜ້າເວັບ. ຈໍທັງໝົດຂອງລະບົບຖືກອອກແບບມາໃຫ້ພໍດີໜ້າຈໍຢູ່
+// ແລ້ວ ແລະ ການບີບໂດຍບັງເອີນລະຫວ່າງເລື່ອນຕາຕະລາງເຮັດໃຫ້ຈໍຄ້າງເຄິ່ງກາງ.
+//
+// ⚠️ ອັນນີ້ກວມແຕ່ Android/Chrome/Firefox — iOS Safari ບໍ່ສົນໃຈ
+// `user-scalable=no` ຈຶ່ງຕ້ອງມີ <DisablePageZoom /> ຄູ່ກັນ.
+export const viewport: Viewport = {
+  width: "device-width",
+  initialScale: 1,
+  maximumScale: 1,
+  userScalable: false,
+};
+
 export default function RootLayout({
   children,
 }: Readonly<{
@@ -45,6 +58,7 @@ export default function RootLayout({
           ທີ່ບໍ່ແມ່ນຄວາມຜິດຂອງລະບົບ ແລະ ແກ້ຈາກຝັ່ງເຮົາບໍ່ໄດ້. ປິດສະເພາະ
           <body> ຊັ້ນນີ້ຊັ້ນດຽວ — ຂ້າງໃນຍັງກວດ hydration ຕາມປົກກະຕິ. */}
       <body className="min-h-full flex flex-col" suppressHydrationWarning>
+        <DisablePageZoom />
         <SessionProvider>
           {children}
           <Toaster position="top-right" />

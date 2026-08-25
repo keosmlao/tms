@@ -125,6 +125,10 @@ body {
   background-attachment: fixed;
   color: var(--foreground);
   font-family: var(--font-sans), system-ui, sans-serif;
+  /* ປິດ "ແຕະສອງເທື່ອເພື່ອຊູມ" — meta viewport ບໍ່ກວມອັນນີ້ ແລະ ມັນເປັນສາເຫດ
+     ທີ່ຈໍເດັ້ງຕອນກົດປຸ່ມໄວໆ ສອງເທື່ອຕິດກັນ. `manipulation` ຍັງປ່ອຍໃຫ້ເລື່ອນ
+     (pan) ໄດ້ຄືເກົ່າ; ແຜນທີ່ Leaflet ຕັ້ງ touch-action ຂອງມັນເອງຢູ່ແລ້ວ. */
+  touch-action: manipulation;
 }
 
 /* ─── Glassmorphism Utilities ─── */
