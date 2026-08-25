@@ -55,6 +55,13 @@ const NOTIFY_KEYS = [
   "fleet.alert_enabled",
   "fleet.parked_minutes",
   "fleet.left_base_metres",
+  // ຄວາມໄວທີ່ຖືວ່າຂັບໄວ (ກມ/ຊມ) ແລະ ໄລຍະຫ່າງຈາກຈຸດສົ່ງ/ສາງ (ແມັດ) ທີ່
+  // ຖືວ່າ "ຈອດບໍ່ຕົງຈຸດ".
+  "fleet.speed_limit_kmh",
+  "fleet.off_point_metres",
+  // ອອກນອກເສັ້ນທາງ (ກມ). **ຫວ່າງ = ປິດ** — ລະບົບບໍ່ມີເສັ້ນທາງທີ່ວາງແຜນໄວ້
+  // ຈຶ່ງເກນນີ້ຕ່າງກັນຫຼາຍລະຫວ່າງສາຂາ ຕ້ອງໃຫ້ຜູ້ດູແລຕັ້ງເອງ.
+  "fleet.off_route_km",
   "tv.pages",
   "tv.secs",
 ] as const;
@@ -87,6 +94,9 @@ export interface NotifySettings {
   "fleet.alert_enabled": string;
   "fleet.parked_minutes": string;
   "fleet.left_base_metres": string;
+  "fleet.speed_limit_kmh": string;
+  "fleet.off_point_metres": string;
+  "fleet.off_route_km": string;
   "tv.pages": string;
   "tv.secs": string;
 }

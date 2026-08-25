@@ -26,6 +26,9 @@ export interface NotifySettings {
   "fleet.alert_enabled": string;
   "fleet.parked_minutes": string;
   "fleet.left_base_metres": string;
+  "fleet.speed_limit_kmh": string;
+  "fleet.off_point_metres": string;
+  "fleet.off_route_km": string;
   "tv.pages": string;
   "tv.secs": string;
 }
@@ -60,6 +63,9 @@ export const EMPTY_SETTINGS: NotifySettings = {
   "fleet.alert_enabled": "0",
   "fleet.parked_minutes": "30",
   "fleet.left_base_metres": "500",
+  "fleet.speed_limit_kmh": "80",
+  "fleet.off_point_metres": "300",
+  "fleet.off_route_km": "",
 };
 
 export const SETTING_TOPICS = [

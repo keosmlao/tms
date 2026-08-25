@@ -28,6 +28,14 @@ const PARKED_MINUTES = 30;
 // ໃກ້ສຸດຢູ່ 2,046 ມ — 500 ຈຶ່ງແຍກສອງກໍລະນີໄດ້ຢ່າງປອດໄພ
 const LEFT_BASE_METRES = 500;
 
+// ຄວາມໄວທີ່ຖືວ່າ "ຂັບໄວ" (ກມ/ຊມ). ວັດຈາກ gps_current ຕອນຂຽນ: ໄວສຸດຂອງ
+// ກອງລົດແມ່ນ 51 — 80 ຈຶ່ງບໍ່ເຕືອນຂອງທຳມະດາ ແຕ່ຈັບຄົນຂັບໄວແທ້ໄດ້.
+const SPEED_LIMIT_KMH = 80;
+
+// ຈອດຫ່າງຈາກ "ຈຸດຈອດທີ່ຄວນ" (ຈຸດສົ່ງ ຫຼື ສາງ) ເກີນເທົ່າໃດຈຶ່ງຜິດປົກກະຕິ.
+// 300 ມ ເຜື່ອໄວ້ໃຫ້ຈອດແຄມທາງ / ລານຈອດຂອງຮ້ານ ແລະ ຄວາມຄາດເຄື່ອນ GPS.
+const OFF_POINT_METRES = 300;
+
 /**
  * ອ່ານເກນຈາກ setting ຖ້າຕັ້ງໄວ້ ບໍ່ດັ່ງນັ້ນໃຊ້ຄ່າຕັ້ງຕົ້ນ.
  *
@@ -128,6 +136,124 @@ async function findLeftWithoutStart(day, metres = LEFT_BASE_METRES) {
 }
 
 /**
+ * ຈຸດທີ່ລົດ "ຄວນ" ຢູ່ໄດ້ຂອງຖ້ຽວໜຶ່ງ: ຈຸດສົ່ງທີ່ຍັງບໍ່ປິດ + ໝຸດສາງຂອງສາຂາ.
+ *
+ * ໃຊ້ຮ່ວມກັນລະຫວ່າງ "ຈອດບໍ່ຕົງຈຸດ" ແລະ "ອອກນອກເສັ້ນທາງ" — ສອງອັນນີ້ຕ່າງກັນ
+ * ແຕ່ເງື່ອນໄຂຄວາມໄວ ແລະ ໄລຍະ ບໍ່ແມ່ນນິຍາມຂອງ "ຈຸດທີ່ຄວນຢູ່".
+ *
+ * ⚠️ ບໍ່ມີເສັ້ນທາງທີ່ວາງແຜນໄວ້ (polyline) ໃນລະບົບ ຈຶ່ງວັດ "ນອກເສັ້ນທາງ"
+ * ບໍ່ໄດ້ຢ່າງແທ້ຈິງ. ສິ່ງທີ່ວັດໄດ້ຄື **ໄລຍະຫ່າງຈາກຈຸດທີ່ຄວນຢູ່ໃກ້ທີ່ສຸດ**
+ * ເຊິ່ງພຽງພໍສຳລັບຈັບ "ລົດໄປທາງອື່ນ" ແຕ່ຢ່າຕັ້ງເກນຕ່ຳເກີນ ບໍ່ດັ່ງນັ້ນຖ້ຽວ
+ * ທາງໄກ (ປາກເຊ) ຈະເຕືອນຕະຫຼອດທາງ.
+ */
+const NEAREST_POINT_SQL = `
+  LEAST(
+    COALESCE((
+      SELECT MIN(ROUND(6371000 * 2 * ASIN(SQRT(
+        POWER(SIN(RADIANS(acd.latitude::numeric - NULLIF(TRIM(g.lat), '')::numeric) / 2), 2)
+        + COS(RADIANS(NULLIF(TRIM(g.lat), '')::numeric))
+          * COS(RADIANS(acd.latitude::numeric))
+          * POWER(SIN(RADIANS(acd.longitude::numeric - NULLIF(TRIM(g.lng), '')::numeric) / 2), 2)
+      )))::int)
+      FROM public.odg_tms_detail d
+      JOIN public.ar_customer_detail acd ON acd.ar_code = d.cust_code
+      WHERE d.doc_no = t.doc_no
+        AND COALESCE(d.status, 0) NOT IN (1, 2)
+        AND acd.latitude IS NOT NULL AND acd.longitude IS NOT NULL
+        AND acd.latitude::numeric <> 0 AND acd.longitude::numeric <> 0
+    ), 2147483647),
+    COALESCE((
+      SELECT ROUND(6371000 * 2 * ASIN(SQRT(
+        POWER(SIN(RADIANS(
+          NULLIF(TRIM(f.start_lat), '')::numeric - NULLIF(TRIM(g.lat), '')::numeric
+        ) / 2), 2)
+        + COS(RADIANS(NULLIF(TRIM(g.lat), '')::numeric))
+          * COS(RADIANS(NULLIF(TRIM(f.start_lat), '')::numeric))
+          * POWER(SIN(RADIANS(
+              NULLIF(TRIM(f.start_lng), '')::numeric - NULLIF(TRIM(g.lng), '')::numeric
+            ) / 2), 2)
+      )))::int
+      FROM public.odg_tms_geofence f
+      WHERE NULLIF(TRIM(f.transport_code), '') = NULLIF(TRIM(t.origin_transport_code), '')
+        AND NULLIF(TRIM(f.start_lat), '') ~ '^-?[0-9.]+$'
+        AND NULLIF(TRIM(f.start_lng), '') ~ '^-?[0-9.]+$'
+    ), 2147483647)
+  )`;
+
+/** ຂັບເກີນຄວາມໄວທີ່ກຳນົດ ໃນຂະນະທີ່ຖ້ຽວກຳລັງແລ່ນ. */
+async function findSpeeding(day, limitKmh = SPEED_LIMIT_KMH) {
+  return query(
+    `SELECT ${TRIP_FIELDS},
+            NULLIF(TRIM(g.speed), '')::numeric AS speed,
+            TRIM(COALESCE(g.recorded_at, '')) AS seen_at
+     ${TRIP_JOINS}
+     WHERE t.date_logistic::date = $1::date
+       AND ${getFixedYearSqlFilter("t.doc_date")}
+       AND COALESCE(t.approve_status, 0) = 1
+       AND COALESCE(t.job_status, 0) = 2
+       AND TRIM(COALESCE(g.speed, '')) ~ '^[0-9.]+$'
+       AND NULLIF(TRIM(g.speed), '')::numeric > $2
+     ORDER BY speed DESC`,
+    [day, limitKmh]
+  );
+}
+
+/** ຈອດດັບເຄື່ອງດົນ **ແລະ** ບໍ່ໄດ້ຈອດຢູ່ຈຸດສົ່ງ ຫຼື ສາງ. */
+async function findParkedOffPoint(day, minutes, metres = OFF_POINT_METRES) {
+  return query(
+    `WITH candidate AS (
+       SELECT ${TRIP_FIELDS},
+              TRIM(g.engine_state_since) AS since,
+              FLOOR(EXTRACT(EPOCH FROM (
+                LOCALTIMESTAMP - NULLIF(TRIM(g.engine_state_since), '')::timestamp
+              )) / 60)::int AS minutes,
+              ${NEAREST_POINT_SQL} AS metres
+       ${TRIP_JOINS}
+       WHERE t.date_logistic::date = $1::date
+         AND ${getFixedYearSqlFilter("t.doc_date")}
+         AND COALESCE(t.approve_status, 0) = 1
+         AND COALESCE(t.job_status, 0) = 2
+         AND TRIM(COALESCE(g.engine_state, '')) = '0'
+         AND NULLIF(TRIM(g.engine_state_since), '') IS NOT NULL
+         AND NULLIF(TRIM(g.lat), '') ~ '^-?[0-9.]+$'
+         AND NULLIF(TRIM(g.lng), '') ~ '^-?[0-9.]+$'
+         AND LOCALTIMESTAMP - NULLIF(TRIM(g.engine_state_since), '')::timestamp
+             >= ($2 || ' minutes')::interval
+     )
+     -- 2147483647 = ບໍ່ມີຈຸດໃດໃຫ້ທຽບເລີຍ (ລູກຄ້າບໍ່ໄດ້ປັກໝຸດ ແລະ ສາຂາບໍ່ໄດ້
+     -- ປັກໝຸດ) — ບໍ່ຮູ້ກໍ່ຢ່າເຕືອນ ດີກວ່າເຕືອນຜິດ.
+     SELECT * FROM candidate
+      WHERE metres >= $3 AND metres < 2147483647
+      ORDER BY minutes DESC`,
+    [day, String(minutes), metres]
+  );
+}
+
+/** ກຳລັງແລ່ນ ແຕ່ຢູ່ໄກຈາກທຸກຈຸດສົ່ງ ແລະ ໄກຈາກສາງ. */
+async function findOffRoute(day, metres) {
+  return query(
+    `WITH candidate AS (
+       SELECT ${TRIP_FIELDS},
+              NULLIF(TRIM(g.speed), '')::numeric AS speed,
+              ${NEAREST_POINT_SQL} AS metres
+       ${TRIP_JOINS}
+       WHERE t.date_logistic::date = $1::date
+         AND ${getFixedYearSqlFilter("t.doc_date")}
+         AND COALESCE(t.approve_status, 0) = 1
+         AND COALESCE(t.job_status, 0) = 2
+         AND NULLIF(TRIM(g.lat), '') ~ '^-?[0-9.]+$'
+         AND NULLIF(TRIM(g.lng), '') ~ '^-?[0-9.]+$'
+         AND TRIM(COALESCE(g.speed, '')) ~ '^[0-9.]+$'
+         AND NULLIF(TRIM(g.speed), '')::numeric > 5
+     )
+     SELECT * FROM candidate
+      WHERE metres >= $2 AND metres < 2147483647
+      ORDER BY metres DESC`,
+    [day, metres]
+  );
+}
+
+/**
  * ພະນັກງານຂອງສາຂາທີ່ມີ line_id.
  *
  * logistic_code ບາງແຖວເກັບຫຼາຍສາຂາຄັ່ນດ້ວຍຈຸດ (ວັດແລ້ວ: '1102,1104') ຈຶ່ງ
@@ -163,6 +289,48 @@ function buildAlert(kind, row) {
         `ລົດ ${row.car_name} · ຄົນຂັບ ${row.driver}\n` +
         `ຖ້ຽວ ${row.doc_no}\n` +
         `ຈອດດັບເຄື່ອງມາແລ້ວ ${fmtDuration(row.minutes)}` +
+        (row.address ? `\nຢູ່ ${row.address}` : ""),
+    };
+  }
+  if (kind === "speeding") {
+    return {
+      // ຄັນລະເທື່ອຕໍ່ຊົ່ວໂມງ — gps_current ເປັນພາບຖ່າຍ ຖ້າຈອງດ້ວຍເວລາຈຸດ
+      // ມັນຈະເຕືອນທຸກຮອບ cron ຕະຫຼອດທີ່ລົດຍັງແລ່ນໄວ.
+      alertKey: `${row.car_code}|${String(row.seen_at ?? "").slice(0, 13)}`,
+      minutes: null,
+      message:
+        `🚨 ຂັບໄວເກີນກຳນົດ\n` +
+        `ລົດ ${row.car_name} · ຄົນຂັບ ${row.driver}\n` +
+        `ຖ້ຽວ ${row.doc_no}\n` +
+        `ຄວາມໄວ ${Math.round(Number(row.speed ?? 0))} ກມ/ຊມ` +
+        (row.address ? `\nຢູ່ ${row.address}` : ""),
+    };
+  }
+  if (kind === "parked_off_point") {
+    return {
+      alertKey: `${row.car_code}|${row.since}`,
+      minutes: Number(row.minutes ?? 0),
+      message:
+        `📍 ຈອດບໍ່ຕົງຈຸດຈອດ\n` +
+        `ລົດ ${row.car_name} · ຄົນຂັບ ${row.driver}\n` +
+        `ຖ້ຽວ ${row.doc_no}\n` +
+        `ຈອດດັບເຄື່ອງ ${fmtDuration(row.minutes)} ຫ່າງຈາກຈຸດສົ່ງ/ສາງ ` +
+        `${(Number(row.metres ?? 0) / 1000).toFixed(1)} ກມ` +
+        (row.address ? `\nຢູ່ ${row.address}` : ""),
+    };
+  }
+  if (kind === "off_route") {
+    return {
+      // ຄັນລະເທື່ອຕໍ່ຊົ່ວໂມງ ຄືກັນກັບຂັບໄວ — ບໍ່ດັ່ງນັ້ນລົດທີ່ແລ່ນທາງໄກ
+      // ຈະຍິງທຸກຮອບ cron.
+      alertKey: `${row.car_code}|${String(row.seen_at ?? "").slice(0, 13)}`,
+      minutes: null,
+      message:
+        `🧭 ລົດອອກນອກເສັ້ນທາງ\n` +
+        `ລົດ ${row.car_name} · ຄົນຂັບ ${row.driver}\n` +
+        `ຖ້ຽວ ${row.doc_no}\n` +
+        `ຫ່າງຈາກຈຸດສົ່ງ/ສາງ ໃກ້ສຸດ ` +
+        `${(Number(row.metres ?? 0) / 1000).toFixed(1)} ກມ` +
         (row.address ? `\nຢູ່ ${row.address}` : ""),
     };
   }
@@ -233,29 +401,54 @@ async function ensureFleetAlertSchema() {
  * ຫຼັງກວດຂໍ້ຄວາມ ແລະ ລາຍຊື່ຜູ້ຮັບແລ້ວ.
  */
 async function evaluateFleetAlerts({ day, dryRun = false } = {}) {
-  const [enabled, rawMinutes, rawMetres] = await Promise.all([
-    getSetting("fleet.alert_enabled", "0"),
-    getSetting("fleet.parked_minutes", ""),
-    getSetting("fleet.left_base_metres", ""),
-  ]);
+  const [enabled, rawMinutes, rawMetres, rawSpeed, rawOffPoint, rawOffRoute] =
+    await Promise.all([
+      getSetting("fleet.alert_enabled", "0"),
+      getSetting("fleet.parked_minutes", ""),
+      getSetting("fleet.left_base_metres", ""),
+      getSetting("fleet.speed_limit_kmh", ""),
+      getSetting("fleet.off_point_metres", ""),
+      // ບໍ່ມີຄ່າຕັ້ງຕົ້ນ — ຫວ່າງ = ປິດ. ບໍ່ມີເສັ້ນທາງທີ່ວາງແຜນໄວ້ໃນລະບົບ
+      // ຈຶ່ງເກນນີ້ຂຶ້ນກັບແຕ່ລະສາຂາຫຼາຍ (ດອນຕິ້ວ ກັບ ປາກເຊ ບໍ່ຄືກັນ) —
+      // ບັງຄັບໃຫ້ຜູ້ດູແລຕັ້ງເອງ ດີກວ່າເປີດເອງແລ້ວເຕືອນຜິດທັງມື້.
+      getSetting("fleet.off_route_km", ""),
+    ]);
   const isOn = enabled === "1" || enabled === "true";
   if (!isOn && !dryRun) return { skipped: true, reason: "alert_disabled" };
 
   const minutes = intSetting(rawMinutes, PARKED_MINUTES, 5, 480);
   const metres = intSetting(rawMetres, LEFT_BASE_METRES, 100, 5000);
+  const speedLimit = intSetting(rawSpeed, SPEED_LIMIT_KMH, 30, 200);
+  const offPointMetres = intSetting(rawOffPoint, OFF_POINT_METRES, 100, 5000);
+  const offRouteKm = String(rawOffRoute ?? "").trim()
+    ? intSetting(rawOffRoute, 0, 1, 500)
+    : 0;
 
   await ensureFleetAlertSchema();
   const today =
     day || (await queryOne(`SELECT to_char(CURRENT_DATE,'YYYY-MM-DD') AS d`))?.d;
 
-  const [parked, left] = await Promise.all([
+  const [parked, left, speeding, offPoint, offRoute] = await Promise.all([
     findParkedTooLong(today, minutes),
     findLeftWithoutStart(today, metres),
+    findSpeeding(today, speedLimit),
+    findParkedOffPoint(today, minutes, offPointMetres),
+    offRouteKm > 0 ? findOffRoute(today, offRouteKm * 1000) : Promise.resolve([]),
   ]);
 
+  // ຈອດບໍ່ຕົງຈຸດ ເປັນເລື່ອງດຽວກັນກັບ ຈອດດົນ ແຕ່ບອກເຫດຜົນຫຼາຍກວ່າ — ຄັນທີ່
+  // ເຂົ້າທັງສອງເງື່ອນໄຂ ສົ່ງແຕ່ອັນທີ່ລະອຽດກວ່າ ບໍ່ດັ່ງນັ້ນຫົວໜ້າໄດ້ສອງ
+  // ຂໍ້ຄວາມກ່ຽວກັບການຈອດຄັ້ງດຽວກັນ.
+  const offPointCars = new Set(offPoint.map((r) => `${r.car_code}|${r.since}`));
+
   const found = [
-    ...parked.map((row) => ({ kind: "parked", row })),
+    ...parked
+      .filter((row) => !offPointCars.has(`${row.car_code}|${row.since}`))
+      .map((row) => ({ kind: "parked", row })),
+    ...offPoint.map((row) => ({ kind: "parked_off_point", row })),
     ...left.map((row) => ({ kind: "left_no_start", row })),
+    ...speeding.map((row) => ({ kind: "speeding", row })),
+    ...offRoute.map((row) => ({ kind: "off_route", row })),
   ];
 
   const sent = [];

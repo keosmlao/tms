@@ -41,6 +41,12 @@ export default function FleetAlertSettingsPage() {
         "fleet.alert_enabled": data["fleet.alert_enabled"],
         "fleet.parked_minutes": clampInt(data["fleet.parked_minutes"], 5, 480, "30"),
         "fleet.left_base_metres": clampInt(data["fleet.left_base_metres"], 100, 5000, "500"),
+        "fleet.speed_limit_kmh": clampInt(data["fleet.speed_limit_kmh"], 30, 200, "80"),
+        "fleet.off_point_metres": clampInt(data["fleet.off_point_metres"], 100, 5000, "300"),
+        // ຫວ່າງ = ປິດ. ຢ່າ clamp ໃຫ້ເປັນຄ່າຕັ້ງຕົ້ນ ບໍ່ດັ່ງນັ້ນມັນຈະເປີດເອງ.
+        "fleet.off_route_km": data["fleet.off_route_km"].trim()
+          ? clampInt(data["fleet.off_route_km"], 1, 500, "20")
+          : "",
       });
       setSavedAt(Date.now());
     } catch (e) {
@@ -113,9 +119,43 @@ export default function FleetAlertSettingsPage() {
               icon={<FaMapMarkedAlt />}
               disabled={!on}
             />
+            <Field
+              label="ຂັບໄວເກີນ (ກມ/ຊມ)"
+              hint="ເຕືອນເມື່ອລົດທີ່ກຳລັງຈັດສົ່ງແລ່ນໄວກວ່ານີ້. ຄັນລະເທື່ອຕໍ່ຊົ່ວໂມງ. ຄ່າ 30–200"
+              value={data["fleet.speed_limit_kmh"]}
+              onChange={(v) =>
+                setData((d) => ({ ...d, "fleet.speed_limit_kmh": v.replace(/\D/g, "").slice(0, 3) }))
+              }
+              placeholder="80"
+              icon={<FaTruck />}
+              disabled={!on}
+            />
+            <Field
+              label="ຈອດບໍ່ຕົງຈຸດ — ຫ່າງເກີນ (ແມັດ)"
+              hint="ຈອດດັບເຄື່ອງດົນເກີນເກນຂ້າງເທິງ ແລະ ຫ່າງຈາກຈຸດສົ່ງທີ່ຍັງບໍ່ປິດ ແລະ ຈາກສາງ ໄກກວ່ານີ້. ຄ່າ 100–5000"
+              value={data["fleet.off_point_metres"]}
+              onChange={(v) =>
+                setData((d) => ({ ...d, "fleet.off_point_metres": v.replace(/\D/g, "").slice(0, 4) }))
+              }
+              placeholder="300"
+              icon={<FaMapMarkedAlt />}
+              disabled={!on}
+            />
+            <Field
+              label="ອອກນອກເສັ້ນທາງ — ຫ່າງເກີນ (ກມ) · ຫວ່າງ = ປິດ"
+              hint="ເຕືອນເມື່ອລົດກຳລັງແລ່ນ ແຕ່ຫ່າງຈາກທຸກຈຸດສົ່ງ ແລະ ຈາກສາງ ໄກກວ່ານີ້. ລະບົບບໍ່ມີເສັ້ນທາງທີ່ວາງແຜນໄວ້ ຈຶ່ງເປັນການປະມານ — ຕັ້ງຕ່ຳເກີນ ຖ້ຽວທາງໄກຈະເຕືອນຕະຫຼອດທາງ. ຄ່າ 1–500"
+              value={data["fleet.off_route_km"]}
+              onChange={(v) =>
+                setData((d) => ({ ...d, "fleet.off_route_km": v.replace(/\D/g, "").slice(0, 3) }))
+              }
+              placeholder="ຫວ່າງ = ປິດ"
+              icon={<FaMapMarkedAlt />}
+              disabled={!on}
+            />
             <p className="text-[11px] text-slate-500 dark:text-gray-400">
-              ໝາຍເຫດ: ການເຕືອນ “ອອກຈາກສາງ” ຕ້ອງມີພິກັດສາງໃນ Geofence ຂອງສາຂານັ້ນ —
-              ສາຂາທີ່ຍັງບໍ່ໄດ້ຕັ້ງພິກັດຈະບໍ່ຖືກເຕືອນ.
+              ໝາຍເຫດ: “ອອກຈາກສາງ”, “ຈອດບໍ່ຕົງຈຸດ” ແລະ “ອອກນອກເສັ້ນທາງ” ຕ້ອງມີພິກັດສາງໃນ
+              Geofence ຂອງສາຂານັ້ນ ຫຼື ພິກັດຂອງລູກຄ້າ — ບ່ອນທີ່ບໍ່ມີພິກັດເລີຍຈະບໍ່ຖືກເຕືອນ
+              (ບໍ່ຮູ້ກໍ່ບໍ່ເຕືອນ ດີກວ່າເຕືອນຜິດ).
             </p>
           </SectionCard>
 
