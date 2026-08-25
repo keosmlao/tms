@@ -49,6 +49,7 @@ import {
 import Chatter from "@/components/Chatter";
 import { PendingRoutePanel } from "@/components/pending-route-panel";
 import { printBillLocationQr } from "@/lib/print-bill-location-qr";
+import { userErrorMessage } from "@/lib/action-error";
 // Ported from server actions: getBillProducts, getBillsPending, updateBillTransport
 
 interface TimeUse {
@@ -443,7 +444,7 @@ function BillLocationActions({
       custName: bill.cust_name ?? null,
       lat,
       lng,
-    }).catch((err) => alert(err instanceof Error ? err.message : "ພິມບໍ່ສຳເລັດ"));
+    }).catch((err) => alert(userErrorMessage(err, "ພິມບໍ່ສຳເລັດ")));
     onDone?.();
   };
 
@@ -1136,7 +1137,7 @@ export default function BillsPendingClient() {
       setDrawerBill((current) => (current?.doc_no === billNo ? null : current));
     } catch (e) {
       console.error(e);
-      window.alert(e instanceof Error ? e.message : String(e));
+      window.alert(userErrorMessage(e, String(e)));
     } finally {
       setRemovingManualBillNo(null);
     }
@@ -1177,7 +1178,7 @@ export default function BillsPendingClient() {
         alert("ສົ່ງ LINE ບໍ່ສຳເລັດ");
       }
     } catch (e) {
-      alert(e instanceof Error ? e.message : "ສົ່ງ LINE ບໍ່ສຳເລັດ");
+      alert(userErrorMessage(e, "ສົ່ງ LINE ບໍ່ສຳເລັດ"));
     } finally {
       setSendingLine(null);
     }

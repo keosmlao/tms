@@ -5,6 +5,7 @@ import { useParams, useSearchParams, useRouter } from "next/navigation";
 import { FaPrint, FaArrowLeft, FaSpinner, FaExclamationTriangle } from "react-icons/fa";
 import Link from "next/link";
 import { Actions } from "@/lib/api";
+import { userErrorMessage } from "@/lib/action-error";
 
 interface PrintItem {
   item_code: string;
@@ -100,7 +101,7 @@ export default function JobPrintPage() {
       })
       .catch((e: unknown) => {
         if (!active) return;
-        setError(e instanceof Error ? e.message : "ໂຫຼດຂໍ້ມູນບໍ່ສຳເລັດ");
+        setError(userErrorMessage(e, "ໂຫຼດຂໍ້ມູນບໍ່ສຳເລັດ"));
       })
       .finally(() => {
         if (active) setLoading(false);

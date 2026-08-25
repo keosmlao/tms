@@ -24,6 +24,7 @@
 // multi-branch bill lands in the ERP, the legs exist for every branch.
 "use strict";
 
+const { userError } = require("../lib/action-error");
 const { pool, query } = require("../lib/db");
 const { getFixedYearSqlFilter } = require("../lib/fixed-year");
 const {
@@ -339,7 +340,7 @@ async function cancelBranchLeg(legBillNo, userCode) {
     ).rowCount;
     if (used > 0) {
       await client.query("ROLLBACK");
-      throw new Error(`ບິນຍ່ອຍ ${legNo} ຢູ່ໃນຖ້ຽວແລ້ວ — ຍົກເລີກທີ່ຖ້ຽວກ່ອນ`);
+      throw userError(`ບິນຍ່ອຍ ${legNo} ຢູ່ໃນຖ້ຽວແລ້ວ — ຍົກເລີກທີ່ຖ້ຽວກ່ອນ`);
     }
     await client.query(
       `UPDATE public.odg_tms_custom_bill

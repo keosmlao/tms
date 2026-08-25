@@ -33,6 +33,7 @@ import {
 } from "@/components/status-page-shell";
 import { useConfirm } from "@/components/confirm-dialog";
 import Chatter from "@/components/Chatter";
+import { userErrorMessage } from "@/lib/action-error";
 // Ported from server actions: approveJob, closeJob, deleteJob, getJobBillsWithProducts, getJobs
 
 // ==================== Types ====================
@@ -580,7 +581,7 @@ export default function JobsClient({ initialJobs = [] as Job[] }: { initialJobs?
       console.error(error);
       void confirm({
         title: "ຍ້າຍບໍ່ສຳເລັດ",
-        message: error instanceof Error ? error.message : String(error),
+        message: userErrorMessage(error, String(error)),
         tone: "danger",
         single: true,
       });
@@ -626,7 +627,7 @@ export default function JobsClient({ initialJobs = [] as Job[] }: { initialJobs?
       );
       refreshJobs();
     } catch (error) {
-      void confirm({ title: "ຜິດພາດ", message: error instanceof Error ? error.message : "ບໍ່ສາມາດປິດຖ້ຽວໄດ້", tone: "warning", single: true });
+      void confirm({ title: "ຜິດພາດ", message: userErrorMessage(error, "ບໍ່ສາມາດປິດຖ້ຽວໄດ້"), tone: "warning", single: true });
     } finally {
       setActingDoc(null);
     }
@@ -650,7 +651,7 @@ export default function JobsClient({ initialJobs = [] as Job[] }: { initialJobs?
       );
       refreshJobs();
     } catch (error) {
-      void confirm({ title: "ຜິດພາດ", message: error instanceof Error ? error.message : "ບໍ່ສາມາດອະນຸມັດຖ້ຽວໄດ້", tone: "warning", single: true });
+      void confirm({ title: "ຜິດພາດ", message: userErrorMessage(error, "ບໍ່ສາມາດອະນຸມັດຖ້ຽວໄດ້"), tone: "warning", single: true });
     } finally {
       setActingDoc(null);
     }

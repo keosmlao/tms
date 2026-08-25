@@ -19,6 +19,7 @@ import {
 import { Auth } from "@/lib/api";
 import { useSession } from "@/providers/session-provider";
 import { BrandLogo } from "@/components/brand-logo";
+import { userErrorMessage } from "@/lib/action-error";
 
 export default function LoginPage() {
   return (
@@ -70,9 +71,7 @@ function Login() {
       await refresh();
       router.replace(from);
     } catch (err: any) {
-      setError(
-        err?.message || err?.response?.data?.error || "ຊື່ຜູ້ໃຊ້ ຫຼື ລະຫັດຜ່ານບໍ່ຖືກຕ້ອງ"
-      );
+      setError(userErrorMessage(err, "ຊື່ຜູ້ໃຊ້ ຫຼື ລະຫັດຜ່ານບໍ່ຖືກຕ້ອງ"));
     } finally {
       setLoading(false);
     }

@@ -1,6 +1,7 @@
 import { getSession, type Session } from "@/lib/auth";
 import { isSalesLogin } from "@/lib/sales-role";
 import { resolveDispatchBranchCodes } from "@/queries/master-data.js";
+import { userError } from "@/lib/action-error";
 
 // Refresh the multi-branch dispatch set from the DB on every request so an admin
 // re-assignment takes effect WITHOUT the user re-logging in. Falls back to the
@@ -25,7 +26,7 @@ export async function requireSession(): Promise<Session> {
 export async function requireDispatchAccess(): Promise<Session> {
   const session = await requireSession();
   if (isSalesLogin(session)) {
-    throw new Error("ບໍ່ມີສິດໃນການຈັດການຖ້ຽວ");
+    throw userError("ບໍ່ມີສິດໃນການຈັດການຖ້ຽວ");
   }
   return session;
 }

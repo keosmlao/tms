@@ -37,6 +37,7 @@ import {
   FIXED_YEAR_START,
   getFixedTodayDate,
 } from "@/lib/fixed-year";
+import { userErrorMessage } from "@/lib/action-error";
 
 // ==================== Types ====================
 interface GpsUsageSummary {
@@ -226,11 +227,7 @@ function hourlyDistance(
 }
 
 function getApiErrorMessage(err: unknown, fallback: string) {
-  const axiosErr = err as {
-    response?: { data?: { error?: string } };
-    message?: string;
-  };
-  return axiosErr?.response?.data?.error ?? axiosErr?.message ?? fallback;
+  return userErrorMessage(err, fallback);
 }
 
 function TrackMetricCard({

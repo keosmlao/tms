@@ -12,6 +12,7 @@ import {
 import { Actions } from "@/lib/api";
 import { StatusPageHeader, StatusTableShell } from "@/components/status-page-shell";
 import { useConfirm } from "@/components/confirm-dialog";
+import { userErrorMessage } from "@/lib/action-error";
 
 interface PackDim {
   roworder: number;
@@ -115,7 +116,7 @@ export default function PackSizesPage() {
       setCoverage(cov ?? null);
     } catch (e) {
       console.error(e);
-      setError(e instanceof Error ? e.message : "ໂຫຼດບໍ່ສຳເລັດ");
+      setError(userErrorMessage(e, "ໂຫຼດບໍ່ສຳເລັດ"));
     } finally {
       setLoading(false);
     }
@@ -200,7 +201,7 @@ export default function PackSizesPage() {
       await load();
     } catch (e) {
       console.error(e);
-      setError(e instanceof Error ? e.message : "ບັນທຶກບໍ່ສຳເລັດ");
+      setError(userErrorMessage(e, "ບັນທຶກບໍ່ສຳເລັດ"));
     } finally {
       setSubmitting(false);
     }
@@ -658,7 +659,7 @@ function PackImportModal({ onClose, onDone }: { onClose: () => void; onDone: () 
       setResult({
         parsed: 0,
         inserted: 0,
-        parseErrors: [{ line: 0, text: "", reason: e instanceof Error ? e.message : "ຜິດພາດ" }],
+        parseErrors: [{ line: 0, text: "", reason: userErrorMessage(e, "ຜິດພາດ") }],
         failed: [],
       });
     } finally {

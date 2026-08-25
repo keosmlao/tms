@@ -22,6 +22,7 @@ import {
 } from "react-icons/fa";
 import { Actions } from "@/lib/api";
 import { FIXED_YEAR_END, FIXED_YEAR_START, getFixedTodayDate } from "@/lib/fixed-year";
+import { userErrorMessage } from "@/lib/action-error";
 
 interface CodTripRow {
   doc_no: string;
@@ -97,7 +98,7 @@ export default function CodPage() {
       setTotals(data?.totals ?? null);
     } catch (e) {
       console.error(e);
-      setError(e instanceof Error ? e.message : String(e));
+      setError(userErrorMessage(e, String(e)));
     } finally {
       setLoading(false);
     }
@@ -309,7 +310,7 @@ export default function CodPage() {
                               await Actions.deleteCodHandover(row.doc_no);
                               await fetchRows();
                             } catch (e) {
-                              window.alert(e instanceof Error ? e.message : String(e));
+                              window.alert(userErrorMessage(e, String(e)));
                             }
                           }}
                           className="inline-flex items-center gap-1 rounded border border-slate-300 px-2 py-1 text-[10px] font-semibold text-slate-600 hover:bg-slate-100 dark:border-slate-700 dark:text-slate-300 dark:hover:bg-slate-800"
@@ -414,7 +415,7 @@ function HandoverDialog({
       });
       await onSaved();
     } catch (e) {
-      setError(e instanceof Error ? e.message : String(e));
+      setError(userErrorMessage(e, String(e)));
     } finally {
       setSaving(false);
     }

@@ -15,6 +15,7 @@ import {
 import { FIXED_YEAR_END, FIXED_YEAR_START, getFixedTodayDate } from "@/lib/fixed-year";
 import { Actions } from "@/lib/api";
 import Chatter from "@/components/Chatter";
+import { userErrorMessage } from "@/lib/action-error";
 
 interface DailyBillRow {
   bill_no: string;
@@ -98,7 +99,7 @@ function BillEditRow({
       setSavedOk(true);
       window.setTimeout(() => setSavedOk(false), 2500);
     } catch (err) {
-      setError((err as Error)?.message ?? "ບັນທຶກບໍ່ສຳເລັດ");
+      setError(userErrorMessage(err, "ບັນທຶກບໍ່ສຳເລັດ"));
     } finally {
       setSaving(false);
     }

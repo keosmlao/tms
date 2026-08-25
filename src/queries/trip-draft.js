@@ -1,3 +1,4 @@
+const { userError } = require("../lib/action-error");
 const { pool, query, queryOne } = require("../lib/db");
 const { getFixedYearSqlFilter } = require("../lib/fixed-year");
 const {
@@ -205,19 +206,19 @@ async function createTripDraft(session, input) {
     remark,
   } = input || {};
   const day = String(dateLogistic ?? "").trim();
-  if (!/^\d{4}-\d{2}-\d{2}$/.test(day)) throw new Error("ກະລຸນາເລືອກວັນທີຈັດສົ່ງ");
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(day)) throw userError("ກະລຸນາເລືອກວັນທີຈັດສົ່ງ");
   const round = String(deliveryRoundCode ?? "").trim();
   const route = String(deliveryRouteCode ?? "").trim();
   const branch = String(originTransportCode ?? "").trim();
   const carCode = String(car ?? "").trim();
-  if (!round) throw new Error("ກະລຸນາເລືອກຮອບຈັດສົ່ງ");
-  if (!route) throw new Error("ກະລຸນາເລືອກສາຍຈັດສົ່ງ");
+  if (!round) throw userError("ກະລຸນາເລືອກຮອບຈັດສົ່ງ");
+  if (!route) throw userError("ກະລຸນາເລືອກສາຍຈັດສົ່ງ");
   // Required up front: the branch owns the trip, and leaving it blank pushed
   // the problem to dispatch time where createJob simply refused.
-  if (!branch) throw new Error("ກະລຸນາເລືອກສາຂາຂົນສົ່ງ");
+  if (!branch) throw userError("ກະລຸນາເລືອກສາຂາຂົນສົ່ງ");
   // ລົດຕ້ອງມີແຕ່ຕົ້ນ: ບໍ່ມີລົດ = ບໍ່ຮູ້ຄວາມຈຸ = ບອກບໍ່ໄດ້ວ່າຖ້ຽວເຕັມຫຼືຍັງ
   // ເຊິ່ງເປັນເຫດຜົນຫຼັກຂອງການວາງແຜນລ່ວງໜ້າ. ປ່ຽນລົດພາຍຫຼັງໄດ້.
-  if (!carCode) throw new Error("ກະລຸນາເລືອກລົດ — ຕ້ອງມີຈຶ່ງຄິດພື້ນທີ່ບັນທຸກໄດ້");
+  if (!carCode) throw userError("ກະລຸນາເລືອກລົດ — ຕ້ອງມີຈຶ່ງຄິດພື້ນທີ່ບັນທຸກໄດ້");
 
   const row = await queryOne(
     `INSERT INTO public.odg_tms_trip_draft
@@ -307,7 +308,7 @@ async function addBillsToTripDraft(session, draftId, billNos, items) {
     [codes, id]
   );
   if (clash.length > 0) {
-    throw new Error(
+    throw userError(
       `ບິນ ${clash.map((c) => c.bill_no).join(", ")} ຢູ່ໃນຮ່າງຖ້ຽວອື່ນແລ້ວ`
     );
   }
@@ -334,7 +335,7 @@ async function removeBillFromTripDraft(draftId, billNo) {
   await ensureTripDraftSchema();
   const id = Number(draftId);
   const code = String(billNo ?? "").trim();
-  if (!Number.isFinite(id) || !code) throw new Error("draft_id ແລະ bill_no ຈຳເປັນ");
+  if (!Number.isFinite(id) || !code) throw userError("draft_id ແລະ bill_no ຈຳເປັນ");
   const result = await pool.query(
     `DELETE FROM public.odg_tms_trip_draft_bill WHERE draft_id = $1 AND bill_no = $2`,
     [id, code]
@@ -346,7 +347,7 @@ async function setTripDraftBillOptions(draftId, billNo, options) {
   await ensureTripDraftSchema();
   const id = Number(draftId);
   const code = String(billNo ?? "").trim();
-  if (!Number.isFinite(id) || !code) throw new Error("draft_id ແລະ bill_no ຈຳເປັນ");
+  if (!Number.isFinite(id) || !code) throw userError("draft_id ແລະ bill_no ຈຳເປັນ");
   await pool.query(
     `UPDATE public.odg_tms_trip_draft_bill
      SET delivery_condition = COALESCE($3, delivery_condition),
@@ -383,7 +384,7 @@ async function dispatchTripDraft(session, draftId, crew) {
      FROM public.odg_tms_trip_draft WHERE draft_id = $1`,
     [id]
   );
-  if (!draft) throw new Error("ບໍ່ພົບຮ່າງຖ້ຽວນີ້");
+  if (!draft) throw userError("ບໍ່ພົບຮ່າງຖ້ຽວນີ້");
 
   // A draft can be started before anyone decides which branch runs it ("ທຸກສາຂາ"
   // at creation time), but createJob requires one. Derive it from the bills
@@ -414,7 +415,7 @@ async function dispatchTripDraft(session, draftId, crew) {
     }
   }
   if (!originBranch) {
-    throw new Error("ຮ່າງນີ້ຍັງບໍ່ມີສາຂາຂົນສົ່ງ — ເລືອກສາຂາໃນຮ່າງກ່ອນ");
+    throw userError("ຮ່າງນີ້ຍັງບໍ່ມີສາຂາຂົນສົ່ງ — ເລືອກສາຂາໃນຮ່າງກ່ອນ");
   }
   // Trips may only belong to a real delivery branch; a pseudo-branch such as
   // 02-0004 (ລູກຄ້າຮັບເອງ) would be rejected deeper in createJob with a much
@@ -425,7 +426,7 @@ async function dispatchTripDraft(session, draftId, crew) {
       `SELECT COALESCE(NULLIF(TRIM(name_1), ''), code) AS name FROM transport_type WHERE code = $1`,
       [originBranch]
     ).catch(() => null);
-    throw new Error(
+    throw userError(
       `ສາຂາ "${name?.name ?? originBranch}" ບໍ່ແມ່ນສາຂາຂົນສົ່ງທີ່ອອກຖ້ຽວໄດ້ — ເລືອກສາຂາໃນຮ່າງໃໝ່`
     );
   }
@@ -435,8 +436,8 @@ async function dispatchTripDraft(session, draftId, crew) {
   const workers = Array.isArray(crew?.workers)
     ? crew.workers.filter(Boolean)
     : String(draft.workers ?? "").split(",").map((w) => w.trim()).filter(Boolean);
-  if (!car) throw new Error("ກະລຸນາເລືອກລົດກ່ອນປ່ຽນເປັນພ້ອມອອກ");
-  if (!driver) throw new Error("ກະລຸນາເລືອກຄົນຂັບກ່ອນປ່ຽນເປັນພ້ອມອອກ");
+  if (!car) throw userError("ກະລຸນາເລືອກລົດກ່ອນປ່ຽນເປັນພ້ອມອອກ");
+  if (!driver) throw userError("ກະລຸນາເລືອກຄົນຂັບກ່ອນປ່ຽນເປັນພ້ອມອອກ");
 
   const draftBills = await query(
     `SELECT b.bill_no,
@@ -464,7 +465,7 @@ async function dispatchTripDraft(session, draftId, crew) {
      WHERE b.draft_id = $1 ORDER BY b.added_at, b.bill_no`,
     [id]
   );
-  if (draftBills.length === 0) throw new Error("ຮ່າງຖ້ຽວນີ້ຍັງບໍ່ມີບິນ");
+  if (draftBills.length === 0) throw userError("ຮ່າງຖ້ຽວນີ້ຍັງບໍ່ມີບິນ");
 
   // createJob validates each bill's remaining quantity itself, so pass the
   // bills through and let it own that logic (and the ic_trans_shipment /

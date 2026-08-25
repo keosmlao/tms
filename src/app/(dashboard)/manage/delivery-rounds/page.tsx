@@ -15,6 +15,7 @@ import {
   StatusTableShell,
 } from "@/components/status-page-shell";
 import { useConfirm } from "@/components/confirm-dialog";
+import { userErrorMessage } from "@/lib/action-error";
 
 interface Round {
   code: string;
@@ -52,7 +53,7 @@ export default function DeliveryRoundsPage() {
       setRows(data ?? []);
     } catch (e) {
       console.error(e);
-      setError(e instanceof Error ? e.message : "ໂຫຼດບໍ່ສຳເລັດ");
+      setError(userErrorMessage(e, "ໂຫຼດບໍ່ສຳເລັດ"));
     } finally {
       setLoading(false);
     }
@@ -72,7 +73,7 @@ export default function DeliveryRoundsPage() {
       await load();
     } catch (e) {
       console.error(e);
-      setError(e instanceof Error ? e.message : "ບັນທຶກບໍ່ສຳເລັດ");
+      setError(userErrorMessage(e, "ບັນທຶກບໍ່ສຳເລັດ"));
     } finally {
       setSubmitting(false);
     }

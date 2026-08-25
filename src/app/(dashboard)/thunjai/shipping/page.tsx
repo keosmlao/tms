@@ -28,6 +28,7 @@ import {
 } from "react-icons/fa";
 import { Actions } from "@/lib/api";
 import { getLaoToday, startOfMonth } from "@/lib/lao-date";
+import { userErrorMessage } from "@/lib/action-error";
 
 type Row = Record<string, unknown>;
 
@@ -507,7 +508,7 @@ export default function ThunJaiShippingPage() {
     try {
       return await task();
     } catch (err) {
-      setError(err instanceof Error ? err.message : "ThunJai API request failed");
+      setError(userErrorMessage(err, "ThunJai API request failed"));
       return null;
     } finally {
       setLoading(null);

@@ -14,6 +14,7 @@ import { Actions } from "@/lib/api";
 import { StatusPageHeader, StatusTableShell } from "@/components/status-page-shell";
 import { useConfirm } from "@/components/confirm-dialog";
 import { pipeM3 } from "@/lib/pipe-name";
+import { userErrorMessage } from "@/lib/action-error";
 
 interface PipeDim {
   size_key: string;
@@ -86,7 +87,7 @@ export default function PipeSizesPage() {
       setCoverage(cov ?? null);
     } catch (e) {
       console.error(e);
-      setError(e instanceof Error ? e.message : "ໂຫຼດບໍ່ສຳເລັດ");
+      setError(userErrorMessage(e, "ໂຫຼດບໍ່ສຳເລັດ"));
     } finally {
       setLoading(false);
     }
@@ -135,7 +136,7 @@ export default function PipeSizesPage() {
       await load();
     } catch (e) {
       console.error(e);
-      setError(e instanceof Error ? e.message : "ບັນທຶກບໍ່ສຳເລັດ");
+      setError(userErrorMessage(e, "ບັນທຶກບໍ່ສຳເລັດ"));
     } finally {
       setSubmitting(false);
     }

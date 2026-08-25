@@ -7,6 +7,7 @@ import {
 } from "@/lib/auth";
 import { queryOne, query } from "@/lib/db.js";
 import { headers } from "next/headers";
+import { userError } from "@/lib/action-error";
 
 async function requestAuditMeta() {
   const h = await headers();
@@ -34,7 +35,7 @@ export async function login(username: string, password: string) {
       ipAddr: auditMeta.ipAddr,
       changes: { user_agent: auditMeta.userAgent },
     });
-    throw new Error("ຊື່ຜູ້ໃຊ້ ຫຼື ລະຫັດຜ່ານບໍ່ຖືກຕ້ອງ!");
+    throw userError("ຊື່ຜູ້ໃຊ້ ຫຼື ລະຫັດຜ່ານບໍ່ຖືກຕ້ອງ!");
   }
   // odg_employee carries the role (app_role / position_code) + the canonical
   // department_code used to confine a salesperson to their department's bills.

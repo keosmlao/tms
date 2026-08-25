@@ -1,3 +1,4 @@
+const { userError } = require("../lib/action-error");
 const { pool, query, queryOne } = require("../lib/db");
 const { ensureCarTypeSchema, capacityM3Sql, numOrNull } = require("./car-type.js");
 const { ensureSettingsSchema } = require("./settings");
@@ -570,7 +571,7 @@ async function getWorkerDispatchBranches(workerCode) {
 async function setWorkerDispatchBranches(session, workerCode, transportCodes) {
   await ensureWorkerBranchTable();
   const code = String(workerCode ?? "").trim();
-  if (!code) throw new Error("ຕ້ອງລະບຸ worker");
+  if (!code) throw userError("ຕ້ອງລະບຸ worker");
   const valid = await query(
     `SELECT code FROM public.transport_type WHERE code LIKE '02-%' AND code <> '02-0004'`
   );

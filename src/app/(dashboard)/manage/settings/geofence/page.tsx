@@ -8,6 +8,7 @@ import { StatusPageHeader } from "@/components/status-page-shell";
 import { GeofenceMapPicker } from "@/components/geofence-map-picker";
 import { Field, PageLoading, SaveBar, SectionCard, Toggle } from "../_components";
 import type { GeofenceRow } from "@/actions/geofence";
+import { userErrorMessage } from "@/lib/action-error";
 
 export default function GeofenceSettingsPage() {
   const [rows, setRows] = useState<GeofenceRow[]>([]);
@@ -25,7 +26,7 @@ export default function GeofenceSettingsPage() {
         setRows(data);
         if (data.length) setCode((c) => c || data[0].transport_code);
       } catch (e) {
-        setError(e instanceof Error ? e.message : "ໂຫຼດບໍ່ສຳເລັດ");
+        setError(userErrorMessage(e, "ໂຫຼດບໍ່ສຳເລັດ"));
       } finally {
         setLoading(false);
       }
@@ -57,7 +58,7 @@ export default function GeofenceSettingsPage() {
       });
       setSavedAt(Date.now());
     } catch (e) {
-      setError(e instanceof Error ? e.message : "ບັນທຶກບໍ່ສຳເລັດ");
+      setError(userErrorMessage(e, "ບັນທຶກບໍ່ສຳເລັດ"));
     } finally {
       setSaving(false);
     }

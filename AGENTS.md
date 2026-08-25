@@ -51,6 +51,30 @@ three different ways; `src/lib/metric-definitions.test.ts` guards them.
   `odg_tms_delivery_images`) in a list query — they are base64 and a one-day
   range already reaches ~27 MB.
 
+## Error messages the user must see
+
+In a production build Next.js **throws away the message of every `Error` that
+leaves a Server Component or a Server Action** and replaces it with "An error
+occurred in the Server Components render…". A plain
+`throw new Error("ກະລຸນາເລືອກລົດກ່ອນຈັດຖ້ຽວ")` therefore reaches nobody — the
+user gets that English paragraph in the ຜິດພາດ dialog. The message survives
+only inside `error.digest`, which Next forwards verbatim when the error already
+carries one.
+
+- Throwing a rule the user has to read → `userError()` from
+  [`src/lib/action-error.js`](src/lib/action-error.js), never `new Error()`.
+  It keeps `message` (so route handlers and `mobileErrorResponse` are
+  unchanged) and smuggles the same text through `digest`.
+- Displaying a caught error → `userErrorMessage(error, "ຂໍ້ຄວາມສຳຮອງ")`, never
+  `error instanceof Error ? error.message : …`. It reads the digest first, and
+  when the failure is a real crash it returns the fallback plus the digest
+  (`… (ລະຫັດຂໍ້ຜິດພາດ: 2246335556)`) instead of the English paragraph.
+- That code is only findable because `onRequestError` in
+  [`src/instrumentation.ts`](src/instrumentation.ts) logs it next to the real
+  stack. Business errors are logged there as one `warn` line, not as crashes.
+- Route handlers under `src/app/api/**` are *not* redacted — they keep
+  returning `error.message` as before.
+
 ## Adding a new mobile route
 
 1. Define a Zod schema for the body/query in `src/lib/mobile-schemas.ts`.

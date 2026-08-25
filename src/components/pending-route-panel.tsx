@@ -10,6 +10,7 @@ import type {
   PendingRouteBill,
   PendingRouteSuggestions,
 } from "@/actions/route-assign";
+import { userErrorMessage } from "@/lib/action-error";
 
 /**
  * ແຖບ "ສາຍທີ່ແນະນຳ" ຢູ່ໜ້າບິນຄ້າງ.
@@ -56,7 +57,7 @@ export function PendingRoutePanel({ billNos }: { billNos: string[] }) {
           )) as PendingRouteSuggestions
         );
       } catch (e) {
-        setError(e instanceof Error ? e.message : "ໂຫຼດຄຳແນະນຳບໍ່ໄດ້");
+        setError(userErrorMessage(e, "ໂຫຼດຄຳແນະນຳບໍ່ໄດ້"));
       }
     })();
   }, [key]);

@@ -4,6 +4,7 @@ import { useCallback, useEffect, useState } from "react";
 import { FaTruckMoving } from "react-icons/fa";
 import { Actions } from "@/lib/api";
 import { StatusPageHeader } from "@/components/status-page-shell";
+import { userErrorMessage } from "@/lib/action-error";
 
 type TypeRow = {
   car_type: string;
@@ -63,7 +64,7 @@ export default function VehicleFlowPage() {
     try {
       setData((await Actions.getReportVehicleFlow(from, to)) as Flow);
     } catch (e) {
-      setError(e instanceof Error ? e.message : "ໂຫຼດບໍ່ສຳເລັດ");
+      setError(userErrorMessage(e, "ໂຫຼດບໍ່ສຳເລັດ"));
     } finally {
       setLoading(false);
     }

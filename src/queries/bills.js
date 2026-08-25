@@ -1,3 +1,4 @@
+const { userError } = require("../lib/action-error");
 const { query, queryOne, queryB } = require("../lib/db");
 const {
   getLastDeliveredPoints,
@@ -392,9 +393,9 @@ async function createCustomPendingBill({
 async function dispatchBillRemainingByBranch(session, billNo, branches) {
   await ensurePendingBillSchema();
   const bill = String(billNo ?? "").trim();
-  if (!bill) throw new Error("ຕ້ອງລະບຸ bill_no");
+  if (!bill) throw userError("ຕ້ອງລະບຸ bill_no");
   if (!Array.isArray(branches) || branches.length === 0) {
-    throw new Error("ຕ້ອງເລືອກຢ່າງໜ້ອຍ 1 ສາຂາ");
+    throw userError("ຕ້ອງເລືອກຢ່າງໜ້ອຍ 1 ສາຂາ");
   }
 
   // Fold the incoming entries by branch so two warehouses handed to the same
@@ -402,11 +403,11 @@ async function dispatchBillRemainingByBranch(session, billNo, branches) {
   const byBranch = new Map();
   for (const entry of branches) {
     const branch = String(entry?.transport_code ?? "").trim();
-    if (!branch) throw new Error("ກະລຸນາເລືອກສາຂາໃຫ້ທຸກກຸ່ມສາງ");
+    if (!branch) throw userError("ກະລຸນາເລືອກສາຂາໃຫ້ທຸກກຸ່ມສາງ");
     const date = String(entry?.scheduled_date ?? "").trim();
     const round = String(entry?.delivery_round_code ?? "").trim();
-    if (!date) throw new Error(`ກະລຸນາເລືອກວັນຈັດສົ່ງໃຫ້ສາຂາ ${branch}`);
-    if (!round) throw new Error(`ກະລຸນາເລືອກຮອບຈັດສົ່ງໃຫ້ສາຂາ ${branch}`);
+    if (!date) throw userError(`ກະລຸນາເລືອກວັນຈັດສົ່ງໃຫ້ສາຂາ ${branch}`);
+    if (!round) throw userError(`ກະລຸນາເລືອກຮອບຈັດສົ່ງໃຫ້ສາຂາ ${branch}`);
     const items = (Array.isArray(entry?.items) ? entry.items : [])
       .map((item) => ({
         item_code: String(item?.item_code ?? "").trim(),
@@ -434,7 +435,7 @@ async function dispatchBillRemainingByBranch(session, billNo, branches) {
       else group.items.push({ ...item });
     }
   }
-  if (byBranch.size === 0) throw new Error("ບໍ່ມີລາຍການທີ່ຈະຈັດ");
+  if (byBranch.size === 0) throw userError("ບໍ່ມີລາຍການທີ່ຈະຈັດ");
 
   // Every chosen branch must be a real internal delivery branch.
   const branchCodes = [...byBranch.keys()];
@@ -445,7 +446,7 @@ async function dispatchBillRemainingByBranch(session, billNo, branches) {
   );
   const branchNameByCode = new Map(validRows.map((row) => [row.code, row.name_1]));
   for (const code of branchCodes) {
-    if (!branchNameByCode.has(code)) throw new Error(`ສາຂາປາຍທາງ ${code} ບໍ່ຖືກຕ້ອງ`);
+    if (!branchNameByCode.has(code)) throw userError(`ສາຂາປາຍທາງ ${code} ບໍ່ຖືກຕ້ອງ`);
   }
 
   // Customer name / phone come from the ERP bill; custom sub-bills carry no
@@ -474,7 +475,7 @@ async function dispatchBillRemainingByBranch(session, billNo, branches) {
       [subBillNo]
     );
     if (existing && !existing.leg_cancelled_at) {
-      throw new Error(`ບິນ ${bill} ຖືກແຍກໄປສາຂາ ${branchNameByCode.get(branch)} ແລ້ວ`);
+      throw userError(`ບິນ ${bill} ຖືກແຍກໄປສາຂາ ${branchNameByCode.get(branch)} ແລ້ວ`);
     }
     const whLabel = [...group.whLabels].filter(Boolean).join(", ");
     const remark = `ແຍກຈາກບິນ ${bill}${whLabel ? ` · ${whLabel}` : ""}`;

@@ -10,6 +10,7 @@ import {
 } from "react-icons/fa";
 import { Actions } from "@/lib/api";
 import { getFixedTodayDate } from "@/lib/fixed-year";
+import { userErrorMessage } from "@/lib/action-error";
 
 export interface PendingScheduleDefaults {
   scheduled_date?: string | null;
@@ -87,7 +88,7 @@ export function PendingBillScheduleDialog({
       onClose();
     } catch (e) {
       console.error(e);
-      setError(e instanceof Error ? e.message : "ບັນທຶກບໍ່ສຳເລັດ");
+      setError(userErrorMessage(e, "ບັນທຶກບໍ່ສຳເລັດ"));
     } finally {
       setSubmitting(false);
     }

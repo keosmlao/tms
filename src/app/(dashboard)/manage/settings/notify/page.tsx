@@ -7,6 +7,7 @@ import { Actions } from "@/lib/api";
 import { StatusPageHeader } from "@/components/status-page-shell";
 import { PageLoading, SaveBar } from "../_components";
 import type { NotifyPrefsPage, NotifyPerson } from "@/actions/notify-prefs";
+import { userErrorMessage } from "@/lib/action-error";
 
 /**
  * ໜ້າ "ໃຜຮັບແຈ້ງເຕືອນຫຍັງ".
@@ -28,7 +29,7 @@ export default function NotifyPrefsSettingsPage() {
       try {
         setData((await Actions.getNotifyPrefs()) as NotifyPrefsPage);
       } catch (e) {
-        setError(e instanceof Error ? e.message : "ໂຫຼດບໍ່ສຳເລັດ");
+        setError(userErrorMessage(e, "ໂຫຼດບໍ່ສຳເລັດ"));
       } finally {
         setLoading(false);
       }
@@ -81,7 +82,7 @@ export default function NotifyPrefsSettingsPage() {
       setEdits({});
       setSavedAt(Date.now());
     } catch (e) {
-      setError(e instanceof Error ? e.message : "ບັນທຶກບໍ່ສຳເລັດ");
+      setError(userErrorMessage(e, "ບັນທຶກບໍ່ສຳເລັດ"));
     } finally {
       setSaving(false);
     }

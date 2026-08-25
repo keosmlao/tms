@@ -18,6 +18,7 @@ import { StatusPageHeader } from "@/components/status-page-shell";
 import { Field, PageLoading, SaveBar, SectionCard, Toggle } from "../_components";
 import { EMPTY_SETTINGS, type NotifySettings } from "../_settings";
 import type { PushTarget, PushTestResult } from "@/actions/push-test";
+import { userErrorMessage } from "@/lib/action-error";
 
 export default function AppSettingsPage() {
   const [data, setData] = useState<NotifySettings>(EMPTY_SETTINGS);
@@ -32,7 +33,7 @@ export default function AppSettingsPage() {
         const d = (await Actions.getNotifySettings()) as NotifySettings;
         setData({ ...EMPTY_SETTINGS, ...d });
       } catch (e) {
-        setError(e instanceof Error ? e.message : "ໂຫຼດບໍ່ສຳເລັດ");
+        setError(userErrorMessage(e, "ໂຫຼດບໍ່ສຳເລັດ"));
       } finally {
         setLoading(false);
       }
@@ -77,7 +78,7 @@ export default function AppSettingsPage() {
         configured: false,
         app_tokens: 0,
         sales_tokens: 0,
-        error: e instanceof Error ? e.message : "ຍິງທົດສອບບໍ່ສຳເລັດ",
+        error: userErrorMessage(e, "ຍິງທົດສອບບໍ່ສຳເລັດ"),
       });
     } finally {
       setPushBusy(false);
@@ -102,7 +103,7 @@ export default function AppSettingsPage() {
       });
       setSavedAt(Date.now());
     } catch (e) {
-      setError(e instanceof Error ? e.message : "ບັນທຶກບໍ່ສຳເລັດ");
+      setError(userErrorMessage(e, "ບັນທຶກບໍ່ສຳເລັດ"));
     } finally {
       setSaving(false);
     }

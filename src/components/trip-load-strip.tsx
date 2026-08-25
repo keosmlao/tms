@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { Actions } from "@/lib/api";
+import { userErrorMessage } from "@/lib/action-error";
 
 // ແຖບພື້ນທີ່ບັນທຸກແບບເຕັມ — ໃຊ້ຮ່ວມກັນທັງໜ້າຮ່າງຖ້ຽວ ແລະ ໜ້າຖ້ຽວຈິງ
 // ເພື່ອໃຫ້ dispatcher ເຫັນຮູບແບບດຽວກັນທຸກບ່ອນ.
@@ -279,7 +280,7 @@ export function TripLoadPanel({ docNo }: { docNo: string }) {
       .then((data) => alive && setV(data as TripVolumeInfo))
       .catch((e) => {
         console.error("getTripVolume", docNo, e);
-        if (alive) setError(String((e as Error)?.message ?? e));
+        if (alive) setError(userErrorMessage(e, String(e)));
       })
       .finally(() => alive && setLoading(false));
     return () => {

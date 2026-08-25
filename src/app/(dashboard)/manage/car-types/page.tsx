@@ -5,6 +5,7 @@ import { FaCar, FaCheck, FaPlus, FaSpinner, FaTimes, FaTrash } from "react-icons
 import { Actions } from "@/lib/api";
 import { StatusPageHeader, StatusTableShell } from "@/components/status-page-shell";
 import { useConfirm } from "@/components/confirm-dialog";
+import { userErrorMessage } from "@/lib/action-error";
 
 interface CarType {
   code: string;
@@ -40,7 +41,7 @@ export default function CarTypesPage() {
       setRows(data ?? []);
     } catch (e) {
       console.error(e);
-      setError(e instanceof Error ? e.message : "ໂຫຼດບໍ່ສຳເລັດ");
+      setError(userErrorMessage(e, "ໂຫຼດບໍ່ສຳເລັດ"));
     } finally {
       setLoading(false);
     }
@@ -65,7 +66,7 @@ export default function CarTypesPage() {
       await load();
     } catch (e) {
       console.error(e);
-      setError(e instanceof Error ? e.message : "ບັນທຶກບໍ່ສຳເລັດ");
+      setError(userErrorMessage(e, "ບັນທຶກບໍ່ສຳເລັດ"));
     } finally {
       setSubmitting(false);
     }

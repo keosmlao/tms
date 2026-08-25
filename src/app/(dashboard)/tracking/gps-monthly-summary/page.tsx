@@ -27,6 +27,7 @@ import {
   FIXED_MONTH_MIN,
   getFixedTodayMonth,
 } from "@/lib/fixed-year";
+import { userErrorMessage } from "@/lib/action-error";
 
 interface GpsUsageSummary {
   imei: string;
@@ -232,7 +233,7 @@ export default function GpsMonthlySummaryPage() {
       setEfficiency((res?.efficiency ?? null) as EfficiencyResult | null);
     } catch (err) {
       console.error(err);
-      setError(err instanceof Error ? err.message : "ໂຫຼດຂໍ້ມູນ GPS ບໍ່ສຳເລັດ");
+      setError(userErrorMessage(err, "ໂຫຼດຂໍ້ມູນ GPS ບໍ່ສຳເລັດ"));
     } finally {
       setLoading(false);
     }
@@ -252,7 +253,7 @@ export default function GpsMonthlySummaryPage() {
       setEfficiency((eff ?? null) as EfficiencyResult | null);
     } catch (err) {
       console.error(err);
-      setError(err instanceof Error ? err.message : "Sync GPS ບໍ່ສຳເລັດ");
+      setError(userErrorMessage(err, "Sync GPS ບໍ່ສຳເລັດ"));
     } finally {
       setRefreshing(false);
     }

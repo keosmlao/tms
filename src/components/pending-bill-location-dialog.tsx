@@ -3,6 +3,7 @@
 import { useEffect, useRef, useState } from "react";
 import { FaMapMarkerAlt, FaPaste, FaSpinner, FaTimes, FaTrash, FaCrosshairs } from "react-icons/fa";
 import { Actions } from "@/lib/api";
+import { userErrorMessage } from "@/lib/action-error";
 
 const LEAFLET_JS = "https://unpkg.com/leaflet@1.9.4/dist/leaflet.js";
 const LEAFLET_CSS = "https://unpkg.com/leaflet@1.9.4/dist/leaflet.css";
@@ -263,7 +264,7 @@ export function PendingBillLocationDialog({
       onSaved();
       onClose();
     } catch (e) {
-      setError(e instanceof Error ? e.message : "ບັນທຶກບໍ່ສຳເລັດ");
+      setError(userErrorMessage(e, "ບັນທຶກບໍ່ສຳເລັດ"));
     } finally {
       setSubmitting(false);
     }

@@ -6,6 +6,7 @@ import { FaSpinner, FaArrowLeft, FaExclamationTriangle } from "react-icons/fa";
 import Link from "next/link";
 import { Actions } from "@/lib/api";
 import AddJobClient, { type JobForEdit } from "../add/page";
+import { userErrorMessage } from "@/lib/action-error";
 
 export default function EditJobPage() {
   const router = useRouter();
@@ -32,7 +33,7 @@ export default function EditJobPage() {
       })
       .catch((e) => {
         if (!active) return;
-        setError(e instanceof Error ? e.message : String(e));
+        setError(userErrorMessage(e, String(e)));
       })
       .finally(() => {
         if (active) setLoading(false);

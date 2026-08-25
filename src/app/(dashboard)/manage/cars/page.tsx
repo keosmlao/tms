@@ -27,6 +27,7 @@ import { Actions } from "@/lib/api";
 import { useConfirm } from "@/components/confirm-dialog";
 import { Pagination } from "@/components/status-page-helpers";
 import { cargoBoxM3, toCapacityNumber, usableM3 } from "@/lib/car-capacity";
+import { userErrorMessage } from "@/lib/action-error";
 // Ported from server actions: addCarProfile, deleteCarProfile, getCarProfiles, getDispatchDrivers, getDispatchWorkers, updateCarProfile
 
 // ==================== Types ====================
@@ -680,7 +681,7 @@ export default function CarsManagePage() {
       await refreshData();
     } catch (error) {
       console.error(error);
-      void confirm({ title: "ຜິດພາດ", message: error instanceof Error ? error.message : "ບັນທຶກຂໍ້ມູນບໍ່ສຳເລັດ", tone: "warning", single: true });
+      void confirm({ title: "ຜິດພາດ", message: userErrorMessage(error, "ບັນທຶກຂໍ້ມູນບໍ່ສຳເລັດ"), tone: "warning", single: true });
     } finally {
       setSaving(false);
     }

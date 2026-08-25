@@ -45,6 +45,7 @@ import {
   normalizeCustomerSuggestion,
   type StopSuggestion,
 } from "@/lib/route-geometry";
+import { userErrorMessage } from "@/lib/action-error";
 
 interface RouteRow {
   code: string;
@@ -168,7 +169,7 @@ export default function DeliveryRoutesPage() {
       setRows((data ?? []).map(normalizeRoute));
     } catch (e) {
       console.error(e);
-      setLoadError(e instanceof Error ? e.message : "ໂຫຼດບໍ່ສຳເລັດ");
+      setLoadError(userErrorMessage(e, "ໂຫຼດບໍ່ສຳເລັດ"));
     } finally {
       setLoading(false);
     }
@@ -212,7 +213,7 @@ export default function DeliveryRoutesPage() {
       await load();
     } catch (e) {
       console.error(e);
-      setLoadError(e instanceof Error ? e.message : "ລຶບບໍ່ສຳເລັດ");
+      setLoadError(userErrorMessage(e, "ລຶບບໍ່ສຳເລັດ"));
     }
   };
 
@@ -230,7 +231,7 @@ export default function DeliveryRoutesPage() {
       setRows((current) =>
         current.map((item) => (item.code === row.code ? row : item))
       );
-      setLoadError(e instanceof Error ? e.message : "ບັນທຶກບໍ່ສຳເລັດ");
+      setLoadError(userErrorMessage(e, "ບັນທຶກບໍ່ສຳເລັດ"));
     }
   };
 
@@ -759,7 +760,7 @@ function RouteEditor({
         `ຕື່ມ ${found.length} ຈຸດ ຈາກລຳດັບການແວ່ຈິງ (ສະເລ່ຍ ${res.typical_stops} ຈຸດ/ຖ້ຽວ) — ກວດແລ້ວກົດບັນທຶກ`
       );
     } catch (e) {
-      setAutoFillNote(e instanceof Error ? e.message : "ດຶງບໍ່ສຳເລັດ");
+      setAutoFillNote(userErrorMessage(e, "ດຶງບໍ່ສຳເລັດ"));
     } finally {
       setAutoFilling(false);
     }
@@ -866,7 +867,7 @@ function RouteEditor({
       await onSaved();
     } catch (e) {
       console.error(e);
-      setError(e instanceof Error ? e.message : "ບັນທຶກບໍ່ສຳເລັດ");
+      setError(userErrorMessage(e, "ບັນທຶກບໍ່ສຳເລັດ"));
     } finally {
       setSubmitting(false);
     }

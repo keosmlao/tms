@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { FaCheck, FaSpinner, FaStar } from "react-icons/fa";
+import { userErrorMessage } from "@/lib/action-error";
 
 interface RatingInfo {
   bill_no: string;
@@ -57,7 +58,7 @@ export default function RatePage() {
       if (!r.ok) throw new Error(data?.error ?? "submit failed");
       setDone(true);
     } catch (e) {
-      setError(e instanceof Error ? e.message : "ບັນທຶກບໍ່ສຳເລັດ");
+      setError(userErrorMessage(e, "ບັນທຶກບໍ່ສຳເລັດ"));
     } finally {
       setSubmitting(false);
     }

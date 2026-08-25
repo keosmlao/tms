@@ -15,6 +15,7 @@ import { FIXED_YEAR_END, FIXED_YEAR_START, getFixedTodayDate } from "@/lib/fixed
 import { Actions } from "@/lib/api";
 import { StatusPageHeader, StatusStatGrid } from "@/components/status-page-shell";
 import { WhatsappLink, buildBillWhatsappMessage } from "@/components/whatsapp-link";
+import { userErrorMessage } from "@/lib/action-error";
 
 interface DeliveredBillRow {
   bill_no: string;
@@ -60,7 +61,7 @@ export default function SalesDeliveredBillsPage() {
       .then((data) => setRows((data ?? []) as DeliveredBillRow[]))
       .catch((e) => {
         console.error(e);
-        setError(e?.message ?? "ໂຫຼດຂໍ້ມູນບໍ່ສຳເລັດ");
+        setError(userErrorMessage(e, "ໂຫຼດຂໍ້ມູນບໍ່ສຳເລັດ"));
       })
       .finally(() => setLoading(false));
   }, [fromDate, toDate]);

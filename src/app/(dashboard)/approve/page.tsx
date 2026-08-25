@@ -24,6 +24,7 @@ import {
 } from "@/components/status-page-shell";
 import { Pagination, toNumber } from "@/components/status-page-helpers";
 import { WhatsappLink, buildBillWhatsappMessage } from "@/components/whatsapp-link";
+import { userErrorMessage } from "@/lib/action-error";
 
 interface Product {
   item_code: string;
@@ -74,7 +75,7 @@ export default function ApprovePage() {
       .then((data) => setItems((data ?? []) as ApprovalItem[]))
       .catch((e: any) => {
         console.error(e);
-        setLoadError(e?.message ?? "Unknown error");
+        setLoadError(userErrorMessage(e, "ໂຫຼດຂໍ້ມູນບໍ່ສຳເລັດ"));
       })
       .finally(() => setLoading(false));
   };

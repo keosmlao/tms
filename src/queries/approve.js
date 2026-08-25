@@ -1,3 +1,4 @@
+const { userError } = require("../lib/action-error");
 const { query, queryOne } = require("../lib/db");
 const { getFixedYearSqlFilter } = require("../lib/fixed-year");
 const {
@@ -30,10 +31,10 @@ async function approveJob(session, docNo) {
      WHERE a.doc_no=$1 AND ${getFixedYearSqlFilter("a.doc_date")}`,
     [docNo]
   );
-  if (!job) throw new Error("ບໍ່ພົບຖ້ຽວ");
-  if (!job.driver) throw new Error("ຖ້ຽວນີ້ຍັງບໍ່ໄດ້ກຳນົດຄົນຂັບ — ບໍ່ສາມາດອະນຸມັດ");
-  if (!job.car) throw new Error("ຖ້ຽວນີ້ຍັງບໍ່ໄດ້ກຳນົດລົດ — ບໍ່ສາມາດອະນຸມັດ");
-  if (Number(job.open_bills) < 1) throw new Error("ຖ້ຽວນີ້ບໍ່ມີບິນທີ່ຈັດສົ່ງໄດ້ — ບໍ່ສາມາດອະນຸມັດ");
+  if (!job) throw userError("ບໍ່ພົບຖ້ຽວ");
+  if (!job.driver) throw userError("ຖ້ຽວນີ້ຍັງບໍ່ໄດ້ກຳນົດຄົນຂັບ — ບໍ່ສາມາດອະນຸມັດ");
+  if (!job.car) throw userError("ຖ້ຽວນີ້ຍັງບໍ່ໄດ້ກຳນົດລົດ — ບໍ່ສາມາດອະນຸມັດ");
+  if (Number(job.open_bills) < 1) throw userError("ຖ້ຽວນີ້ບໍ່ມີບິນທີ່ຈັດສົ່ງໄດ້ — ບໍ່ສາມາດອະນຸມັດ");
 
   await queryOne(`UPDATE odg_tms SET approve_status=1, approve_user=$1 WHERE doc_no=$2 AND ${getFixedYearSqlFilter("doc_date")}`, [session.usercode, docNo]);
 

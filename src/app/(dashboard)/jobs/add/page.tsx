@@ -37,6 +37,7 @@ import { Actions } from "@/lib/api";
 import { useSession } from "@/providers/session-provider";
 import SplitBillByBranch from "@/components/split-bill-by-branch";
 import { dispatchableCars, matchesCarSearch } from "@/lib/car-picker";
+import { userErrorMessage } from "@/lib/action-error";
 
 interface Product {
   item_code: string;
@@ -1124,7 +1125,7 @@ export default function AddJobClient({
       router.push("/jobs");
     } catch (error) {
       console.error(error);
-      const message = error instanceof Error ? error.message : String(error);
+      const message = userErrorMessage(error, String(error));
       void confirm({
         title: "ບັນທຶກບໍ່ສຳເລັດ",
         message,
