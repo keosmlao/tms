@@ -289,7 +289,14 @@ async function findParkedOffPoint(day, minutes, metres = OFF_POINT_METRES) {
   );
 }
 
-/** ກຳລັງແລ່ນ ແຕ່ຢູ່ໄກຈາກທຸກຈຸດສົ່ງ ແລະ ໄກຈາກສາງ. */
+/**
+ * ກຳລັງແລ່ນ ແຕ່ຢູ່ໄກຈາກທຸກຈຸດສົ່ງ ແລະ ໄກຈາກສາງ.
+ *
+ * **ນັບສະເພາະສາຂາທີ່ປັກໝຸດສາງແລ້ວ.** ສາຂາທີ່ຍັງບໍ່ປັກ ຈຸດທຽບຈະເຫຼືອແຕ່
+ * ພິກັດລູກຄ້າ ແລ້ວລົດທີ່ຈອດຢູ່ລານສາງເອງຈະຖືກວັດວ່າ "ຫ່າງ 4–15 ກມ" (ວັດຈາກ
+ * ຂໍ້ມູນຈິງ 25/08: ປາກເຊ 4.4 ກມ ທັງທີ່ລົດຢູ່ສາງ) ແລ້ວເຕືອນຜິດທັງມື້.
+ * ພໍປັກໝຸດແລ້ວ ສາຂານັ້ນເຂົ້າມາເອງ ໂດຍບໍ່ຕ້ອງແກ້ໂຄດ.
+ */
 async function findOffRoute(day, metres) {
   return query(
     `WITH candidate AS (
@@ -297,6 +304,10 @@ async function findOffRoute(day, metres) {
               NULLIF(TRIM(g.speed), '')::numeric AS speed,
               ${NEAREST_POINT_SQL} AS metres
        ${TRIP_JOINS}
+       JOIN public.odg_tms_geofence gf0
+         ON NULLIF(TRIM(gf0.transport_code), '') = NULLIF(TRIM(t.origin_transport_code), '')
+        AND NULLIF(TRIM(gf0.start_lat), '') ~ '^-?[0-9.]+$'
+        AND NULLIF(TRIM(gf0.start_lng), '') ~ '^-?[0-9.]+$'
        WHERE t.date_logistic::date = $1::date
          AND ${getFixedYearSqlFilter("t.doc_date")}
          AND COALESCE(t.approve_status, 0) = 1

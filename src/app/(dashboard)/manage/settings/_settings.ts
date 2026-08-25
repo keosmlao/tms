@@ -12,6 +12,7 @@ export interface NotifySettings {
   "app.mobile.min_version": string;
   "app.mobile.min_version_mode": string;
   "app.mobile.force_after_trip": string;
+  "app.mobile.force_from_hour": string;
   "app.mobile.latest_version": string;
   "app.mobile.update_url_android": string;
   "app.mobile.update_url_ios": string;
@@ -53,6 +54,7 @@ export const EMPTY_SETTINGS: NotifySettings = {
   "app.mobile.min_version": "",
   "app.mobile.min_version_mode": "auto",
   "app.mobile.force_after_trip": "1",
+  "app.mobile.force_from_hour": "",
   "app.mobile.latest_version": "",
   "app.mobile.update_url_android": "",
   "app.mobile.update_url_ios": "",

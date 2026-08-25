@@ -8,6 +8,7 @@ import { getSettings } from "@/queries/settings.js";
 import { driverHasOpenTrip } from "@/queries/mobile.js";
 import { compareVersions, parseVersion } from "@/lib/version-compare";
 import { shippedAppVersion } from "@/lib/shipped-app-version";
+import { getLaoParts } from "@/lib/lao-date.js";
 
 export { compareVersions, parseVersion };
 
@@ -15,6 +16,7 @@ const VERSION_KEYS = [
   "app.mobile.min_version",
   "app.mobile.min_version_mode",
   "app.mobile.force_after_trip",
+  "app.mobile.force_from_hour",
   "app.mobile.latest_version",
   "app.mobile.update_url_android",
   "app.mobile.update_url_ios",
@@ -25,8 +27,8 @@ export interface MobileAppUpdate {
   force_update: boolean;
   // A newer version exists but the current one is still allowed — soft prompt.
   update_available: boolean;
-  // ຕ່ຳກວ່າຂັ້ນຕ່ຳຈິງ ແຕ່ຍັງປ່ອຍຜ່ານເພາະຄົນຂັບມີຖ້ຽວຄ້າງຢູ່. ແອັບເອົາອັນນີ້
-  // ໄປສະແດງແຖບເຕືອນວ່າ "ປິດຖ້ຽວແລ້ວຕ້ອງອັບເດດ".
+  // ຕ່ຳກວ່າຂັ້ນຕ່ຳຈິງ ແຕ່ຍັງປ່ອຍຜ່ານ — ເພາະຄົນຂັບມີຖ້ຽວຄ້າງ ຫຼື ຍັງບໍ່ຮອດ
+  // ໂມງທີ່ອະນຸຍາດໃຫ້ບັງຄັບ. ແອັບເອົາໄປສະແດງແຖບເຕືອນລ່ວງໜ້າ.
   update_after_trip: boolean;
   min_version: string;
   latest_version: string;
@@ -69,6 +71,18 @@ export async function evaluateMobileAppVersion(
   // ເກົ່າແລ່ນຕໍ່ອີກ 2–3 ຊົ່ວໂມງຈົນປິດຖ້ຽວ.
   const forceAfterTrip =
     (raw["app.mobile.force_after_trip"] ?? "").trim() !== "0";
+  // ໂມງທີ່ເລີ່ມບັງຄັບໄດ້ (ໂມງລາວ 0–23). ຫວ່າງ = ບັງຄັບໄດ້ຕະຫຼອດເວລາ.
+  //
+  // ມີໄວ້ເພື່ອບໍ່ໃຫ້ການອອກລຸ້ນໃໝ່ກາງມື້ໄປຢຸດຄົນຂັບທີ່ກຳລັງເຮັດວຽກ. ຕັ້ງ 18
+  // = ລຸ້ນທີ່ອອກຕອນເຊົ້າຈະບໍ່ບັງຄັບໃຜຈົນກວ່າ 18:00 ຂອງມື້ນັ້ນ.
+  const rawHour = (raw["app.mobile.force_from_hour"] ?? "").trim();
+  const forceFromHour = rawHour === "" ? null : Number(rawHour);
+  const laoHour = Number(getLaoParts().hour);
+  const beforeAllowedHour =
+    forceFromHour !== null &&
+    Number.isFinite(forceFromHour) &&
+    Number.isFinite(laoHour) &&
+    laoHour < forceFromHour;
   const current = header(request, "x-app-version");
   const platform = header(request, "x-app-platform").toLowerCase();
   const updateUrl = (
@@ -82,9 +96,14 @@ export async function evaluateMobileAppVersion(
     ? !current || compareVersions(current, minVersion) < 0
     : false;
 
-  // ຕ່ຳກວ່າຂັ້ນຕ່ຳ ແຕ່ຍັງມີຖ້ຽວຄ້າງ → ຍັງບໍ່ບັງຄັບ ພຽງແຕ່ໝາຍໄວ້.
+  // ຕ່ຳກວ່າຂັ້ນຕ່ຳ ແຕ່ຍັງບໍ່ຮອດເວລາ ຫຼື ຍັງມີຖ້ຽວຄ້າງ → ຍັງບໍ່ບັງຄັບ.
+  //
+  // ກວດໂມງກ່ອນຖາມ DB: ຖ້າຍັງບໍ່ຮອດໂມງ ຄຳຕອບບໍ່ປ່ຽນ ບໍ່ວ່າຈະມີຖ້ຽວຄ້າງບໍ່
+  // ຈຶ່ງບໍ່ຕ້ອງຍິງ query ໃສ່ທຸກ request ຂອງມືຖືຕະຫຼອດມື້.
   const deferred =
-    belowMinimum && forceAfterTrip && (await hasOpenTrip(driverId));
+    belowMinimum &&
+    (beforeAllowedHour ||
+      (forceAfterTrip && (await hasOpenTrip(driverId))));
   const forceUpdate = belowMinimum && !deferred;
   // ຕອນເລື່ອນ ຕ້ອງປິດ `update_available` ນຳ. ເຫດຜົນ: ແອັບຖືວ່າ **ທຸກການ
   // ອັບເດດເປັນການບັງຄັບ** ຈຶ່ງບລັອກຕົວເອງເມື່ອເຫັນທຸງນີ້ ໂດຍບໍ່ສົນ

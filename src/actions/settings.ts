@@ -54,6 +54,8 @@ const NOTIFY_KEYS = [
   // "0" = ບັງຄັບທັນທີ. ຢ່າງອື່ນ (ຄ່າເລີ່ມຕົ້ນ) = ລໍໃຫ້ປິດຖ້ຽວກ່ອນ ຈຶ່ງບັງຄັບ
   // — ບໍ່ລັອກຄົນຂັບອອກກາງທາງ.
   "app.mobile.force_after_trip",
+  // ໂມງລາວ (0–23) ທີ່ເລີ່ມບັງຄັບອັບເດດໄດ້. ຫວ່າງ = ຕະຫຼອດເວລາ.
+  "app.mobile.force_from_hour",
   "app.mobile.latest_version",
   "app.mobile.update_url_android",
   "app.mobile.update_url_ios",
@@ -107,6 +109,7 @@ export interface NotifySettings {
   "app.mobile.min_version": string;
   "app.mobile.min_version_mode": string;
   "app.mobile.force_after_trip": string;
+  "app.mobile.force_from_hour": string;
   "app.mobile.latest_version": string;
   "app.mobile.update_url_android": string;
   "app.mobile.update_url_ios": string;

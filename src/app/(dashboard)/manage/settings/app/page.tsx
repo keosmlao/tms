@@ -95,6 +95,7 @@ export default function AppSettingsPage() {
         "app.mobile.min_version": data["app.mobile.min_version"].trim(),
         "app.mobile.min_version_mode": data["app.mobile.min_version_mode"],
         "app.mobile.force_after_trip": data["app.mobile.force_after_trip"],
+        "app.mobile.force_from_hour": data["app.mobile.force_from_hour"].trim(),
         "app.mobile.latest_version": data["app.mobile.latest_version"].trim(),
         "app.mobile.update_url_android": data["app.mobile.update_url_android"].trim(),
         "app.mobile.update_url_ios": data["app.mobile.update_url_ios"].trim(),
@@ -288,6 +289,18 @@ export default function AppSettingsPage() {
                   "app.mobile.force_after_trip": v ? "1" : "0",
                 }))
               }
+            />
+            <Field
+              label="ເລີ່ມບັງຄັບຕັ້ງແຕ່ໂມງ (0–23) · ຫວ່າງ = ຕະຫຼອດເວລາ"
+              hint="ໂມງລາວ. ຕັ້ງ 18 = ລຸ້ນທີ່ອອກຕອນເຊົ້າຈະບໍ່ບັງຄັບໃຜຈົນກວ່າ 18:00 ຂອງມື້ນັ້ນ — ບໍ່ໄປຢຸດຄົນຂັບກາງມື້."
+              value={data["app.mobile.force_from_hour"]}
+              onChange={(v) =>
+                setData((d) => ({
+                  ...d,
+                  "app.mobile.force_from_hour": v.replace(/\D/g, "").slice(0, 2),
+                }))
+              }
+              placeholder="18"
             />
             {!autoMinVersion && (
               <Field

@@ -20,6 +20,10 @@ vi.mock("@/queries/mobile.js", () => ({
 }));
 
 let shipped = "";
+let laoHour = "09";
+vi.mock("@/lib/lao-date.js", () => ({
+  getLaoParts: () => ({ hour: laoHour }),
+}));
 vi.mock("@/lib/shipped-app-version", () => ({
   shippedAppVersion: async () => shipped,
 }));
@@ -157,6 +161,43 @@ describe("ບັງຄັບຫຼັງປິດຖ້ຽວ", () => {
     const r = await evaluateMobileAppVersion(req("1.3.3"));
     expect(r.force_update).toBe(true);
     expect(openTripCalls).toBe(0);
+  });
+});
+
+// ຜູ້ໃຊ້ຂໍ: ຢ່າໄປຢຸດຄົນຂັບກາງມື້ — ປ່ອຍໃຫ້ອັບເດດຕອນ 18:00.
+describe("ບັງຄັບຕັ້ງແຕ່ໂມງທີ່ກຳນົດ", () => {
+  beforeEach(() => {
+    settings["app.mobile.min_version_mode"] = "auto";
+    settings["app.mobile.force_from_hour"] = "18";
+    shipped = "1.3.4";
+    laoHour = "09";
+  });
+
+  it("ກ່ອນຮອດໂມງ → ຍັງບໍ່ບັງຄັບ", async () => {
+    const r = await evaluateMobileAppVersion(req("1.3.3"), "D001");
+    expect(r.force_update).toBe(false);
+    expect(r.update_after_trip).toBe(true);
+    // ລຸ້ນເກົ່າບໍ່ຮູ້ຈັກທຸງໃໝ່ ຈຶ່ງຕ້ອງບໍ່ເຫັນ "ມີລຸ້ນໃໝ່" ນຳ
+    expect(r.update_available).toBe(false);
+  });
+
+  it("ຮອດໂມງແລ້ວ → ບັງຄັບ", async () => {
+    laoHour = "18";
+    const r = await evaluateMobileAppVersion(req("1.3.3"), "D001");
+    expect(r.force_update).toBe(true);
+  });
+
+  // ຄຳຕອບບໍ່ປ່ຽນບໍ່ວ່າຈະມີຖ້ຽວຄ້າງບໍ່ — ຢ່າຍິງ query ໃສ່ທຸກ request.
+  it("ກ່ອນຮອດໂມງ ບໍ່ຖາມ DB ວ່າມີຖ້ຽວຄ້າງບໍ່", async () => {
+    openTrip = true;
+    await evaluateMobileAppVersion(req("1.3.3"), "D001");
+    expect(openTripCalls).toBe(0);
+  });
+
+  it("ບໍ່ຕັ້ງໂມງ → ບັງຄັບໄດ້ຕະຫຼອດເວລາ", async () => {
+    settings["app.mobile.force_from_hour"] = "";
+    const r = await evaluateMobileAppVersion(req("1.3.3"), "D001");
+    expect(r.force_update).toBe(true);
   });
 });
 

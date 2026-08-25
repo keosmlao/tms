@@ -3029,8 +3029,11 @@ const DAILY_BILL_BUCKETS = {
             AND (sent_end IS NULL OR sent_end::date >= $1::date)
             AND status <> 2`,
   opened: `opened_at IS NOT NULL AND opened_at::date = $1::date`,
-  sending: `(status = 1 AND sent_end IS NOT NULL AND sent_end::date = $1::date)
-            OR (status NOT IN (1, 2) AND sent_start IS NOT NULL)`,
+  // ສະເພາະບິນທີ່ **ປິດແລ້ວ** ໃນມື້ນັ້ນ. ບໍ່ລວມບິນທີ່ຍັງຢູ່ເທິງລົດອີກຕໍ່ໄປ:
+  // ບິນພວກນັ້ນ status ຍັງບໍ່ປິດ ຈຶ່ງຖືກນັບຢູ່ "ຄົງເຫຼືອ" ນຳ — ວັດແລ້ວ 104
+  // ບິນຢູ່ທັງສອງຊ່ອງພ້ອມກັນ ເຮັດໃຫ້ຕົວເລກສອງຊ່ອງບວກກັນເກີນຄວາມຈິງ ແລະ
+  // ຫົວໜ້າຖາມວ່າ "ສົ່ງແລ້ວ 1 ແຕ່ຄົງເຫຼືອ 38 ໄດ້ແນວໃດ".
+  sending: `status = 1 AND sent_end IS NOT NULL AND sent_end::date = $1::date`,
   outstanding: `status NOT IN (1, 2)
                 AND opened_at IS NOT NULL
                 AND opened_at::date <= $1::date`,
