@@ -51,6 +51,8 @@ export default function FleetAlertSettingsPage() {
           data["fleet.close_reminder_minutes"], 5, 240, "20"
         ),
         "fleet.alert_line_to": data["fleet.alert_line_to"].trim(),
+        "fleet.alert_channel_line": data["fleet.alert_channel_line"],
+        "fleet.alert_channel_app": data["fleet.alert_channel_app"],
       });
       setSavedAt(Date.now());
     } catch (e) {
@@ -61,6 +63,10 @@ export default function FleetAlertSettingsPage() {
   };
 
   const on = data["fleet.alert_enabled"] === "1";
+  // ບໍ່ໄດ້ຕັ້ງ = ເປີດ (ພຶດຕິກຳເກົ່າ) — ມີແຕ່ "0" ທີ່ປິດ. ຕ້ອງກົງກັບ
+  // fleet-alert.js ບໍ່ດັ່ງນັ້ນໜ້າຈໍກັບຕົວສົ່ງຈິງຈະບອກຄົນລະຢ່າງ.
+  const chanLine = data["fleet.alert_channel_line"].trim() !== "0";
+  const chanApp = data["fleet.alert_channel_app"].trim() !== "0";
 
   return (
     <div className="space-y-5">
@@ -170,13 +176,34 @@ export default function FleetAlertSettingsPage() {
               icon={<FaTruck />}
               disabled={!on}
             />
-            <LineRecipientPicker
+            <Toggle
+              label="ສົ່ງຜ່ານ LINE"
+              description="ສົ່ງຂໍ້ຄວາມແຈ້ງເຕືອນເຂົ້າ LINE ຂອງຜູ້ຮັບທີ່ເລືອກໄວ້ຂ້າງລຸ່ມ."
+              checked={chanLine}
+              onChange={(v) =>
+                setData((d) => ({ ...d, "fleet.alert_channel_line": v ? "1" : "0" }))
+              }
+            />
+            <Toggle
+              label="ສົ່ງເຂົ້າແອັບ (push)"
+              description="ຄົນທີ່ຕິກເປີດ “ແຈ້ງເຕືອນລົດ” ໃນແອັບຈະໄດ້ຮັບ. ສ່ວນ “ຮອດສາງແຕ່ບໍ່ປິດຖ້ຽວ” ສົ່ງໃຫ້ຄົນຂັບຄົນນັ້ນໂດຍກົງສະເໝີ."
+              checked={chanApp}
+              onChange={(v) =>
+                setData((d) => ({ ...d, "fleet.alert_channel_app": v ? "1" : "0" }))
+              }
+            />
+            {!chanLine && !chanApp && (
+              <p className="rounded-lg bg-amber-50 p-2.5 text-[11px] font-medium text-amber-700 dark:bg-amber-500/10 dark:text-amber-300">
+                ປິດທັງສອງຊ່ອງທາງ = ບໍ່ມີໃຜໄດ້ຮັບແຈ້ງເຕືອນເລີຍ.
+              </p>
+            )}
+            {chanLine && <LineRecipientPicker
               value={data["fleet.alert_line_to"]}
               disabled={!on}
               onChange={(v) =>
                 setData((d) => ({ ...d, "fleet.alert_line_to": v }))
               }
-            />
+            />}
             <p className="text-[11px] text-slate-500 dark:text-gray-400">
               ໝາຍເຫດ: “ອອກຈາກສາງ”, “ຈອດບໍ່ຕົງຈຸດ” ແລະ “ອອກນອກເສັ້ນທາງ” ຕ້ອງມີພິກັດສາງໃນ
               Geofence ຂອງສາຂານັ້ນ ຫຼື ພິກັດຂອງລູກຄ້າ — ບ່ອນທີ່ບໍ່ມີພິກັດເລີຍຈະບໍ່ຖືກເຕືອນ

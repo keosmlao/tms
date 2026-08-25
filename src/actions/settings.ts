@@ -85,6 +85,10 @@ const NOTIFY_KEYS = [
   "fleet.close_reminder_minutes",
   // ຜູ້ຮັບ LINE ທີ່ກຳນົດເອງ — ຫວ່າງ = ໄລ່ຫາພະນັກງານຂອງສາຂາຕາມ logistic_code.
   "fleet.alert_line_to",
+  // ຊ່ອງທາງ — "0" = ປິດ, ຢ່າງອື່ນ (ລວມທັງບໍ່ຕັ້ງ) = ເປີດ. ເປີດອັນດຽວ ຫຼື
+  // ທັງສອງກໍ່ໄດ້; ປິດທັງສອງ = ບໍ່ສົ່ງຫຍັງ.
+  "fleet.alert_channel_line",
+  "fleet.alert_channel_app",
   "tv.pages",
   "tv.secs",
 ] as const;
@@ -122,6 +126,8 @@ export interface NotifySettings {
   "fleet.off_route_km": string;
   "fleet.close_reminder_minutes": string;
   "fleet.alert_line_to": string;
+  "fleet.alert_channel_line": string;
+  "fleet.alert_channel_app": string;
   "tv.pages": string;
   "tv.secs": string;
 }

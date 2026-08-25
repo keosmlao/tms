@@ -48,6 +48,15 @@ const TOPICS = [
     driverDefault: true,
   },
   {
+    key: "fleet_alert",
+    label: "ແຈ້ງເຕືອນລົດ",
+    detail: "ຂັບໄວ · ຈອດດົນ/ບໍ່ຕົງຈຸດ · ອອກນອກເສັ້ນທາງ · ຮອດສາງແຕ່ບໍ່ປິດຖ້ຽວ",
+    managerDefault: true,
+    // ຄົນຂັບປິດໄວ້: ຂໍ້ຄວາມພວກນີ້ເປັນມຸມມອງຂອງຜູ້ຄຸມກອງລົດ. ສິ່ງທີ່ຄົນຂັບ
+    // ຕ້ອງເຮັດເອງ (ໄປປິດຖ້ຽວ) ສົ່ງໃຫ້ລາວໂດຍກົງຢູ່ແລ້ວ ບໍ່ຜ່ານການຕິກນີ້.
+    driverDefault: false,
+  },
+  {
     key: "chat",
     label: "ຂໍ້ຄວາມແຊັດ",
     detail: "ຂໍ້ຄວາມໃໝ່ໃນບິນ ຫຼື ຂໍ້ຄວາມສ່ວນຕົວ",
@@ -88,6 +97,14 @@ const TYPE_TO_TOPIC = {
   pickup_variance: "pickup_variance",
   bill_forwarded: "bill_forwarded",
   dispatch_reminder: "dispatch_reminder",
+  // ແຈ້ງເຕືອນລົດ — ທຸກຊະນິດລວມຢູ່ຫົວຂໍ້ດຽວ ຈຶ່ງຕິກເປີດ/ປິດເທື່ອດຽວໄດ້
+  speeding: "fleet_alert",
+  parked: "fleet_alert",
+  parked_off_point: "fleet_alert",
+  off_route: "fleet_alert",
+  left_no_start: "fleet_alert",
+  back_no_close: "fleet_alert",
+  close_trip_reminder: "fleet_alert",
   dm: "chat",
   chatter: "chat",
   web_activity: "web_activity",

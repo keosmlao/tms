@@ -31,6 +31,8 @@ export interface NotifySettings {
   "fleet.off_route_km": string;
   "fleet.close_reminder_minutes": string;
   "fleet.alert_line_to": string;
+  "fleet.alert_channel_line": string;
+  "fleet.alert_channel_app": string;
   "tv.pages": string;
   "tv.secs": string;
 }
@@ -70,6 +72,8 @@ export const EMPTY_SETTINGS: NotifySettings = {
   "fleet.off_route_km": "",
   "fleet.close_reminder_minutes": "20",
   "fleet.alert_line_to": "",
+  "fleet.alert_channel_line": "1",
+  "fleet.alert_channel_app": "1",
 };
 
 export const SETTING_TOPICS = [

@@ -52,7 +52,7 @@ describe("ຊະນິດຂອງແຈ້ງເຕືອນລົດ", () => {
   // ຄົນຂັບຕ້ອງໄດ້ຮັບເອງຜ່ານແອັບ ບໍ່ແມ່ນລໍໃຫ້ຫົວໜ້າບອກ — ແລະ ຕ້ອງສົ່ງກ່ອນ
   // ກວດຜູ້ຮັບ LINE ບໍ່ດັ່ງນັ້ນສາຂາທີ່ບໍ່ມີໃຜຕັ້ງ line_id ຈະບໍ່ມີໃຜເຕືອນເລີຍ.
   it("ຮອດສາງບໍ່ປິດຖ້ຽວ ເຕືອນຄົນຂັບຜ່ານ push ກ່ອນກວດ LINE", () => {
-    const pushAt = src.indexOf("await pushCloseReminder(row)");
+    const pushAt = src.indexOf("await pushAlert(kind, row, alert)");
     const lineAt = src.indexOf("recipientCache.set(code, await findRecipients");
     expect(pushAt).toBeGreaterThan(-1);
     expect(lineAt).toBeGreaterThan(-1);
@@ -109,6 +109,31 @@ describe("ຊະນິດຂອງແຈ້ງເຕືອນລົດ", () => {
     expect(src).toContain("NULLIF(TRIM(e.line_id), '') IS NOT NULL");
   });
 
+  // ຜູ້ໃຊ້ຂໍໃຫ້ເປີດ LINE ຢ່າງດຽວ / ແອັບຢ່າງດຽວ / ທັງສອງ ໄດ້.
+  it("ເປີດ-ປິດ LINE ແລະ ແອັບ ແຍກກັນໄດ້", () => {
+    expect(src).toContain('getSetting("fleet.alert_channel_line", "")');
+    expect(src).toContain('getSetting("fleet.alert_channel_app", "")');
+    // ບໍ່ໄດ້ຕັ້ງ = ເປີດ ຈຶ່ງລະບົບເກົ່າບໍ່ປ່ຽນພຶດຕິກຳເອງ
+    expect(src).toContain('String(rawChanLine ?? "").trim() !== "0"');
+    expect(src).toContain('String(rawChanApp ?? "").trim() !== "0"');
+  });
+
+  it("ປິດທັງສອງຊ່ອງທາງ = ບໍ່ສົ່ງຫຍັງ", () => {
+    expect(src).toContain('reason: "no_channel"');
+  });
+
+  // ປິດ LINE ແລ້ວຍັງຕ້ອງສົ່ງ push ໄດ້ — ບໍ່ດັ່ງນັ້ນ "ແອັບຢ່າງດຽວ" ໃຊ້ບໍ່ໄດ້.
+  it("ປິດ LINE ແລ້ວຍັງສົ່ງເຂົ້າແອັບໄດ້", () => {
+    expect(src).toContain('channel: "app"');
+    expect(src).toContain("if (!useLine) {");
+  });
+
+  // ຊະນິດອື່ນເປັນມຸມມອງຜູ້ຄຸມກອງລົດ — ຢ່າຍິງໃສ່ຄົນຂັບ.
+  it("ສົ່ງໃຫ້ຄົນຂັບໂດຍກົງສະເພາະ ຮອດສາງແຕ່ບໍ່ປິດຖ້ຽວ", () => {
+    expect(src).toContain('kind === "back_no_close" && row.driver_code');
+    expect(src).toContain("candidates: toDriver ? [row.driver_code] : []");
+  });
+
   it("ເກນທັງໝົດອ່ານຈາກຕັ້ງຄ່າ ບໍ່ແມ່ນຝັງໄວ້", () => {
     for (const key of [
       "fleet.speed_limit_kmh",
@@ -116,6 +141,8 @@ describe("ຊະນິດຂອງແຈ້ງເຕືອນລົດ", () => {
       "fleet.off_route_km",
       "fleet.close_reminder_minutes",
       "fleet.alert_line_to",
+      "fleet.alert_channel_line",
+      "fleet.alert_channel_app",
     ]) {
       expect(src).toContain(key);
     }

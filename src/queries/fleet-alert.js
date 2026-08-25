@@ -494,20 +494,28 @@ function buildAlert(kind, row) {
  * ໃຊ້ push ບໍ່ແມ່ນ LINE ສຳລັບຄົນຂັບ ເພາະຄົນຂັບຖືແອັບຢູ່ໃນມືແລ້ວ ແລະ ການກົດ
  * ປິດຖ້ຽວກໍ່ຢູ່ໃນແອັບ — ສົ່ງ LINE ຈະບັງຄັບໃຫ້ສະຫຼັບແອັບໂດຍບໍ່ຈຳເປັນ.
  */
-async function pushCloseReminder(row) {
+async function pushAlert(kind, row, alert) {
   try {
     const { pushToTopic } = require("./push");
+
+    // ມີແຕ່ "ຮອດສາງແຕ່ບໍ່ປິດຖ້ຽວ" ທີ່ເປັນສິ່ງທີ່ **ຄົນຂັບ** ຕ້ອງລົງມືເອງ
+    // ຈຶ່ງສົ່ງໃຫ້ລາວໂດຍກົງ. ຊະນິດອື່ນເປັນມຸມມອງຂອງຜູ້ຄຸມກອງລົດ — ສົ່ງໃຫ້
+    // ສະເພາະຄົນທີ່ຕິກເປີດ "ແຈ້ງເຕືອນລົດ" ໄວ້.
+    const toDriver = kind === "back_no_close" && row.driver_code;
+    const short = String(alert.message ?? "")
+      .split("\n")
+      .slice(1)
+      .join(" · ");
+
     await pushToTopic({
-      candidates: [row.driver_code],
+      candidates: toDriver ? [row.driver_code] : [],
       title: "🏁 ກະລຸນາປິດຖ້ຽວ",
       body:
         `ຮອດສາງແລ້ວ ${fmtDuration(row.minutes)} ແຕ່ຖ້ຽວ ${row.doc_no} ` +
         `ຍັງບໍ່ໄດ້ປິດ — ກະລຸນາກົດ "ຂໍປິດຖ້ຽວ"`,
-      data: { doc_no: row.doc_no, type: "close_trip_reminder" },
-      observerTitle: "🏁 ຖ້ຽວຍັງບໍ່ປິດ",
-      observerBody:
-        `ຖ້ຽວ ${row.doc_no} · ${row.car_name} ຮອດສາງແລ້ວ ` +
-        `${fmtDuration(row.minutes)} ແຕ່ຍັງບໍ່ໄດ້ປິດຖ້ຽວ`,
+      data: { doc_no: row.doc_no, type: kind },
+      observerTitle: String(alert.message ?? "").split("\n")[0] || "ແຈ້ງເຕືອນລົດ",
+      observerBody: short,
       sales: false,
     });
     return true;
@@ -580,6 +588,8 @@ async function evaluateFleetAlerts({ day, dryRun = false } = {}) {
     rawOffRoute,
     rawCloseMinutes,
     rawLineTo,
+    rawChanLine,
+    rawChanApp,
   ] =
     await Promise.all([
       getSetting("fleet.alert_enabled", "0"),
@@ -593,6 +603,8 @@ async function evaluateFleetAlerts({ day, dryRun = false } = {}) {
       getSetting("fleet.off_route_km", ""),
       getSetting("fleet.close_reminder_minutes", ""),
       getSetting("fleet.alert_line_to", ""),
+      getSetting("fleet.alert_channel_line", ""),
+      getSetting("fleet.alert_channel_app", ""),
     ]);
   const isOn = enabled === "1" || enabled === "true";
   if (!isOn && !dryRun) return { skipped: true, reason: "alert_disabled" };
@@ -611,6 +623,13 @@ async function evaluateFleetAlerts({ day, dryRun = false } = {}) {
     240
   );
   const lineOverride = await resolveLineTargets(parseLineTargets(rawLineTo));
+
+  // ຊ່ອງທາງ — ບໍ່ໄດ້ຕັ້ງ = ເປີດທັງສອງ (ພຶດຕິກຳເກົ່າ). ມີແຕ່ "0" ທີ່ປິດ.
+  const useLine = String(rawChanLine ?? "").trim() !== "0";
+  const useApp = String(rawChanApp ?? "").trim() !== "0";
+  if (!useLine && !useApp && !dryRun) {
+    return { skipped: true, reason: "no_channel" };
+  }
 
   await ensureFleetAlertSchema();
   const today =
@@ -672,13 +691,21 @@ async function evaluateFleetAlerts({ day, dryRun = false } = {}) {
       continue;
     }
 
-    // ຄົນຂັບຕ້ອງໄດ້ຮັບເອງ ບໍ່ແມ່ນຜ່ານຫົວໜ້າ — ສົ່ງ push ກ່ອນກວດຜູ້ຮັບ LINE
-    // ບໍ່ດັ່ງນັ້ນສາຂາທີ່ບໍ່ມີໃຜຕັ້ງ line_id ຈະບໍ່ມີໃຜເຕືອນຄົນຂັບເລີຍ.
-    const pushedToDriver =
-      kind === "back_no_close" && row.driver_code
-        ? await pushCloseReminder(row)
-        : false;
+    // ສົ່ງ push ກ່ອນກວດຜູ້ຮັບ LINE — ບໍ່ດັ່ງນັ້ນສາຂາທີ່ບໍ່ມີໃຜຕັ້ງ line_id
+    // ຈະບໍ່ມີໃຜໄດ້ຮັບເລີຍ ເຖິງວ່າຊ່ອງທາງແອັບຈະເປີດຢູ່.
+    const pushed = useApp ? await pushAlert(kind, row, alert) : false;
 
+    if (!useLine) {
+      if (pushed) {
+        sent.push({ kind, alert_key: alert.alertKey, channel: "app" });
+      } else {
+        await query(`DELETE FROM public.odg_tms_fleet_alert_log WHERE id = $1`, [id]);
+        skipped.push({ kind, alert_key: alert.alertKey, reason: "send_failed" });
+      }
+      continue;
+    }
+
+    const pushedToDriver = pushed;
     const code = row.transport_code ?? "";
     if (!recipientCache.has(code)) {
       recipientCache.set(code, await findRecipients(code, lineOverride));
