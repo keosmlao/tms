@@ -276,6 +276,7 @@ export const Actions = {
   // Settings (notification test mode etc.)
   getNotifySettings: settings.getNotifySettings,
   saveNotifySettings: settings.saveNotifySettings,
+  getLineRecipientOptions: settings.getLineRecipientOptions,
 
   // ThunJai Express integration
   getThunJaiSettings: thunjai.getThunJaiSettings,

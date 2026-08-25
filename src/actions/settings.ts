@@ -5,6 +5,25 @@ import {
   getSettings as svcGetSettings,
   setSettings as svcSetSettings,
 } from "@/queries/settings.js";
+import { listLineRecipientOptions as svcListLineRecipientOptions } from "@/queries/fleet-alert.js";
+
+export interface LineRecipientOption {
+  code: string;
+  name: string;
+  nickname: string;
+  department: string;
+  position: string;
+}
+
+/**
+ * ພະນັກງານທີ່ເລືອກເປັນຜູ້ຮັບແຈ້ງເຕືອນ LINE ໄດ້ (ຍັງເຮັດວຽກ + ຜູກ LINE ແລ້ວ).
+ * ບໍ່ໄດ້ສົ່ງ line_id ອອກມາ — ໜ້າຕັ້ງຄ່າເກັບ **ລະຫັດພະນັກງານ** ຢ່າງດຽວ
+ * ຈຶ່ງບໍ່ມີເຫດຜົນທີ່ຈະສົ່ງ id ສ່ວນຕົວອອກໄປໃຫ້ browser.
+ */
+export async function getLineRecipientOptions(): Promise<LineRecipientOption[]> {
+  await requireSession();
+  return svcListLineRecipientOptions() as Promise<LineRecipientOption[]>;
+}
 
 const NOTIFY_KEYS = [
   "line.test_enabled",

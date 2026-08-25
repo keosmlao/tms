@@ -170,27 +170,13 @@ export default function FleetAlertSettingsPage() {
               icon={<FaTruck />}
               disabled={!on}
             />
-            <div>
-              <label className="mb-1 block text-xs font-semibold text-slate-600 dark:text-slate-300">
-                ຜູ້ຮັບແຈ້ງເຕືອນຜ່ານ LINE
-              </label>
-              <textarea
-                value={data["fleet.alert_line_to"]}
-                onChange={(e) =>
-                  setData((d) => ({ ...d, "fleet.alert_line_to": e.target.value }))
-                }
-                disabled={!on}
-                rows={3}
-                placeholder={"ຫວ່າງ = ສົ່ງຫາພະນັກງານຂອງສາຂານັ້ນທຸກຄົນທີ່ມີ LINE\nUxxxxxxxx…  ຫຼື  Cxxxxxxxx… (ກຸ່ມ)"}
-                className="w-full rounded-lg border border-slate-300 px-3 py-2 font-mono text-xs disabled:opacity-50 dark:border-slate-700 dark:bg-slate-800"
-              />
-              <p className="mt-1 text-[11px] text-slate-500 dark:text-gray-400">
-                ໃສ່ userId ຫຼື groupId ຂອງ LINE ຫຼາຍອັນໄດ້ — ຄັ່ນດ້ວຍຈຸດ ຫຼື ຂຶ້ນແຖວໃໝ່.
-                <b> ຕັ້ງໄວ້ = ສົ່ງສະເພາະລາຍຊື່ນີ້</b> ບໍ່ໄດ້ສົ່ງຫາພະນັກງານສາຂາອີກ.
-                ປ່ອຍຫວ່າງຈຶ່ງກັບໄປໃຊ້ວິທີເກົ່າ (ທຸກຄົນທີ່ logistic_code ຕົງ — ດຽວນີ້ມີ
-                280 ຄົນທີ່ຕັ້ງ LINE ໄວ້ ຈຶ່ງມັກຈະຫຼາຍເກີນໄປ).
-              </p>
-            </div>
+            <LineRecipientPicker
+              value={data["fleet.alert_line_to"]}
+              disabled={!on}
+              onChange={(v) =>
+                setData((d) => ({ ...d, "fleet.alert_line_to": v }))
+              }
+            />
             <p className="text-[11px] text-slate-500 dark:text-gray-400">
               ໝາຍເຫດ: “ອອກຈາກສາງ”, “ຈອດບໍ່ຕົງຈຸດ” ແລະ “ອອກນອກເສັ້ນທາງ” ຕ້ອງມີພິກັດສາງໃນ
               Geofence ຂອງສາຂານັ້ນ ຫຼື ພິກັດຂອງລູກຄ້າ — ບ່ອນທີ່ບໍ່ມີພິກັດເລີຍຈະບໍ່ຖືກເຕືອນ
@@ -201,6 +187,154 @@ export default function FleetAlertSettingsPage() {
           <SaveBar saving={saving} savedAt={savedAt} error={error} onSave={() => void save()} />
         </>
       )}
+    </div>
+  );
+}
+
+type RecipientOption = {
+  code: string;
+  name: string;
+  nickname: string;
+  department: string;
+  position: string;
+};
+
+/**
+ * ເລືອກຜູ້ຮັບແຈ້ງເຕືອນຈາກລາຍຊື່ພະນັກງານ (odg_employee) ແທນການພິມ LINE id ເອງ.
+ *
+ * ເກັບເປັນ **ລະຫັດພະນັກງານ** ບໍ່ແມ່ນ LINE id — ພະນັກງານປ່ຽນ LINE ເມື່ອໃດ
+ * ແຈ້ງເຕືອນກໍ່ຕາມໄປເອງ. ຄ່າເກົ່າທີ່ເປັນ LINE id ດິບ (ຕັ້ງກ່ອນມີໜ້ານີ້) ຍັງ
+ * ໃຊ້ໄດ້ຢູ່ ແລະ ສະແດງເປັນລາຍການ "ຕັ້ງດ້ວຍມື" ໃຫ້ລຶບອອກໄດ້.
+ */
+function LineRecipientPicker({
+  value,
+  disabled,
+  onChange,
+}: {
+  value: string;
+  disabled: boolean;
+  onChange: (v: string) => void;
+}) {
+  const [options, setOptions] = useState<RecipientOption[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [q, setQ] = useState("");
+
+  useEffect(() => {
+    void (async () => {
+      try {
+        setOptions((await Actions.getLineRecipientOptions()) as RecipientOption[]);
+      } catch {
+        setOptions([]);
+      } finally {
+        setLoading(false);
+      }
+    })();
+  }, []);
+
+  const selected = value
+    .split(/[\n,]/)
+    .map((v) => v.trim())
+    .filter(Boolean);
+  const byCode = new Map(options.map((o) => [o.code, o]));
+  const isRawId = (t: string) => /^[UC][0-9a-f]{20,}$/i.test(t);
+
+  const toggle = (code: string) => {
+    const next = selected.includes(code)
+      ? selected.filter((c) => c !== code)
+      : [...selected, code];
+    onChange(next.join(","));
+  };
+
+  const query = q.trim().toLowerCase();
+  const shown = query
+    ? options.filter((o) =>
+        `${o.name} ${o.nickname} ${o.code} ${o.department} ${o.position}`
+          .toLowerCase()
+          .includes(query)
+      )
+    : options;
+
+  return (
+    <div>
+      <label className="mb-1 block text-xs font-semibold text-slate-600 dark:text-slate-300">
+        ຜູ້ຮັບແຈ້ງເຕືອນຜ່ານ LINE
+      </label>
+
+      {selected.length > 0 && (
+        <div className="mb-2 flex flex-wrap gap-1.5">
+          {selected.map((code) => {
+            const opt = byCode.get(code);
+            return (
+              <button
+                key={code}
+                type="button"
+                disabled={disabled}
+                onClick={() => toggle(code)}
+                className="inline-flex items-center gap-1.5 rounded-full bg-teal-50 px-2.5 py-1 text-[11px] font-semibold text-teal-700 disabled:opacity-50 dark:bg-teal-500/15 dark:text-teal-300"
+                title="ກົດເພື່ອເອົາອອກ"
+              >
+                {opt ? opt.name : isRawId(code) ? `LINE id (ຕັ້ງດ້ວຍມື)` : code}
+                <span aria-hidden>×</span>
+              </button>
+            );
+          })}
+        </div>
+      )}
+
+      <input
+        type="search"
+        value={q}
+        onChange={(e) => setQ(e.target.value)}
+        disabled={disabled}
+        placeholder="ຄົ້ນຫາຊື່ / ຊື່ຫຼິ້ນ / ລະຫັດ / ພະແນກ"
+        className="mb-2 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm disabled:opacity-50 dark:border-slate-700 dark:bg-slate-800"
+      />
+
+      <div className="max-h-56 overflow-auto rounded-lg border border-slate-200 dark:border-slate-800">
+        {loading ? (
+          <p className="p-3 text-xs text-slate-500">ກຳລັງໂຫຼດລາຍຊື່…</p>
+        ) : shown.length === 0 ? (
+          <p className="p-3 text-xs text-slate-500">
+            {options.length === 0
+              ? "ບໍ່ມີພະນັກງານທີ່ຜູກ LINE ໄວ້"
+              : "ບໍ່ພົບຄົນທີ່ຄົ້ນຫາ"}
+          </p>
+        ) : (
+          shown.map((o) => (
+            <label
+              key={o.code}
+              className="flex cursor-pointer items-center gap-2.5 border-b border-slate-100 px-3 py-2 text-sm last:border-0 hover:bg-slate-50 dark:border-slate-800 dark:hover:bg-slate-800/60"
+            >
+              <input
+                type="checkbox"
+                checked={selected.includes(o.code)}
+                onChange={() => toggle(o.code)}
+                disabled={disabled}
+                className="h-4 w-4 accent-teal-600"
+              />
+              <span className="min-w-0 flex-1">
+                <span className="block truncate font-medium text-slate-800 dark:text-slate-100">
+                  {o.name}
+                  {o.nickname ? (
+                    <span className="text-slate-400"> ({o.nickname})</span>
+                  ) : null}
+                </span>
+                <span className="block truncate text-[11px] text-slate-500">
+                  {[o.code, o.position, o.department]
+                    .filter(Boolean)
+                    .join(" · ")}
+                </span>
+              </span>
+            </label>
+          ))
+        )}
+      </div>
+
+      <p className="mt-1 text-[11px] text-slate-500 dark:text-gray-400">
+        ເລືອກຈາກລາຍຊື່ພະນັກງານທີ່ຜູກ LINE ໄວ້ແລ້ວ.{" "}
+        <b>ເລືອກໄວ້ = ສົ່ງສະເພາະຄົນທີ່ເລືອກ</b> ບໍ່ໄດ້ສົ່ງຫາພະນັກງານສາຂາທຸກຄົນອີກ.
+        ບໍ່ເລືອກໃຜເລີຍ = ກັບໄປໃຊ້ວິທີເກົ່າ (ທຸກຄົນທີ່ logistic_code ຕົງ).
+      </p>
     </div>
   );
 }

@@ -334,6 +334,54 @@ function parseLineTargets(raw) {
     .filter(Boolean);
 }
 
+/**
+ * ລາຍຊື່ພະນັກງານທີ່ເລືອກເປັນຜູ້ຮັບແຈ້ງເຕືອນໄດ້ — ຄົນທີ່ຍັງເຮັດວຽກ ແລະ ມີ
+ * LINE ຜູກໄວ້ແລ້ວ. ໃຊ້ໂດຍໜ້າຕັ້ງຄ່າ.
+ */
+async function listLineRecipientOptions() {
+  return query(
+    `SELECT TRIM(e.employee_code) AS code,
+            COALESCE(NULLIF(TRIM(e.fullname_lo), ''), TRIM(e.employee_code)) AS name,
+            COALESCE(NULLIF(TRIM(e.nickname), ''), '') AS nickname,
+            COALESCE(NULLIF(TRIM(d.name_1::text), ''), '') AS department,
+            COALESCE(NULLIF(TRIM(p.position_name_lo::text), ''), '') AS position
+       FROM public.odg_employee e
+       -- ພະແນກຂອງ odg_employee ອ້າງ odg_department_list (ບໍ່ແມ່ນ
+       -- erp_department_list ທີ່ໃຊ້ລະຫັດຄົນລະຊຸດ — join ຜິດຈະໄດ້ຊ່ອງວ່າງ)
+       LEFT JOIN public.odg_department_list d
+         ON TRIM(d.code::text) = TRIM(e.department_code::text)
+       LEFT JOIN public.odg_position p
+         ON TRIM(p.position_code::text) = TRIM(e.position_code::text)
+      WHERE NULLIF(TRIM(e.line_id), '') IS NOT NULL
+        AND COALESCE(e.employment_status, '') ILIKE 'active'
+      ORDER BY name`
+  );
+}
+
+/**
+ * ແປງລາຍການທີ່ຕັ້ງໄວ້ໃຫ້ເປັນ LINE id ຈິງ.
+ *
+ * ຄ່າທີ່ເກັບຄື **ລະຫັດພະນັກງານ** ບໍ່ແມ່ນ LINE id — ພະນັກງານປ່ຽນ LINE ເມື່ອໃດ
+ * ແຈ້ງເຕືອນກໍ່ຕາມໄປເອງ ໂດຍບໍ່ຕ້ອງມາແກ້ຕັ້ງຄ່າ.
+ *
+ * ຍັງຮັບ LINE id ດິບ (U…/C…) ໄດ້ຢູ່ — ຄ່າທີ່ຕັ້ງໄວ້ກ່ອນມີໜ້າເລືອກນີ້ຈຶ່ງບໍ່
+ * ພັງ ແລະ ກຸ່ມ LINE (C…) ບໍ່ມີແຖວພະນັກງານໃຫ້ເລືອກຢູ່ແລ້ວ.
+ */
+async function resolveLineTargets(tokens) {
+  if (tokens.length === 0) return [];
+  const raw = tokens.filter((t) => /^[UC][0-9a-f]{20,}$/i.test(t));
+  const codes = tokens.filter((t) => !/^[UC][0-9a-f]{20,}$/i.test(t));
+  if (codes.length === 0) return raw;
+  const rows = await query(
+    `SELECT DISTINCT NULLIF(TRIM(e.line_id), '') AS line_id
+       FROM public.odg_employee e
+      WHERE TRIM(e.employee_code) = ANY($1::text[])
+        AND NULLIF(TRIM(e.line_id), '') IS NOT NULL`,
+    [codes]
+  );
+  return [...new Set([...raw, ...rows.map((r) => r.line_id)])].filter(Boolean);
+}
+
 async function findRecipients(transportCode, override = []) {
   if (override.length > 0) return override;
   const code = String(transportCode ?? "").trim();
@@ -562,7 +610,7 @@ async function evaluateFleetAlerts({ day, dryRun = false } = {}) {
     5,
     240
   );
-  const lineOverride = parseLineTargets(rawLineTo);
+  const lineOverride = await resolveLineTargets(parseLineTargets(rawLineTo));
 
   await ensureFleetAlertSchema();
   const today =
@@ -687,6 +735,7 @@ async function evaluateFleetAlerts({ day, dryRun = false } = {}) {
 }
 
 module.exports = {
+  listLineRecipientOptions,
   PARKED_MINUTES,
   LEFT_BASE_METRES,
   evaluateFleetAlerts,

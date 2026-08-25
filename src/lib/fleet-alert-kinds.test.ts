@@ -88,6 +88,27 @@ describe("ຊະນິດຂອງແຈ້ງເຕືອນລົດ", () => {
     expect(src).toContain("split(/[\\n,]/)");
   });
 
+  // ເກັບ **ລະຫັດພະນັກງານ** ບໍ່ແມ່ນ LINE id — ພະນັກງານປ່ຽນ LINE ເມື່ອໃດ
+  // ແຈ້ງເຕືອນຕ້ອງຕາມໄປເອງ ໂດຍບໍ່ຕ້ອງມາແກ້ຕັ້ງຄ່າ.
+  it("ແປງລະຫັດພະນັກງານເປັນ LINE id ຕອນສົ່ງ", () => {
+    expect(src).toContain("async function resolveLineTargets(");
+    expect(src).toContain("FROM public.odg_employee e");
+    expect(src).toContain("await resolveLineTargets(parseLineTargets(rawLineTo))");
+  });
+
+  // ຄ່າທີ່ຕັ້ງໄວ້ກ່ອນມີໜ້າເລືອກ (LINE id ດິບ) ແລະ ກຸ່ມ LINE (C…) ຕ້ອງຍັງໃຊ້ໄດ້.
+  it("ຍັງຮັບ LINE id ດິບ ໄດ້ຢູ່", () => {
+    expect(src).toContain("/^[UC][0-9a-f]{20,}$/i");
+  });
+
+  // ລາຍຊື່ໃຫ້ເລືອກຕ້ອງເປັນຄົນທີ່ຍັງເຮັດວຽກ ແລະ ຜູກ LINE ແລ້ວ — ບໍ່ດັ່ງນັ້ນ
+  // ເລືອກໄປແລ້ວກໍ່ບໍ່ມີໃຜໄດ້ຮັບ.
+  it("ລາຍຊື່ໃຫ້ເລືອກ ກັ່ນຕອງ active + ມີ LINE", () => {
+    expect(src).toContain("async function listLineRecipientOptions(");
+    expect(src).toContain("ILIKE 'active'");
+    expect(src).toContain("NULLIF(TRIM(e.line_id), '') IS NOT NULL");
+  });
+
   it("ເກນທັງໝົດອ່ານຈາກຕັ້ງຄ່າ ບໍ່ແມ່ນຝັງໄວ້", () => {
     for (const key of [
       "fleet.speed_limit_kmh",
