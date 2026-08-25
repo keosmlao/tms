@@ -32,6 +32,7 @@ import {
 } from "@/queries/chatter.js";
 import { coerceDateToFixedYear, getFixedTodayDate } from "@/lib/fixed-year";
 import { SalesDailyBillsQuery, SalesScheduleSave } from "@/lib/sales-schemas";
+import { userError } from "@/lib/action-error";
 
 export async function trackBill(search: string) {
   const s = await requireSession();
@@ -187,7 +188,7 @@ export async function saveSalesBillSchedule(input: {
     !!current?.delivery_route_code?.trim() ||
     !!current?.delivery_round_code?.trim();
   if (lockedByDispatch) {
-    throw new Error("ບິນນີ້ຖືກຝ່າຍຂົນສົ່ງແກ້ໄຂແລ້ວ — ແກ້ວັນຈັດສົ່ງ/ສາຂາບໍ່ໄດ້");
+    throw userError("ບິນນີ້ຖືກຝ່າຍຂົນສົ່ງແກ້ໄຂແລ້ວ — ແກ້ວັນຈັດສົ່ງ/ສາຂາບໍ່ໄດ້");
   }
 
   const result = await svcUpsertPendingBillSchedule({

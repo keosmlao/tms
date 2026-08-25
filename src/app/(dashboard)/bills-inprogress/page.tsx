@@ -24,6 +24,7 @@ import { Actions } from "@/lib/api";
 import { useConfirm } from "@/components/confirm-dialog";
 import { StatusPageHeader, StatusStatGrid } from "@/components/status-page-shell";
 import { WhatsappLink, buildBillWhatsappMessage } from "@/components/whatsapp-link";
+import { userErrorMessage } from "@/lib/action-error";
 // Ported from server actions: getBillsWaitingSentDetails, deleteJob, getJobBillsWithProducts
 
 function ImageThumb({ src, label }: { src: string; label: string }) {
@@ -334,7 +335,7 @@ export default function BillsInProgressClient({
       .then((data) => setJobs((data ?? []) as InProgressJob[]))
       .catch((e: any) => {
         console.error(e);
-        setLoadError(e?.response?.data?.error ?? e?.message ?? "Unknown error");
+        setLoadError(userErrorMessage(e, "ໂຫຼດຂໍ້ມູນບໍ່ສຳເລັດ"));
       })
       .finally(() => setLoading(false));
   };
@@ -384,7 +385,7 @@ export default function BillsInProgressClient({
       fetchJobs();
     } catch (error) {
       console.error(error);
-      const message = error instanceof Error ? error.message : "ປ່ຽນບໍ່ສຳເລັດ";
+      const message = userErrorMessage(error, "ປ່ຽນບໍ່ສຳເລັດ");
       void confirm({ title: "ຜິດພາດ", message, tone: "warning", single: true });
     } finally {
       setReclassifyBusy(false);

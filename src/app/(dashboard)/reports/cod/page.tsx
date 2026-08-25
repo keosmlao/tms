@@ -13,6 +13,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { FaCoins, FaSpinner, FaExclamationTriangle } from "react-icons/fa";
 import { FIXED_YEAR_END, FIXED_YEAR_START, getFixedTodayDate } from "@/lib/fixed-year";
 import { Actions } from "@/lib/api";
+import { userErrorMessage } from "@/lib/action-error";
 
 interface CodDriverRow {
   driver_name: string;
@@ -56,7 +57,7 @@ export default function CodByDriverReport() {
       setRows(data ?? []);
     } catch (e) {
       console.error(e);
-      setError(e instanceof Error ? e.message : String(e));
+      setError(userErrorMessage(e, String(e)));
     } finally {
       setLoading(false);
     }

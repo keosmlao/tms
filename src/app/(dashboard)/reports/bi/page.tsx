@@ -34,6 +34,7 @@ import { fuelPaymentTypeLabel } from "@/lib/fuel-payment-type";
 import { tripCostTypeLabel } from "@/lib/trip-cost-type";
 import type { BiDashboard } from "@/actions/bi-dashboard";
 import type { DeliveryPerfReport } from "@/lib/delivery-performance";
+import { userErrorMessage } from "@/lib/action-error";
 
 /**
  * ຍອດບິນຂອງຊ່ວງ — ເອົາສະເພາະແຖວລວມຂອງ getReportDailyActivity (ບັນຊີດຽວກັບ
@@ -736,7 +737,7 @@ export default function BiDashboardPage() {
       setData((await Actions.getBiDashboard(dateFrom, dateTo, car, branch)) as BiDashboard);
     } catch (e) {
       console.error(e);
-      setError(e instanceof Error ? e.message : "ໂຫຼດຂໍ້ມູນບໍ່ສຳເລັດ");
+      setError(userErrorMessage(e, "ໂຫຼດຂໍ້ມູນບໍ່ສຳເລັດ"));
       setStatusLoading(false);
       return;
     } finally {

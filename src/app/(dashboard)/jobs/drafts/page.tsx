@@ -30,6 +30,7 @@ import { FIXED_YEAR_END, FIXED_YEAR_START, getFixedTodayDate } from "@/lib/fixed
 import { useConfirm } from "@/components/confirm-dialog";
 import { useSession } from "@/providers/session-provider";
 import { DELIVERY_CONDITIONS, PICKUP_AT_CUSTOMER } from "../add/page";
+import { userErrorMessage } from "@/lib/action-error";
 
 // ຮ່າງຖ້ຽວ — ວັນ × ຮອບ × ສາຍ.
 // The dispatcher plans the day here: one draft per (ຮອບ, ສາຍ), bills dropped in
@@ -232,7 +233,7 @@ export default function TripDraftsPage() {
       setVolumeByDraft(payload.volumes ?? {});
       setDraftedBills(new Set((drafted ?? []) as string[]));
     } catch (e) {
-      setError(String((e as Error)?.message ?? e));
+      setError(userErrorMessage(e, String(e)));
     } finally {
       setLoading(false);
     }
@@ -309,7 +310,7 @@ export default function TripDraftsPage() {
       if (after) await after();
       else await load();
     } catch (e) {
-      setError(String((e as Error)?.message ?? e));
+      setError(userErrorMessage(e, String(e)));
     } finally {
       setBusy(false);
     }
@@ -1575,7 +1576,7 @@ function BillItemPicker({
         setChecked(Object.fromEntries(list.map((p) => [p.item_code, true])));
         setQty(Object.fromEntries(list.map((p) => [p.item_code, String(p.qty)])));
       })
-      .catch((e) => alive && setError(String((e as Error)?.message ?? e)))
+      .catch((e) => alive && setError(userErrorMessage(e, String(e))))
       .finally(() => alive && setLoading(false));
     return () => {
       alive = false;

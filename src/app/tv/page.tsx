@@ -4,6 +4,7 @@ import { useCallback, useEffect, useState } from "react";
 
 import { podAgoLabel } from "@/lib/pod";
 import "./tv.css";
+import { userErrorMessage } from "@/lib/action-error";
 
 
 /**
@@ -292,7 +293,7 @@ export default function TvPage() {
     } catch (fetchError) {
       // Keep the last good screen up — a blank TV tells the room nothing. The
       // staleness clock in the corner is what says the feed died.
-      setError(fetchError instanceof Error ? fetchError.message : "error");
+      setError(userErrorMessage(fetchError, "error"));
     }
   }, []);
 

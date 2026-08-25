@@ -7,6 +7,7 @@ import { Actions } from "@/lib/api";
 import { StatusPageHeader } from "@/components/status-page-shell";
 import { useSession } from "@/providers/session-provider";
 import { getLaoToday } from "@/lib/lao-date";
+import { userErrorMessage } from "@/lib/action-error";
 
 interface TripBill {
   bill_no: string;
@@ -110,7 +111,7 @@ export default function SuggestTripsPage() {
       setData(res);
     } catch (e) {
       console.error(e);
-      setError(e instanceof Error ? e.message : "ຄິດບໍ່ສຳເລັດ");
+      setError(userErrorMessage(e, "ຄິດບໍ່ສຳເລັດ"));
     } finally {
       setLoading(false);
     }
@@ -138,7 +139,7 @@ export default function SuggestTripsPage() {
       setFormFor(null);
     } catch (e) {
       console.error(e);
-      setError(e instanceof Error ? e.message : "ສ້າງຮ່າງບໍ່ສຳເລັດ");
+      setError(userErrorMessage(e, "ສ້າງຮ່າງບໍ່ສຳເລັດ"));
     } finally {
       setCreating(false);
     }

@@ -11,6 +11,7 @@
 //    ບໍ່ມີກໍ່ຄືນຄ່າວ່າງເປົ່າ (ຍັງບໍ່ມີໃຜບັນທຶກຕົ້ນທຶນຈັກລາຍ = ຍອດ 0 ຢູ່ແລ້ວ).
 "use strict";
 
+const { userError } = require("../lib/action-error");
 const { pool, query, queryOne } = require("../lib/db");
 const { getBranchScope } = require("./helpers");
 const { normalizeTripCostType } = require("../lib/trip-cost-type");
@@ -80,9 +81,9 @@ function asAmount(v) {
  */
 async function saveTripCost(payload) {
   const type = normalizeTripCostType(payload?.cost_type);
-  if (!type) throw new Error("ກະລຸນາເລືອກປະເພດຕົ້ນທຶນ");
+  if (!type) throw userError("ກະລຸນາເລືອກປະເພດຕົ້ນທຶນ");
   const amount = asAmount(payload?.amount);
-  if (!Number.isFinite(amount) || amount <= 0) throw new Error("ຈຳນວນເງິນຕ້ອງຫຼາຍກວ່າ 0");
+  if (!Number.isFinite(amount) || amount <= 0) throw userError("ຈຳນວນເງິນຕ້ອງຫຼາຍກວ່າ 0");
   await ensureTripCostSchema();
   const row = await queryOne(
     `INSERT INTO public.odg_tms_trip_cost
@@ -107,7 +108,7 @@ async function saveTripCost(payload) {
 /** ລຶບ 1 ລາຍການ */
 async function deleteTripCost(id) {
   const value = Number(id);
-  if (!Number.isFinite(value) || value <= 0) throw new Error("ລະຫັດລາຍການບໍ່ຖືກຕ້ອງ");
+  if (!Number.isFinite(value) || value <= 0) throw userError("ລະຫັດລາຍການບໍ່ຖືກຕ້ອງ");
   await tolerateMissing(
     () => query(`DELETE FROM public.odg_tms_trip_cost WHERE id = $1`, [value]),
     []

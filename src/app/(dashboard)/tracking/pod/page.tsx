@@ -37,6 +37,7 @@ import {
   type PodRow,
   type PodTotals,
 } from "@/lib/pod";
+import { userErrorMessage } from "@/lib/action-error";
 
 const STATE_OPTIONS: { value: string; label: string }[] = [
   { value: "all", label: "ທັງໝົດ" },
@@ -94,7 +95,7 @@ export default function PodTrackingPage() {
       setDrivers(data.drivers ?? []);
     } catch (e) {
       console.error(e);
-      setError(e instanceof Error ? e.message : "ໂຫຼດບໍ່ສຳເລັດ");
+      setError(userErrorMessage(e, "ໂຫຼດບໍ່ສຳເລັດ"));
     } finally {
       setLoading(false);
     }

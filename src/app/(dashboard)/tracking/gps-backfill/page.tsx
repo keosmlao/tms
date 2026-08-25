@@ -13,6 +13,7 @@ import {
 } from "react-icons/fa";
 import { Actions } from "@/lib/api";
 import { getLaoToday } from "@/lib/lao-date";
+import { userErrorMessage } from "@/lib/action-error";
 
 interface CarProgress {
   code: string;
@@ -101,12 +102,7 @@ export default function GpsBackfillPage() {
       await Actions.startGpsBackfill(fromDate, toDate, undefined, maxIterations);
       await refresh();
     } catch (err) {
-      const msg =
-        (err as { response?: { data?: { error?: string } }; message?: string })
-          ?.response?.data?.error ??
-        (err as { message?: string })?.message ??
-        "ເລີ່ມບໍ່ສຳເລັດ";
-      setError(msg);
+      setError(userErrorMessage(err, "ເລີ່ມບໍ່ສຳເລັດ"));
     } finally {
       setLoading(false);
     }

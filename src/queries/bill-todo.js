@@ -1,3 +1,4 @@
+const { userError } = require("../lib/action-error");
 const { pool, query, queryOne } = require("../lib/db");
 const { getBranchScope } = require("./helpers");
 
@@ -161,7 +162,7 @@ async function createBillTodo({ billNo, summary, deadline, userCode, session }) 
   const code = String(billNo ?? "").trim();
   const text = String(summary ?? "").trim();
   if (!code) throw new Error("bill_no is required");
-  if (!text) throw new Error("ກະລຸນາໃສ່ໃນລາຍລະອຽດ");
+  if (!text) throw userError("ກະລຸນາໃສ່ໃນລາຍລະອຽດ");
   await assertTodoCanMutate(session);
   await ensureBillTodoSchema();
 

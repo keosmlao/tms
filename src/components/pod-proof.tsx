@@ -10,6 +10,7 @@ import {
   type PodProof,
   type PodRow,
 } from "@/lib/pod";
+import { userErrorMessage } from "@/lib/action-error";
 
 export const podMapsUrl = (lat: string, lng: string) =>
   `https://www.google.com/maps?q=${lat},${lng}`;
@@ -157,7 +158,7 @@ export function PodProofDialog({
         if (alive) setProof(data);
       })
       .catch((e) => {
-        if (alive) setError(e instanceof Error ? e.message : "ໂຫຼດຫຼັກຖານບໍ່ສຳເລັດ");
+        if (alive) setError(userErrorMessage(e, "ໂຫຼດຫຼັກຖານບໍ່ສຳເລັດ"));
       })
       .finally(() => {
         if (alive) setLoading(false);

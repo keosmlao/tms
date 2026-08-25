@@ -30,6 +30,7 @@ import {
   THUNJAI_DEFAULTS,
   type ThunJaiSettings,
 } from "@/lib/thunjai-config";
+import { userErrorMessage } from "@/lib/action-error";
 
 type TokenResult = {
   ok: boolean;
@@ -122,7 +123,7 @@ export default function ThunJaiPage() {
         const data = (await Actions.getThunJaiSettings()) as ThunJaiSettings;
         setSettings({ ...THUNJAI_DEFAULTS, ...data });
       } catch (err) {
-        setError(err instanceof Error ? err.message : "ໂຫຼດຕັ້ງຄ່າບໍ່ສຳເລັດ");
+        setError(userErrorMessage(err, "ໂຫຼດຕັ້ງຄ່າບໍ່ສຳເລັດ"));
       } finally {
         setLoading(false);
       }
@@ -152,7 +153,7 @@ export default function ThunJaiPage() {
       await Actions.saveThunJaiSettings(settings);
       setSavedAt(Date.now());
     } catch (err) {
-      setError(err instanceof Error ? err.message : "ບັນທຶກບໍ່ສຳເລັດ");
+      setError(userErrorMessage(err, "ບັນທຶກບໍ່ສຳເລັດ"));
     } finally {
       setSaving(false);
     }
@@ -168,7 +169,7 @@ export default function ThunJaiPage() {
       setTokenResult(result);
       setSavedAt(Date.now());
     } catch (err) {
-      setError(err instanceof Error ? err.message : "ທົດສອບ Token ບໍ່ສຳເລັດ");
+      setError(userErrorMessage(err, "ທົດສອບ Token ບໍ່ສຳເລັດ"));
     } finally {
       setTesting(false);
     }

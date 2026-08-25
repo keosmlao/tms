@@ -7,6 +7,7 @@ import { Actions } from "@/lib/api";
 import { StatusPageHeader } from "@/components/status-page-shell";
 import { Field, PageLoading, SaveBar, SectionCard, Toggle } from "../_components";
 import { EMPTY_SETTINGS, type NotifySettings } from "../_settings";
+import { userErrorMessage } from "@/lib/action-error";
 
 export default function KpiSettingsPage() {
   const [data, setData] = useState<NotifySettings>(EMPTY_SETTINGS);
@@ -21,7 +22,7 @@ export default function KpiSettingsPage() {
         const d = (await Actions.getNotifySettings()) as NotifySettings;
         setData({ ...EMPTY_SETTINGS, ...d });
       } catch (e) {
-        setError(e instanceof Error ? e.message : "ໂຫຼດບໍ່ສຳເລັດ");
+        setError(userErrorMessage(e, "ໂຫຼດບໍ່ສຳເລັດ"));
       } finally {
         setLoading(false);
       }
@@ -49,7 +50,7 @@ export default function KpiSettingsPage() {
       });
       setSavedAt(Date.now());
     } catch (e) {
-      setError(e instanceof Error ? e.message : "ບັນທຶກບໍ່ສຳເລັດ");
+      setError(userErrorMessage(e, "ບັນທຶກບໍ່ສຳເລັດ"));
     } finally {
       setSaving(false);
     }

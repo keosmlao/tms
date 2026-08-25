@@ -12,6 +12,7 @@ import {
   FaTimes,
 } from "react-icons/fa";
 import { Actions } from "@/lib/api";
+import { userErrorMessage } from "@/lib/action-error";
 
 interface AvailableBill {
   doc_no: string;
@@ -85,7 +86,7 @@ export function AddBillsToJobDialog({
       })
       .catch((e) => {
         console.error(e);
-        setError(e instanceof Error ? e.message : "ບໍ່ສາມາດໂຫຼດບິນ");
+        setError(userErrorMessage(e, "ບໍ່ສາມາດໂຫຼດບິນ"));
       })
       .finally(() => setLoading(false));
   }, [open]);
@@ -241,7 +242,7 @@ export function AddBillsToJobDialog({
       onClose();
     } catch (e) {
       console.error(e);
-      setError(e instanceof Error ? e.message : "ບັນທຶກບໍ່ສຳເລັດ");
+      setError(userErrorMessage(e, "ບັນທຶກບໍ່ສຳເລັດ"));
     } finally {
       setSubmitting(false);
     }

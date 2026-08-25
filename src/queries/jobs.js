@@ -1,3 +1,4 @@
+const { userError } = require("../lib/action-error");
 const { pool, query, queryOne } = require("../lib/db");
 const { ensureDeliveryWorkflowSchema } = require("./delivery");
 const {
@@ -255,13 +256,13 @@ async function createJob(session, data) {
             const remainingItem = remainingByItem.get(item.item_code);
             const selectedQty = Number(item.selectedQty ?? 0);
             if (!remainingItem) {
-              throw new Error(`ບິນ ${bill.bill_no} ລາຍການ ${item.item_code} ຖືກຈັດຄົບແລ້ວ`);
+              throw userError(`ບິນ ${bill.bill_no} ລາຍການ ${item.item_code} ຖືກຈັດຄົບແລ້ວ`);
             }
             if (!Number.isFinite(selectedQty) || selectedQty <= 0) {
-              throw new Error(`ຈໍານວນຈັດສົ່ງຂອງ ${item.item_code} ບໍ່ຖືກຕ້ອງ`);
+              throw userError(`ຈໍານວນຈັດສົ່ງຂອງ ${item.item_code} ບໍ່ຖືກຕ້ອງ`);
             }
             if (selectedQty > remainingItem.qty) {
-              throw new Error(`ບິນ ${bill.bill_no} ລາຍການ ${item.item_code} ເຫຼືອຈັດໄດ້ພຽງ ${remainingItem.qty}`);
+              throw userError(`ບິນ ${bill.bill_no} ລາຍການ ${item.item_code} ເຫຼືອຈັດໄດ້ພຽງ ${remainingItem.qty}`);
             }
             return {
               item_code: item.item_code,
@@ -280,7 +281,7 @@ async function createJob(session, data) {
           }));
 
     if (itemsToSave.length === 0) {
-      throw new Error(`ບິນ ${bill.bill_no} ບໍ່ມີລາຍການຄົງເຫຼືອໃຫ້ຈັດຖ້ຽວ`);
+      throw userError(`ບິນ ${bill.bill_no} ບໍ່ມີລາຍການຄົງເຫຼືອໃຫ້ຈັດຖ້ຽວ`);
     }
     return { ...bill, count_item: itemsToSave.length, items: itemsToSave };
   };
@@ -302,7 +303,7 @@ async function createJob(session, data) {
     originBranch = DELIVERY_BRANCH_CODES.includes(selectedBranch) ? selectedBranch : null;
   }
   if (!originBranch) {
-    throw new Error("ກະລຸນາເລືອກສາຂາຂົນສົ່ງ");
+    throw userError("ກະລຸນາເລືອກສາຂາຂົນສົ່ງ");
   }
   // Optional route/round; auto-DDL creates the columns on first run.
   const { ensureDeliveryRouteSchema } = require("./delivery-route");
@@ -319,16 +320,16 @@ async function createJob(session, data) {
   // Server-side guards — the add-job page enforces these client-side, but the
   // action is directly callable so it must not trust the client.
   if (!data.car || !String(data.car).trim()) {
-    throw new Error("ກະລຸນາເລືອກລົດກ່ອນຈັດຖ້ຽວ");
+    throw userError("ກະລຸນາເລືອກລົດກ່ອນຈັດຖ້ຽວ");
   }
   if (!deliveryRouteCode) {
-    throw new Error("ກະລຸນາເລືອກສາຍຈັດສົ່ງ");
+    throw userError("ກະລຸນາເລືອກສາຍຈັດສົ່ງ");
   }
   if (!deliveryRoundCode) {
-    throw new Error("ກະລຸນາເລືອກຮອບຈັດສົ່ງ");
+    throw userError("ກະລຸນາເລືອກຮອບຈັດສົ່ງ");
   }
   if (!Array.isArray(billsList) || billsList.length === 0) {
-    throw new Error("ກະລຸນາເລືອກບິນຢ່າງໜ້ອຍ 1 ບິນ");
+    throw userError("ກະລຸນາເລືອກບິນຢ່າງໜ້ອຍ 1 ບິນ");
   }
 
   // Distinct bill numbers, sorted so concurrent createJob calls take the
@@ -522,7 +523,7 @@ async function addBillsToJob(docNo, bills) {
     })
     .filter(Boolean);
   if (normalizedInput.length === 0) {
-    throw new Error("ກະລຸນາເລືອກບິນຢ່າງໜ້ອຍ 1 ບິນ");
+    throw userError("ກະລຸນາເລືອກບິນຢ່າງໜ້ອຍ 1 ບິນ");
   }
 
   await ensureTmsWorkerTable();
@@ -542,12 +543,12 @@ async function addBillsToJob(docNo, bills) {
      WHERE doc_no=$1 AND ${getFixedYearSqlFilter("doc_date")}`,
     [docNo]
   );
-  if (!job) throw new Error("ບໍ່ພົບຖ້ຽວ");
+  if (!job) throw userError("ບໍ່ພົບຖ້ຽວ");
   if (Number(job.approve_status) !== 1) {
-    throw new Error("ຖ້ຽວນີ້ຍັງບໍ່ຖືກອະນຸມັດ");
+    throw userError("ຖ້ຽວນີ້ຍັງບໍ່ຖືກອະນຸມັດ");
   }
   if (Number(job.job_status) >= 2) {
-    throw new Error("ຖ້ຽວນີ້ເລີ່ມຈັດສົ່ງແລ້ວ ບໍ່ສາມາດເພີ່ມບິນໄດ້");
+    throw userError("ຖ້ຽວນີ້ເລີ່ມຈັດສົ່ງແລ້ວ ບໍ່ສາມາດເພີ່ມບິນໄດ້");
   }
 
   // De-dupe against bills already on this job so the same bill can't be
@@ -560,7 +561,7 @@ async function addBillsToJob(docNo, bills) {
   const existingSet = new Set(existing.map((r) => String(r.bill_no)));
   const billsToAdd = normalizedInput.filter((b) => !existingSet.has(b.bill_no));
   if (billsToAdd.length === 0) {
-    throw new Error("ບິນທີ່ເລືອກມີຢູ່ໃນຖ້ຽວແລ້ວ");
+    throw userError("ບິນທີ່ເລືອກມີຢູ່ໃນຖ້ຽວແລ້ວ");
   }
 
   // Distinct bill numbers, sorted so concurrent writers take the per-bill locks
@@ -624,13 +625,13 @@ async function addBillsToJob(docNo, bills) {
             const remainingItem = remainingByItem.get(item.item_code);
             const selectedQty = Number(item.selectedQty ?? item.qty ?? 0);
             if (!remainingItem) {
-              throw new Error(`ບິນ ${billNo} ລາຍການ ${item.item_code} ຖືກຈັດຄົບແລ້ວ`);
+              throw userError(`ບິນ ${billNo} ລາຍການ ${item.item_code} ຖືກຈັດຄົບແລ້ວ`);
             }
             if (!Number.isFinite(selectedQty) || selectedQty <= 0) {
-              throw new Error(`ຈໍານວນຈັດສົ່ງຂອງ ${item.item_code} ບໍ່ຖືກຕ້ອງ`);
+              throw userError(`ຈໍານວນຈັດສົ່ງຂອງ ${item.item_code} ບໍ່ຖືກຕ້ອງ`);
             }
             if (selectedQty > Number(remainingItem.qty)) {
-              throw new Error(
+              throw userError(
                 `ບິນ ${billNo} ລາຍການ ${item.item_code} ເຫຼືອຈັດໄດ້ພຽງ ${remainingItem.qty}`
               );
             }
@@ -651,7 +652,7 @@ async function addBillsToJob(docNo, bills) {
           }));
 
     if (itemsToSave.length === 0) {
-      throw new Error(`ບິນ ${billNo} ບໍ່ມີລາຍການຄົງເຫຼືອໃຫ້ຈັດຖ້ຽວ`);
+      throw userError(`ບິນ ${billNo} ບໍ່ມີລາຍການຄົງເຫຼືອໃຫ້ຈັດຖ້ຽວ`);
     }
 
     await client.query(
@@ -824,9 +825,9 @@ async function getJobForEdit(docNo) {
      WHERE doc_no=$1 AND ${getFixedYearSqlFilter("doc_date")}`,
     [docNo]
   );
-  if (!job) throw new Error("ບໍ່ພົບຖ້ຽວ");
+  if (!job) throw userError("ບໍ່ພົບຖ້ຽວ");
   if (Number(job.job_status) !== 0) {
-    throw new Error("ສາມາດແກ້ໄຂໄດ້ສະເພາະຖ້ຽວທີ່ຄົນຂັບຍັງບໍ່ກົດຮັບ");
+    throw userError("ສາມາດແກ້ໄຂໄດ້ສະເພາະຖ້ຽວທີ່ຄົນຂັບຍັງບໍ່ກົດຮັບ");
   }
 
   const billsRows = await query(
@@ -1018,15 +1019,15 @@ async function updateJob(session, docNo, data) {
   );
 
   const selectedDriver = await getDispatchDriverByCode(data.driver);
-  if (!selectedDriver) throw new Error("ບໍ່ພົບຄົນຂັບ");
+  if (!selectedDriver) throw userError("ບໍ່ພົບຄົນຂັບ");
 
   const existing = await queryOne(
     `SELECT job_status FROM odg_tms WHERE doc_no=$1 AND ${getFixedYearSqlFilter("doc_date")}`,
     [docNo]
   );
-  if (!existing) throw new Error("ບໍ່ພົບຖ້ຽວ");
+  if (!existing) throw userError("ບໍ່ພົບຖ້ຽວ");
   if (Number(existing.job_status ?? 0) !== 0) {
-    throw new Error("ສາມາດແກ້ໄຂໄດ້ສະເພາະຖ້ຽວທີ່ຄົນຂັບຍັງບໍ່ກົດຮັບ");
+    throw userError("ສາມາດແກ້ໄຂໄດ້ສະເພາະຖ້ຽວທີ່ຄົນຂັບຍັງບໍ່ກົດຮັບ");
   }
 
   // Ensure driver row exists (createJob does the same)
@@ -1059,7 +1060,7 @@ async function updateJob(session, docNo, data) {
 
   const inputBills = Array.isArray(data.bills) ? data.bills : [];
   if (inputBills.length === 0) {
-    throw new Error("ກະລຸນາເລືອກບິນຢ່າງໜ້ອຍ 1 ບິນ");
+    throw userError("ກະລຸນາເລືອກບິນຢ່າງໜ້ອຍ 1 ບິນ");
   }
   const newBillNos = new Set(inputBills.map((b) => String(b.bill_no)));
 
@@ -1095,17 +1096,17 @@ async function updateJob(session, docNo, data) {
 
       const items = Array.isArray(bill.items) ? bill.items : [];
       if (items.length === 0) {
-        throw new Error(`ບິນ ${billNo} ບໍ່ມີລາຍການ`);
+        throw userError(`ບິນ ${billNo} ບໍ່ມີລາຍການ`);
       }
       const itemsToSave = items.map((it) => {
         const r = remByCode.get(it.item_code);
         const sel = Number(it.selectedQty ?? 0);
-        if (!r) throw new Error(`ບິນ ${billNo} ລາຍການ ${it.item_code} ບໍ່ມີໃນຕົ້ນສະບັບ`);
+        if (!r) throw userError(`ບິນ ${billNo} ລາຍການ ${it.item_code} ບໍ່ມີໃນຕົ້ນສະບັບ`);
         if (!Number.isFinite(sel) || sel <= 0) {
-          throw new Error(`ຈຳນວນຂອງ ${it.item_code} ບໍ່ຖືກຕ້ອງ`);
+          throw userError(`ຈຳນວນຂອງ ${it.item_code} ບໍ່ຖືກຕ້ອງ`);
         }
         if (sel > r.qty) {
-          throw new Error(`ບິນ ${billNo} ລາຍການ ${it.item_code} ເຫຼືອໃຫ້ຈັດໄດ້ພຽງ ${r.qty}`);
+          throw userError(`ບິນ ${billNo} ລາຍການ ${it.item_code} ເຫຼືອໃຫ້ຈັດໄດ້ພຽງ ${r.qty}`);
         }
         return {
           item_code: it.item_code,
@@ -1315,7 +1316,7 @@ async function closeJob(session, docNo) {
   );
   if (!currentJob) throw new Error("Job not found");
   if (Number(currentJob.job_status ?? 0) !== 3) {
-    throw new Error("ສາມາດປິດຖ້ຽວໄດ້ເມື່ອຄົນຂັບປິດງານແລ້ວເທົ່ານັ້ນ");
+    throw userError("ສາມາດປິດຖ້ຽວໄດ້ເມື່ອຄົນຂັບປິດງານແລ້ວເທົ່ານັ້ນ");
   }
   await queryOne(
     `UPDATE odg_tms
@@ -1419,7 +1420,7 @@ async function getJobPrintData(docNo) {
      WHERE a.doc_no = $1 AND ${getFixedYearSqlFilter("a.doc_date")}`,
     [docNo]
   );
-  if (!header) throw new Error("ບໍ່ພົບຖ້ຽວ");
+  if (!header) throw userError("ບໍ່ພົບຖ້ຽວ");
 
   const bills = await query(
     `SELECT
@@ -1917,33 +1918,33 @@ async function moveBillToJob(sourceDocNo, billNo, destDocNo) {
       `SELECT job_status, doc_date, date_logistic, car FROM public.odg_tms WHERE doc_no = $1 FOR UPDATE`,
       [dest]
     );
-    if (lockSource.rows.length === 0) throw new Error("ບໍ່ພົບຖ້ຽວຕົ້ນທາງ");
-    if (lockDest.rows.length === 0) throw new Error("ບໍ່ພົບຖ້ຽວປາຍທາງ");
+    if (lockSource.rows.length === 0) throw userError("ບໍ່ພົບຖ້ຽວຕົ້ນທາງ");
+    if (lockDest.rows.length === 0) throw userError("ບໍ່ພົບຖ້ຽວປາຍທາງ");
     if (Number(lockSource.rows[0].job_status ?? 0) !== 0) {
-      throw new Error("ຖ້ຽວຕົ້ນທາງເລີ່ມຮັບແລ້ວ — ຍ້າຍບໍ່ໄດ້");
+      throw userError("ຖ້ຽວຕົ້ນທາງເລີ່ມຮັບແລ້ວ — ຍ້າຍບໍ່ໄດ້");
     }
     if (Number(lockDest.rows[0].job_status ?? 0) !== 0) {
-      throw new Error("ຖ້ຽວປາຍທາງເລີ່ມຮັບແລ້ວ — ຍ້າຍບໍ່ໄດ້");
+      throw userError("ຖ້ຽວປາຍທາງເລີ່ມຮັບແລ້ວ — ຍ້າຍບໍ່ໄດ້");
     }
     const billLock = await client.query(
       `SELECT recipt_job, status FROM public.odg_tms_detail WHERE doc_no = $1 AND bill_no = $2 FOR UPDATE`,
       [source, bill]
     );
     if (billLock.rows.length === 0) {
-      throw new Error("ບໍ່ພົບບິນໃນຖ້ຽວຕົ້ນທາງ");
+      throw userError("ບໍ່ພົບບິນໃນຖ້ຽວຕົ້ນທາງ");
     }
     if (billLock.rows[0].recipt_job != null) {
-      throw new Error("ບິນຮັບແລ້ວ — ຍ້າຍບໍ່ໄດ້");
+      throw userError("ບິນຮັບແລ້ວ — ຍ້າຍບໍ່ໄດ້");
     }
     if ([1, 2].includes(Number(billLock.rows[0].status ?? 0))) {
-      throw new Error("ບິນສະຖານະປິດແລ້ວ — ຍ້າຍບໍ່ໄດ້");
+      throw userError("ບິນສະຖານະປິດແລ້ວ — ຍ້າຍບໍ່ໄດ້");
     }
     const conflict = await client.query(
       `SELECT 1 FROM public.odg_tms_detail WHERE doc_no = $1 AND bill_no = $2 LIMIT 1`,
       [dest, bill]
     );
     if (conflict.rowCount > 0) {
-      throw new Error("ບິນນີ້ຢູ່ຖ້ຽວປາຍທາງແລ້ວ — ຍ້າຍບໍ່ໄດ້");
+      throw userError("ບິນນີ້ຢູ່ຖ້ຽວປາຍທາງແລ້ວ — ຍ້າຍບໍ່ໄດ້");
     }
     const { doc_date: destDocDate, date_logistic: destDateLog, car: destCar } = lockDest.rows[0];
     // Defensive: drop any orphan items lingering on dest for this bill_no
@@ -1999,8 +2000,8 @@ async function reclassifyDeliveredBillToBranch(session, docNo, billNo, forwardTr
   const doc = String(docNo ?? "").trim();
   const bill = String(billNo ?? "").trim();
   const branch = String(forwardTransportCode ?? "").trim();
-  if (!doc || !bill) throw new Error("ຕ້ອງລະບຸ doc_no ແລະ bill_no");
-  if (!branch) throw new Error("ກະລຸນາເລືອກສາຂາປາຍທາງ");
+  if (!doc || !bill) throw userError("ຕ້ອງລະບຸ doc_no ແລະ bill_no");
+  if (!branch) throw userError("ກະລຸນາເລືອກສາຂາປາຍທາງ");
 
   // Forward target must be a real internal delivery branch (transport_type
   // 02-xxxx) — never the customer self-pickup pseudo-branch 02-0004.
@@ -2009,7 +2010,7 @@ async function reclassifyDeliveredBillToBranch(session, docNo, billNo, forwardTr
      WHERE code = $1 AND code LIKE '02-%' AND code <> '02-0004'`,
     [branch]
   );
-  if (!branchRow) throw new Error("ສາຂາປາຍທາງບໍ່ຖືກຕ້ອງ");
+  if (!branchRow) throw userError("ສາຂາປາຍທາງບໍ່ຖືກຕ້ອງ");
 
   const client = await pool.connect();
   try {
@@ -2022,13 +2023,13 @@ async function reclassifyDeliveredBillToBranch(session, docNo, billNo, forwardTr
        FOR UPDATE`,
       [doc, bill]
     );
-    if (lock.rows.length === 0) throw new Error("ບໍ່ພົບບິນໃນຖ້ຽວນີ້");
+    if (lock.rows.length === 0) throw userError("ບໍ່ພົບບິນໃນຖ້ຽວນີ້");
     const detail = lock.rows[0];
     if (Number(detail.status) === 2) {
-      throw new Error("ບິນທີ່ຍົກເລີກແລ້ວ ບໍ່ສາມາດແກ້ເປັນສົ່ງສາຂາ");
+      throw userError("ບິນທີ່ຍົກເລີກແລ້ວ ບໍ່ສາມາດແກ້ເປັນສົ່ງສາຂາ");
     }
     if (detail.forward_transport_code) {
-      throw new Error("ບິນນີ້ເປັນ 'ສົ່ງສາຂາ' ຢູ່ແລ້ວ");
+      throw userError("ບິນນີ້ເປັນ 'ສົ່ງສາຂາ' ຢູ່ແລ້ວ");
     }
     // An in-delivery (ກຳລັງຈັດສົ່ງ) / waiting stop hasn't been finalised yet, so
     // we also stamp its completion below + dispatch the trip (matching the native
@@ -2043,7 +2044,7 @@ async function reclassifyDeliveredBillToBranch(session, docNo, billNo, forwardTr
     );
     const origin = trip.rows[0]?.origin_transport_code ?? "";
     if (origin && origin === branch) {
-      throw new Error("ສາຂາປາຍທາງຊ້ຳກັບສາຂາທີ່ຈັດສົ່ງ");
+      throw userError("ສາຂາປາຍທາງຊ້ຳກັບສາຂາທີ່ຈັດສົ່ງ");
     }
     // Legacy trips can have no origin_transport_code anchor — they show in a
     // branch's scoped lists only via the bill's CURRENT shipment branch

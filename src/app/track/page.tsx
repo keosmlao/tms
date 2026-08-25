@@ -19,6 +19,7 @@ import {
   FaMapMarkerAlt,
 } from "react-icons/fa";
 import { TrackingLiveMap } from "@/components/tracking-live-map";
+import { userErrorMessage } from "@/lib/action-error";
 
 interface TrackingStep {
   doc_date: string;
@@ -173,7 +174,7 @@ function TrackPageInner() {
       setResult(data);
     } catch (e) {
       console.error(e);
-      setError(e instanceof Error ? e.message : "ບໍ່ສາມາດເຊື່ອມຕໍ່ ລອງໃໝ່");
+      setError(userErrorMessage(e, "ບໍ່ສາມາດເຊື່ອມຕໍ່ ລອງໃໝ່"));
       setResult(null);
     } finally {
       setLoading(false);

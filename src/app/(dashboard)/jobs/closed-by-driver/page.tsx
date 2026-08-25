@@ -37,6 +37,7 @@ import {
   JobBillsAccordion,
   type JobBill,
 } from "@/components/job-bills-accordion";
+import { userErrorMessage } from "@/lib/action-error";
 
 interface JobRow {
   doc_date: string;
@@ -135,7 +136,7 @@ export default function JobsClosedByDriverPage() {
       setJobs((current) => current.filter((job) => job.doc_no !== docNo));
       if (expandedDoc === docNo) setExpandedDoc(null);
     } catch (error) {
-      void confirm({ title: "ຜິດພາດ", message: error instanceof Error ? error.message : "ບໍ່ສາມາດປິດຖ້ຽວໄດ້", tone: "warning", single: true });
+      void confirm({ title: "ຜິດພາດ", message: userErrorMessage(error, "ບໍ່ສາມາດປິດຖ້ຽວໄດ້"), tone: "warning", single: true });
     } finally {
       setActingDoc(null);
     }

@@ -12,6 +12,7 @@ import {
   THUNJAI_KEYS,
   type ThunJaiSettings,
 } from "@/lib/thunjai-config";
+import { userError } from "@/lib/action-error";
 
 function resolveBaseUrl(settings: ThunJaiSettings) {
   const custom = settings["thunjai.base_url"].trim();
@@ -306,7 +307,7 @@ export async function createThunJaiOrder(input: unknown) {
   // reject it instead of silently sending 0.
   products.forEach((p, i) => {
     if (p.is_cod && (p.price == null || p.price <= 0)) {
-      throw new Error(`Product ${i + 1}: COD ต้องระบุราคาเก็บเงินมากกว่า 0`);
+      throw userError(`Product ${i + 1}: COD ต้องระบุราคาเก็บเงินมากกว่า 0`);
     }
   });
 

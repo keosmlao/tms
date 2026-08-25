@@ -5,6 +5,7 @@ import { FaSpinner, FaWarehouse, FaTimes, FaCodeBranch } from "react-icons/fa";
 import { Actions } from "@/lib/api";
 import { useConfirm } from "@/components/confirm-dialog";
 import { getFixedTodayDate, FIXED_YEAR_START, FIXED_YEAR_END } from "@/lib/fixed-year";
+import { userErrorMessage } from "@/lib/action-error";
 
 interface RemainingItem {
   item_code: string;
@@ -84,7 +85,7 @@ export default function SplitBillByBranch({ billNo, onClose, onDone }: SplitBill
         );
       })
       .catch((e) => {
-        if (!cancelled) setLoadError(e?.message ?? "ໂຫຼດຂໍ້ມູນບໍ່ສຳເລັດ");
+        if (!cancelled) setLoadError(userErrorMessage(e, "ໂຫຼດຂໍ້ມູນບໍ່ສຳເລັດ"));
       })
       .finally(() => {
         if (!cancelled) setLoading(false);
@@ -188,7 +189,7 @@ export default function SplitBillByBranch({ billNo, onClose, onDone }: SplitBill
       onDone?.();
       onClose();
     } catch (error) {
-      const message = error instanceof Error ? error.message : "ແຍກບໍ່ສຳເລັດ";
+      const message = userErrorMessage(error, "ແຍກບໍ່ສຳເລັດ");
       void confirm({ title: "ຜິດພາດ", message, tone: "warning", single: true });
     } finally {
       setSaving(false);

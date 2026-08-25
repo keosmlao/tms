@@ -14,6 +14,7 @@ import {
 import { Actions } from "@/lib/api";
 import { useConfirm } from "@/components/confirm-dialog";
 import { getFixedTodayDate } from "@/lib/fixed-year";
+import { userErrorMessage } from "@/lib/action-error";
 
 interface Todo {
   id: number;
@@ -131,7 +132,7 @@ export function BillTodoPopover({
       onChanged?.();
     } catch (e) {
       console.error(e);
-      setError(e instanceof Error ? e.message : "ບັນທຶກບໍ່ສຳເລັດ");
+      setError(userErrorMessage(e, "ບັນທຶກບໍ່ສຳເລັດ"));
     } finally {
       setSubmitting(false);
     }

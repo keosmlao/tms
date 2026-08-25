@@ -20,6 +20,7 @@ import {
   StatusStatGrid,
   StatusTableShell,
 } from "@/components/status-page-shell";
+import { userErrorMessage } from "@/lib/action-error";
 
 // ບິນເບີກບໍ່ຄົບ — pickups where the driver reported a different quantity at the
 // warehouse than the trip planned. The trip was already corrected when the
@@ -87,7 +88,7 @@ export default function BillsPickupVariancePage() {
     setError("");
     void Actions.getPickupVarianceList(fromDate, toDate, nextStatus)
       .then((data) => setRows(data as VarianceRow[]))
-      .catch((e) => setError(String(e?.message ?? e)))
+      .catch((e) => setError(userErrorMessage(e, String(e))))
       .finally(() => setLoading(false));
   };
 
@@ -109,7 +110,7 @@ export default function BillsPickupVariancePage() {
           : prev.map((r) => (rowKey(r) === key ? { ...r, acknowledged: true } : r))
       );
     } catch (e) {
-      setError(String((e as Error)?.message ?? e));
+      setError(userErrorMessage(e, String(e)));
     } finally {
       setAcking(null);
     }

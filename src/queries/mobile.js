@@ -1,3 +1,4 @@
+const { userError } = require("../lib/action-error");
 const { pool, query, queryOne, queryOneB } = require("../lib/db");
 const {
   ensureBillDeliveryItems,
@@ -805,12 +806,12 @@ async function mobileJobAction(body) {
         const currentJob = billRow.rows[0];
         const currentDocNo = currentJob?.doc_no;
         if (!currentDocNo) throw new Error("Bill was not found");
-        if (Number(currentJob.approve_status ?? 0) !== 1) throw new Error("ຖ້ຽວນີ້ຍັງບໍ່ຖືກອະນຸມັດ");
+        if (Number(currentJob.approve_status ?? 0) !== 1) throw userError("ຖ້ຽວນີ້ຍັງບໍ່ຖືກອະນຸມັດ");
         // Bills sitting at ANOTHER branch's warehouse can only be picked up once
         // the trip has actually started dispatching (job_status >= 2). Own-branch
         // bills load first, before dispatch starts.
         if (currentJob.is_other_branch && Number(currentJob.job_status ?? 0) < 2) {
-          throw new Error("ບິນສາຂາອື່ນ: ຕ້ອງເລີ່ມຈັດສົ່ງກ່ອນຈຶ່ງເບີກໄດ້");
+          throw userError("ບິນສາຂາອື່ນ: ຕ້ອງເລີ່ມຈັດສົ່ງກ່ອນຈຶ່ງເບີກໄດ້");
         }
         // ຮັບຖ້ຽວ is a required first step: the driver must take the trip before
         // any goods leave the warehouse against it. This used to auto-receive
@@ -818,10 +819,10 @@ async function mobileJobAction(body) {
         // the step; the app now hides every pickup control until the trip is
         // received, and this guard makes the rule hold for any other client.
         if (Number(currentJob.job_status ?? 0) === 0) {
-          throw new Error("ຕ້ອງກົດ 'ຮັບຖ້ຽວ' ກ່ອນ ຈຶ່ງເບີກເຄື່ອງໄດ້");
+          throw userError("ຕ້ອງກົດ 'ຮັບຖ້ຽວ' ກ່ອນ ຈຶ່ງເບີກເຄື່ອງໄດ້");
         }
         if (Number(currentJob.job_status ?? 0) > 2) {
-          throw new Error("ຖ້ຽວນີ້ປິດແລ້ວ ບໍ່ສາມາດເບີກເຄື່ອງ");
+          throw userError("ຖ້ຽວນີ້ປິດແລ້ວ ບໍ່ສາມາດເບີກເຄື່ອງ");
         }
 
         await ensureBillDeliveryItems(billNo, client);
@@ -854,7 +855,7 @@ async function mobileJobAction(body) {
             reportedItems
           );
           if (result.emptyPickup) {
-            throw new Error(
+            throw userError(
               "ບໍ່ໄດ້ຮັບສິນຄ້າແມ່ນແຕ່ລາຍການດຽວ — ໃຫ້ໃຊ້ 'ຍົກເລີກບິນ' ແທນການເບີກເຄື່ອງ"
             );
           }
@@ -969,15 +970,15 @@ async function mobileJobAction(body) {
         const currentBill = billRow.rows[0];
         const currentDocNo = currentBill?.doc_no;
         if (!currentDocNo) throw new Error("Bill was not found");
-        if (Number(currentBill.approve_status ?? 0) !== 1) throw new Error("ຖ້ຽວນີ້ຍັງບໍ່ຖືກອະນຸມັດ");
-        if (Number(currentBill.job_status ?? 0) >= 3) throw new Error("ຖ້ຽວນີ້ປິດແລ້ວ ບໍ່ສາມາດຮັບເຄື່ອງ");
+        if (Number(currentBill.approve_status ?? 0) !== 1) throw userError("ຖ້ຽວນີ້ຍັງບໍ່ຖືກອະນຸມັດ");
+        if (Number(currentBill.job_status ?? 0) >= 3) throw userError("ຖ້ຽວນີ້ປິດແລ້ວ ບໍ່ສາມາດຮັບເຄື່ອງ");
         if (currentBill.pickup_transport_code !== "__CUSTOMER__") {
-          throw new Error("ບິນນີ້ບໍ່ແມ່ນການຮັບຈາກລານລູກຄ້າ");
+          throw userError("ບິນນີ້ບໍ່ແມ່ນການຮັບຈາກລານລູກຄ້າ");
         }
         // Same first-step rule as pickup_bill: the trip must be received before
         // any goods are collected against it (was an auto-receive).
         if (Number(currentBill.job_status ?? 0) === 0) {
-          throw new Error("ຕ້ອງກົດ 'ຮັບຖ້ຽວ' ກ່ອນ ຈຶ່ງຮັບສິນຄ້າໄດ້");
+          throw userError("ຕ້ອງກົດ 'ຮັບຖ້ຽວ' ກ່ອນ ຈຶ່ງຮັບສິນຄ້າໄດ້");
         }
 
         await ensureBillDeliveryItems(billNo, client);
@@ -1017,13 +1018,13 @@ async function mobileJobAction(body) {
         );
         const currentJob = jobRow.rows[0];
         if (!currentJob) throw new Error("Job was not found");
-        if (Number(currentJob.approve_status ?? 0) !== 1) throw new Error("ຖ້ຽວນີ້ຍັງບໍ່ຖືກອະນຸມັດ");
+        if (Number(currentJob.approve_status ?? 0) !== 1) throw userError("ຖ້ຽວນີ້ຍັງບໍ່ຖືກອະນຸມັດ");
         const currentJobStatus = Number(currentJob.job_status ?? 0);
         if (currentJobStatus === 2) {
           await client.query("COMMIT");
           return { success: true, already_started: true };
         }
-        if (currentJobStatus > 2) throw new Error("ຖ້ຽວນີ້ປິດແລ້ວ ບໍ່ສາມາດເລີ່ມຈັດສົ່ງ");
+        if (currentJobStatus > 2) throw userError("ຖ້ຽວນີ້ປິດແລ້ວ ບໍ່ສາມາດເລີ່ມຈັດສົ່ງ");
 
         // Goods owned by the trip's origin branch must be explicitly picked up
         // before the truck may leave. Bills collected at the customer or at a
@@ -1043,7 +1044,7 @@ async function mobileJobAction(body) {
         );
         const pendingOriginPickupCount = Number(pendingOriginPickup.rows[0]?.count ?? 0);
         if (pendingOriginPickupCount > 0) {
-          throw new Error(
+          throw userError(
             `ຕ້ອງເບີກສິນຄ້າຂອງສາຂານີ້ໃຫ້ຄົບກ່ອນ (ຍັງເຫຼືອ ${pendingOriginPickupCount} ບິນ)`
           );
         }
@@ -1135,8 +1136,8 @@ async function mobileJobAction(body) {
         const currentBill = billRow.rows[0];
         const currentDocNo = currentBill?.doc_no;
         if (!currentDocNo) throw new Error("Bill was not found");
-        if (Number(currentBill.approve_status ?? 0) !== 1) throw new Error("ຖ້ຽວນີ້ຍັງບໍ່ຖືກອະນຸມັດ");
-        if (Number(currentBill.job_status ?? 0) >= 3) throw new Error("ຖ້ຽວນີ້ປິດແລ້ວ ບໍ່ສາມາດ checkin");
+        if (Number(currentBill.approve_status ?? 0) !== 1) throw userError("ຖ້ຽວນີ້ຍັງບໍ່ຖືກອະນຸມັດ");
+        if (Number(currentBill.job_status ?? 0) >= 3) throw userError("ຖ້ຽວນີ້ປິດແລ້ວ ບໍ່ສາມາດ checkin");
         // Auto-receive + auto-dispatch: the UPDATE below sets job_status=2
         // regardless of current value, so a driver who jumped straight to
         // check-in (skipped "ຮັບຖ້ຽວ" / "ເລີ່ມຈັດສົ່ງ") still progresses cleanly.
@@ -1153,7 +1154,7 @@ async function mobileJobAction(body) {
           (currentBill.effective_pickup_code ?? "") === (currentBill.origin_transport_code ?? "");
         const autoReceive = pickupAtCustomer || pickupAtOrigin;
         if (!autoReceive && !currentBill.recipt_job) {
-          throw new Error("ກະລຸນາເບີກເຄື່ອງກ່ອນ");
+          throw userError("ກະລຸນາເບີກເຄື່ອງກ່ອນ");
         }
         // Driver may skip the explicit "ເລີ່ມຈັດສົ່ງ" button (older trips, or
         // they jumped straight to the customer). Backfill dispatch_started_at
@@ -1177,7 +1178,7 @@ async function mobileJobAction(body) {
           [currentDocNo, billNo]
         );
         if (activeCheckin.rows.length > 0) {
-          throw new Error(
+          throw userError(
             `ກະລຸນາສຳເລັດ ຫຼື ຍົກເລີກບິນ ${activeCheckin.rows[0].bill_no} ກ່ອນ checkin ບິນອື່ນ`
           );
         }
@@ -1377,10 +1378,10 @@ async function mobileJobAction(body) {
         // before complete_bill, so accept either an inline image or the primary
         // image already persisted on the bill.
         if (deliveryImages.length === 0 && !asNullableText(currentBill.url_img)) {
-          throw new Error("ຕ້ອງຖ່າຍຮູບຫຼັກຖານກ່ອນສົ່ງສຳເລັດ");
+          throw userError("ຕ້ອງຖ່າຍຮູບຫຼັກຖານກ່ອນສົ່ງສຳເລັດ");
         }
-        if (Number(currentBill.approve_status ?? 0) !== 1) throw new Error("ຖ້ຽວນີ້ຍັງບໍ່ຖືກອະນຸມັດ");
-        if (Number(currentBill.job_status ?? 0) >= 3) throw new Error("ຖ້ຽວນີ້ປິດແລ້ວ ບໍ່ສາມາດສຳເລັດ");
+        if (Number(currentBill.approve_status ?? 0) !== 1) throw userError("ຖ້ຽວນີ້ຍັງບໍ່ຖືກອະນຸມັດ");
+        if (Number(currentBill.job_status ?? 0) >= 3) throw userError("ຖ້ຽວນີ້ປິດແລ້ວ ບໍ່ສາມາດສຳເລັດ");
         // Same origin-aware ເບີກເຄື່ອງ rule as checkin_bill: auto-receive when
         // the goods came from the trip's origin warehouse or from the customer;
         // otherwise the driver must still tap "ຮັບເຄື່ອງ" first.
@@ -1389,7 +1390,7 @@ async function mobileJobAction(body) {
           (currentBill.effective_pickup_code ?? "") === (currentBill.origin_transport_code ?? "");
         const autoReceive = pickupAtCustomer || pickupAtOrigin;
         if (!currentBill.recipt_job) {
-          if (!autoReceive) throw new Error("ກະລຸນາເບີກເຄື່ອງກ່ອນ");
+          if (!autoReceive) throw userError("ກະລຸນາເບີກເຄື່ອງກ່ອນ");
           await client.query(
             `UPDATE public.odg_tms_detail
              SET recipt_job = COALESCE(recipt_job, LOCALTIMESTAMP(0))
@@ -1764,8 +1765,8 @@ async function mobileJobAction(body) {
             open_bill_count: openBillCount,
           };
         }
-        if (Number(currentBill.approve_status ?? 0) !== 1) throw new Error("ຖ້ຽວນີ້ຍັງບໍ່ຖືກອະນຸມັດ");
-        if (Number(currentBill.job_status ?? 0) >= 3) throw new Error("ຖ້ຽວນີ້ປິດແລ້ວ ບໍ່ສາມາດຄືນສາງ");
+        if (Number(currentBill.approve_status ?? 0) !== 1) throw userError("ຖ້ຽວນີ້ຍັງບໍ່ຖືກອະນຸມັດ");
+        if (Number(currentBill.job_status ?? 0) >= 3) throw userError("ຖ້ຽວນີ້ປິດແລ້ວ ບໍ່ສາມາດຄືນສາງ");
 
         const returnItemRows = await client.query(
           `SELECT item_code, selected_qty, delivered_qty, returned_qty
@@ -1890,7 +1891,7 @@ async function mobileJobAction(body) {
             open_bill_count: openBillCount,
           };
         }
-        if (Number(currentBill.approve_status ?? 0) !== 1) throw new Error("ຖ້ຽວນີ້ຍັງບໍ່ຖືກອະນຸມັດ");
+        if (Number(currentBill.approve_status ?? 0) !== 1) throw userError("ຖ້ຽວນີ້ຍັງບໍ່ຖືກອະນຸມັດ");
 
         // Undo-pickup mode: bill was picked up but the driver hasn't pressed
         // "ເລີ່ມຈັດສົ່ງ" yet (job_status < 2). Roll back recipt_job so the
@@ -1922,7 +1923,7 @@ async function mobileJobAction(body) {
         // Full cancel mode: bill never picked up (recipt_job NULL) or
         // dispatch already started (job_status >= 2). A remark is required
         // and the bill is marked as cancelled (status=2).
-        if (!comment) throw new Error("ກະລຸນາໃສ່ໝາຍເຫດການຍົກເລີກ");
+        if (!comment) throw userError("ກະລຸນາໃສ່ໝາຍເຫດການຍົກເລີກ");
 
         await client.query(
           `UPDATE public.odg_tms_detail
@@ -2002,10 +2003,10 @@ async function mobileJobAction(body) {
         const currentDocNo = currentBill?.doc_no;
         if (!currentDocNo) throw new Error("Bill was not found");
         if (Number(currentBill.status ?? 0) !== 1) {
-          throw new Error("ບິນນີ້ບໍ່ໄດ້ຢູ່ໃນສະຖານະຈັດສົ່ງສຳເລັດ");
+          throw userError("ບິນນີ້ບໍ່ໄດ້ຢູ່ໃນສະຖານະຈັດສົ່ງສຳເລັດ");
         }
         if (Number(currentBill.job_status ?? 0) >= 3) {
-          throw new Error("ປິດຖ້ຽວແລ້ວ ບໍ່ສາມາດຍົກເລີກສຳເລັດໄດ້");
+          throw userError("ປິດຖ້ຽວແລ້ວ ບໍ່ສາມາດຍົກເລີກສຳເລັດໄດ້");
         }
 
         // Serialize against complete_job (which holds tms_exec_job via doc_no):
@@ -2082,10 +2083,10 @@ async function mobileJobAction(body) {
         const currentDocNo = currentBill?.doc_no;
         if (!currentDocNo) throw new Error("Bill was not found");
         if (Number(currentBill.status ?? 0) !== 1) {
-          throw new Error("ບິນນີ້ບໍ່ໄດ້ຢູ່ໃນສະຖານະຈັດສົ່ງສຳເລັດ");
+          throw userError("ບິນນີ້ບໍ່ໄດ້ຢູ່ໃນສະຖານະຈັດສົ່ງສຳເລັດ");
         }
         if (Number(currentBill.job_status ?? 0) >= 3) {
-          throw new Error("ປິດຖ້ຽວແລ້ວ ບໍ່ສາມາດແກ້ໄຂໄດ້");
+          throw userError("ປິດຖ້ຽວແລ້ວ ບໍ່ສາມາດແກ້ໄຂໄດ້");
         }
 
         const itemRows = await client.query(

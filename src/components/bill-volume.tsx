@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import { FaSpinner, FaTimes } from "react-icons/fa";
 import { Actions } from "@/lib/api";
+import { userErrorMessage } from "@/lib/action-error";
 
 export interface BillVolume {
   m3: number;
@@ -137,7 +138,7 @@ export function BillItemsModal({
         setTotalM3(d.totalM3 ?? 0);
         setLinesUnknown(d.linesUnknown ?? 0);
       })
-      .catch((e) => alive && setError(String((e as Error)?.message ?? e)))
+      .catch((e) => alive && setError(userErrorMessage(e, String(e))))
       .finally(() => alive && setLoading(false));
     return () => {
       alive = false;

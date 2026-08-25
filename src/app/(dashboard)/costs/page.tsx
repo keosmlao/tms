@@ -18,6 +18,7 @@ import { Actions } from "@/lib/api";
 import { FIXED_YEAR_END, FIXED_YEAR_START, getFixedTodayDate } from "@/lib/fixed-year";
 import { TRIP_COST_TYPES, tripCostTypeLabel } from "@/lib/trip-cost-type";
 import type { TripCostRow } from "@/lib/trip-cost-types";
+import { userErrorMessage } from "@/lib/action-error";
 
 const n = (v: number) => Math.round(Number(v) || 0).toLocaleString("en-US");
 
@@ -49,7 +50,7 @@ export default function TripCostPage() {
       setRows((await Actions.listTripCosts(from, to)) as TripCostRow[]);
     } catch (e) {
       console.error(e);
-      setError(e instanceof Error ? e.message : "ໂຫຼດຂໍ້ມູນບໍ່ສຳເລັດ");
+      setError(userErrorMessage(e, "ໂຫຼດຂໍ້ມູນບໍ່ສຳເລັດ"));
     } finally {
       setLoading(false);
     }
@@ -85,7 +86,7 @@ export default function TripCostPage() {
       await load(fromDate, toDate);
     } catch (e) {
       console.error(e);
-      setError(e instanceof Error ? e.message : "ບັນທຶກບໍ່ສຳເລັດ");
+      setError(userErrorMessage(e, "ບັນທຶກບໍ່ສຳເລັດ"));
     } finally {
       setSaving(false);
     }
@@ -98,7 +99,7 @@ export default function TripCostPage() {
       setRows((prev) => prev.filter((r) => r.id !== id));
     } catch (e) {
       console.error(e);
-      setError(e instanceof Error ? e.message : "ລຶບບໍ່ສຳເລັດ");
+      setError(userErrorMessage(e, "ລຶບບໍ່ສຳເລັດ"));
     }
   };
 

@@ -1,3 +1,5 @@
+import { decodeUserErrorDigest } from "@/lib/action-error";
+
 /**
  * Next.js instrumentation hook — runs once per server process at startup.
  *
@@ -46,3 +48,29 @@ export async function register() {
     );
   }
 }
+
+/**
+ * ທຸກ error ທີ່ເກີດຢູ່ server (render / server action / route handler).
+ *
+ * ຢູ່ production Next ລົບຂໍ້ຄວາມຈິງອອກກ່ອນສົ່ງໄປ browser ແລ້ວສົ່ງແຕ່ `digest`.
+ * ໜ້າຈໍຈຶ່ງບອກຜູ້ໃຊ້ວ່າ "…(ລະຫັດຂໍ້ຜິດພາດ: 2246335556)" — ລະຫັດນັ້ນຈະຄົ້ນຫາ
+ * ໄດ້ກໍ່ຕໍ່ເມື່ອມັນຖືກ log ໄວ້ຄູ່ກັບຂໍ້ຜິດພາດຈິງ ເຊິ່ງແມ່ນວຽກຂອງ hook ນີ້.
+ */
+export const onRequestError: NonNullable<
+  import("next").Instrumentation.onRequestError
+> = (error, request, context) => {
+  const err = error as { digest?: string; message?: string; stack?: string };
+
+  // ກົດລະບຽບທຸລະກິດ (userError) ບໍ່ແມ່ນ bug — ຜູ້ໃຊ້ເຫັນຂໍ້ຄວາມຄົບຢູ່ແລ້ວ.
+  // log ໄວ້ແຖວດຽວພໍເປັນຮ່ອງຮອຍ ບໍ່ຕ້ອງມີ stack ໃຫ້ຮົກ log.
+  const userMessage = decodeUserErrorDigest(err.digest);
+  if (userMessage) {
+    console.warn(`[${context.routeType}] ${request.method} ${request.path} — ${userMessage}`);
+    return;
+  }
+
+  console.error(
+    `[${context.routeType}] ${request.method} ${request.path} — digest=${err.digest ?? "-"}`,
+    error
+  );
+};

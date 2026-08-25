@@ -26,6 +26,7 @@ import {
   type PodLiveRow,
   type PodProof,
 } from "@/lib/pod";
+import { userErrorMessage } from "@/lib/action-error";
 
 const POLL_MS = 15_000;
 // ສະແດງ 10 ລາຍການລ່າສຸດ — ຮູບໂຫຼດໃຫ້ຄົບທຸກໃບທີ່ເຫັນ (ໃບໜຶ່ງ 100–400 KB ແລະ
@@ -84,7 +85,7 @@ export function PodLiveFeed({
       }
     } catch (e) {
       console.error("[pod-live] load failed:", e);
-      setError(e instanceof Error ? e.message : "ໂຫຼດບໍ່ສຳເລັດ");
+      setError(userErrorMessage(e, "ໂຫຼດບໍ່ສຳເລັດ"));
     } finally {
       setLoading(false);
     }

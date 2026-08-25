@@ -1,3 +1,4 @@
+const { userError } = require("../lib/action-error");
 const { pool, query, queryOne } = require("../lib/db");
 const { getBranchScope } = require("./helpers");
 const {
@@ -115,7 +116,7 @@ async function saveFuelRefill(payload, client) {
   const liters = asNumber(payload?.liters);
   const amount = asNumber(payload?.amount);
   if (liters === null && amount === null) {
-    throw new Error("ກະລຸນາໃສ່ຈຳນວນລິດ ຫຼື ຈຳນວນເງິນ");
+    throw userError("ກະລຸນາໃສ່ຈຳນວນລິດ ຫຼື ຈຳນວນເງິນ");
   }
   // Last line of defence — the dialog and the mobile schema check this too, but
   // this is the only path every refill goes through.

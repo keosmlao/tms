@@ -17,6 +17,7 @@
 //   collected_at         ເວລາທີ່ບັນທຶກ
 "use strict";
 
+const { userError } = require("../lib/action-error");
 const { pool, query, queryOne } = require("../lib/db");
 const { getFixedYearSqlFilter } = require("../lib/fixed-year");
 const { COD_DOC_FORMAT_PREFIX, summarizeTripCod, toKip } = require("../lib/cod");
@@ -219,21 +220,21 @@ async function recordCodHandover(input) {
   const bills = await getTripCodBills(doc);
   const summary = summarizeTripCod(bills);
   if (summary.cod_bill_count === 0) {
-    throw new Error("ຖ້ຽວນີ້ບໍ່ມີບິນເກັບເງິນປາຍທາງ");
+    throw userError("ຖ້ຽວນີ້ບໍ່ມີບິນເກັບເງິນປາຍທາງ");
   }
   if (summary.pending_count > 0) {
-    throw new Error(
+    throw userError(
       `ຍັງມີ ${summary.pending_count} ບິນທີ່ຄົນຂັບບໍ່ທັນບັນທຶກການເກັບເງິນ — ປິດບິນໃຫ້ຄົບກ່ອນ`
     );
   }
   const counted = toKip(input?.countedAmount);
-  if (counted < 0) throw new Error("ຍອດທີ່ນັບໄດ້ຕ້ອງບໍ່ຕິດລົບ");
+  if (counted < 0) throw userError("ຍອດທີ່ນັບໄດ້ຕ້ອງບໍ່ຕິດລົບ");
   // ການເງິນຮັບສະເພາະ "ເງິນສົດ" — ສ່ວນທີ່ລູກຄ້າໂອນເຂົ້າບັນຊີແລ້ວ ບໍ່ໄດ້ຜ່ານມືຄົນຂັບ
   const expected = summary.cash_total;
   const reason = String(input?.varianceReason ?? "").trim();
   if (counted !== expected && !reason) {
     const diff = Math.abs(counted - expected).toLocaleString("en-US");
-    throw new Error(
+    throw userError(
       counted < expected
         ? `ເງິນຂາດ ${diff} ກີບ ທຽບກັບທີ່ຄວນມອບ — ຕ້ອງລະບຸເຫດຜົນ`
         : `ເງິນເກີນ ${diff} ກີບ ທຽບກັບທີ່ຄວນມອບ — ຕ້ອງລະບຸເຫດຜົນ`

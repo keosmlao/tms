@@ -19,6 +19,7 @@ import { Actions } from "@/lib/api";
 import { getFixedTodayDate } from "@/lib/fixed-year";
 import { describeFuelEntryProblem } from "@/lib/fuel-sanity";
 import { FUEL_PAYMENT_TYPES } from "@/lib/fuel-payment-type";
+import { userErrorMessage } from "@/lib/action-error";
 
 interface Option {
   code: string;
@@ -333,7 +334,7 @@ export function FuelEntryDialog({
       onSaved();
     } catch (err) {
       console.error(err);
-      setError(err instanceof Error ? err.message : "ບັນທຶກບໍ່ສຳເລັດ");
+      setError(userErrorMessage(err, "ບັນທຶກບໍ່ສຳເລັດ"));
     } finally {
       setSubmitting(false);
     }

@@ -16,6 +16,7 @@ import {
 } from "react-icons/fa";
 import { Actions } from "@/lib/api";
 import { StatusPageHeader } from "@/components/status-page-shell";
+import { userErrorMessage } from "@/lib/action-error";
 
 type SelectRow = Record<string, unknown>;
 
@@ -360,7 +361,7 @@ export default function CreateThunJaiOrderPage() {
           });
         }
       } catch (err) {
-        setError(err instanceof Error ? err.message : "ໂຫຼດຂໍ້ມູນ ThunJai ບໍ່ສຳເລັດ");
+        setError(userErrorMessage(err, "ໂຫຼດຂໍ້ມູນ ThunJai ບໍ່ສຳເລັດ"));
       } finally {
         setLoading(null);
       }
@@ -381,7 +382,7 @@ export default function CreateThunJaiOrderPage() {
       } catch (err) {
         if (!cancelled) {
           setDistricts([]);
-          setError(err instanceof Error ? err.message : "ໂຫຼດລາຍຊື່ເມືອງບໍ່ສຳເລັດ");
+          setError(userErrorMessage(err, "ໂຫຼດລາຍຊື່ເມືອງບໍ່ສຳເລັດ"));
         }
       }
     })();
@@ -404,7 +405,7 @@ export default function CreateThunJaiOrderPage() {
       } catch (err) {
         if (!cancelled) {
           setVillages([]);
-          setError(err instanceof Error ? err.message : "ໂຫຼດລາຍຊື່ບ້ານບໍ່ສຳເລັດ");
+          setError(userErrorMessage(err, "ໂຫຼດລາຍຊື່ບ້ານບໍ່ສຳເລັດ"));
         }
       }
     })();
@@ -438,7 +439,7 @@ export default function CreateThunJaiOrderPage() {
       } catch (err) {
         if (!cancelled) {
           setServices([]);
-          setError(err instanceof Error ? err.message : "ໂຫຼດ Service Type ບໍ່ສຳເລັດ");
+          setError(userErrorMessage(err, "ໂຫຼດ Service Type ບໍ່ສຳເລັດ"));
         }
       }
     })();
@@ -536,7 +537,7 @@ export default function CreateThunJaiOrderPage() {
       setSourceRows(Array.isArray(rows) ? rows : []);
     } catch (err) {
       setSourceRows([]);
-      setSourceError(err instanceof Error ? err.message : "ຄົ້ນຫາພັດສະດຸບໍ່ສຳເລັດ");
+      setSourceError(userErrorMessage(err, "ຄົ້ນຫາພັດສະດຸບໍ່ສຳເລັດ"));
     } finally {
       setLoading(null);
     }
@@ -588,7 +589,7 @@ export default function CreateThunJaiOrderPage() {
       const result = await task();
       return result;
     } catch (err) {
-      setError(err instanceof Error ? err.message : "ThunJai API request failed");
+      setError(userErrorMessage(err, "ThunJai API request failed"));
       return null;
     } finally {
       setLoading(null);

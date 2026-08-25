@@ -21,6 +21,7 @@ import { useConfirm } from "@/components/confirm-dialog";
 import { getFixedTodayDate, FIXED_YEAR_START, FIXED_YEAR_END } from "@/lib/fixed-year";
 import { StatusPageHeader, StatusStatGrid } from "@/components/status-page-shell";
 import { WhatsappLink, buildBillWhatsappMessage } from "@/components/whatsapp-link";
+import { userErrorMessage } from "@/lib/action-error";
 // Ported from server actions: getBillsWaitingSentDetails, deleteJob
 
 function ImageThumb({ src, label }: { src: string; label: string }) {
@@ -258,7 +259,7 @@ export default function BillCompleteClient({
       .then((data) => setJobs((data ?? []) as CompletedJob[]))
       .catch((e) => {
         console.error(e);
-        setLoadError(e?.response?.data?.error ?? e?.message ?? "Unknown error");
+        setLoadError(userErrorMessage(e, "ໂຫຼດຂໍ້ມູນບໍ່ສຳເລັດ"));
       })
       .finally(() => setLoading(false));
   };
@@ -306,7 +307,7 @@ export default function BillCompleteClient({
       await refreshDetails(docNo);
     } catch (error) {
       console.error(error);
-      const message = error instanceof Error ? error.message : "ປ່ຽນບໍ່ສຳເລັດ";
+      const message = userErrorMessage(error, "ປ່ຽນບໍ່ສຳເລັດ");
       void confirm({ title: "ຜິດພາດ", message, tone: "warning", single: true });
     } finally {
       setReclassifyBusy(false);

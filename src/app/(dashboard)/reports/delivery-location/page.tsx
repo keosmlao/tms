@@ -5,6 +5,7 @@ import { FaMapMarkedAlt, FaSpinner, FaExternalLinkAlt } from "react-icons/fa";
 import { Actions } from "@/lib/api";
 import { StatusPageHeader, StatusTableShell } from "@/components/status-page-shell";
 import { addDays, getLaoToday } from "@/lib/lao-date";
+import { userErrorMessage } from "@/lib/action-error";
 
 interface Row {
   bill_no: string;
@@ -64,7 +65,7 @@ export default function DeliveryLocationPage() {
       setSummary(data.summary ?? null);
     } catch (e) {
       console.error(e);
-      setError(e instanceof Error ? e.message : "ໂຫຼດບໍ່ສຳເລັດ");
+      setError(userErrorMessage(e, "ໂຫຼດບໍ່ສຳເລັດ"));
     } finally {
       setLoading(false);
     }

@@ -5,6 +5,7 @@ import { FaExclamationTriangle, FaSpinner, FaTruckLoading } from "react-icons/fa
 import { Actions } from "@/lib/api";
 import { StatusPageHeader, StatusTableShell } from "@/components/status-page-shell";
 import { addDays, getLaoToday } from "@/lib/lao-date";
+import { userErrorMessage } from "@/lib/action-error";
 
 interface Row {
   docNo: string;
@@ -57,7 +58,7 @@ export default function TruckUtilizationPage() {
       setSummary(data.summary ?? null);
     } catch (e) {
       console.error(e);
-      setError(e instanceof Error ? e.message : "ໂຫຼດບໍ່ສຳເລັດ");
+      setError(userErrorMessage(e, "ໂຫຼດບໍ່ສຳເລັດ"));
     } finally {
       setLoading(false);
     }

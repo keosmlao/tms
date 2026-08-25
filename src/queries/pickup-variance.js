@@ -1,3 +1,4 @@
+const { userError } = require("../lib/action-error");
 const { query, pool } = require("../lib/db");
 const { getFixedYearSqlFilter } = require("../lib/fixed-year");
 const { getBranchScope, branchFilterJob } = require("./helpers");
@@ -100,7 +101,7 @@ async function acknowledgePickupVariance(session, docNo, billNo) {
   await ensureDeliveryWorkflowSchema();
   const doc = String(docNo ?? "").trim();
   const bill = String(billNo ?? "").trim();
-  if (!doc || !bill) throw new Error("doc_no ແລະ bill_no ຈຳເປັນ");
+  if (!doc || !bill) throw userError("doc_no ແລະ bill_no ຈຳເປັນ");
   const userCode = String(session?.usercode ?? "").trim() || null;
 
   const result = await pool.query(
