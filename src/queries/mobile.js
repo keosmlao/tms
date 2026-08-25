@@ -265,13 +265,6 @@ async function mobileJobsList(driverId, date, options = {}) {
         AND ${getFixedYearSqlFilter("d.doc_date")}
       ORDER BY d.doc_no, d.sent_start NULLS LAST, d.bill_no
     ),
-    -- ຕຳແໜ່ງລ່າສຸດຂອງລົດ — ໄລຍະຕ້ອງວັດຈາກ "ບ່ອນລົດຢູ່ດຽວນີ້" ບໍ່ແມ່ນຈາກສາງ
-    -- ຈຶ່ງຈະເປັນຕົວເລກທີ່ຄົນຂັບໃຊ້ຕັດສິນໃຈໄດ້.
-    last_fix AS (
-      SELECT DISTINCT ON (th.doc_no) th.doc_no, th.lat, th.lng
-      FROM public.odg_tms_travel_history th
-      ORDER BY th.doc_no, th.recorded_at DESC
-    ),
     worker_summary AS (
       SELECT doc_no, COUNT(*)::int AS worker_count,
         string_agg(worker_name, ', ' ORDER BY worker_name) AS workers
@@ -347,7 +340,21 @@ async function mobileJobsList(driverId, date, options = {}) {
     LEFT JOIN bill_summary bs ON bs.doc_no = a.doc_no
     LEFT JOIN worker_summary ws ON ws.doc_no = a.doc_no
     LEFT JOIN next_stop ns ON ns.doc_no = a.doc_no
-    LEFT JOIN last_fix lf ON lf.doc_no = a.doc_no
+    -- ຕຳແໜ່ງລ່າສຸດຂອງລົດ — ໄລຍະຕ້ອງວັດຈາກ "ບ່ອນລົດຢູ່ດຽວນີ້" ບໍ່ແມ່ນຈາກສາງ
+    -- ຈຶ່ງຈະເປັນຕົວເລກທີ່ຄົນຂັບໃຊ້ຕັດສິນໃຈໄດ້.
+    --
+    -- ⚠️ ຕ້ອງເປັນ LATERAL ບໍ່ແມ່ນ CTE. ເມື່ອກ່ອນເປັນ
+    -- DISTINCT ON (doc_no) ຈາກ odg_tms_travel_history ໂດຍບໍ່ມີ WHERE —
+    -- ສະແກນ + ຮຽງທັງຕາຕະລາງ (308 MB / 1.5 ລ້ານແຖວ) **ທຸກຄັ້ງທີ່ຄົນຂັບ
+    -- ເປີດແອັບ** ເຖິງວ່າຈະມີຖ້ຽວດຽວ. ວັດແລ້ວ: ລາຍການຖ້ຽວຂອງຄົນຂັບ 2,453 ms
+    -- ທຽບກັບຂອງຫົວໜ້າ 11 ms. LATERAL ໃຊ້ index doc_no ດຶງແຖວດຽວຕໍ່ຖ້ຽວ.
+    LEFT JOIN LATERAL (
+      SELECT th.lat, th.lng
+      FROM public.odg_tms_travel_history th
+      WHERE th.doc_no = a.doc_no
+      ORDER BY th.recorded_at DESC
+      LIMIT 1
+    ) lf ON true
     LEFT JOIN public.odg_tms_delivery_route rt
       ON rt.code = a.delivery_route_code
     LEFT JOIN public.odg_tms_delivery_round dr
