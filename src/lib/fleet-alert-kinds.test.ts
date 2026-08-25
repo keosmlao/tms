@@ -76,12 +76,25 @@ describe("ຊະນິດຂອງແຈ້ງເຕືອນລົດ", () => {
     expect(src).toContain('ຍັງບໍ່ກົດ "ເລີ່ມຈັດສົ່ງ"');
   });
 
+  // ຜູ້ໃຊ້ຂໍໃຫ້ກຳນົດຜູ້ຮັບ LINE ເອງ. ຕັ້ງໄວ້ຕ້ອງ **ແທນ** ວິທີເກົ່າ ບໍ່ແມ່ນ
+  // ບວກເພີ່ມ — ບໍ່ດັ່ງນັ້ນຍັງສົ່ງຫາ 280 ຄົນຢູ່ດີ.
+  it("ຜູ້ຮັບ LINE ທີ່ກຳນົດເອງ ແທນການໄລ່ຫາພະນັກງານສາຂາ", () => {
+    expect(src).toContain('getSetting("fleet.alert_line_to", "")');
+    expect(src).toContain("if (override.length > 0) return override;");
+    expect(src).toContain("findRecipients(code, lineOverride)");
+  });
+
+  it("ຮັບຫຼາຍຜູ້ຮັບ ຄັ່ນດ້ວຍຈຸດ ຫຼື ຂຶ້ນແຖວໃໝ່", () => {
+    expect(src).toContain("split(/[\\n,]/)");
+  });
+
   it("ເກນທັງໝົດອ່ານຈາກຕັ້ງຄ່າ ບໍ່ແມ່ນຝັງໄວ້", () => {
     for (const key of [
       "fleet.speed_limit_kmh",
       "fleet.off_point_metres",
       "fleet.off_route_km",
       "fleet.close_reminder_minutes",
+      "fleet.alert_line_to",
     ]) {
       expect(src).toContain(key);
     }

@@ -177,6 +177,7 @@ export const Actions = {
   getMonthlyDeliveryKpi: reports.getMonthlyDeliveryKpi,
   getDeliveryPerformance: reports.getDeliveryPerformance,
   getReportPendingDaily: reports.getReportPendingDaily,
+  getReportVehicleFlow: reports.getReportVehicleFlow,
   getReportDeliveredDaily: reports.getReportDeliveredDaily,
   getReportCancelledDaily: reports.getReportCancelledDaily,
   getReportDailyActivity: reports.getReportDailyActivity,

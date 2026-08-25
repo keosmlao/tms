@@ -64,6 +64,8 @@ const NOTIFY_KEYS = [
   "fleet.off_route_km",
   // ຮອດສາງແລ້ວຈອດດົນເທົ່າໃດຈຶ່ງເຕືອນໃຫ້ໄປປິດຖ້ຽວ (ນາທີ).
   "fleet.close_reminder_minutes",
+  // ຜູ້ຮັບ LINE ທີ່ກຳນົດເອງ — ຫວ່າງ = ໄລ່ຫາພະນັກງານຂອງສາຂາຕາມ logistic_code.
+  "fleet.alert_line_to",
   "tv.pages",
   "tv.secs",
 ] as const;
@@ -100,6 +102,7 @@ export interface NotifySettings {
   "fleet.off_point_metres": string;
   "fleet.off_route_km": string;
   "fleet.close_reminder_minutes": string;
+  "fleet.alert_line_to": string;
   "tv.pages": string;
   "tv.secs": string;
 }

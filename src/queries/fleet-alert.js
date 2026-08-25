@@ -319,7 +319,23 @@ async function findOffRoute(day, metres) {
  * logistic_code ບາງແຖວເກັບຫຼາຍສາຂາຄັ່ນດ້ວຍຈຸດ (ວັດແລ້ວ: '1102,1104') ຈຶ່ງ
  * ຕ້ອງແຍກເປັນລາຍການກ່ອນທຽບ ບໍ່ແມ່ນທຽບຂໍ້ຄວາມກົງໆ.
  */
-async function findRecipients(transportCode) {
+/**
+ * ຜູ້ຮັບທີ່ກຳນົດເອງ (ຕັ້ງຄ່າ → ແຈ້ງເຕືອນລົດ). ຫຼາຍຄົນຄັ່ນດ້ວຍຈຸດ ຫຼື ຂຶ້ນ
+ * ແຖວໃໝ່. ຮັບໄດ້ທັງ userId ແລະ groupId ຂອງ LINE.
+ *
+ * ຕັ້ງໄວ້ = **ໃຊ້ອັນນີ້ແທນ** ການໄລ່ຫາພະນັກງານຂອງສາຂາ. ເຫດຜົນ: ໜ້າວຽກນີ້
+ * ມັກຢາກສົ່ງເຂົ້າກຸ່ມ LINE ຂອງທີມຂົນສົ່ງກຸ່ມດຽວ ບໍ່ແມ່ນສົ່ງຫາທຸກຄົນທີ່
+ * logistic_code ຕົງ (ວັດແລ້ວມີ 280 ຄົນທີ່ມີ line_id — ສົ່ງໝົດຄືສະແປມ).
+ */
+function parseLineTargets(raw) {
+  return String(raw ?? "")
+    .split(/[\n,]/)
+    .map((v) => v.trim())
+    .filter(Boolean);
+}
+
+async function findRecipients(transportCode, override = []) {
+  if (override.length > 0) return override;
   const code = String(transportCode ?? "").trim();
   if (!code) return [];
   const rows = await query(
@@ -515,6 +531,7 @@ async function evaluateFleetAlerts({ day, dryRun = false } = {}) {
     rawOffPoint,
     rawOffRoute,
     rawCloseMinutes,
+    rawLineTo,
   ] =
     await Promise.all([
       getSetting("fleet.alert_enabled", "0"),
@@ -527,6 +544,7 @@ async function evaluateFleetAlerts({ day, dryRun = false } = {}) {
       // ບັງຄັບໃຫ້ຜູ້ດູແລຕັ້ງເອງ ດີກວ່າເປີດເອງແລ້ວເຕືອນຜິດທັງມື້.
       getSetting("fleet.off_route_km", ""),
       getSetting("fleet.close_reminder_minutes", ""),
+      getSetting("fleet.alert_line_to", ""),
     ]);
   const isOn = enabled === "1" || enabled === "true";
   if (!isOn && !dryRun) return { skipped: true, reason: "alert_disabled" };
@@ -544,6 +562,7 @@ async function evaluateFleetAlerts({ day, dryRun = false } = {}) {
     5,
     240
   );
+  const lineOverride = parseLineTargets(rawLineTo);
 
   await ensureFleetAlertSchema();
   const today =
@@ -613,7 +632,9 @@ async function evaluateFleetAlerts({ day, dryRun = false } = {}) {
         : false;
 
     const code = row.transport_code ?? "";
-    if (!recipientCache.has(code)) recipientCache.set(code, await findRecipients(code));
+    if (!recipientCache.has(code)) {
+      recipientCache.set(code, await findRecipients(code, lineOverride));
+    }
     const to = recipientCache.get(code);
     if (to.length === 0 && pushedToDriver) {
       sent.push({ kind, alert_key: alert.alertKey, channel: "push" });

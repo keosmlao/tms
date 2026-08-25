@@ -21,7 +21,17 @@ import {
   getReportDailyActivityItems as svcGetReportDailyActivityItems,
   getReportDailyDepartment as svcGetReportDailyDepartment,
   getAttemptDeliveryItems as svcGetAttemptDeliveryItems,
+  getReportVehicleFlow as svcGetReportVehicleFlow,
 } from "@/queries/reports.js";
+
+/**
+ * ການເຂົ້າ-ອອກຂອງລົດ: ປະລິມານ · ຄວາມຖີ່ · ປະເພດລົດ.
+ * ຂາອອກ ນັບດ້ວຍເວລາທີ່ລົດອອກຈິງ, ຂາເຂົ້າ ນັບດ້ວຍເວລາປິດຖ້ຽວ.
+ */
+export async function getReportVehicleFlow(fromDate: string, toDate: string) {
+  const s = await requireSession();
+  return svcGetReportVehicleFlow(s, fromDate, toDate);
+}
 
 // dateField: "logistic" = ກັ່ນຕອງດ້ວຍວັນຈັດສົ່ງ, "dispatch" = ດ້ວຍວັນຈັດຖ້ຽວ
 export async function getReportDaily(

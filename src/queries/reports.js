@@ -2694,7 +2694,181 @@ async function getDeliveryPerformance(session, period) {
   };
 }
 
+/**
+ * ລາຍງານ **ການເຂົ້າ-ອອກຂອງລົດ** — ປະລິມານ · ຄວາມຖີ່ · ປະເພດລົດ.
+ *
+ * ນິຍາມທີ່ໃຊ້ (ບອກໄວ້ຢູ່ນີ້ ເພາະສອງຄຳນີ້ຕີຄວາມໄດ້ຫຼາຍແບບ):
+ *   * **ຂາອອກ** = ຖ້ຽວທີ່ລົດອອກຈາກສາງຈິງ → ນັບດ້ວຍ `dispatch_started_at`
+ *   * **ຂາເຂົ້າ** = ຖ້ຽວທີ່ປິດແລ້ວ (ລົດກັບຮອດ) → ນັບດ້ວຍ `job_close`
+ *
+ * ບໍ່ໄດ້ນັບດ້ວຍ `doc_date` ຫຼື `date_logistic` ເພາະສອງອັນນັ້ນເປັນວັນທີ່ຂອງ
+ * **ເອກະສານ** ບໍ່ແມ່ນເວລາທີ່ລົດເຄື່ອນໄຫວຈິງ — ຖ້ຽວທີ່ຈັດໄວ້ມື້ໜຶ່ງແຕ່ອອກ
+ * ແທ້ອີກມື້ໜຶ່ງຈະຖືກນັບຜິດວັນ.
+ *
+ * ຄວາມຖີ່ = ຖ້ຽວ ÷ ຈຳນວນລົດທີ່ໃຊ້ຈິງ ÷ ຈຳນວນມື້ທີ່ມີການເຄື່ອນໄຫວ. ຫານດ້ວຍ
+ * "ມື້ທີ່ມີການເຄື່ອນໄຫວ" ບໍ່ແມ່ນຈຳນວນມື້ໃນຊ່ວງ — ບໍ່ດັ່ງນັ້ນວັນພັກຈະດຶງ
+ * ຄ່າສະເລ່ຍລົງຈົນອ່ານບໍ່ໄດ້ຄວາມ.
+ */
+async function getReportVehicleFlow(session, fromDate, toDate) {
+  const scope = getBranchScope(session);
+  const branch = branchFilterJob(scope, "a");
+
+  // ໜຶ່ງແຖວຕໍ່ຖ້ຽວ ພ້ອມເວລາອອກ/ເຂົ້າ ແລະ ປະເພດລົດ — ໃຊ້ຮ່ວມກັນທຸກສ່ວນ
+  // ຂ້າງລຸ່ມ ຈຶ່ງບໍ່ມີທາງທີ່ສາມຕາຕະລາງຈະນັບຄົນລະຊຸດ.
+  const base = `
+    SELECT a.doc_no,
+           a.car,
+           COALESCE(NULLIF(TRIM(c.car_type), ''), '(ບໍ່ກຳນົດປະເພດ)') AS car_type,
+           c.payload_kg,
+           a.dispatch_started_at AS out_at,
+           a.job_close AS in_at,
+           COALESCE(tb.bills_total, 0)::int AS bills
+      FROM odg_tms a
+      LEFT JOIN public.odg_tms_car c ON c.code = a.car
+      LEFT JOIN (
+        SELECT d.doc_no, COUNT(*)::int AS bills_total
+          FROM public.odg_tms_detail d
+         WHERE ${getFixedYearSqlFilter("d.doc_date")}
+         GROUP BY d.doc_no
+      ) tb ON tb.doc_no = a.doc_no
+     WHERE COALESCE(a.approve_status, 0) = 1
+       AND ${getFixedYearSqlFilter("a.doc_date")}
+       AND (
+         (a.dispatch_started_at IS NOT NULL
+          AND a.dispatch_started_at::date BETWEEN $1::date AND $2::date)
+         OR
+         (a.job_close IS NOT NULL
+          AND a.job_close::date BETWEEN $1::date AND $2::date)
+       )
+       ${branch}`;
+
+  const [byType, byHour, byDay, totals] = await Promise.all([
+    // ── ຕາມປະເພດລົດ ──
+    query(
+      `WITH t AS (${base})
+       SELECT car_type,
+              COUNT(DISTINCT car) FILTER (WHERE car IS NOT NULL)::int AS cars,
+              COUNT(*) FILTER (
+                WHERE out_at IS NOT NULL
+                  AND out_at::date BETWEEN $1::date AND $2::date
+              )::int AS trips_out,
+              COUNT(*) FILTER (
+                WHERE in_at IS NOT NULL
+                  AND in_at::date BETWEEN $1::date AND $2::date
+              )::int AS trips_in,
+              COALESCE(SUM(bills) FILTER (
+                WHERE out_at IS NOT NULL
+                  AND out_at::date BETWEEN $1::date AND $2::date
+              ), 0)::int AS bills_out,
+              ROUND(AVG(payload_kg))::int AS payload_kg
+         FROM t
+        GROUP BY car_type
+        ORDER BY trips_out DESC, car_type`,
+      [fromDate, toDate]
+    ),
+    // ── ຄວາມຖີ່ຕາມຊົ່ວໂມງ ── ບອກຊົ່ວໂມງທີ່ລົດອອກ/ເຂົ້າໜາແໜ້ນ
+    query(
+      `WITH t AS (${base})
+       SELECT h.hour::int AS hour,
+              COALESCE(o.n, 0)::int AS trips_out,
+              COALESCE(i.n, 0)::int AS trips_in
+         FROM generate_series(0, 23) AS h(hour)
+         LEFT JOIN (
+           SELECT EXTRACT(HOUR FROM out_at)::int AS hour, COUNT(*) AS n
+             FROM t
+            WHERE out_at IS NOT NULL
+              AND out_at::date BETWEEN $1::date AND $2::date
+            GROUP BY 1
+         ) o ON o.hour = h.hour
+         LEFT JOIN (
+           SELECT EXTRACT(HOUR FROM in_at)::int AS hour, COUNT(*) AS n
+             FROM t
+            WHERE in_at IS NOT NULL
+              AND in_at::date BETWEEN $1::date AND $2::date
+            GROUP BY 1
+         ) i ON i.hour = h.hour
+        ORDER BY h.hour`,
+      [fromDate, toDate]
+    ),
+    // ── ຕາມມື້ ──
+    query(
+      `WITH t AS (${base})
+       SELECT d.day::date AS day,
+              to_char(d.day, 'DD-MM-YYYY') AS day_display,
+              COALESCE(o.n, 0)::int AS trips_out,
+              COALESCE(i.n, 0)::int AS trips_in,
+              COALESCE(o.cars, 0)::int AS cars_out,
+              COALESCE(o.bills, 0)::int AS bills_out
+         FROM generate_series($1::date, $2::date, interval '1 day') AS d(day)
+         LEFT JOIN (
+           SELECT out_at::date AS day, COUNT(*) AS n,
+                  COUNT(DISTINCT car) AS cars, SUM(bills) AS bills
+             FROM t WHERE out_at IS NOT NULL GROUP BY 1
+         ) o ON o.day = d.day::date
+         LEFT JOIN (
+           SELECT in_at::date AS day, COUNT(*) AS n
+             FROM t WHERE in_at IS NOT NULL GROUP BY 1
+         ) i ON i.day = d.day::date
+        ORDER BY d.day`,
+      [fromDate, toDate]
+    ),
+    // ── ສະຫຼຸບ ──
+    query(
+      `WITH t AS (${base})
+       SELECT
+         COUNT(*) FILTER (
+           WHERE out_at IS NOT NULL
+             AND out_at::date BETWEEN $1::date AND $2::date
+         )::int AS trips_out,
+         COUNT(*) FILTER (
+           WHERE in_at IS NOT NULL
+             AND in_at::date BETWEEN $1::date AND $2::date
+         )::int AS trips_in,
+         COUNT(DISTINCT car) FILTER (
+           WHERE out_at IS NOT NULL
+             AND out_at::date BETWEEN $1::date AND $2::date
+         )::int AS cars,
+         COUNT(DISTINCT out_at::date) FILTER (
+           WHERE out_at IS NOT NULL
+             AND out_at::date BETWEEN $1::date AND $2::date
+         )::int AS active_days,
+         COALESCE(SUM(bills) FILTER (
+           WHERE out_at IS NOT NULL
+             AND out_at::date BETWEEN $1::date AND $2::date
+         ), 0)::int AS bills_out
+        FROM t`,
+      [fromDate, toDate]
+    ),
+  ]);
+
+  const sum = totals[0] ?? {};
+  const cars = Number(sum.cars ?? 0);
+  const days = Number(sum.active_days ?? 0);
+  const tripsOut = Number(sum.trips_out ?? 0);
+
+  return {
+    from: fromDate,
+    to: toDate,
+    totals: {
+      trips_out: tripsOut,
+      trips_in: Number(sum.trips_in ?? 0),
+      bills_out: Number(sum.bills_out ?? 0),
+      cars,
+      active_days: days,
+      // ຖ້ຽວຕໍ່ຄັນຕໍ່ມື້ — ຫານດ້ວຍມື້ທີ່ມີການເຄື່ອນໄຫວ ບໍ່ແມ່ນມື້ໃນຊ່ວງ
+      trips_per_car_day:
+        cars > 0 && days > 0 ? Number((tripsOut / cars / days).toFixed(2)) : 0,
+      trips_per_car:
+        cars > 0 ? Number((tripsOut / cars).toFixed(2)) : 0,
+    },
+    by_type: byType,
+    by_hour: byHour,
+    by_day: byDay,
+  };
+}
+
 module.exports = {
+  getReportVehicleFlow,
   getReportDaily,
   getReportByDriver,
   getReportByCar,

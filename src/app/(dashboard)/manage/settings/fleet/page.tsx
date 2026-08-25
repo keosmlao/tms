@@ -50,6 +50,7 @@ export default function FleetAlertSettingsPage() {
         "fleet.close_reminder_minutes": clampInt(
           data["fleet.close_reminder_minutes"], 5, 240, "20"
         ),
+        "fleet.alert_line_to": data["fleet.alert_line_to"].trim(),
       });
       setSavedAt(Date.now());
     } catch (e) {
@@ -169,6 +170,27 @@ export default function FleetAlertSettingsPage() {
               icon={<FaTruck />}
               disabled={!on}
             />
+            <div>
+              <label className="mb-1 block text-xs font-semibold text-slate-600 dark:text-slate-300">
+                ຜູ້ຮັບແຈ້ງເຕືອນຜ່ານ LINE
+              </label>
+              <textarea
+                value={data["fleet.alert_line_to"]}
+                onChange={(e) =>
+                  setData((d) => ({ ...d, "fleet.alert_line_to": e.target.value }))
+                }
+                disabled={!on}
+                rows={3}
+                placeholder={"ຫວ່າງ = ສົ່ງຫາພະນັກງານຂອງສາຂານັ້ນທຸກຄົນທີ່ມີ LINE\nUxxxxxxxx…  ຫຼື  Cxxxxxxxx… (ກຸ່ມ)"}
+                className="w-full rounded-lg border border-slate-300 px-3 py-2 font-mono text-xs disabled:opacity-50 dark:border-slate-700 dark:bg-slate-800"
+              />
+              <p className="mt-1 text-[11px] text-slate-500 dark:text-gray-400">
+                ໃສ່ userId ຫຼື groupId ຂອງ LINE ຫຼາຍອັນໄດ້ — ຄັ່ນດ້ວຍຈຸດ ຫຼື ຂຶ້ນແຖວໃໝ່.
+                <b> ຕັ້ງໄວ້ = ສົ່ງສະເພາະລາຍຊື່ນີ້</b> ບໍ່ໄດ້ສົ່ງຫາພະນັກງານສາຂາອີກ.
+                ປ່ອຍຫວ່າງຈຶ່ງກັບໄປໃຊ້ວິທີເກົ່າ (ທຸກຄົນທີ່ logistic_code ຕົງ — ດຽວນີ້ມີ
+                280 ຄົນທີ່ຕັ້ງ LINE ໄວ້ ຈຶ່ງມັກຈະຫຼາຍເກີນໄປ).
+              </p>
+            </div>
             <p className="text-[11px] text-slate-500 dark:text-gray-400">
               ໝາຍເຫດ: “ອອກຈາກສາງ”, “ຈອດບໍ່ຕົງຈຸດ” ແລະ “ອອກນອກເສັ້ນທາງ” ຕ້ອງມີພິກັດສາງໃນ
               Geofence ຂອງສາຂານັ້ນ ຫຼື ພິກັດຂອງລູກຄ້າ — ບ່ອນທີ່ບໍ່ມີພິກັດເລີຍຈະບໍ່ຖືກເຕືອນ
