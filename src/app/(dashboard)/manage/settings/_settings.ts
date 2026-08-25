@@ -29,6 +29,7 @@ export interface NotifySettings {
   "fleet.speed_limit_kmh": string;
   "fleet.off_point_metres": string;
   "fleet.off_route_km": string;
+  "fleet.close_reminder_minutes": string;
   "tv.pages": string;
   "tv.secs": string;
 }
@@ -66,6 +67,7 @@ export const EMPTY_SETTINGS: NotifySettings = {
   "fleet.speed_limit_kmh": "80",
   "fleet.off_point_metres": "300",
   "fleet.off_route_km": "",
+  "fleet.close_reminder_minutes": "20",
 };
 
 export const SETTING_TOPICS = [

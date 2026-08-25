@@ -62,6 +62,8 @@ const NOTIFY_KEYS = [
   // ອອກນອກເສັ້ນທາງ (ກມ). **ຫວ່າງ = ປິດ** — ລະບົບບໍ່ມີເສັ້ນທາງທີ່ວາງແຜນໄວ້
   // ຈຶ່ງເກນນີ້ຕ່າງກັນຫຼາຍລະຫວ່າງສາຂາ ຕ້ອງໃຫ້ຜູ້ດູແລຕັ້ງເອງ.
   "fleet.off_route_km",
+  // ຮອດສາງແລ້ວຈອດດົນເທົ່າໃດຈຶ່ງເຕືອນໃຫ້ໄປປິດຖ້ຽວ (ນາທີ).
+  "fleet.close_reminder_minutes",
   "tv.pages",
   "tv.secs",
 ] as const;
@@ -97,6 +99,7 @@ export interface NotifySettings {
   "fleet.speed_limit_kmh": string;
   "fleet.off_point_metres": string;
   "fleet.off_route_km": string;
+  "fleet.close_reminder_minutes": string;
   "tv.pages": string;
   "tv.secs": string;
 }

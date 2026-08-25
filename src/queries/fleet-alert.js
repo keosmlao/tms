@@ -36,6 +36,13 @@ const SPEED_LIMIT_KMH = 80;
 // 300 ມ ເຜື່ອໄວ້ໃຫ້ຈອດແຄມທາງ / ລານຈອດຂອງຮ້ານ ແລະ ຄວາມຄາດເຄື່ອນ GPS.
 const OFF_POINT_METRES = 300;
 
+// ຮອດສາງແລ້ວແຕ່ຍັງບໍ່ປິດຖ້ຽວ — ເຕືອນຫຼັງຈອດຢູ່ສາງດົນເທົ່າໃດ.
+const CLOSE_REMINDER_MINUTES = 20;
+
+// ຢູ່ໃນລັດສະໝີເທົ່າໃດຈຶ່ງນັບວ່າ "ຮອດສາງແລ້ວ". ຕ້ອງກວ້າງພໍກັບລານສາງ ແຕ່
+// ແຄບກວ່າ LEFT_BASE_METRES (500) ບໍ່ດັ່ງນັ້ນລົດທີ່ຫາກໍ່ອອກຈະຖືກນັບວ່າຮອດ.
+const BACK_BASE_METRES = 300;
+
 /**
  * ອ່ານເກນຈາກ setting ຖ້າຕັ້ງໄວ້ ບໍ່ດັ່ງນັ້ນໃຊ້ຄ່າຕັ້ງຕົ້ນ.
  *
@@ -68,6 +75,8 @@ const TRIP_FIELDS = `
   NULLIF(TRIM(t.car::text), '') AS car_code,
   COALESCE(NULLIF(TRIM(car.name_1), ''), t.car::text, '-') AS car_name,
   COALESCE(NULLIF(TRIM(dv.name_1), ''), t.driver::text, '-') AS driver,
+  NULLIF(TRIM(t.driver::text), '') AS driver_code,
+  COALESCE(t.job_status, 0) AS job_status,
   COALESCE(NULLIF(TRIM(t.origin_transport_code), ''), '') AS transport_code,
   COALESCE(NULLIF(TRIM(g.address), ''), '') AS address`;
 
@@ -179,6 +188,57 @@ const NEAREST_POINT_SQL = `
         AND NULLIF(TRIM(f.start_lng), '') ~ '^-?[0-9.]+$'
     ), 2147483647)
   )`;
+
+/**
+ * ລົດຮອດສາງແລ້ວ (ຈອດຢູ່ໃນລັດສະໝີໝຸດສາງ) ແຕ່ຖ້ຽວຍັງບໍ່ຖືກປິດ.
+ *
+ * ໃຊ້ `engine_state_since` ເປັນຕົວວັດ "ຈອດຢູ່ນີ້ດົນເທົ່າໃດ" ເພາະບໍ່ມີ
+ * ປະຫວັດຈຸດຕໍ່ຖ້ຽວແລ້ວ (odg_tms_travel_history ຢຸດຮັບຂໍ້ມູນ 08/08/2026).
+ * ດັບເຄື່ອງຢູ່ລານສາງ 20 ນາທີ = ຮອດແລ້ວແທ້ ບໍ່ແມ່ນຜ່ານທາງ.
+ */
+async function findBackAtBaseNotClosed(day, minutes, metres = BACK_BASE_METRES) {
+  return query(
+    `WITH candidate AS (
+       SELECT ${TRIP_FIELDS},
+              TRIM(g.engine_state_since) AS since,
+              FLOOR(EXTRACT(EPOCH FROM (
+                LOCALTIMESTAMP - NULLIF(TRIM(g.engine_state_since), '')::timestamp
+              )) / 60)::int AS minutes,
+              ROUND(6371000 * 2 * ASIN(SQRT(
+                POWER(SIN(RADIANS(
+                  NULLIF(TRIM(g.lat), '')::numeric - NULLIF(TRIM(f.start_lat), '')::numeric
+                ) / 2), 2)
+                + COS(RADIANS(NULLIF(TRIM(f.start_lat), '')::numeric))
+                  * COS(RADIANS(NULLIF(TRIM(g.lat), '')::numeric))
+                  * POWER(SIN(RADIANS(
+                      NULLIF(TRIM(g.lng), '')::numeric - NULLIF(TRIM(f.start_lng), '')::numeric
+                    ) / 2), 2)
+              )))::int AS metres,
+              f.radius_m
+       ${TRIP_JOINS}
+       JOIN public.odg_tms_geofence f
+         ON NULLIF(TRIM(f.transport_code), '') = NULLIF(TRIM(t.origin_transport_code), '')
+        AND NULLIF(TRIM(f.start_lat), '') ~ '^-?[0-9.]+$'
+        AND NULLIF(TRIM(f.start_lng), '') ~ '^-?[0-9.]+$'
+       WHERE t.date_logistic::date = $1::date
+         AND ${getFixedYearSqlFilter("t.doc_date")}
+         AND COALESCE(t.approve_status, 0) = 1
+         AND COALESCE(t.job_status, 0) = 2
+         AND TRIM(COALESCE(g.engine_state, '')) = '0'
+         AND NULLIF(TRIM(g.engine_state_since), '') IS NOT NULL
+         AND NULLIF(TRIM(g.lat), '') ~ '^-?[0-9.]+$'
+         AND NULLIF(TRIM(g.lng), '') ~ '^-?[0-9.]+$'
+         AND LOCALTIMESTAMP - NULLIF(TRIM(g.engine_state_since), '')::timestamp
+             >= ($2 || ' minutes')::interval
+     )
+     -- ໃຊ້ລັດສະໝີຂອງສາຂາເອງຖ້າຕັ້ງໄວ້ກວ້າງກວ່າຄ່າຕັ້ງຕົ້ນ — ບາງລານສາງ
+     -- ກວ້າງກວ່າ 300 ມ ແລະ ຂໍ້ມູນນັ້ນຕັ້ງໄວ້ຢູ່ Geofence ແລ້ວ.
+     SELECT * FROM candidate
+      WHERE metres <= GREATEST($3::int, COALESCE(radius_m, 0))
+      ORDER BY minutes DESC`,
+    [day, String(minutes), metres]
+  );
+}
 
 /** ຂັບເກີນຄວາມໄວທີ່ກຳນົດ ໃນຂະນະທີ່ຖ້ຽວກຳລັງແລ່ນ. */
 async function findSpeeding(day, limitKmh = SPEED_LIMIT_KMH) {
@@ -334,17 +394,63 @@ function buildAlert(kind, row) {
         (row.address ? `\nຢູ່ ${row.address}` : ""),
     };
   }
+  if (kind === "back_no_close") {
+    return {
+      alertKey: `${row.doc_no}|${row.since}`,
+      minutes: Number(row.minutes ?? 0),
+      message:
+        `🏁 ຮອດສາງແລ້ວ ແຕ່ຍັງບໍ່ປິດຖ້ຽວ\n` +
+        `ລົດ ${row.car_name} · ຄົນຂັບ ${row.driver}\n` +
+        `ຖ້ຽວ ${row.doc_no}\n` +
+        `ຈອດຢູ່ສາງມາແລ້ວ ${fmtDuration(row.minutes)}`,
+    };
+  }
   return {
     // ຖ້ຽວໜຶ່ງເຕືອນເທື່ອດຽວ — ພໍກົດເລີ່ມແລ້ວກໍ່ຫຼຸດອອກຈາກເງື່ອນໄຂເອງ
     alertKey: String(row.doc_no),
     minutes: null,
+    // ແຍກສອງກໍລະນີ: ຍັງບໍ່ໄດ້ກົດ "ຮັບຖ້ຽວ" (job_status 0) ກັບ ຮັບແລ້ວແຕ່ຍັງ
+    // ບໍ່ກົດ "ເລີ່ມຈັດສົ່ງ" (1). ເມື່ອກ່ອນຂຽນລວມເປັນອັນດຽວ ຫົວໜ້າຈຶ່ງບໍ່ຮູ້
+    // ວ່າຕ້ອງບອກຄົນຂັບໃຫ້ກົດປຸ່ມໃດ.
     message:
-      `🚚 ອອກຈາກສາງແຕ່ຍັງບໍ່ກົດ "ເລີ່ມຈັດສົ່ງ"\n` +
+      (Number(row.job_status ?? 0) === 0
+        ? `🚚 ອອກຈາກສາງແຕ່ຍັງບໍ່ກົດ "ຮັບຖ້ຽວ"\n`
+        : `🚚 ອອກຈາກສາງແຕ່ຍັງບໍ່ກົດ "ເລີ່ມຈັດສົ່ງ"\n`) +
       `ລົດ ${row.car_name} · ຄົນຂັບ ${row.driver}\n` +
       `ຖ້ຽວ ${row.doc_no}\n` +
       `ຫ່າງຈາກສາງ ${(Number(row.metres ?? 0) / 1000).toFixed(1)} ກມ` +
       (row.address ? `\nຢູ່ ${row.address}` : ""),
   };
+}
+
+/**
+ * ເຕືອນ "ໄປປິດຖ້ຽວ" ຜ່ານ push ຂອງແອັບ — ຫາ **ຄົນຂັບ** ໂດຍກົງ ແລະ ຫາຫົວໜ້າ
+ * ທີ່ຕິກເປີດການຕິດຕາມ (observer).
+ *
+ * ໃຊ້ push ບໍ່ແມ່ນ LINE ສຳລັບຄົນຂັບ ເພາະຄົນຂັບຖືແອັບຢູ່ໃນມືແລ້ວ ແລະ ການກົດ
+ * ປິດຖ້ຽວກໍ່ຢູ່ໃນແອັບ — ສົ່ງ LINE ຈະບັງຄັບໃຫ້ສະຫຼັບແອັບໂດຍບໍ່ຈຳເປັນ.
+ */
+async function pushCloseReminder(row) {
+  try {
+    const { pushToTopic } = require("./push");
+    await pushToTopic({
+      candidates: [row.driver_code],
+      title: "🏁 ກະລຸນາປິດຖ້ຽວ",
+      body:
+        `ຮອດສາງແລ້ວ ${fmtDuration(row.minutes)} ແຕ່ຖ້ຽວ ${row.doc_no} ` +
+        `ຍັງບໍ່ໄດ້ປິດ — ກະລຸນາກົດ "ຂໍປິດຖ້ຽວ"`,
+      data: { doc_no: row.doc_no, type: "close_trip_reminder" },
+      observerTitle: "🏁 ຖ້ຽວຍັງບໍ່ປິດ",
+      observerBody:
+        `ຖ້ຽວ ${row.doc_no} · ${row.car_name} ຮອດສາງແລ້ວ ` +
+        `${fmtDuration(row.minutes)} ແຕ່ຍັງບໍ່ໄດ້ປິດຖ້ຽວ`,
+      sales: false,
+    });
+    return true;
+  } catch (err) {
+    console.warn("[fleet-alert] push failed:", err?.message ?? err);
+    return false;
+  }
 }
 
 /**
@@ -401,7 +507,15 @@ async function ensureFleetAlertSchema() {
  * ຫຼັງກວດຂໍ້ຄວາມ ແລະ ລາຍຊື່ຜູ້ຮັບແລ້ວ.
  */
 async function evaluateFleetAlerts({ day, dryRun = false } = {}) {
-  const [enabled, rawMinutes, rawMetres, rawSpeed, rawOffPoint, rawOffRoute] =
+  const [
+    enabled,
+    rawMinutes,
+    rawMetres,
+    rawSpeed,
+    rawOffPoint,
+    rawOffRoute,
+    rawCloseMinutes,
+  ] =
     await Promise.all([
       getSetting("fleet.alert_enabled", "0"),
       getSetting("fleet.parked_minutes", ""),
@@ -412,6 +526,7 @@ async function evaluateFleetAlerts({ day, dryRun = false } = {}) {
       // ຈຶ່ງເກນນີ້ຂຶ້ນກັບແຕ່ລະສາຂາຫຼາຍ (ດອນຕິ້ວ ກັບ ປາກເຊ ບໍ່ຄືກັນ) —
       // ບັງຄັບໃຫ້ຜູ້ດູແລຕັ້ງເອງ ດີກວ່າເປີດເອງແລ້ວເຕືອນຜິດທັງມື້.
       getSetting("fleet.off_route_km", ""),
+      getSetting("fleet.close_reminder_minutes", ""),
     ]);
   const isOn = enabled === "1" || enabled === "true";
   if (!isOn && !dryRun) return { skipped: true, reason: "alert_disabled" };
@@ -423,18 +538,33 @@ async function evaluateFleetAlerts({ day, dryRun = false } = {}) {
   const offRouteKm = String(rawOffRoute ?? "").trim()
     ? intSetting(rawOffRoute, 0, 1, 500)
     : 0;
+  const closeMinutes = intSetting(
+    rawCloseMinutes,
+    CLOSE_REMINDER_MINUTES,
+    5,
+    240
+  );
 
   await ensureFleetAlertSchema();
   const today =
     day || (await queryOne(`SELECT to_char(CURRENT_DATE,'YYYY-MM-DD') AS d`))?.d;
 
-  const [parked, left, speeding, offPoint, offRoute] = await Promise.all([
-    findParkedTooLong(today, minutes),
-    findLeftWithoutStart(today, metres),
-    findSpeeding(today, speedLimit),
-    findParkedOffPoint(today, minutes, offPointMetres),
-    offRouteKm > 0 ? findOffRoute(today, offRouteKm * 1000) : Promise.resolve([]),
-  ]);
+  const [parked, left, speeding, offPoint, offRoute, backNoClose] =
+    await Promise.all([
+      findParkedTooLong(today, minutes),
+      findLeftWithoutStart(today, metres),
+      findSpeeding(today, speedLimit),
+      findParkedOffPoint(today, minutes, offPointMetres),
+      offRouteKm > 0
+        ? findOffRoute(today, offRouteKm * 1000)
+        : Promise.resolve([]),
+      findBackAtBaseNotClosed(today, closeMinutes),
+    ]);
+
+  // ຮອດສາງແລ້ວແຕ່ບໍ່ປິດຖ້ຽວ ເປັນເລື່ອງດຽວກັນກັບ ຈອດດົນ / ຈອດບໍ່ຕົງຈຸດ ແຕ່
+  // ບອກສິ່ງທີ່ຕ້ອງເຮັດຊັດກວ່າ ("ໄປປິດຖ້ຽວ") — ຄັນທີ່ເຂົ້າຫຼາຍເງື່ອນໄຂພ້ອມ
+  // ກັນ ສົ່ງແຕ່ອັນນີ້.
+  const backKeys = new Set(backNoClose.map((r) => `${r.car_code}|${r.since}`));
 
   // ຈອດບໍ່ຕົງຈຸດ ເປັນເລື່ອງດຽວກັນກັບ ຈອດດົນ ແຕ່ບອກເຫດຜົນຫຼາຍກວ່າ — ຄັນທີ່
   // ເຂົ້າທັງສອງເງື່ອນໄຂ ສົ່ງແຕ່ອັນທີ່ລະອຽດກວ່າ ບໍ່ດັ່ງນັ້ນຫົວໜ້າໄດ້ສອງ
@@ -443,9 +573,16 @@ async function evaluateFleetAlerts({ day, dryRun = false } = {}) {
 
   const found = [
     ...parked
-      .filter((row) => !offPointCars.has(`${row.car_code}|${row.since}`))
+      .filter(
+        (row) =>
+          !offPointCars.has(`${row.car_code}|${row.since}`) &&
+          !backKeys.has(`${row.car_code}|${row.since}`)
+      )
       .map((row) => ({ kind: "parked", row })),
-    ...offPoint.map((row) => ({ kind: "parked_off_point", row })),
+    ...offPoint
+      .filter((row) => !backKeys.has(`${row.car_code}|${row.since}`))
+      .map((row) => ({ kind: "parked_off_point", row })),
+    ...backNoClose.map((row) => ({ kind: "back_no_close", row })),
     ...left.map((row) => ({ kind: "left_no_start", row })),
     ...speeding.map((row) => ({ kind: "speeding", row })),
     ...offRoute.map((row) => ({ kind: "off_route", row })),
@@ -468,9 +605,20 @@ async function evaluateFleetAlerts({ day, dryRun = false } = {}) {
       continue;
     }
 
+    // ຄົນຂັບຕ້ອງໄດ້ຮັບເອງ ບໍ່ແມ່ນຜ່ານຫົວໜ້າ — ສົ່ງ push ກ່ອນກວດຜູ້ຮັບ LINE
+    // ບໍ່ດັ່ງນັ້ນສາຂາທີ່ບໍ່ມີໃຜຕັ້ງ line_id ຈະບໍ່ມີໃຜເຕືອນຄົນຂັບເລີຍ.
+    const pushedToDriver =
+      kind === "back_no_close" && row.driver_code
+        ? await pushCloseReminder(row)
+        : false;
+
     const code = row.transport_code ?? "";
     if (!recipientCache.has(code)) recipientCache.set(code, await findRecipients(code));
     const to = recipientCache.get(code);
+    if (to.length === 0 && pushedToDriver) {
+      sent.push({ kind, alert_key: alert.alertKey, channel: "push" });
+      continue;
+    }
     if (to.length === 0) {
       // ບໍ່ມີຜູ້ຮັບ = ສົ່ງບໍ່ໄດ້ ບໍ່ແມ່ນສົ່ງແລ້ວ — ລຶບການຈອງອອກ ບໍ່ດັ່ງນັ້ນ
       // ພໍຕັ້ງ line_id ໃຫ້ພະນັກງານແລ້ວ ເຫດການນີ້ຈະບໍ່ມີວັນຖືກສົ່ງ
@@ -491,6 +639,10 @@ async function evaluateFleetAlerts({ day, dryRun = false } = {}) {
       )
     );
     const ok = results.filter(Boolean).length;
+    if (ok === 0 && pushedToDriver) {
+      sent.push({ kind, alert_key: alert.alertKey, channel: "push" });
+      continue;
+    }
     if (ok === 0) {
       await query(`DELETE FROM public.odg_tms_fleet_alert_log WHERE id = $1`, [id]);
       skipped.push({ kind, alert_key: alert.alertKey, reason: "send_failed" });

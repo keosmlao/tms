@@ -47,6 +47,9 @@ export default function FleetAlertSettingsPage() {
         "fleet.off_route_km": data["fleet.off_route_km"].trim()
           ? clampInt(data["fleet.off_route_km"], 1, 500, "20")
           : "",
+        "fleet.close_reminder_minutes": clampInt(
+          data["fleet.close_reminder_minutes"], 5, 240, "20"
+        ),
       });
       setSavedAt(Date.now());
     } catch (e) {
@@ -150,6 +153,20 @@ export default function FleetAlertSettingsPage() {
               }
               placeholder="ຫວ່າງ = ປິດ"
               icon={<FaMapMarkedAlt />}
+              disabled={!on}
+            />
+            <Field
+              label="ຮອດສາງແລ້ວບໍ່ປິດຖ້ຽວ (ນາທີ)"
+              hint="ລົດຈອດຢູ່ລານສາງດົນເກີນນີ້ ແຕ່ຖ້ຽວຍັງບໍ່ປິດ — ເຕືອນທັງຄົນຂັບ (ແຈ້ງເຕືອນໃນແອັບ) ແລະ ຫົວໜ້າ. ຄ່າ 5–240"
+              value={data["fleet.close_reminder_minutes"]}
+              onChange={(v) =>
+                setData((d) => ({
+                  ...d,
+                  "fleet.close_reminder_minutes": v.replace(/\D/g, "").slice(0, 3),
+                }))
+              }
+              placeholder="20"
+              icon={<FaTruck />}
               disabled={!on}
             />
             <p className="text-[11px] text-slate-500 dark:text-gray-400">
