@@ -447,6 +447,27 @@ async function mobileJobsListAll({
       FROM odg_tms a
       WHERE ${where.join(" AND ")}
     ),
+    -- ── ຕຳແໜ່ງລົດ + ໄລຍະ ─────────────────────────────────────────────
+    -- ແຫຼ່ງຄື odg_tms_gps_current (ດຶງຈາກຜູ້ໃຫ້ບໍລິການ GPS ທຸກນາທີ) ບໍ່ແມ່ນ
+    -- odg_tms_travel_history. ເຫດຜົນ: travel_history **ຢຸດຮັບຂໍ້ມູນຕັ້ງແຕ່
+    -- 08/08/2026** ຈຶ່ງເປັນຕາຕະລາງທີ່ຕາຍແລ້ວ — ໃຊ້ມັນຈະໄດ້ຊ່ອງວ່າງທຸກຖ້ຽວ.
+    car_now AS (
+      SELECT g.car_code,
+             g.lat::numeric AS lat,
+             g.lng::numeric AS lng,
+             COALESCE(NULLIF(TRIM(g.address), ''), '') AS address,
+             COALESCE(NULLIF(TRIM(g.speed), ''), '0')  AS speed,
+             g.recorded_at
+      FROM public.odg_tms_gps_current g
+      WHERE g.lat ~ '^-?[0-9.]+$' AND g.lng ~ '^-?[0-9.]+$'
+    ),
+    -- ໄລຍະທາງລວມຂອງ **ລົດຄັນນັ້ນມື້ນີ້** (ບໍ່ແມ່ນຕໍ່ຖ້ຽວ — ຂໍ້ມູນຈຸດຕໍ່ຖ້ຽວ
+    -- ບໍ່ມີແລ້ວ). ອ່ານຈາກ rollup ບໍ່ໄດ້ໄລ່ຈຸດດິບ.
+    car_day AS (
+      SELECT gd.car_code, gd.distance_km
+      FROM public.odg_tms_gps_daily gd
+      WHERE gd.usage_date = CURRENT_DATE
+    ),
     bill_summary AS (
       SELECT
         d.doc_no, COUNT(*)::int AS total_bills,
@@ -496,6 +517,30 @@ async function mobileJobsListAll({
       COALESCE(a.miles_end, '') as miles_end,
       '' as img_end,
       (a.img_end IS NOT NULL AND a.img_end <> '') as has_img_end,
+      -- ຕຳແໜ່ງລົດປັດຈຸບັນ
+      COALESCE(cn.address, '') as car_address,
+      COALESCE(cn.lat::text, '') as car_lat,
+      COALESCE(cn.lng::text, '') as car_lng,
+      COALESCE(cn.speed, '') as car_speed,
+      -- recorded_at ຢູ່ຕາຕະລາງນີ້ເປັນ varchar ("YYYY-MM-DD HH:MM:SS")
+      -- ບໍ່ແມ່ນ timestamp — ສົ່ງດິບໄປໃຫ້ແອັບຈັດຮູບແບບເອງ.
+      COALESCE(cn.recorded_at, '') as car_seen_at,
+      -- ໄລຍະທາງທີ່ລົດແລ່ນມື້ນີ້ (ກມ)
+      COALESCE(round(cd.distance_km::numeric, 1)::text, '') as car_day_km,
+      -- ໄລຍະຫ່າງເສັ້ນຊື່ຈາກຈຸດເລີ່ມຕົ້ນ (ໝຸດສາງຂອງສາຂາ) ຫາຕຳແໜ່ງລົດ.
+      -- ວ່າງ ເມື່ອສາຂາຍັງບໍ່ໄດ້ປັກໝຸດ ຫຼື ລົດຍັງບໍ່ສົ່ງພິກັດ.
+      CASE
+        WHEN cn.lat IS NULL OR gf.start_lat IS NULL
+          OR gf.start_lat !~ '^-?[0-9.]+$' OR gf.start_lng !~ '^-?[0-9.]+$'
+        THEN ''
+        ELSE round((
+          6371 * acos(LEAST(1, GREATEST(-1,
+            cos(radians(gf.start_lat::numeric)) * cos(radians(cn.lat))
+            * cos(radians(cn.lng) - radians(gf.start_lng::numeric))
+            + sin(radians(gf.start_lat::numeric)) * sin(radians(cn.lat))
+          )))
+        )::numeric, 1)::text
+      END as car_from_start_km,
       case when a.approve_status = 0 then 'ລໍຖ້າອະນຸມັດ'
         else case
           when a.job_status = 0 then 'ລໍຖ້າຈັດສົ່ງ'
@@ -510,6 +555,10 @@ async function mobileJobsListAll({
     LEFT JOIN public.odg_tms_driver c ON c.code = a.driver
     LEFT JOIN erp_user d ON d.code = a.user_created
     LEFT JOIN bill_summary bs ON bs.doc_no = a.doc_no
+    LEFT JOIN car_now cn ON cn.car_code = a.car
+    LEFT JOIN car_day cd ON cd.car_code = a.car
+    LEFT JOIN public.odg_tms_geofence gf
+      ON gf.transport_code = a.origin_transport_code
     WHERE ${where.join(" AND ")}${issueWhere}
     ORDER BY a.doc_no`;
   return await query(sql, params);
